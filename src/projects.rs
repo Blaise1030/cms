@@ -2,8 +2,8 @@
 //!
 //! `create` copies the embedded template, runs `npm install`, then `git init` + initial
 //! commit. `delete` removes the project directory (the HTTP layer guards it with an
-//! explicit confirm flag). Dev-server supervision is a later task: for now a project
-//! gets an unused port and `devserver: "starting"`.
+//! explicit confirm flag). Every project gets an unused port; `crate::devserver` supervises
+//! the dev server on it and reports status back through [`ProjectRegistry::set_devserver`].
 
 use std::collections::HashSet;
 use std::net::TcpListener;
@@ -35,6 +35,16 @@ pub enum DevserverStatus {
     Starting,
     Ready,
     Crashed,
+}
+
+impl DevserverStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Crashed => "crashed",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +179,70 @@ impl ProjectRegistry {
             .iter()
             .find(|p| p.id == id)
             .cloned()
+    }
+
+    /// Record the runtime dev-server status. Returns the previous `(status, port)`, or
+    /// `None` if the project no longer exists.
+    pub async fn set_devserver(
+        &self,
+        id: &str,
+        status: DevserverStatus,
+    ) -> Option<(DevserverStatus, u16)> {
+        let mut inner = self.inner.lock().await;
+        let p = inner.projects.iter_mut().find(|p| p.id == id)?;
+        let prev = (p.devserver, p.port);
+        p.devserver = status;
+        Some(prev)
+    }
+
+    /// Point the project at a different dev-server port (persisted).
+    pub async fn set_port(&self, id: &str, port: u16) -> Result<(), ApiError> {
+        self.check_writable()?;
+        let mut inner = self.inner.lock().await;
+        let idx = inner
+            .projects
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+        let before = inner.projects[idx].port;
+        if before == port {
+            return Ok(());
+        }
+        inner.projects[idx].port = port;
+        if let Err(e) = self.persist(&inner.projects).await {
+            inner.projects[idx].port = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// The project's dev-server port, guaranteed bindable right now. If the persisted port
+    /// is busy (another process took it, or two projects share it) a fresh one is
+    /// allocated and persisted.
+    pub async fn ensure_free_port(&self, id: &str) -> Result<u16, ApiError> {
+        let mut inner = self.inner.lock().await;
+        let idx = inner
+            .projects
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+        let port = inner.projects[idx].port;
+        let shared = inner
+            .projects
+            .iter()
+            .enumerate()
+            .any(|(i, p)| i != idx && p.port == port);
+        if !shared && port != 0 && TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Ok(port);
+        }
+        self.check_writable()?;
+        let fresh = allocate_port(&inner)?;
+        inner.projects[idx].port = fresh;
+        if let Err(e) = self.persist(&inner.projects).await {
+            inner.projects[idx].port = port;
+            return Err(e);
+        }
+        Ok(fresh)
     }
 
     /// Update project settings (`PATCH /api/projects/{id}`). Persisted; on failure the

@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod checkpoints;
+pub mod devserver;
 pub mod error;
 pub mod events;
 pub mod files;
@@ -13,12 +14,13 @@ use std::path::PathBuf;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::Query;
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
 
 use crate::auth;
 use crate::error::ApiError;
+use crate::preview;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
@@ -29,6 +31,13 @@ pub fn router(state: AppState) -> Router {
             "/api/projects/{id}",
             delete(projects::remove).patch(projects::update),
         )
+        .route(
+            "/api/projects/{id}/devserver/restart",
+            post(devserver::restart),
+        )
+        .route("/preview/{id}", any(preview::handle))
+        .route("/preview/{id}/", any(preview::handle))
+        .route("/preview/{id}/{*rest}", any(preview::handle))
         .route("/api/agents", get(agent::providers))
         .route("/api/agent/session", post(agent::start_session))
         .route("/api/agent/prompt", post(agent::prompt))

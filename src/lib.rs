@@ -4,11 +4,13 @@ pub mod acp;
 pub mod agents_config;
 pub mod auth;
 pub mod config;
+pub mod devserver;
 pub mod error;
 pub mod events;
 pub mod fs;
 pub mod git;
 pub mod http;
+pub mod preview;
 pub mod projects;
 pub mod state;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
@@ -28,6 +30,9 @@ pub fn version() -> &'static str {
 /// Serve the HTTP API on an already-bound listener until Ctrl-C.
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     let agents = state.agents.clone();
+    let devservers = state.devservers.clone();
+    // Projects that survived a restart get their dev servers back (on a free port).
+    devservers.resume_all().await;
     let app = http::router(state);
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -36,6 +41,7 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
         .await;
     // Don't leave agent subprocesses behind.
     agents.shutdown().await;
+    devservers.shutdown().await;
     served
 }
 

@@ -16,7 +16,7 @@ Static Astro site. All copy and structure live in content files; components only
 - `src/layouts/Base.astro` — header (from `site.nav`), footer, global styles.
 - `src/components/sections/*.astro` — one component per section `type`; `index.ts` maps `type` → component.
 - `src/lib/href.ts` — base-aware link helper.
-- `astro.config.mjs` — reads `PUBLIC_BASE` (default `/`) for `base`. Do not hard-code absolute paths; use `import.meta.env.BASE_URL` or `href()`.
+- `astro.config.mjs` — reads `PUBLIC_BASE` (default `/`) for `base` and the HMR socket path (needed for the live preview proxy). Keep both. Do not hard-code absolute paths; use `import.meta.env.BASE_URL` or `href()`.
 
 ## Conventions
 

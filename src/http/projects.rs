@@ -28,7 +28,17 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<ProjectInfo>), ApiError> {
     let req: CreateRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{\"name\": string}}: {e}")))?;
-    let info = state.projects.create(&req.name).await?;
+    let mut info = state.projects.create(&req.name).await?;
+    // Scaffold done: supervise `npm run dev`. A failure here (no usable port) leaves the
+    // project created; the restart endpoint retries.
+    match state.devservers.start(&info.id).await {
+        Ok(()) => {
+            if let Some(p) = state.projects.get(&info.id).await {
+                info = ProjectInfo::from(&p);
+            }
+        }
+        Err(e) => eprintln!("workbench: cannot start dev server for {}: {e}", info.id),
+    }
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -73,9 +83,17 @@ pub async fn remove(
             "deleting a project removes its files; pass ?confirm=true to proceed",
         ));
     }
-    // Stop the project's agent first so nothing writes into a directory being removed.
+    // Stop the project's dev server and agent first so nothing writes into (or serves
+    // from) a directory being removed.
+    state.devservers.stop(&id).await;
     state.agents.terminate_project(&id).await;
-    state.projects.delete(&id).await?;
+    if let Err(e) = state.projects.delete(&id).await {
+        // Delete failed and the project lives on: bring its preview back.
+        if state.projects.get(&id).await.is_some() {
+            let _ = state.devservers.start(&id).await;
+        }
+        return Err(e);
+    }
     Ok(Json(json!({ "deleted": id })))
 }
 

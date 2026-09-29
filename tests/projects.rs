@@ -489,7 +489,12 @@ async fn project_endpoints_require_auth() {
 #[ignore = "needs network + npm"]
 async fn real_npm_install_and_site_builds() {
     let tmp = tempfile::tempdir().unwrap();
-    let app = http::router(AppState::new(config(tmp.path(), true)));
+    // Real install, but no dev server: this test is about scaffolding and `astro build`.
+    let app = http::router(AppState::with_options(
+        config(tmp.path(), true),
+        true,
+        workbench::devserver::DevServerOptions::disabled(),
+    ));
     let body = create(&app, "Real Install").await;
     let dir = tmp.path().join(body["id"].as_str().unwrap());
     assert!(dir.join("node_modules/astro").is_dir());
