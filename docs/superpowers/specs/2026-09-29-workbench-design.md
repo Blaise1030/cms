@@ -73,7 +73,8 @@ Modules do not import each other except through `AppState` and typed structs in 
 - `DELETE /api/file?root=<id>&path=<rel>` — delete file or directory (recursive).
 - `GET /api/git/status?root=<id>` → `{ branch, upstream, ahead, behind, files: [{ path, staged, unstaged, untracked, renamedFrom? }], added, removed }` (parsed from `git status --porcelain=v2 --branch -z`).
 - `GET /api/git/diff?root=<id>&path=<rel>&staged=<bool>` → `{ diff }` (unified diff text). Untracked files: daemon runs `git add -N <path>` on first diff request so the diff renders; noted side effect on the index.
-- `POST /api/git/stage` `{ root, paths: [rel...] }` — `git add`. OR `{ root, path, patch }` — apply a single-hunk patch via `git apply --cached -`.
+- `GET /api/git/rev?root=<id>&path=<rel>&which=head|index` → `{ content, exists }` — file content at HEAD or in the index. The diff tab renders @codemirror/merge from two documents: this endpoint's content (a) and the current disk content from `/api/file` (b). The unified diff above is used only to extract patches for hunk staging.
+- `POST /api/git/stage` `{ root, paths: [rel...] }` — `git add`. OR `{ root, path, patch }` — apply a single-hunk patch via `git apply --cached -`. Client-built patches must include the `diff --git` header, the `@@` hunk header, and `\ No newline at end of file` markers where present; the daemon validates with `git apply --cached --check` first and returns the git error verbatim on failure.
 - `POST /api/git/unstage` — same shapes; paths → `git restore --staged`; patch → `git apply --cached -R -`.
 - `POST /api/git/commit` `{ root, message }` — commits the staged index (`git commit -m`). UI flow is stage → commit; no path-scoped commits in v1.
 
@@ -91,7 +92,7 @@ Auth note: browsers cannot set headers on WS upgrade, so WS uses the query token
 1. **Bind**: `127.0.0.1` only, default port 7800.
 2. **Token**: 32-byte random hex generated at startup (or `--token`). Printed as click-ready `http://127.0.0.1:7800/?t=<token>`; UI stores it in localStorage and sends Bearer/query. `--no-auth` disables (localhost-only use).
 3. **Host-header allowlist**: allow `localhost`, `*.localhost`, `127.0.0.1`, `[::1]`, plus `--origin` host. Reject all others (DNS-rebinding protection).
-4. **CORS**: only the `--origin` origin is allowed (with Bearer header). Embedded UI is same-origin, needs nothing.
+4. **CORS**: only the `--origin` origin is allowed (with Bearer header). Embedded UI is same-origin, needs nothing. Hosted mode is a thin add-on (flag + middleware config), not a first-class path.
 5. **Path sandboxing**: every path from a client is joined to its root, `canonicalize()`d, and must remain under that root's canonical path. Symlink escapes are caught by canonicalization. Applies to REST and git paths.
 
 ## Frontend (Vue 3 + TypeScript + Vite, pnpm)
