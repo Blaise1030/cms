@@ -65,7 +65,7 @@ app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedde
 | `devserver.rs` | Allocate free port; spawn `npm run dev -- --port N` with env `PUBLIC_BASE=/preview/{id}/`; detect readiness on stdout; crash-restart with backoff (max 3). Lifecycle: dev server runs from project creation until daemon shutdown or project delete (no open/close API; "open project" is a UI-only concept) — plus manual `/devserver/restart`. |
 | `preview.rs` | Reverse proxy `/preview/{id}/*` → `127.0.0.1:{port}` including WebSocket upgrade pass-through (HMR). Template's `PUBLIC_BASE` makes all asset/HMR URLs prefix-correct; no HTML rewriting. |
 | `git.rs` | Checkpoints: after each agent turn settles (no running tool calls, 2s quiet), `git add -A && git commit -m "checkpoint: <turn summary>"`. `restore` = `git reset --hard <sha> && git clean -fd`. Log API returns checkpoints with turn metadata. Skips checkpoint if tree is clean. |
-| `watch.rs` | `notify` watcher per open project → `fs.change` events (feeds UI file tree + checkpoint state). |
+| `watch.rs` | `notify` watcher per project, running for the project's lifetime (same lifecycle as its dev server) → `fs.change` events (feeds UI file tree + checkpoint state). |
 | `fs.rs` | Sandboxed read-only file ops for the UI (tree, get, raw blob). Canonicalize-and-contains check against project dir. |
 | `http/` | Thin handlers: parse → module call → JSON. |
 | `auth.rs` | Token middleware (REST: Bearer or `wb_session` cookie). WS: token via query param. Host-header allowlist (`localhost`, `*.localhost`, loopback IPs, `--origin` host) — DNS-rebinding protection. CORS: only `--origin`. Cookie flow: hitting `/?t=<token>` once sets `wb_session` so `<iframe>`-loaded preview and proxy URLs authenticate without headers. |
@@ -80,11 +80,12 @@ app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedde
 - `POST /api/projects` `{ name }` → scaffolds from template, git init, starts dev server. → `{ id, ... }`
 - `DELETE /api/projects/{id}` — stops dev server, removes dir (confirm in UI).
 - `POST /api/projects/{id}/devserver/restart` — manual restart affordance (e.g. after crashes exhausted backoff).
+- `PATCH /api/projects/{id}` `{ autoApprove?: bool, name?: string }` — project settings (e.g. the agent auto-approve toggle).
 - `POST /api/agent/session` `{ project, provider }` → `{ sessionId }` (spawn + initialize + newSession). **One active session per project** — starting a new one terminates the previous cleanly. Provider is chosen per session; the UI remembers the last-used provider per project (client-side preference).
 - `POST /api/agent/prompt` `{ project, sessionId, text }` → `{ turnId }` (streamed over WS).
 - `POST /api/agent/prompt/{turnId}/cancel`
 - `POST /api/agent/permission/{requestId}` `{ decision: "allow"|"deny" }`
-- `GET /api/agent/history?project=` → `{ turns: [{ id, sessionId, provider, ts, userText, assistantText, tools: [{ tool, summary, state }] }] }` — chat history for the project. Persisted by `acp.rs` as JSONL at `{projects-dir}/.workbench/{id}/history.jsonl` (daemon state dir, deliberately outside the site repo so checkpoints never see it). Survives daemon restarts; deleted with the project.
+- `GET /api/agent/history?project=&session=?` → `{ turns: [{ id, sessionId, provider, ts, userText, assistantText, tools: [{ tool, summary, state }] }] }` — chat history, optionally filtered by session. Persisted by `acp.rs` as JSONL at `{projects-dir}/.workbench/{id}/history.jsonl` (daemon state dir, deliberately outside the site repo so checkpoints never see it). Survives daemon restarts; deleted with the project.
 - `GET /api/checkpoints?project=` → `{ checkpoints: [{ sha, summary, ts }] }`
 - `GET /api/checkpoints/{sha}/diff?project=` → unified diff of that commit
 - `POST /api/checkpoints/{sha}/restore` `{ project }`
