@@ -2,9 +2,10 @@
 
 pub mod error;
 pub mod health;
+pub mod projects;
 
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
 
@@ -14,6 +15,8 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
+        .route("/api/projects", get(projects::list).post(projects::create))
+        .route("/api/projects/{id}", delete(projects::remove))
         .fallback(error::not_found)
         .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.

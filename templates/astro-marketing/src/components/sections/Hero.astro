@@ -1,0 +1,14 @@
+---
+import { href } from "../../lib/href";
+const { data, id, Content } = Astro.props;
+---
+
+<section class="section center" id={id}>
+  <h1>{data.headline}</h1>
+  {data.subheadline && <p>{data.subheadline}</p>}
+  <p>
+    <a class="button primary" href={href(data.cta.href)}>{data.cta.label}</a>
+    {data.secondaryCta && <a class="button" href={href(data.secondaryCta.href)}>{data.secondaryCta.label}</a>}
+  </p>
+  <Content />
+</section>

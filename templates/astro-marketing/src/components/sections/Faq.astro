@@ -1,0 +1,11 @@
+---
+const { data, id, Content } = Astro.props;
+---
+
+<section class="section" id={id}>
+  <h2>{data.heading}</h2>
+  <Content />
+  {data.items.map((i) => (
+    <details class="card"><summary>{i.question}</summary><p>{i.answer}</p></details>
+  ))}
+</section>

@@ -1,0 +1,54 @@
+---
+import { getEntry } from "astro:content";
+import { href } from "../lib/href";
+
+interface Props {
+  title: string;
+  description: string;
+}
+const { title, description } = Astro.props;
+const site = (await getEntry("site", "site"))!.data;
+const base = import.meta.env.BASE_URL;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href={base}>{site.name}</a>
+      <nav>
+        {site.nav.map((l) => <a href={href(l.href)}>{l.label}</a>)}
+      </nav>
+    </header>
+    <main><slot /></main>
+    <footer class="site-footer">
+      <p>{site.footer.text}</p>
+      <nav>
+        {site.footer.links.map((l) => <a href={href(l.href)}>{l.label}</a>)}
+        {site.socials.map((s) => <a href={s.href} rel="noopener">{s.label}</a>)}
+      </nav>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { margin: 0; }
+  a { color: inherit; }
+  .site-header, .site-footer { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 2rem; flex-wrap: wrap; }
+  .site-header nav, .site-footer nav { display: flex; gap: 1rem; }
+  .brand { font-weight: 700; text-decoration: none; }
+  section.section { max-width: 64rem; margin: 0 auto; padding: 4rem 2rem; }
+  section.section h2 { font-size: 2rem; margin: 0 0 1.5rem; }
+  .grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+  .card { border: 1px solid #8884; border-radius: .75rem; padding: 1.25rem; }
+  .card.highlighted { border-color: currentColor; }
+  .button { display: inline-block; padding: .6rem 1.2rem; border-radius: .5rem; border: 1px solid currentColor; text-decoration: none; font-weight: 600; }
+  .button.primary { background: canvasText; color: canvas; }
+  .center { text-align: center; }
+</style>

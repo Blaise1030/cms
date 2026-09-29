@@ -4,7 +4,11 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod projects;
 pub mod state;
+// `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
+#[path = "static.rs"]
+pub mod static_files;
 
 use std::net::SocketAddr;
 

@@ -1,0 +1,19 @@
+---
+import { href } from "../../lib/href";
+const { data, id, Content } = Astro.props;
+---
+
+<section class="section" id={id}>
+  <h2>{data.heading}</h2>
+  <Content />
+  <div class="grid">
+    {data.plans.map((p) => (
+      <div class:list={["card", { highlighted: p.highlighted }]}>
+        <h3>{p.name}</h3>
+        <p><strong>{p.price}</strong> {p.period}</p>
+        <ul>{p.features.map((f) => <li>{f}</li>)}</ul>
+        <a class="button" href={href(p.cta.href)}>{p.cta.label}</a>
+      </div>
+    ))}
+  </div>
+</section>

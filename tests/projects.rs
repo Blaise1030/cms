@@ -1,0 +1,355 @@
+use std::path::Path;
+use std::process::Command;
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use tower::ServiceExt;
+use workbench::config::Config;
+use workbench::http;
+use workbench::state::AppState;
+
+fn config(dir: &Path, no_auth: bool) -> Config {
+    Config {
+        port: 0,
+        origin: None,
+        projects_dir: dir.to_path_buf(),
+        no_auth,
+        token: if no_auth { None } else { Some("abc123".into()) },
+        agents_config: None,
+    }
+}
+
+/// Router with `npm install` skipped (test hook: `AppState::with_scaffold_install(_, false)`).
+fn app(dir: &Path) -> axum::Router {
+    http::router(AppState::with_scaffold_install(config(dir, true), false))
+}
+
+fn req(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "localhost");
+    let body = match body {
+        Some(v) => {
+            b = b.header(header::CONTENT_TYPE, "application/json");
+            Body::from(v.to_string())
+        }
+        None => Body::empty(),
+    };
+    b.body(body).unwrap()
+}
+
+async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
+    let res = app.clone().oneshot(r).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+async fn create(app: &axum::Router, name: &str) -> Value {
+    let (status, body) = call(
+        app,
+        req("POST", "/api/projects", Some(json!({ "name": name }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    body
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[tokio::test]
+async fn create_copies_template_inits_git_and_returns_id_and_port() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+
+    let body = create(&app, "My Cool Site").await;
+    assert_eq!(body["id"], "my-cool-site");
+    assert_eq!(body["name"], "My Cool Site");
+    assert_eq!(body["devserver"], "starting");
+    let port = body["port"].as_u64().unwrap();
+    assert!(port > 1024 && port < 65536);
+
+    let dir = tmp.path().join("my-cool-site");
+    for f in [
+        "package.json",
+        "package-lock.json",
+        "AGENTS.md",
+        ".gitignore",
+        "astro.config.mjs",
+        "src/content.config.ts",
+        "src/content/site.json",
+        "src/content/pages/home.json",
+        "src/content/sections/hero.mdx",
+        "src/content/sections/pricing.mdx",
+        "src/pages/index.astro",
+        "src/components/sections/Hero.astro",
+    ] {
+        assert!(dir.join(f).is_file(), "missing {f}");
+    }
+    assert!(
+        !dir.join("node_modules").exists(),
+        "install skipped by hook"
+    );
+
+    // git: exactly one commit, clean tree, on main.
+    assert_eq!(git(&dir, &["rev-list", "--count", "HEAD"]), "1");
+    assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    assert_eq!(git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert!(git(&dir, &["ls-files"]).contains("src/content/sections/hero.mdx"));
+
+    // appears in the list with the same shape
+    let (status, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["projects"], json!([body]));
+}
+
+#[tokio::test]
+async fn duplicate_names_get_distinct_ids_dirs_and_ports() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let a = create(&app, "Site").await;
+    let b = create(&app, "site").await;
+    assert_eq!(a["id"], "site");
+    assert_eq!(b["id"], "site-2");
+    assert_ne!(a["port"], b["port"]);
+    assert!(tmp.path().join("site-2/AGENTS.md").is_file());
+}
+
+#[tokio::test]
+async fn create_does_not_reuse_an_existing_unregistered_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join("taken")).unwrap();
+    std::fs::write(tmp.path().join("taken/keep.txt"), "x").unwrap();
+    let app = app(tmp.path());
+    let body = create(&app, "taken").await;
+    assert_eq!(body["id"], "taken-2");
+    assert!(tmp.path().join("taken/keep.txt").is_file());
+}
+
+#[tokio::test]
+async fn concurrent_creates_do_not_collide() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let (a, b, c) = tokio::join!(
+        create(&app, "Same"),
+        create(&app, "Same"),
+        create(&app, "Same")
+    );
+    let mut ids: Vec<_> = [&a, &b, &c]
+        .iter()
+        .map(|v| v["id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 3);
+    let mut ports: Vec<_> = [&a, &b, &c]
+        .iter()
+        .map(|v| v["port"].as_u64().unwrap())
+        .collect();
+    ports.sort();
+    ports.dedup();
+    assert_eq!(ports.len(), 3);
+}
+
+#[tokio::test]
+async fn invalid_create_requests_use_error_envelope() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    for body in [
+        Some(json!({ "name": "" })),
+        Some(json!({ "name": "   " })),
+        Some(json!({ "name": "!!!" })),
+        Some(json!({ "name": "a".repeat(65) })),
+        Some(json!({ "name": "line\nbreak" })),
+        Some(json!({ "nope": 1 })),
+        Some(json!({ "name": 5 })),
+        None,
+    ] {
+        let (status, v) = call(&app, req("POST", "/api/projects", body.clone())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}");
+        assert_eq!(v["error"]["code"], "BADREQ", "{body:?}");
+    }
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+    // nothing (besides possibly the state dir) was scaffolded
+    let dirs: Vec<_> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != ".workbench")
+        .collect();
+    assert!(dirs.is_empty(), "{dirs:?}");
+}
+
+#[tokio::test]
+async fn delete_requires_confirm_then_removes_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let id = create(&app, "Doomed").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let dir = tmp.path().join(&id);
+    // history-style daemon state outside the repo is removed too
+    let state = tmp.path().join(".workbench").join(&id);
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("history.jsonl"), "").unwrap();
+
+    for uri in [
+        format!("/api/projects/{id}"),
+        format!("/api/projects/{id}?confirm=false"),
+        format!("/api/projects/{id}?confirm=1"),
+    ] {
+        let (status, v) = call(&app, req("DELETE", &uri, None)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(v["error"]["code"], "BADREQ");
+        assert!(dir.is_dir(), "dir must survive unconfirmed delete");
+    }
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"].as_array().unwrap().len(), 1);
+
+    let (status, v) = call(
+        &app,
+        req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["deleted"], id);
+    assert!(!dir.exists());
+    assert!(!state.exists());
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+
+    // deleting again is ENOENT
+    let (status, v) = call(
+        &app,
+        req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(v["error"]["code"], "ENOENT");
+}
+
+#[tokio::test]
+async fn delete_only_touches_registered_projects() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let projects = tmp.path().join("projects");
+    let app = app(&projects);
+    create(&app, "real").await;
+    for id in [
+        "outside",
+        "..",
+        "%2e%2e",
+        "real/../../outside",
+        ".workbench",
+    ] {
+        let (status, _) = call(
+            &app,
+            req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}");
+    }
+    assert!(outside.is_dir());
+    assert!(projects.join("real").is_dir());
+    assert!(projects.join(".workbench").is_dir());
+}
+
+#[tokio::test]
+async fn registry_survives_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first = app(tmp.path());
+    let created = create(&first, "Persist Me").await;
+    drop(first);
+
+    let second = app(tmp.path());
+    let (_, list) = call(&second, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([created]));
+
+    // a project whose dir vanished is dropped on load
+    std::fs::remove_dir_all(tmp.path().join("persist-me")).unwrap();
+    let third = app(tmp.path());
+    let (_, list) = call(&third, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+}
+
+#[tokio::test]
+async fn corrupt_registry_is_preserved_not_overwritten() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".workbench")).unwrap();
+    std::fs::write(tmp.path().join(".workbench/projects.json"), "{not json").unwrap();
+    let app = app(tmp.path());
+    let (status, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["projects"], json!([]));
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".workbench/projects.json.corrupt")).unwrap(),
+        "{not json"
+    );
+}
+
+#[tokio::test]
+async fn project_endpoints_require_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = http::router(AppState::with_scaffold_install(
+        config(tmp.path(), false),
+        false,
+    ));
+    for (m, u) in [
+        ("GET", "/api/projects"),
+        ("POST", "/api/projects"),
+        ("DELETE", "/api/projects/x?confirm=true"),
+    ] {
+        let (status, v) = call(&app, req(m, u, None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{m} {u}");
+        assert_eq!(v["error"]["code"], "UNAUTH");
+    }
+}
+
+/// Full path with a real `npm install` and a real `astro build` of the scaffolded content
+/// model. Needs network; run with `cargo test -- --ignored`.
+#[tokio::test]
+#[ignore = "needs network + npm"]
+async fn real_npm_install_and_site_builds() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = http::router(AppState::new(config(tmp.path(), true)));
+    let body = create(&app, "Real Install").await;
+    let dir = tmp.path().join(body["id"].as_str().unwrap());
+    assert!(dir.join("node_modules/astro").is_dir());
+    assert_eq!(
+        git(&dir, &["status", "--porcelain"]),
+        "",
+        "node_modules must be ignored"
+    );
+
+    let out = Command::new("npm")
+        .args(["run", "build"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("dist/index.html").is_file());
+}

@@ -1,13 +1,22 @@
 ---
+import { getEntry, render } from "astro:content";
+import { sectionComponents } from "../components/sections";
+import Base from "../layouts/Base.astro";
+
+const page = (await getEntry("pages", "home"))!.data;
+const rendered = await Promise.all(
+  page.sections.map(async (id) => {
+    const entry = await getEntry("sections", id);
+    if (!entry) throw new Error(`pages/home.json references missing section "${id}"`);
+    const { Content } = await render(entry);
+    return { id, data: entry.data, Content };
+  }),
+);
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>Astro Marketing</title>
-  </head>
-  <body>
-    <h1>Astro Marketing</h1>
-  </body>
-</html>
+<Base title={page.title} description={page.description}>
+  {rendered.map(({ id, data, Content }) => {
+    const Section = sectionComponents[data.type] as any;
+    return <Section id={id} data={data} Content={Content} />;
+  })}
+</Base>

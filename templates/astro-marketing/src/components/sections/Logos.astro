@@ -1,0 +1,13 @@
+---
+const { data, id, Content } = Astro.props;
+---
+
+<section class="section center" id={id}>
+  {data.heading && <h2>{data.heading}</h2>}
+  <Content />
+  <div class="grid">
+    {data.items.map((l) => (
+      <div>{l.url ? <a href={l.url}>{l.name}</a> : l.name}</div>
+    ))}
+  </div>
+</section>

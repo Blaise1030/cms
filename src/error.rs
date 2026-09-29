@@ -93,6 +93,9 @@ impl ApiError {
     pub fn io(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Io, message)
     }
+    pub fn git(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::GitErr, message)
+    }
 }
 
 impl fmt::Display for ApiError {
