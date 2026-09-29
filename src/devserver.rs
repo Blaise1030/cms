@@ -143,7 +143,22 @@ impl DevServerManager {
         if let Some(old) = running.remove(id) {
             old.stop().await;
         }
-        let port = self.shared.projects.ensure_free_port(id).await?;
+        let port = match self.shared.projects.ensure_free_port(id).await {
+            Ok(p) => p,
+            Err(e) => {
+                // No supervisor will run: make the failure visible (status + event) so the
+                // project is not left `starting` forever. Restart retries.
+                if e.code != ErrorCode::Enoent {
+                    if let Some(p) = self.shared.projects.get(id).await {
+                        let msg = format!("cannot start dev server: {e}");
+                        self.shared
+                            .set_state(id, DevserverStatus::Crashed, p.port, Some(&msg))
+                            .await;
+                    }
+                }
+                return Err(e);
+            }
+        };
         self.shared
             .set_state(id, DevserverStatus::Starting, port, None)
             .await;
@@ -370,8 +385,16 @@ async fn run_once(
                     if let Some(actual) = ready_port(&line) {
                         // The server may have picked another port if ours was taken.
                         if actual != port {
+                            // The proxy routes by the registry's port, so it must agree
+                            // with the process before anyone is told it is ready.
                             if let Err(e) = shared.projects.set_port(id, actual).await {
-                                eprintln!("workbench: cannot record port {actual} for {id}: {e}");
+                                terminate(&mut child, &guard).await;
+                                break Outcome::Died {
+                                    message: format!(
+                                        "dev server listens on port {actual} but it could not be recorded: {e}"
+                                    ),
+                                    stable: false,
+                                };
                             }
                             port = actual;
                         }

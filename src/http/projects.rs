@@ -30,14 +30,14 @@ pub async fn create(
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{\"name\": string}}: {e}")))?;
     let mut info = state.projects.create(&req.name).await?;
     // Scaffold done: supervise `npm run dev`. A failure here (no usable port) leaves the
-    // project created; the restart endpoint retries.
-    match state.devservers.start(&info.id).await {
-        Ok(()) => {
-            if let Some(p) = state.projects.get(&info.id).await {
-                info = ProjectInfo::from(&p);
-            }
-        }
-        Err(e) => eprintln!("workbench: cannot start dev server for {}: {e}", info.id),
+    // project created but `crashed`; the restart endpoint retries.
+    // `start` marks the project `crashed` (and publishes it) if it cannot supervise, so
+    // the response below reflects the real state either way.
+    if let Err(e) = state.devservers.start(&info.id).await {
+        eprintln!("workbench: cannot start dev server for {}: {e}", info.id);
+    }
+    if let Some(p) = state.projects.get(&info.id).await {
+        info = ProjectInfo::from(&p);
     }
     Ok((StatusCode::CREATED, Json(info)))
 }

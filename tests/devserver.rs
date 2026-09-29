@@ -302,6 +302,90 @@ async fn startup_crashes_only_publish_the_terminal_state_with_the_output_tail() 
     assert!(crashed["message"].as_str().unwrap().contains("boom-output"));
 }
 
+/// Make every registry write fail: `projects.json` becomes a directory, so the atomic
+/// rename of the temp file onto it errors.
+fn break_registry_persistence(root: &Path) {
+    let f = root.join(".workbench/projects.json");
+    std::fs::remove_file(&f).unwrap();
+    std::fs::create_dir(&f).unwrap();
+}
+
+fn restore_registry_persistence(root: &Path) {
+    std::fs::remove_dir(root.join(".workbench/projects.json")).unwrap();
+}
+
+const WRONG_PORT: &str = r#"
+echo x >> spawns.log
+echo "  Local  http://127.0.0.1:$((PORT + 1))/"
+exec sleep 300
+"#;
+
+#[tokio::test]
+async fn unrecordable_reported_port_is_never_announced_ready() {
+    let env = env_with(script(WRONG_PORT));
+    let info = env.state.projects.create("Site").await.unwrap();
+    let mut events = env.events();
+    break_registry_persistence(&env.root);
+    env.state.devservers.start("site").await.unwrap();
+
+    let crashed = events.status("site", "crashed").await;
+    assert!(
+        crashed["message"]
+            .as_str()
+            .unwrap()
+            .contains("could not be recorded"),
+        "{crashed}"
+    );
+    assert!(
+        events.seen.iter().all(|e| e["state"] != "ready"),
+        "{:?}",
+        events.seen
+    );
+    // Registry and proxy routing still agree on the original port.
+    let p = env.state.projects.get("site").await.unwrap();
+    assert_eq!(p.port, info.port);
+    // Every attempt's process was killed.
+    assert_eq!(
+        lines(&env.file("site", "spawns.log")).len() as u32,
+        1 + MAX_RESTARTS
+    );
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn start_failure_marks_project_crashed_and_restart_recovers() {
+    let env = env_with(script(READY));
+    let info = env.state.projects.create("Site").await.unwrap();
+    let mut events = env.events();
+    // Port taken + registry unwritable => no usable port can be assigned.
+    let squatter = std::net::TcpListener::bind(("127.0.0.1", info.port)).unwrap();
+    break_registry_persistence(&env.root);
+
+    let err = env.state.devservers.start("site").await.unwrap_err();
+    assert_eq!(err.code.as_str(), "IO");
+    let crashed = events.status("site", "crashed").await;
+    assert!(
+        crashed["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot start"),
+        "{crashed}"
+    );
+    assert_eq!(env.devserver_state("site").await, "crashed");
+
+    // Fixed: the restart endpoint recovers it (on a fresh port, since ours is squatted).
+    restore_registry_persistence(&env.root);
+    let (s, v) = env
+        .call("POST", "/api/projects/site/devserver/restart", None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["devserver"], "starting");
+    assert_ne!(v["port"].as_u64().unwrap(), info.port as u64);
+    events.status("site", "ready").await;
+    drop(squatter);
+    env.state.devservers.shutdown().await;
+}
+
 #[tokio::test]
 async fn manual_restart_replaces_the_running_process() {
     let env = env_with(script(READY));
