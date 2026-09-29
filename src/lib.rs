@@ -3,6 +3,8 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod fs;
+pub mod git;
 pub mod http;
 pub mod projects;
 pub mod state;

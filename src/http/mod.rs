@@ -1,15 +1,22 @@
 //! HTTP layer: router, middleware wiring.
 
+pub mod checkpoints;
 pub mod error;
+pub mod files;
 pub mod health;
 pub mod projects;
 
+use std::path::PathBuf;
+
+use axum::extract::rejection::QueryRejection;
+use axum::extract::Query;
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
 
 use crate::auth;
+use crate::error::ApiError;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
@@ -17,6 +24,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health::health))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/projects/{id}", delete(projects::remove))
+        .route("/api/checkpoints", get(checkpoints::list))
+        .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))
+        .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
+        .route("/api/tree", get(files::tree))
+        .route("/api/file", get(files::file))
         .fallback(error::not_found)
         .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.
@@ -52,4 +64,20 @@ pub fn router(state: AppState) -> Router {
         );
     }
     app.with_state(state)
+}
+
+/// Directory of a registered project, or `ENOENT`.
+pub(crate) async fn project_dir(state: &AppState, id: &str) -> Result<PathBuf, ApiError> {
+    state
+        .projects
+        .get(id)
+        .await
+        .map(|p| p.dir)
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))
+}
+
+/// Query-string rejections become the uniform error envelope.
+pub(crate) fn query_or_badreq<T>(q: Result<Query<T>, QueryRejection>) -> Result<T, ApiError> {
+    q.map(|Query(v)| v)
+        .map_err(|e| ApiError::badreq(format!("invalid query: {e}")))
 }
