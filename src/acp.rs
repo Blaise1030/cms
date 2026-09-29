@@ -14,8 +14,12 @@
 //!   event and waits for `Allow`/`Deny` via `POST /api/agent/permission/{requestId}`.
 //!
 //! A turn *settles* once the prompt has returned, no tool call is still running, and the
-//! agent has been quiet for the settle period (2 s). Settling triggers a git checkpoint.
-//! Completed turns are appended to `{projects-dir}/.workbench/{id}/history.jsonl`.
+//! agent has been quiet for the settle period (2 s). Only a true settle triggers a git
+//! checkpoint; if the agent dies or a tool is still running after the settle cap (30 s) the
+//! turn fails with `chat.error` and nothing is committed. Turns are appended to
+//! `{projects-dir}/.workbench/{id}/history.jsonl` *after* settling so late `session/update`s
+//! are included. Terminating a session waits for its in-flight turn task to finish, and a
+//! terminated turn neither persists nor checkpoints.
 //!
 //! The protocol subset we need is tiny, so this is a hand-rolled JSON-RPC client rather
 //! than an SDK dependency (keeps cold start and binary size down, and the wire format is
@@ -48,8 +52,8 @@ const PROTOCOL_VERSION: u32 = 1;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Quiet period after a turn before it is checkpointed.
 pub const DEFAULT_SETTLE_QUIET: Duration = Duration::from_secs(2);
-/// A tool stuck in `running` cannot delay the checkpoint beyond this.
-const MAX_SETTLE: Duration = Duration::from_secs(30);
+/// A tool stuck in `running` for this long fails the turn (no checkpoint is taken).
+pub const DEFAULT_MAX_SETTLE: Duration = Duration::from_secs(30);
 /// Graceful-exit budgets when terminating an agent subprocess.
 const EXIT_GRACE: Duration = Duration::from_millis(1500);
 const TERM_GRACE: Duration = Duration::from_secs(2);
@@ -325,9 +329,14 @@ struct Shared {
     events: EventBus,
     permissions: StdMutex<HashMap<String, PendingPermission>>,
     settle_quiet_ms: AtomicU64,
+    max_settle_ms: AtomicU64,
 }
 
 impl Shared {
+    fn max_settle(&self) -> Duration {
+        Duration::from_millis(self.max_settle_ms.load(Ordering::Relaxed))
+    }
+
     fn settle_quiet(&self) -> Duration {
         Duration::from_millis(self.settle_quiet_ms.load(Ordering::Relaxed))
     }
@@ -356,13 +365,16 @@ struct Session {
     shared: Arc<Shared>,
     conn: Conn,
     turn: StdMutex<Option<TurnState>>,
-    /// Held for a whole turn including settling, so turns never overlap.
+    /// Held by the `run_turn` task for its whole life (prompt, settle, persist, checkpoint),
+    /// so turns never overlap and [`Session::terminate`] can wait for the task to finish.
     turn_lock: Arc<Mutex<()>>,
     /// A prompt has been accepted and its `session/prompt` has not returned yet.
     awaiting: AtomicBool,
     dead: AtomicBool,
     /// We are shutting the process down on purpose.
     terminating: AtomicBool,
+    /// `on_exit` already told the UI the process died (avoids a duplicate `chat.error`).
+    exit_reported: AtomicBool,
     child: Mutex<Option<Child>>,
     pid: Option<u32>,
     stderr_tail: StdMutex<String>,
@@ -454,6 +466,7 @@ impl Session {
             awaiting: AtomicBool::new(false),
             dead: AtomicBool::new(false),
             terminating: AtomicBool::new(false),
+            exit_reported: AtomicBool::new(false),
             child: Mutex::new(Some(child)),
             pid,
             stderr_tail: StdMutex::new(String::new()),
@@ -517,7 +530,8 @@ impl Session {
             .ok_or_else(|| "session/new: response has no sessionId".to_string())
     }
 
-    /// Stop the subprocess: close stdin, then SIGTERM the process group, then SIGKILL.
+    /// Stop the subprocess (close stdin, then SIGTERM the process group, then SIGKILL) and
+    /// wait until the session's turn task, if any, has finished.
     async fn terminate(&self) {
         self.terminating.store(true, Ordering::SeqCst);
         self.dead.store(true, Ordering::SeqCst);
@@ -541,6 +555,10 @@ impl Session {
             }
         }
         self.conn.close();
+        // Lifecycle barrier: wait for any in-flight `run_turn` to finish. It sees
+        // `terminating` and skips history/checkpoint, and `prompt` refuses to start new
+        // turns once `dead` is set, so nothing can run for this session after we return.
+        let _quiesced = self.turn_lock.lock().await;
     }
 
     /// Signal the adapter's whole process group. Only called while the child is unreaped,
@@ -714,6 +732,7 @@ impl Session {
             && !self.awaiting.load(Ordering::SeqCst)
         {
             // Nobody is waiting on a prompt, so tell the UI the session died.
+            self.exit_reported.store(true, Ordering::SeqCst);
             let turn_id = lock(&self.turn).as_ref().map(|t| t.id.clone());
             self.emit(
                 "chat.error",
@@ -863,7 +882,20 @@ async fn stderr_loop(session: Arc<Session>, mut stderr: tokio::process::ChildStd
 // Turns
 // ---------------------------------------------------------------------------
 
-/// Drive one turn to completion: prompt → history → `chat.done` → settle → checkpoint.
+/// Why waiting for a turn to settle ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Settle {
+    /// No running tool and the agent has been quiet: safe to persist and checkpoint.
+    Settled,
+    /// The session died or is being terminated.
+    Died,
+    /// A tool was still running (or the agent kept streaming) when the cap elapsed.
+    TimedOut,
+}
+
+/// Drive one turn to completion: prompt → `chat.done` → settle → history → checkpoint.
+///
+/// A terminated session emits nothing further and neither persists nor checkpoints.
 async fn run_turn(
     session: Arc<Session>,
     turn_id: String,
@@ -882,48 +914,21 @@ async fn run_turn(
         )
         .await;
     session.awaiting.store(false, Ordering::SeqCst);
+    if session.terminating.load(Ordering::SeqCst) {
+        *lock(&session.turn) = None;
+        return;
+    }
 
-    let (stop_reason, error) = match result {
+    let (stop_reason, mut error) = match result {
         Ok(v) => (
             Some(v["stopReason"].as_str().unwrap_or("end_turn").to_string()),
             None,
         ),
         Err(e) => (None, Some(session.describe_failure(&e))),
     };
-
-    // Snapshot + persist before announcing completion, so a client that reacts to
-    // `chat.done` by fetching history already sees this turn.
-    let record = {
-        let mut guard = lock(&session.turn);
-        guard.as_mut().map(|t| {
-            t.responded = true;
-            t.last_activity = Instant::now();
-            TurnRecord {
-                id: t.id.clone(),
-                session_id: session.id().to_string(),
-                provider: session.provider.clone(),
-                ts: now_secs(),
-                user_text: t.user_text.clone(),
-                assistant_text: t.assistant.clone(),
-                tools: t
-                    .tools
-                    .iter()
-                    .map(|x| ToolSummary {
-                        tool: x.kind.clone(),
-                        summary: x.label().to_string(),
-                        state: x.state.as_str().to_string(),
-                    })
-                    .collect(),
-                stop_reason: stop_reason.clone(),
-                error: error.clone(),
-            }
-        })
-    };
-    if let Some(record) = record {
-        let path = history_path(&session.shared.config.projects_dir, &session.project_id);
-        if let Err(e) = append_history(&path, &record).await {
-            eprintln!("workbench: cannot write {}: {e}", path.display());
-        }
+    if let Some(t) = lock(&session.turn).as_mut() {
+        t.responded = true;
+        t.last_activity = Instant::now();
     }
     match (&stop_reason, &error) {
         (_, Some(msg)) => session.emit("chat.error", json!({ "turnId": turn_id, "message": msg })),
@@ -934,49 +939,106 @@ async fn run_turn(
         (None, None) => {}
     }
 
-    settle(&session).await;
+    let outcome = settle(&session).await;
+    if session.terminating.load(Ordering::SeqCst) {
+        *lock(&session.turn) = None;
+        return;
+    }
+    if outcome != Settle::Settled && error.is_none() {
+        let msg = match outcome {
+            Settle::TimedOut => format!(
+                "agent still had running tools after {}s; changes were not checkpointed",
+                session.shared.max_settle().as_secs_f64().round()
+            ),
+            _ => session.describe_failure("agent process exited before the turn settled"),
+        };
+        if outcome == Settle::TimedOut || !session.exit_reported.load(Ordering::SeqCst) {
+            session.emit("chat.error", json!({ "turnId": turn_id, "message": msg }));
+        }
+        error = Some(msg);
+    }
 
-    match git::checkpoint(&session.dir, &text).await {
-        Ok(Some(cp)) => session.shared.events.emit(
-            "checkpoint.created",
-            json!({
-                "projectId": session.project_id,
-                "sha": cp.sha,
-                "summary": cp.summary,
-            }),
-        ),
-        Ok(None) => {}
-        Err(e) => eprintln!(
-            "workbench: checkpoint failed for {}: {e}",
-            session.project_id
-        ),
+    // Snapshot after settling so late assistant chunks / tool transitions are included.
+    let record = lock(&session.turn).as_ref().map(|t| TurnRecord {
+        id: t.id.clone(),
+        session_id: session.id().to_string(),
+        provider: session.provider.clone(),
+        ts: now_secs(),
+        user_text: t.user_text.clone(),
+        assistant_text: t.assistant.clone(),
+        tools: t
+            .tools
+            .iter()
+            .map(|x| ToolSummary {
+                tool: x.kind.clone(),
+                summary: x.label().to_string(),
+                state: x.state.as_str().to_string(),
+            })
+            .collect(),
+        stop_reason: stop_reason.clone(),
+        error: error.clone(),
+    });
+    if let Some(record) = record {
+        let path = history_path(&session.shared.config.projects_dir, &session.project_id);
+        if let Err(e) = append_history(&path, &record).await {
+            eprintln!("workbench: cannot write {}: {e}", path.display());
+        }
+    }
+
+    if outcome == Settle::Settled {
+        match git::checkpoint(&session.dir, &text).await {
+            Ok(Some(cp)) => session.shared.events.emit(
+                "checkpoint.created",
+                json!({
+                    "projectId": session.project_id,
+                    "sha": cp.sha,
+                    "summary": cp.summary,
+                }),
+            ),
+            Ok(None) => {}
+            Err(e) => eprintln!(
+                "workbench: checkpoint failed for {}: {e}",
+                session.project_id
+            ),
+        }
     }
     *lock(&session.turn) = None;
 }
 
 /// Wait until no tool is running and the agent has been quiet for the settle period.
-async fn settle(session: &Session) {
+/// Only [`Settle::Settled`] is a safe checkpoint boundary.
+async fn settle(session: &Session) -> Settle {
     let quiet = session.shared.settle_quiet();
+    let max = session.shared.max_settle();
     let started = Instant::now();
     loop {
-        if session.is_dead() || started.elapsed() >= MAX_SETTLE {
-            return;
+        if session.is_dead() {
+            return Settle::Died;
+        }
+        if started.elapsed() >= max {
+            return Settle::TimedOut;
         }
         let wait = {
             let guard = lock(&session.turn);
             match guard.as_ref() {
-                None => return,
+                None => return Settle::Died,
                 Some(t) if t.running_tools() > 0 => Duration::from_millis(50),
                 Some(t) => {
                     let idle = t.last_activity.elapsed();
                     if idle >= quiet {
-                        return;
+                        return Settle::Settled;
                     }
                     (quiet - idle).min(Duration::from_millis(250))
                 }
             }
         };
-        tokio::time::sleep(wait).await;
+        tokio::time::sleep(
+            wait.min(
+                max.saturating_sub(started.elapsed())
+                    .max(Duration::from_millis(1)),
+            ),
+        )
+        .await;
     }
 }
 
@@ -1002,6 +1064,7 @@ impl AgentManager {
                 events,
                 permissions: StdMutex::new(HashMap::new()),
                 settle_quiet_ms: AtomicU64::new(DEFAULT_SETTLE_QUIET.as_millis() as u64),
+                max_settle_ms: AtomicU64::new(DEFAULT_MAX_SETTLE.as_millis() as u64),
             }),
             slots: StdMutex::new(HashMap::new()),
             live: StdMutex::new(HashMap::new()),
@@ -1013,6 +1076,13 @@ impl AgentManager {
         self.shared
             .settle_quiet_ms
             .store(quiet.as_millis() as u64, Ordering::Relaxed);
+    }
+
+    /// Override how long a turn may wait for running tools before it fails (tests).
+    pub fn set_max_settle(&self, max: Duration) {
+        self.shared
+            .max_settle_ms
+            .store(max.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// Providers from the registry file (re-read on every call).
@@ -1121,7 +1191,7 @@ impl AgentManager {
             return Err(ApiError::conflict("a turn is already running"));
         }
         let mut guard = AwaitingGuard(session.clone(), true);
-        // The previous turn may still be settling; wait for it (bounded by MAX_SETTLE).
+        // The previous turn may still be settling; wait for it (bounded by the settle cap).
         let turn_guard = session.turn_lock.clone().lock_owned().await;
         if session.is_dead() {
             return Err(ApiError::agent("agent session died"));

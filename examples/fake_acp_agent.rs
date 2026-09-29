@@ -7,6 +7,7 @@
 //! * `run`    – execute tool call + `request_permission(kind=execute)`; runs only if allowed.
 //! * `slow`   – streams "working", then waits for `session/cancel`.
 //! * `late`   – ends the turn while a tool is still running; finishes it 500 ms later.
+//! * `stuck` – writes `stuck.txt`, ends the turn while a tool runs, and never finishes it.
 //! * `crash`  – exits abruptly.
 //!
 //! Flags: `--log FILE` (append every received line), `--pidfile FILE`,
@@ -168,6 +169,21 @@ impl Agent {
                 std::fs::write("late.txt", "late\n").unwrap();
                 tool_status(&s, "c3", "completed");
                 return;
+            }
+            "stuck" => {
+                std::fs::write("stuck.txt", "stuck\n").unwrap();
+                tool(
+                    &s,
+                    "c4",
+                    "Write stuck.txt",
+                    "edit",
+                    "in_progress",
+                    json!({}),
+                );
+                respond(id, json!({ "stopReason": "end_turn" }));
+                loop {
+                    std::thread::sleep(Duration::from_secs(60));
+                }
             }
             "crash" => {
                 chunk(&s, "about to die");

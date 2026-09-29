@@ -235,6 +235,22 @@ impl Events {
     }
 }
 
+/// History is written once a turn has settled (after `chat.done`), so poll for it.
+async fn wait_turns(e: &Env, n: usize) -> Vec<acp::TurnRecord> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let turns = e.state.agents.history(&e.project, None).await.unwrap();
+        if turns.len() >= n {
+            return turns;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "history never reached {n} turns: {turns:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 fn alive(pid: i32) -> bool {
     // SAFETY: signal 0 only probes for existence.
     unsafe { libc::kill(pid, 0) == 0 }
@@ -320,6 +336,7 @@ async fn session_prompt_streams_and_persists_history() {
     assert_eq!(done["projectId"], e.project);
     assert_eq!(done["stopReason"], "end_turn");
     assert_eq!(ev.text(), "Hello world");
+    wait_turns(&e, 1).await;
     // The prompt reached the agent as a text content block.
     let prompt = e
         .logged()
@@ -676,6 +693,7 @@ async fn deleting_a_project_stops_its_agent_and_history() {
     let sid = e.session("fake").await;
     e.prompt(&sid, "hello").await;
     ev.wait("chat.done").await;
+    wait_turns(&e, 1).await;
     let pid = e.pid();
     assert!(acp::history_path(&e.root, &e.project).is_file());
 
@@ -705,6 +723,7 @@ async fn agent_crash_surfaces_error_and_marks_session_dead() {
     assert!(err["message"].as_str().unwrap().contains("agent"));
 
     // The failed turn is in history with its error.
+    wait_turns(&e, 1).await;
     let (_, h) = e
         .call(
             "GET",
@@ -757,6 +776,110 @@ async fn checkpoint_waits_for_running_tools_to_settle() {
 }
 
 #[tokio::test]
+async fn history_includes_late_updates_after_prompt_returns() {
+    let e = env().await;
+    let mut ev = e.events();
+    let sid = e.session("fake").await;
+    e.prompt(&sid, "late edit").await;
+    ev.wait("checkpoint.created").await;
+
+    // The prompt returned while the tool was running; the persisted record has the final
+    // tool state, not the one at prompt-return time.
+    let turns = wait_turns(&e, 1).await;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].tools.len(), 1);
+    assert_eq!(turns[0].tools[0].state, "done");
+    assert_eq!(turns[0].error, None);
+}
+
+#[tokio::test]
+async fn stuck_tool_fails_the_turn_without_checkpoint() {
+    let e = env().await;
+    e.state.agents.set_max_settle(Duration::from_millis(800));
+    let mut ev = e.events();
+    let sid = e.session("fake").await;
+    let turn = e.prompt(&sid, "stuck").await;
+
+    let err = ev.wait("chat.error").await;
+    assert_eq!(err["turnId"], turn);
+    assert!(
+        err["message"].as_str().unwrap().contains("running tools"),
+        "{err}"
+    );
+    // The failed turn is persisted with its error and the tool still running...
+    let turns = wait_turns(&e, 1).await;
+    assert_eq!(turns[0].tools[0].state, "running");
+    assert!(turns[0].error.is_some());
+    // ...but the dirty tree was never committed.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!ev.types().contains(&"checkpoint.created"));
+    while let Ok(t) = ev.rx.try_recv() {
+        let v: Value = serde_json::from_str(&t).unwrap();
+        assert_ne!(v["type"], "checkpoint.created");
+    }
+    assert_eq!(git(&e.dir, &["rev-list", "--count", "HEAD"]), "1");
+    assert!(git(&e.dir, &["status", "--porcelain"]).contains("stuck.txt"));
+}
+
+#[tokio::test]
+async fn terminated_session_neither_persists_nor_checkpoints() {
+    let e = env().await;
+    // Long quiet period: the turn is guaranteed to still be settling when we terminate.
+    e.state.agents.set_settle_quiet(Duration::from_secs(2));
+    let mut ev = e.events();
+    let sid = e.session("fake").await;
+    e.prompt(&sid, "late edit").await;
+    ev.wait("chat.done").await;
+
+    // Replacing the session must quiesce the old turn before returning.
+    let second = e.session("fake").await;
+    assert_ne!(sid, second);
+    assert!(e
+        .state
+        .agents
+        .history(&e.project, None)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Even after the old quiet period would have elapsed, nothing shows up.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(e
+        .state
+        .agents
+        .history(&e.project, None)
+        .await
+        .unwrap()
+        .is_empty());
+    while let Ok(t) = ev.rx.try_recv() {
+        let v: Value = serde_json::from_str(&t).unwrap();
+        assert_ne!(v["type"], "checkpoint.created", "{v}");
+    }
+    assert_eq!(git(&e.dir, &["rev-list", "--count", "HEAD"]), "1");
+}
+
+#[tokio::test]
+async fn deleting_a_project_mid_settle_leaves_no_history() {
+    let e = env().await;
+    e.state.agents.set_settle_quiet(Duration::from_secs(2));
+    let mut ev = e.events();
+    let sid = e.session("fake").await;
+    e.prompt(&sid, "late edit").await;
+    ev.wait("chat.done").await;
+
+    let (s, _) = e
+        .call(
+            "DELETE",
+            &format!("/api/projects/{}?confirm=true", e.project),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!acp::history_path(&e.root, &e.project).exists());
+}
+
+#[tokio::test]
 async fn clean_turns_create_no_checkpoint() {
     let e = env().await;
     let mut ev = e.events();
@@ -778,10 +901,13 @@ async fn history_filters_by_session() {
     let a = e.session("fake").await;
     e.prompt(&a, "hello a").await;
     ev.wait("chat.done").await;
+    // A new session before the turn settles would (by design) drop the unsaved turn.
+    wait_turns(&e, 1).await;
     let b = e.session("fake").await;
     let mut ev = e.events();
     e.prompt(&b, "hello b").await;
     ev.wait("chat.done").await;
+    wait_turns(&e, 2).await;
 
     let uri = |extra: &str| format!("/api/agent/history?project={}{extra}", e.project);
     let (_, all) = e.call("GET", &uri(""), None).await;
