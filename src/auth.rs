@@ -49,18 +49,17 @@ fn host_allowed(host: &str, origin: Option<&str>) -> bool {
     origin.is_some_and(|o| origin_host(o).eq_ignore_ascii_case(&h))
 }
 
-/// DNS-rebinding protection: reject unknown Host headers.
+/// DNS-rebinding protection: reject unknown, missing, or malformed Host headers (fail closed).
 pub async fn check_host(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    if let Some(host) = req
+    let allowed = req
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-    {
-        if !host_allowed(host, state.config.origin.as_deref()) {
-            return ApiError::unauth("host not allowed")
-                .with_status(403)
-                .into_response();
-        }
+        .is_some_and(|host| host_allowed(host, state.config.origin.as_deref()));
+    if !allowed {
+        return ApiError::unauth("host not allowed")
+            .with_status(403)
+            .into_response();
     }
     next.run(req).await
 }
@@ -108,12 +107,19 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
         return ApiError::unauth("missing or invalid token").into_response();
     }
 
-    let mut res = next.run(req).await;
-    if via_query {
+    let cookie = if via_query {
         let cookie = format!("{SESSION_COOKIE}={expected}; Path=/; HttpOnly; SameSite=Lax");
-        if let Ok(v) = HeaderValue::from_str(&cookie) {
-            res.headers_mut().append(header::SET_COOKIE, v);
+        match HeaderValue::from_str(&cookie) {
+            Ok(v) => Some(v),
+            Err(_) => return ApiError::io("failed to build session cookie").into_response(),
         }
+    } else {
+        None
+    };
+
+    let mut res = next.run(req).await;
+    if let Some(v) = cookie {
+        res.headers_mut().append(header::SET_COOKIE, v);
     }
     res
 }

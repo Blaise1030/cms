@@ -18,3 +18,8 @@ impl IntoResponse for ApiError {
 pub async fn not_found() -> ApiError {
     ApiError::enoent("route not found")
 }
+
+/// Router-generated 405s (e.g. `POST /api/health`) use the uniform envelope.
+pub async fn method_not_allowed() -> ApiError {
+    ApiError::badreq("method not allowed").with_status(405)
+}

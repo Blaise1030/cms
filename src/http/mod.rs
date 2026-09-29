@@ -15,6 +15,7 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
         .fallback(error::not_found)
+        .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.
         .layer(middleware::from_fn_with_state(
             state.clone(),

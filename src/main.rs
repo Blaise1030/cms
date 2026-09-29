@@ -31,8 +31,8 @@ enum Command {
         /// Disable auth (localhost-only use).
         #[arg(long)]
         no_auth: bool,
-        /// Auth token (default: random 32-byte hex).
-        #[arg(long)]
+        /// Auth token, hex only (default: random 32-byte hex).
+        #[arg(long, value_parser = workbench::config::parse_token)]
         token: Option<String>,
         /// Path to agents.json (default: ~/.config/workbench/agents.json).
         #[arg(long)]

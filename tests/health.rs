@@ -42,7 +42,7 @@ fn get(uri: &str) -> Request<Body> {
 async fn health_over_real_socket_returns_200_json() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(config(false, Some("secret"), None));
+    let state = AppState::new(config(false, Some("abc123"), None));
     tokio::spawn(async move {
         workbench::serve_on(listener, state).await.unwrap();
     });
@@ -77,7 +77,7 @@ async fn health_returns_ok_json_with_version() {
 
 #[tokio::test]
 async fn health_needs_no_auth_even_when_auth_enabled() {
-    let res = app(config(false, Some("secret"), None))
+    let res = app(config(false, Some("abc123"), None))
         .oneshot(get("/api/health"))
         .await
         .unwrap();
@@ -98,7 +98,7 @@ async fn unknown_route_uses_error_envelope() {
 
 #[tokio::test]
 async fn protected_route_without_token_is_unauth_envelope() {
-    let res = app(config(false, Some("secret"), None))
+    let res = app(config(false, Some("abc123"), None))
         .oneshot(get("/api/nope"))
         .await
         .unwrap();
@@ -112,10 +112,10 @@ async fn bearer_token_is_accepted() {
     let req = Request::builder()
         .uri("/api/nope")
         .header(header::HOST, "localhost")
-        .header(header::AUTHORIZATION, "Bearer secret")
+        .header(header::AUTHORIZATION, "Bearer abc123")
         .body(Body::empty())
         .unwrap();
-    let res = app(config(false, Some("secret"), None))
+    let res = app(config(false, Some("abc123"), None))
         .oneshot(req)
         .await
         .unwrap();
@@ -128,10 +128,10 @@ async fn wrong_bearer_token_is_rejected() {
     let req = Request::builder()
         .uri("/api/nope")
         .header(header::HOST, "localhost")
-        .header(header::AUTHORIZATION, "Bearer wrong")
+        .header(header::AUTHORIZATION, "Bearer beef")
         .body(Body::empty())
         .unwrap();
-    let res = app(config(false, Some("secret"), None))
+    let res = app(config(false, Some("abc123"), None))
         .oneshot(req)
         .await
         .unwrap();
@@ -140,8 +140,8 @@ async fn wrong_bearer_token_is_rejected() {
 
 #[tokio::test]
 async fn query_token_sets_session_cookie_and_cookie_authenticates() {
-    let router = app(config(false, Some("secret"), None));
-    let res = router.clone().oneshot(get("/?t=secret")).await.unwrap();
+    let router = app(config(false, Some("abc123"), None));
+    let res = router.clone().oneshot(get("/?t=abc123")).await.unwrap();
     let cookie = res
         .headers()
         .get(header::SET_COOKIE)
@@ -149,12 +149,12 @@ async fn query_token_sets_session_cookie_and_cookie_authenticates() {
         .to_str()
         .unwrap()
         .to_string();
-    assert!(cookie.starts_with("wb_session=secret"), "{cookie}");
+    assert!(cookie.starts_with("wb_session=abc123"), "{cookie}");
 
     let req = Request::builder()
         .uri("/")
         .header(header::HOST, "localhost")
-        .header(header::COOKIE, "wb_session=secret")
+        .header(header::COOKIE, "wb_session=abc123")
         .body(Body::empty())
         .unwrap();
     let res = router.oneshot(req).await.unwrap();
@@ -185,4 +185,105 @@ async fn configured_origin_host_is_allowed() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+async fn assert_forbidden_unauth(res: axum::response::Response) {
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(json_of(res).await["error"]["code"], "UNAUTH");
+}
+
+#[tokio::test]
+async fn post_health_uses_error_envelope() {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/health")
+        .header(header::HOST, "localhost")
+        .body(Body::empty())
+        .unwrap();
+    let res = app(config(true, None, None)).oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert!(res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("application/json"));
+    let body = json_of(res).await;
+    assert_eq!(body["error"]["code"], "BADREQ");
+    assert!(body["error"]["message"].is_string());
+}
+
+#[tokio::test]
+async fn missing_host_is_rejected_even_for_health() {
+    let req = Request::builder()
+        .uri("/api/health")
+        .body(Body::empty())
+        .unwrap();
+    assert_forbidden_unauth(app(config(true, None, None)).oneshot(req).await.unwrap()).await;
+    let req = Request::builder()
+        .uri("/api/health")
+        .body(Body::empty())
+        .unwrap();
+    assert_forbidden_unauth(
+        app(config(false, Some("abc123"), None))
+            .oneshot(req)
+            .await
+            .unwrap(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn non_utf8_host_is_rejected() {
+    let req = Request::builder()
+        .uri("/api/health")
+        .header(
+            header::HOST,
+            header::HeaderValue::from_bytes(b"local\xffhost").unwrap(),
+        )
+        .body(Body::empty())
+        .unwrap();
+    assert_forbidden_unauth(app(config(true, None, None)).oneshot(req).await.unwrap()).await;
+}
+
+#[tokio::test]
+async fn malformed_hosts_are_rejected() {
+    for host in [
+        "",
+        "localhost.evil.com",
+        "localhost@evil.com",
+        "evil.com:7800",
+        "127.0.0.1.evil.com",
+    ] {
+        let req = Request::builder()
+            .uri("/api/health")
+            .header(header::HOST, host)
+            .body(Body::empty())
+            .unwrap();
+        assert_forbidden_unauth(app(config(true, None, None)).oneshot(req).await.unwrap()).await;
+    }
+}
+
+#[test]
+fn cli_rejects_token_with_reserved_characters() {
+    for bad in ["bad;token", "a b", "x&t=y", "secret"] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_workbench"))
+            .args(["serve", "--port", "0", "--token", bad])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "accepted {bad:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("hex"),
+            "{bad:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_rejects_invalid_token_in_config() {
+    let err = workbench::serve(config(false, Some("a;b"), None))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
 }

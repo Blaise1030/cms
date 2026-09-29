@@ -28,6 +28,9 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
 
 /// Bind `127.0.0.1:<port>`, print the ready URL, and serve.
 pub async fn serve(config: Config) -> std::io::Result<()> {
+    config
+        .validate()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
