@@ -5,7 +5,7 @@ Status: Approved by user (brainstorming session; replaces the 2026-09-29 file-ed
 
 ## Summary
 
-**workbench** is a local, Lovable-style marketing-site builder. A hosted Vue SPA (`app.<domain>`) drives a Rust daemon on the user's machine (Paseo model). The daemon talks to local coding agents over **ACP** (Agent Client Protocol) — Claude Code, Codex, Opencode via their ACP adapters — using the user's existing subscriptions. Agents edit an **Astro** project whose content lives in **content collections** (git-based CMS); a supervised Astro dev server is reverse-proxied into the UI as a live preview with working HMR. Every completed agent turn becomes a git **checkpoint**; any change is one-click revertable. Projects scaffold from an embedded Astro marketing template that is Cloudflare Pages–ready.
+**workbench** is a local, Lovable-style marketing-site builder. A hosted Vue PWA (`app.<domain>`) drives a Rust daemon on the user's machine (Paseo model). The daemon talks to local coding agents over **ACP** (Agent Client Protocol) — Claude Code, Codex, Opencode via their ACP adapters — using the user's existing subscriptions. Agents edit an **Astro** project whose content lives in **content collections** (git-based CMS); a supervised Astro dev server is reverse-proxied into the UI as a live preview with working HMR. Every completed agent turn becomes a git **checkpoint**; any change is one-click revertable. Projects scaffold from an embedded Astro marketing template that is Cloudflare Pages–ready.
 
 One-line pitch: chat on the right, live site on the left, git as the database, your own agent subscriptions as the engine.
 
@@ -24,7 +24,7 @@ Full file editor and terminal UI in the builder (phase 2). Deploy execution from
 ## Architecture
 
 ```
-app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedded via rust-embed)
+app.<domain> (Vue PWA, hosted)            http://127.0.0.1:7800 (same PWA, embedded via rust-embed)
         │ REST /api/* + WS /ws/events (token: Bearer header or wb_session cookie)
         └───────────────┬─────────────────────┘
                    Rust daemon (axum + tokio, single crate `workbench`)
@@ -46,7 +46,7 @@ app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedde
 /
   Cargo.toml            single crate `workbench`
   src/                  daemon modules
-  web/                  Vue 3 + TS + Vite SPA (pnpm), hosted + embedded
+  web/                  Vue 3 + TS + Vite PWA (pnpm), hosted + embedded
   templates/
     astro-marketing/    the embedded scaffold template (an Astro project)
   justfile              dev / build / test
@@ -106,11 +106,13 @@ Tagged events; client reconciles by `projectId`/`sessionId`/`turnId`:
 ## Auth model (unchanged from v1 design, plus cookie)
 
 1. Bind 127.0.0.1:7800 default; token = 32-byte random hex per start (or `--token`), printed as `http://127.0.0.1:7800/?t=<token>`.
-2. `--origin` hosted SPA allowed via CORS + Host allowlist; `--no-auth` for localhost-only.
+2. `--origin` hosted PWA allowed via CORS + Host allowlist; `--no-auth` for localhost-only.
 3. `wb_session` cookie (HttpOnly, SameSite=Lax, daemon origin) minted from `?t=` links — makes preview iframes and proxy URLs work header-less.
 4. Path sandboxing for all file APIs; agent subprocesses run as the user (their credentials, their machine — the git checkpoint is the safety net for edits).
 
-## Frontend (Vue 3 + TS + Vite, pnpm)
+## Frontend (Vue 3 + TS + Vite, pnpm) — installable PWA
+
+PWA layer: `vite-plugin-pwa` with manifest (name, maskable icons, theme color, standalone display) and a service worker using an auto-update strategy. **Precache the app shell only** (hosted-origin assets: JS/CSS/icons); all live data and previews come from the daemon origin at runtime and are never cached — offline state is an honest "daemon unreachable" screen with retry, not stale content. Result: instant loads, home-screen install on iOS/Android/desktop, and a native-app feel for the builder chrome.
 
 ```
 web/src/
@@ -127,12 +129,13 @@ web/src/
     files/         read-only tree + syntax-highlighted viewer (shiki) (phase 2:
                    editing)
   app/             shell: PREVIEW LEFT · CHAT RIGHT (user-specified), collapsible
-  ui/              atoms (buttons, toasts, icons, spinner)
+  components/ui/   shadcn-vue primitives (button, card, dialog, sonner, …)
+  lib/utils.ts     `cn()` helper (clsx + tailwind-merge)
 ```
 
-Module rules: modules import only `core/*`, `ui/*`, own files. Each owns its pinia store slice. Daemon origin for the SPA = `window.location` when embedded, or the configured daemon URL when hosted (stored after the user pastes/opens the daemon link).
+Module rules: modules import only `core/*`, `components/ui/*`, `lib/*`, own files. Each owns its pinia store slice. Daemon origin for the SPA = `window.location` when embedded, or the configured daemon URL when hosted (stored after the user pastes/opens the daemon link).
 
-Styling: hand-written CSS, dark minimal. No component library.
+Styling: Tailwind CSS v4 (`@tailwindcss/vite`) with `shadcn-vue` (New York / Neutral / CSS variables), dark mode via root `.dark`. Keep custom CSS to small overrides and layout glue only. Init with `pnpm dlx shadcn-vue@latest init`; add primitives with `pnpm dlx shadcn-vue@latest add …`.
 
 ## The scaffold template (`templates/astro-marketing/`)
 

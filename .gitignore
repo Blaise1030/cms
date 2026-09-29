@@ -1,0 +1,8 @@
+.worktrees/
+.superpowers/
+target/
+node_modules/
+web/dist/
+web/node_modules/
+templates/astro-marketing/node_modules/
+templates/astro-marketing/dist/
