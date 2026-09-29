@@ -477,3 +477,89 @@ async fn endpoints_require_auth_and_are_read_only() {
         assert_eq!(s, StatusCode::METHOD_NOT_ALLOWED, "{m}");
     }
 }
+
+#[tokio::test]
+async fn nested_vcs_dirs_are_blocked_and_hidden_at_any_depth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir) = project(tmp.path()).await;
+    // nested repo, upper-case variant, other VCS, and links into VCS metadata
+    for d in [
+        "vendor/lib/.git",
+        "vendor/lib/.GIT",
+        "vendor/.hg",
+        "vendor/.svn",
+    ] {
+        std::fs::create_dir_all(dir.join(d)).unwrap();
+        std::fs::write(dir.join(d).join("config"), "[core]").unwrap();
+    }
+    std::fs::write(dir.join("vendor/lib/ok.txt"), "ok").unwrap();
+    std::os::unix::fs::symlink(".git/config", dir.join("link-to-git-config")).unwrap();
+    std::os::unix::fs::symlink("vendor/lib/.git", dir.join("link-to-nested-git")).unwrap();
+
+    for u in [
+        "/api/file?project=site&path=vendor/lib/.git/config",
+        "/api/file?project=site&path=vendor/lib/.GIT/config",
+        "/api/file?project=site&path=vendor/.hg/config",
+        "/api/file?project=site&path=vendor/.svn/config",
+        "/api/file?project=site&path=link-to-git-config",
+        "/api/file?project=site&path=link-to-nested-git/config",
+        "/api/tree?project=site&path=vendor/lib/.git",
+        "/api/tree?project=site&path=link-to-nested-git",
+    ] {
+        let (s, v) = call(&app, req("GET", u, None)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{u}: {v}");
+        assert_eq!(v["error"]["code"], "SANDBOX", "{u}");
+    }
+
+    let names = |v: &Value| -> Vec<String> {
+        v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let (_, v) = call(
+        &app,
+        req("GET", "/api/tree?project=site&path=vendor/lib", None),
+    )
+    .await;
+    assert_eq!(names(&v), ["ok.txt"]);
+    let (_, v) = call(&app, req("GET", "/api/tree?project=site&path=vendor", None)).await;
+    assert_eq!(names(&v), ["lib"]);
+    // links into VCS metadata are hidden from the root listing
+    let (_, v) = call(&app, req("GET", "/api/tree?project=site", None)).await;
+    let root = names(&v);
+    assert!(
+        !root.contains(&"link-to-git-config".to_string()),
+        "{root:?}"
+    );
+    assert!(
+        !root.contains(&"link-to-nested-git".to_string()),
+        "{root:?}"
+    );
+    assert!(!root.contains(&".git".to_string()));
+}
+
+#[tokio::test]
+async fn oversized_files_are_rejected_with_413() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir) = project(tmp.path()).await;
+    let max = workbench::fs::MAX_FILE_BYTES as usize;
+    std::fs::write(dir.join("ok.bin"), vec![b'a'; max]).unwrap();
+    std::fs::write(dir.join("big.bin"), vec![b'a'; max + 1]).unwrap();
+    let (s, _, b) = raw(
+        &app,
+        req("GET", "/api/file?project=site&path=ok.bin&raw=true", None),
+    )
+    .await;
+    assert_eq!((s, b.len()), (StatusCode::OK, max));
+    for u in [
+        "/api/file?project=site&path=big.bin",
+        "/api/file?project=site&path=big.bin&raw=true",
+    ] {
+        let (s, v) = call(&app, req("GET", u, None)).await;
+        assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE, "{u}");
+        assert_eq!(v["error"]["code"], "BADREQ");
+    }
+}
