@@ -26,6 +26,8 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Daemon state dir (inside projects-dir; slugs never start with `.`, so no collisions).
 const STATE_DIR: &str = ".workbench";
 const REGISTRY_FILE: &str = "projects.json";
+/// Staging area for deletes (same filesystem as projects, so moves are atomic renames).
+const TRASH_DIR: &str = "trash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -86,13 +88,25 @@ pub struct ProjectRegistry {
     /// Run `npm install` during `create`. Tests turn this off via
     /// [`crate::state::AppState::with_scaffold_install`]; the daemon always runs it.
     install: bool,
+    /// Set when the on-disk registry could not be read or quarantined. Mutations are
+    /// refused so we never overwrite a registry we could not preserve.
+    init_error: Option<String>,
     inner: Mutex<Inner>,
 }
 
 impl ProjectRegistry {
     /// Open the registry, loading any persisted projects whose directory still exists.
     pub fn open(projects_dir: PathBuf, install: bool) -> Self {
-        let projects = load_stored(&projects_dir)
+        let (stored, init_error) = match load_stored(&projects_dir) {
+            Ok(v) => (v, None),
+            Err(e) => {
+                eprintln!("workbench: {e}");
+                (Vec::new(), Some(e))
+            }
+        };
+        // Leftovers from deletes that were committed but not fully cleaned up.
+        let _ = std::fs::remove_dir_all(projects_dir.join(STATE_DIR).join(TRASH_DIR));
+        let projects = stored
             .into_iter()
             .filter(|s| is_valid_id(&s.id))
             .map(|s| Project {
@@ -107,10 +121,25 @@ impl ProjectRegistry {
         Self {
             projects_dir,
             install,
+            init_error,
             inner: Mutex::new(Inner {
                 projects,
                 ..Inner::default()
             }),
+        }
+    }
+
+    /// `Some` if the persisted registry could not be loaded safely (see [`Self::open`]).
+    pub fn init_error(&self) -> Option<&str> {
+        self.init_error.as_deref()
+    }
+
+    fn check_writable(&self) -> Result<(), ApiError> {
+        match &self.init_error {
+            Some(e) => Err(ApiError::io(format!(
+                "project registry is unavailable, refusing to modify it: {e}"
+            ))),
+            None => Ok(()),
         }
     }
 
@@ -136,6 +165,7 @@ impl ProjectRegistry {
 
     /// Scaffold a new project from the embedded template.
     pub async fn create(&self, name: &str) -> Result<ProjectInfo, ApiError> {
+        self.check_writable()?;
         let name = validate_name(name)?;
         let slug = slugify(&name);
         if slug.is_empty() {
@@ -201,39 +231,77 @@ impl ProjectRegistry {
     }
 
     /// Remove the project and its directory. The caller is responsible for confirmation.
+    ///
+    /// Staged so the response always matches reality:
+    /// 1. move the project dir into `.workbench/trash/` (atomic rename; failure = nothing changed),
+    /// 2. persist the registry without the project — this is the **commit point**;
+    ///    if it fails the dir is moved back and the delete fails with the project intact,
+    /// 3. best-effort removal of the trashed dir and the project's state dir. Failures here
+    ///    are logged and non-fatal: the project is already gone, and leftovers in
+    ///    `.workbench/trash/` are purged on the next start.
     pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
+        self.check_writable()?;
         let mut inner = self.inner.lock().await;
         let idx = inner
             .projects
             .iter()
             .position(|p| p.id == id)
             .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+        self.ensure_inside_projects_dir(&inner.projects[idx].dir)
+            .await?;
+
+        // 1. Stage.
+        let dir = inner.projects[idx].dir.clone();
+        let trash = self
+            .projects_dir
+            .join(STATE_DIR)
+            .join(TRASH_DIR)
+            .join(format!("{id}-{}", unique_suffix()));
+        let staged = match tokio::fs::metadata(&dir).await {
+            Ok(_) => {
+                if let Some(parent) = trash.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                tokio::fs::rename(&dir, &trash).await?;
+                true
+            }
+            // Already gone from disk: just drop the registry entry.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => return Err(e.into()),
+        };
+
+        // 2. Commit.
         let project = inner.projects.remove(idx);
-
-        let result = async {
-            self.ensure_inside_projects_dir(&project.dir).await?;
-            match tokio::fs::remove_dir_all(&project.dir).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(ApiError::from(e)),
-            }
-            // Daemon-side state (history etc.) lives outside the repo.
-            let state = self.projects_dir.join(STATE_DIR).join(&project.id);
-            match tokio::fs::remove_dir_all(&state).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(ApiError::from(e)),
-            }
-            self.persist(&inner.projects).await
-        }
-        .await;
-
-        if let Err(e) = result {
-            // Keep the registry truthful if anything survived.
-            if project.dir.exists() {
-                inner.projects.insert(idx, project);
+        if let Err(e) = self.persist(&inner.projects).await {
+            inner.projects.insert(idx, project);
+            if staged {
+                if let Err(re) = tokio::fs::rename(&trash, &dir).await {
+                    return Err(ApiError::io(format!(
+                        "delete failed ({e}) and the project directory could not be restored ({re}); its files are in {}",
+                        trash.display()
+                    )));
+                }
             }
             return Err(e);
+        }
+
+        // 3. Best-effort cleanup.
+        if staged {
+            if let Err(e) = tokio::fs::remove_dir_all(&trash).await {
+                eprintln!(
+                    "workbench: deleted project {id} but could not clean {}: {e}",
+                    trash.display()
+                );
+            }
+        }
+        let state = self.projects_dir.join(STATE_DIR).join(id);
+        match tokio::fs::remove_dir_all(&state).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!(
+                "workbench: deleted project {id} but could not clean {}: {e}",
+                state.display()
+            ),
         }
         Ok(())
     }
@@ -311,25 +379,51 @@ impl ProjectRegistry {
     }
 }
 
-fn load_stored(projects_dir: &Path) -> Vec<StoredProject> {
+/// Load the persisted registry. A missing file is an empty registry. An unreadable or
+/// corrupt one is an error; a corrupt file is first moved aside to a unique
+/// `projects.json.corrupt-<nanos>` name, and if that move fails the error says so.
+fn load_stored(projects_dir: &Path) -> Result<Vec<StoredProject>, String> {
     let path = projects_dir.join(STATE_DIR).join(REGISTRY_FILE);
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
-        Err(_) => return Vec::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            // Never silently overwrite a registry we could not read.
-            let backup = path.with_extension("json.corrupt");
-            eprintln!(
-                "workbench: unreadable project registry ({e}); moved to {}",
-                backup.display()
-            );
-            let _ = std::fs::rename(&path, backup);
-            Vec::new()
+        Ok(v) => Ok(v),
+        Err(parse) => {
+            let backup =
+                path.with_file_name(format!("{REGISTRY_FILE}.corrupt-{}", unique_suffix()));
+            match std::fs::rename(&path, &backup) {
+                Ok(()) => {
+                    eprintln!(
+                        "workbench: project registry {} is corrupt ({parse}); moved to {}. Starting with an empty registry",
+                        path.display(),
+                        backup.display()
+                    );
+                    Ok(Vec::new())
+                }
+                Err(e) => Err(format!(
+                    "project registry {} is corrupt ({parse}) and could not be moved aside ({e}); refusing to overwrite it",
+                    path.display()
+                )),
+            }
         }
     }
+}
+
+/// Unique-enough suffix for backup / trash names.
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{nanos}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// Trim and validate a user-supplied project name.

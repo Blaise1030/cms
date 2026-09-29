@@ -292,19 +292,177 @@ async fn registry_survives_restart() {
     assert_eq!(list["projects"], json!([]));
 }
 
+fn quarantined(state_dir: &Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(state_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("projects.json.corrupt-")
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn chmod(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
 #[tokio::test]
-async fn corrupt_registry_is_preserved_not_overwritten() {
+async fn corrupt_registry_is_quarantined_under_a_unique_name() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".workbench")).unwrap();
-    std::fs::write(tmp.path().join(".workbench/projects.json"), "{not json").unwrap();
+    let state = tmp.path().join(".workbench");
+    std::fs::create_dir_all(&state).unwrap();
+    // A pre-existing backup must never be clobbered by a second quarantine.
+    std::fs::write(state.join("projects.json.corrupt"), "old").unwrap();
+    std::fs::write(state.join("projects.json"), "{not json").unwrap();
     let app = app(tmp.path());
     let (status, list) = call(&app, req("GET", "/api/projects", None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list["projects"], json!([]));
+    let q = quarantined(&state);
+    assert_eq!(q.len(), 1);
+    assert_eq!(std::fs::read_to_string(&q[0]).unwrap(), "{not json");
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join(".workbench/projects.json.corrupt")).unwrap(),
+        std::fs::read_to_string(state.join("projects.json.corrupt")).unwrap(),
+        "old"
+    );
+    // registry is usable afterwards
+    create(&app, "fresh").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_quarantine_blocks_writes_and_keeps_corrupt_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tmp.path().join(".workbench");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("projects.json"), "{not json").unwrap();
+    chmod(&state, 0o500); // readable, but no rename/create inside
+
+    let app = app(tmp.path());
+    let (status, v) = call(
+        &app,
+        req("POST", "/api/projects", Some(json!({ "name": "x" }))),
+    )
+    .await;
+    let serve_err = workbench::serve(config(tmp.path(), true))
+        .await
+        .unwrap_err();
+    chmod(&state, 0o700);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+    assert_eq!(v["error"]["code"], "IO");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("refusing"),
+        "{v}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(state.join("projects.json")).unwrap(),
         "{not json"
     );
+    assert!(!tmp.path().join("x").exists(), "nothing scaffolded");
+    // the daemon refuses to start rather than run against an unreadable registry
+    assert!(
+        serve_err.to_string().contains("could not be moved aside"),
+        "{serve_err}"
+    );
+}
+
+#[tokio::test]
+async fn delete_that_fails_to_commit_leaves_project_intact_and_is_retryable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let id = create(&app, "Sticky").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let dir = tmp.path().join(&id);
+    let state = tmp.path().join(".workbench");
+    // Make the registry write fail: its temp file path is occupied by a directory.
+    std::fs::create_dir(state.join("projects.json.tmp")).unwrap();
+
+    let uri = format!("/api/projects/{id}?confirm=true");
+    let (status, v) = call(&app, req("DELETE", &uri, None)).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+    assert_eq!(v["error"]["code"], "IO");
+    // error means nothing was deleted: files, git repo, registry entry all intact
+    assert!(dir.join("AGENTS.md").is_file());
+    assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"].as_array().unwrap().len(), 1);
+    // and nothing is stranded in the trash
+    let trash = state.join("trash");
+    assert!(!trash.exists() || std::fs::read_dir(&trash).unwrap().next().is_none());
+
+    // once the fault is gone, the same request succeeds
+    std::fs::remove_dir(state.join("projects.json.tmp")).unwrap();
+    let (status, _) = call(&app, req("DELETE", &uri, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!dir.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cleanup_failure_after_commit_is_non_fatal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let id = create(&app, "Gone").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // A state dir we cannot fully remove (file inside a read-only subdir).
+    let locked = tmp.path().join(".workbench").join(&id).join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("f"), "x").unwrap();
+    chmod(&locked, 0o500);
+
+    let uri = format!("/api/projects/{id}?confirm=true");
+    let (status, v) = call(&app, req("DELETE", &uri, None)).await;
+    let leftover = locked.exists();
+    chmod(&locked, 0o700);
+
+    assert!(leftover, "test setup: cleanup should have failed");
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(!tmp.path().join(&id).exists());
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+    // and the delete is durable across a restart
+    let reopened = self::app(tmp.path());
+    let (_, list) = call(&reopened, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+}
+
+#[tokio::test]
+async fn delete_of_project_whose_dir_vanished_drops_the_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path());
+    let id = create(&app, "Ghost").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::fs::remove_dir_all(tmp.path().join(&id)).unwrap();
+    let (status, _) = call(
+        &app,
+        req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = call(&app, req("GET", "/api/projects", None)).await;
+    assert_eq!(list["projects"], json!([]));
+}
+
+#[tokio::test]
+async fn trash_leftovers_are_purged_on_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    let leftover = tmp.path().join(".workbench/trash/old-1");
+    std::fs::create_dir_all(&leftover).unwrap();
+    std::fs::write(leftover.join("f"), "x").unwrap();
+    let _ = app(tmp.path());
+    assert!(!tmp.path().join(".workbench/trash").exists());
 }
 
 #[tokio::test]

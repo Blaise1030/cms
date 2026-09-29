@@ -39,6 +39,9 @@ pub async fn serve(config: Config) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
     let state = AppState::new(config);
+    if let Some(e) = state.projects.init_error() {
+        return Err(std::io::Error::other(e.to_string()));
+    }
     match state.config.token.as_deref() {
         Some(token) if !state.config.no_auth => {
             println!("workbench ready: http://{bound}/?t={token}")
