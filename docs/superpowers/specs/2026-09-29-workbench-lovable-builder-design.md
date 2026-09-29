@@ -60,9 +60,9 @@ app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedde
 | `main.rs` | clap CLI: `workbench serve [--port 7800] [--origin URL] [--projects-dir DIR] [--no-auth] [--token T] [--agents-config PATH]`. Prints ready URL with token. |
 | `state.rs` | AppState: projects, agent sessions, dev servers, event broadcaster. |
 | `projects.rs` | Project registry (id → dir under projects-dir). `create` copies the embedded template, `git init` + initial commit. Delete = remove dir (guarded). |
-| `acp.rs` | ACP client on Zed's `agent-client-protocol` crate. Per project+provider: spawn subprocess, JSON-RPC over stdio: `initialize` → `newSession` (cwd = project dir) → `prompt`. Forwards `sessionUpdate` notifications (agent_message_chunk, tool_call, tool_call_update, plan) as WS events. Implements `request_permission`: file edits → always allow; command execution → surface as permission prompt in chat (Allow once / Deny); per-project `auto_approve` toggle skips prompts. Cancel via `cancel`. |
+| `acp.rs` | ACP client on Zed's `agent-client-protocol` crate. Per project: spawn subprocess, JSON-RPC over stdio: `initialize` → `newSession` (cwd = project dir) → `prompt`. Forwards `sessionUpdate` notifications (agent_message_chunk, tool_call, tool_call_update, plan) as WS events. Implements `request_permission`: file edits → always allow; command execution → surface as permission prompt in chat (Allow once / Deny); per-project `auto_approve` toggle skips prompts. Cancel via `cancel`. Persists each completed turn (user text, assistant text, tool summaries) to the history JSONL (see API). One live agent session per project; new session → old subprocess terminated. |
 | `agents_config.rs` | Provider registry from `~/.config/workbench/agents.json`: `{ "claude": ["npx","-y","@zed-industries/claude-code-acp"], "codex": [...], "opencode": ["opencode","acp"] }` (exact adapter package names verified at plan time). UI lists providers from this file; adding any ACP-speaking agent is config-only. |
-| `devserver.rs` | Allocate free port; spawn `npm run dev -- --port N` with env `PUBLIC_BASE=/preview/{id}/`; detect readiness on stdout; crash-restart with backoff (max 3); kill on shutdown/project close. One dev server per open project. |
+| `devserver.rs` | Allocate free port; spawn `npm run dev -- --port N` with env `PUBLIC_BASE=/preview/{id}/`; detect readiness on stdout; crash-restart with backoff (max 3). Lifecycle: dev server runs from project creation until daemon shutdown or project delete (no open/close API; "open project" is a UI-only concept) — plus manual `/devserver/restart`. |
 | `preview.rs` | Reverse proxy `/preview/{id}/*` → `127.0.0.1:{port}` including WebSocket upgrade pass-through (HMR). Template's `PUBLIC_BASE` makes all asset/HMR URLs prefix-correct; no HTML rewriting. |
 | `git.rs` | Checkpoints: after each agent turn settles (no running tool calls, 2s quiet), `git add -A && git commit -m "checkpoint: <turn summary>"`. `restore` = `git reset --hard <sha> && git clean -fd`. Log API returns checkpoints with turn metadata. Skips checkpoint if tree is clean. |
 | `watch.rs` | `notify` watcher per open project → `fs.change` events (feeds UI file tree + checkpoint state). |
@@ -76,13 +76,15 @@ app.<domain> (Vue SPA, hosted)          http://127.0.0.1:7800 (same SPA, embedde
 
 - `GET /api/health` — no auth.
 - `GET /api/agents` → `{ providers: [{ id, command }] }` (from registry).
-- `GET /api/projects` → `{ projects: [{ id, name, provider, port, devserver: "starting"|"ready"|"crashed" }] }`
-- `POST /api/projects` `{ name, provider }` → scaffolds from template, git init, starts dev server. → `{ id, ... }`
+- `GET /api/projects` → `{ projects: [{ id, name, port, devserver: "starting"|"ready"|"crashed" }] }`
+- `POST /api/projects` `{ name }` → scaffolds from template, git init, starts dev server. → `{ id, ... }`
 - `DELETE /api/projects/{id}` — stops dev server, removes dir (confirm in UI).
-- `POST /api/agent/session` `{ project, provider }` → `{ sessionId }` (spawn + initialize + newSession).
+- `POST /api/projects/{id}/devserver/restart` — manual restart affordance (e.g. after crashes exhausted backoff).
+- `POST /api/agent/session` `{ project, provider }` → `{ sessionId }` (spawn + initialize + newSession). **One active session per project** — starting a new one terminates the previous cleanly. Provider is chosen per session; the UI remembers the last-used provider per project (client-side preference).
 - `POST /api/agent/prompt` `{ project, sessionId, text }` → `{ turnId }` (streamed over WS).
 - `POST /api/agent/prompt/{turnId}/cancel`
 - `POST /api/agent/permission/{requestId}` `{ decision: "allow"|"deny" }`
+- `GET /api/agent/history?project=` → `{ turns: [{ id, sessionId, provider, ts, userText, assistantText, tools: [{ tool, summary, state }] }] }` — chat history for the project. Persisted by `acp.rs` as JSONL at `{projects-dir}/.workbench/{id}/history.jsonl` (daemon state dir, deliberately outside the site repo so checkpoints never see it). Survives daemon restarts; deleted with the project.
 - `GET /api/checkpoints?project=` → `{ checkpoints: [{ sha, summary, ts }] }`
 - `GET /api/checkpoints/{sha}/diff?project=` → unified diff of that commit
 - `POST /api/checkpoints/{sha}/restore` `{ project }`
