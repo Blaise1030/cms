@@ -1,0 +1,15 @@
+[package]
+name = "workbench"
+version = "0.1.0"
+edition = "2021"
+description = "Local Lovable-style site builder daemon"
+
+[lib]
+name = "workbench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "workbench"
+path = "src/main.rs"
+
+[dependencies]

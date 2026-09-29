@@ -6,3 +6,4 @@ web/dist/
 web/node_modules/
 templates/astro-marketing/node_modules/
 templates/astro-marketing/dist/
+templates/astro-marketing/.astro/
