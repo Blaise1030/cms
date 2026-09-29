@@ -49,6 +49,16 @@ fn host_allowed(host: &str, origin: Option<&str>) -> bool {
     origin.is_some_and(|o| origin_host(o).eq_ignore_ascii_case(&h))
 }
 
+/// Cross-site WebSocket hijacking protection: browsers always send `Origin` on WS
+/// upgrades, and it must be the daemon itself, a loopback page, or the `--origin` app.
+/// A missing `Origin` (non-browser client) is allowed; it still needs the token.
+pub fn ws_origin_allowed(origin: Option<&str>, configured: Option<&str>) -> bool {
+    let Some(origin) = origin else { return true };
+    let no_scheme = origin.split("://").nth(1).unwrap_or(origin);
+    let authority = no_scheme.split('/').next().unwrap_or(no_scheme);
+    host_allowed(authority, configured)
+}
+
 /// DNS-rebinding protection: reject unknown, missing, or malformed Host headers (fail closed).
 pub async fn check_host(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let allowed = req
@@ -143,5 +153,18 @@ mod tests {
             "other.example.com",
             Some("https://app.example.com")
         ));
+    }
+
+    #[test]
+    fn ws_origin_allowlist() {
+        let cfg = Some("https://app.example.com");
+        assert!(ws_origin_allowed(None, None));
+        assert!(ws_origin_allowed(Some("http://127.0.0.1:7800"), None));
+        assert!(ws_origin_allowed(Some("http://localhost:5173"), None));
+        assert!(ws_origin_allowed(Some("http://[::1]:7800"), None));
+        assert!(ws_origin_allowed(Some("https://app.example.com"), cfg));
+        assert!(!ws_origin_allowed(Some("https://evil.com"), cfg));
+        assert!(!ws_origin_allowed(Some("https://evil.com"), None));
+        assert!(!ws_origin_allowed(Some("null"), None));
     }
 }

@@ -32,6 +32,36 @@ pub async fn create(
     Ok((StatusCode::CREATED, Json(info)))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateRequest {
+    auto_approve: Option<bool>,
+    name: Option<String>,
+}
+
+/// `PATCH /api/projects/{id}` `{ autoApprove?, name? }` → the updated project.
+pub async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<ProjectInfo>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"autoApprove\"?: bool, \"name\"?: string}}: {e}"
+        ))
+    })?;
+    if req.auto_approve.is_none() && req.name.is_none() {
+        return Err(ApiError::badreq(
+            "nothing to update: pass autoApprove and/or name",
+        ));
+    }
+    let info = state
+        .projects
+        .update(&id, req.name.as_deref(), req.auto_approve)
+        .await?;
+    Ok(Json(info))
+}
+
 /// `DELETE /api/projects/{id}?confirm=true` — destructive, so the flag is mandatory.
 pub async fn remove(
     State(state): State<AppState>,
@@ -43,6 +73,8 @@ pub async fn remove(
             "deleting a project removes its files; pass ?confirm=true to proceed",
         ));
     }
+    // Stop the project's agent first so nothing writes into a directory being removed.
+    state.agents.terminate_project(&id).await;
     state.projects.delete(&id).await?;
     Ok(Json(json!({ "deleted": id })))
 }

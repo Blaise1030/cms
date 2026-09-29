@@ -24,7 +24,7 @@ const MAX_SLUG_LEN: usize = 48;
 /// Upper bound for `npm install` at scaffold time.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Daemon state dir (inside projects-dir; slugs never start with `.`, so no collisions).
-const STATE_DIR: &str = ".workbench";
+pub(crate) const STATE_DIR: &str = ".workbench";
 const REGISTRY_FILE: &str = "projects.json";
 /// Staging area for deletes (same filesystem as projects, so moves are atomic renames).
 const TRASH_DIR: &str = "trash";
@@ -44,15 +44,19 @@ pub struct Project {
     pub dir: PathBuf,
     pub port: u16,
     pub devserver: DevserverStatus,
+    /// Agent auto-approve toggle: skip permission prompts for this project.
+    pub auto_approve: bool,
 }
 
-/// API view of a project: `{ id, name, port, devserver }`.
+/// API view of a project: `{ id, name, port, devserver, autoApprove }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
     pub id: String,
     pub name: String,
     pub port: u16,
     pub devserver: DevserverStatus,
+    pub auto_approve: bool,
 }
 
 impl From<&Project> for ProjectInfo {
@@ -62,6 +66,7 @@ impl From<&Project> for ProjectInfo {
             name: p.name.clone(),
             port: p.port,
             devserver: p.devserver,
+            auto_approve: p.auto_approve,
         }
     }
 }
@@ -73,6 +78,8 @@ struct StoredProject {
     id: String,
     name: String,
     port: u16,
+    #[serde(default, rename = "autoApprove")]
+    auto_approve: bool,
 }
 
 #[derive(Default)]
@@ -115,6 +122,7 @@ impl ProjectRegistry {
                 name: s.name,
                 port: s.port,
                 devserver: DevserverStatus::Starting,
+                auto_approve: s.auto_approve,
             })
             .filter(|p| p.dir.is_dir())
             .collect();
@@ -161,6 +169,36 @@ impl ProjectRegistry {
             .iter()
             .find(|p| p.id == id)
             .cloned()
+    }
+
+    /// Update project settings (`PATCH /api/projects/{id}`). Persisted; on failure the
+    /// in-memory project is left unchanged.
+    pub async fn update(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        auto_approve: Option<bool>,
+    ) -> Result<ProjectInfo, ApiError> {
+        self.check_writable()?;
+        let name = name.map(validate_name).transpose()?;
+        let mut inner = self.inner.lock().await;
+        let idx = inner
+            .projects
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+        let before = inner.projects[idx].clone();
+        if let Some(n) = name {
+            inner.projects[idx].name = n;
+        }
+        if let Some(a) = auto_approve {
+            inner.projects[idx].auto_approve = a;
+        }
+        if let Err(e) = self.persist(&inner.projects).await {
+            inner.projects[idx] = before;
+            return Err(e);
+        }
+        Ok(ProjectInfo::from(&inner.projects[idx]))
     }
 
     /// Scaffold a new project from the embedded template.
@@ -216,6 +254,7 @@ impl ProjectRegistry {
             dir,
             port,
             devserver: DevserverStatus::Starting,
+            auto_approve: false,
         };
         let info = ProjectInfo::from(&project);
         inner.projects.push(project);
@@ -366,6 +405,7 @@ impl ProjectRegistry {
                 id: p.id.clone(),
                 name: p.name.clone(),
                 port: p.port,
+                auto_approve: p.auto_approve,
             })
             .collect();
         let state_dir = self.projects_dir.join(STATE_DIR);

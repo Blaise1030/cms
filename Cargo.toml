@@ -13,14 +13,14 @@ name = "workbench"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8.9", features = ["json", "query"] }
+axum = { version = "0.8.9", features = ["json", "query", "ws"] }
 clap = { version = "4.6.7", features = ["derive"] }
 libc = "0.2"
 rand = "0.10.3"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "sync", "rt"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "sync", "rt", "time", "io-util"] }
 tower-http = { version = "0.7.1", features = ["cors"] }
 
 [dev-dependencies]
@@ -28,3 +28,5 @@ http-body-util = "0.1.5"
 tempfile = "3.27.0"
 tokio = { version = "1.53.1", features = ["io-util"] }
 tower = { version = "0.5.3", features = ["util"] }
+tokio-tungstenite = "0.29"
+futures-util = "0.3"

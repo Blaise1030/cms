@@ -1,8 +1,11 @@
 //! workbench daemon library.
 
+pub mod acp;
+pub mod agents_config;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod events;
 pub mod fs;
 pub mod git;
 pub mod http;
@@ -24,12 +27,16 @@ pub fn version() -> &'static str {
 
 /// Serve the HTTP API on an already-bound listener until Ctrl-C.
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
+    let agents = state.agents.clone();
     let app = http::router(state);
-    axum::serve(listener, app)
+    let served = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
-        .await
+        .await;
+    // Don't leave agent subprocesses behind.
+    agents.shutdown().await;
+    served
 }
 
 /// Bind `127.0.0.1:<port>`, print the ready URL, and serve.

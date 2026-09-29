@@ -1,7 +1,9 @@
 //! HTTP layer: router, middleware wiring.
 
+pub mod agent;
 pub mod checkpoints;
 pub mod error;
+pub mod events;
 pub mod files;
 pub mod health;
 pub mod projects;
@@ -23,7 +25,20 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
         .route("/api/projects", get(projects::list).post(projects::create))
-        .route("/api/projects/{id}", delete(projects::remove))
+        .route(
+            "/api/projects/{id}",
+            delete(projects::remove).patch(projects::update),
+        )
+        .route("/api/agents", get(agent::providers))
+        .route("/api/agent/session", post(agent::start_session))
+        .route("/api/agent/prompt", post(agent::prompt))
+        .route("/api/agent/prompt/{turn_id}/cancel", post(agent::cancel))
+        .route(
+            "/api/agent/permission/{request_id}",
+            post(agent::permission),
+        )
+        .route("/api/agent/history", get(agent::history))
+        .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
