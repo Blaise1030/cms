@@ -13,7 +13,8 @@ export function buildEventsUrl(config: DaemonConfig): string {
   return url.toString();
 }
 
-type Shape = Record<string, "string" | "number">;
+/** `nullable-string`: a string, `null`, or absent (e.g. session-level `chat.error.turnId`). */
+type Shape = Record<string, "string" | "number" | "nullable-string">;
 
 /** Required fields per event type (beyond `type`); enough to protect consumers from junk. */
 const SHAPES: Record<DaemonEventType, Shape> = {
@@ -27,7 +28,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   },
   "chat.plan": { sessionId: "string", turnId: "string" },
   "chat.done": { sessionId: "string", turnId: "string" },
-  "chat.error": { sessionId: "string", turnId: "string", message: "string" },
+  "chat.error": { sessionId: "string", turnId: "nullable-string", message: "string" },
   "permission.request": { sessionId: "string", requestId: "string", tool: "string" },
   "devserver.status": { projectId: "string", state: "string" },
   "checkpoint.created": { projectId: "string", sha: "string", summary: "string" },
@@ -36,7 +37,11 @@ const SHAPES: Record<DaemonEventType, Shape> = {
 };
 
 function matches(obj: Record<string, unknown>, shape: Shape): boolean {
-  return Object.entries(shape).every(([key, kind]) => typeof obj[key] === kind);
+  return Object.entries(shape).every(([key, kind]) => {
+    const v = obj[key];
+    if (kind === "nullable-string") return v === undefined || v === null || typeof v === "string";
+    return typeof v === kind;
+  });
 }
 
 /**

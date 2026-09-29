@@ -132,7 +132,8 @@ export interface ChatDoneEvent extends SessionScoped {
 
 export interface ChatErrorEvent extends SessionScoped {
   type: "chat.error";
-  turnId: string;
+  /** `null` when the agent process died while no turn was active (session-level error). */
+  turnId: string | null;
   message: string;
 }
 

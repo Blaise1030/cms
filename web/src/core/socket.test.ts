@@ -48,6 +48,23 @@ describe("decodeEvent", () => {
     for (const f of frames) expect(decodeEvent(JSON.stringify(f))).toEqual(f);
   });
 
+  it("accepts session-level chat.error frames with a null turnId", () => {
+    // Emitted by the daemon when an initialized agent process exits while idle.
+    const idle = {
+      type: "chat.error",
+      projectId: "p",
+      sessionId: "s",
+      turnId: null,
+      message: "agent process exited",
+    };
+    expect(decodeEvent(JSON.stringify(idle))).toEqual(idle);
+    const { turnId: _omit, ...missing } = idle;
+    expect(decodeEvent(missing)).toEqual(missing);
+    // still rejects a wrongly-typed turnId or missing message
+    expect(decodeEvent({ ...idle, turnId: 5 })).toBeNull();
+    expect(decodeEvent({ ...idle, message: undefined })).toBeNull();
+  });
+
   it("returns null for junk, unknown types and malformed events", () => {
     expect(decodeEvent("not json")).toBeNull();
     expect(decodeEvent("[]")).toBeNull();
