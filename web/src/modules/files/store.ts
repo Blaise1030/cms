@@ -94,7 +94,9 @@ export const useFilesStore = defineStore("files", () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => void refresh(), REFRESH_DELAY_MS);
     }),
+    // Missed `fs.change` events (socket drop or `events.lagged`): re-read tree and open file.
     daemon.onReconnected(() => void refresh()),
+    daemon.on("events.lagged", () => void refresh()),
   ];
   onScopeDispose(() => {
     clearTimeout(refreshTimer);

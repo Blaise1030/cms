@@ -92,6 +92,13 @@ describe("projects store", () => {
     expect(listProjects).toHaveBeenCalledTimes(2);
   });
 
+  it("reloads the list when the server reports events.lagged", async () => {
+    const listProjects = vi.fn(async () => [project("a")]);
+    setup({ listProjects });
+    h.daemon.emit({ type: "events.lagged", missed: 5 });
+    await vi.waitFor(() => expect(listProjects).toHaveBeenCalledTimes(1));
+  });
+
   it("patches autoApprove", async () => {
     const updateProject = vi.fn(async (id: string) => project(id, { autoApprove: true }));
     const store = setup({ listProjects: async () => [project("a")], updateProject });

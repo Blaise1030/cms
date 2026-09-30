@@ -69,6 +69,19 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("drops event-derived status and reloads the frame on events.lagged", async () => {
+    const w = mountPanel("ready");
+    h.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "crashed" });
+    await flushPromises();
+    expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("crashed");
+    // The crash was superseded by events we missed; the project list says ready.
+    h.daemon.emit({ type: "events.lagged", missed: 4 });
+    await flushPromises();
+    expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
+    expect(w.find("iframe").exists()).toBe(true);
+    w.unmount();
+  });
+
   it("ignores status events for other projects", async () => {
     const w = mountPanel("ready");
     h.daemon.emit({ type: "devserver.status", projectId: "other", state: "crashed" });

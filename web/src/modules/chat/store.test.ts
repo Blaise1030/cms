@@ -207,6 +207,63 @@ describe("chat store", () => {
     expect(store.chat("p").turns[0]).toMatchObject({ id: "t9", status: "streaming" });
   });
 
+  it("restarts a session that died unnoticed (missed chat.error) on the next prompt", async () => {
+    const store = await started();
+    h.daemon.emit({ type: "chat.done", sessionId: "s1", turnId: "t1" });
+    // The agent died while the socket was down; the daemon no longer knows s1.
+    h.daemon.simulateReconnect();
+    api.prompt!
+      .mockRejectedValueOnce(new ApiError("ENOENT", "no active agent session", 404))
+      .mockResolvedValueOnce("t2");
+    api.startSession!.mockResolvedValueOnce("s2");
+    await store.send("p", "again");
+    expect(api.prompt).toHaveBeenNthCalledWith(2, "p", "s1", "again");
+    expect(api.prompt).toHaveBeenNthCalledWith(3, "p", "s2", "again");
+    const pc = store.chat("p");
+    expect(pc.sessionId).toBe("s2");
+    expect(pc.turns.find((t) => t.id === "t2")).toMatchObject({ status: "streaming" });
+  });
+
+  it("shows the restart banner when the session cannot be recovered", async () => {
+    const store = await started();
+    h.daemon.emit({ type: "chat.done", sessionId: "s1", turnId: "t1" });
+    api.prompt!.mockRejectedValue(new ApiError("AGENT_ERR", "agent session died", 500));
+    api.startSession!.mockResolvedValueOnce("s2");
+    await store.send("p", "again");
+    const pc = store.chat("p");
+    expect(pc.turns[1]).toMatchObject({ status: "error" });
+    expect(pc.sessionError).toBe("agent session died");
+    expect(pc.sessionId).toBeNull();
+    // Restart clears the banner and creates a session.
+    api.startSession!.mockResolvedValueOnce("s3");
+    await store.restartSession("p");
+    expect(pc.sessionError).toBeNull();
+    expect(pc.sessionId).toBe("s3");
+  });
+
+  it("does not retry non-session errors", async () => {
+    const store = await started();
+    h.daemon.emit({ type: "chat.done", sessionId: "s1", turnId: "t1" });
+    api.prompt!.mockRejectedValueOnce(new ApiError("CONFLICT", "turn already running", 409));
+    await store.send("p", "again");
+    expect(api.startSession).toHaveBeenCalledTimes(1);
+    expect(store.chat("p").sessionError).toBeNull();
+    expect(store.chat("p").sessionId).toBe("s1");
+  });
+
+  it("re-syncs history when the server reports events.lagged", async () => {
+    const store = await started();
+    api.history!.mockResolvedValueOnce([
+      {
+        id: "t1", sessionId: "s1", provider: "claude", ts: 1, userText: "make the hero blue",
+        assistantText: "missed reply", tools: [],
+      },
+    ]);
+    h.daemon.emit({ type: "events.lagged", missed: 12 });
+    await vi.waitFor(() => expect(store.chat("p").turns[0]!.status).toBe("done"));
+    expect(store.chat("p").turns[0]!.assistantText).toBe("missed reply");
+  });
+
   it("ignores events for unknown sessions", async () => {
     const store = await started();
     h.daemon.emit({ type: "chat.chunk", sessionId: "other", turnId: "x", delta: "no" });

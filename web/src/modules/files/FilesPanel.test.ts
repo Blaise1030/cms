@@ -84,6 +84,18 @@ describe("FilesPanel", () => {
     w.unmount();
   });
 
+  it("refreshes the tree and open file on events.lagged", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    await w.find("[data-testid='tree-index.astro']").trigger("click");
+    await flushPromises();
+    h.daemon.emit({ type: "events.lagged", missed: 9 });
+    await flushPromises();
+    expect(api.tree).toHaveBeenCalledTimes(2);
+    expect(api.file).toHaveBeenCalledTimes(2);
+    w.unmount();
+  });
+
   it("refreshes the tree and open file on fs.change (debounced)", async () => {
     const w = mountPanel();
     await flushPromises();

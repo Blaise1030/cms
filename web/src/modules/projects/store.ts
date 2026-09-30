@@ -74,7 +74,9 @@ export const useProjectsStore = defineStore("projects", () => {
           : p,
       );
     }),
+    // Events in a gap (socket drop, or the server reporting `events.lagged`) are gone: refetch.
     daemon.onReconnected(() => void load()),
+    daemon.on("events.lagged", () => void load()),
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 

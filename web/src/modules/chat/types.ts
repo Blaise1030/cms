@@ -38,8 +38,6 @@ export interface PermissionView {
 
 export interface ProjectChat {
   sessionId: string | null;
-  /** Whether `sessionId` came from a previous page load (may be stale on the daemon). */
-  restoredSession: boolean;
   provider: string | null;
   turns: TurnView[];
   permissions: PermissionView[];

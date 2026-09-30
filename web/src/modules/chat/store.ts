@@ -37,11 +37,15 @@ export function turnFromHistory(t: Turn): TurnView {
   };
 }
 
+/** Daemon errors meaning "there is no live agent session for this project". */
+function isDeadSession(e: unknown): boolean {
+  return e instanceof ApiError && (e.code === "ENOENT" || e.code === "AGENT_ERR");
+}
+
 function emptyChat(projectId: string): ProjectChat {
   const sessionId = readPref(sessionKey(projectId));
   return {
     sessionId,
-    restoredSession: sessionId !== null,
     provider: readPref(providerKey(projectId)),
     turns: [],
     permissions: [],
@@ -78,7 +82,6 @@ export const useChatStore = defineStore("chat", () => {
 
   function setSession(projectId: string, pc: ProjectChat, sessionId: string | null) {
     pc.sessionId = sessionId;
-    pc.restoredSession = false;
     writePref(sessionKey(projectId), sessionId);
   }
 
@@ -150,21 +153,18 @@ export const useChatStore = defineStore("chat", () => {
 
     try {
       if (providers.value.length === 0) await loadProviders();
+      const hadSession = pc.sessionId !== null;
       let sessionId = await ensureSession(projectId);
       let turnId: string;
       try {
         turnId = await daemon.api.prompt(projectId, sessionId, body);
       } catch (e) {
-        // A session id remembered across a reload may be gone (daemon restarted / agent died).
-        const stale =
-          pc.restoredSession &&
-          e instanceof ApiError &&
-          (e.code === "ENOENT" || e.code === "AGENT_ERR");
-        if (!stale) throw e;
+        // A session we did not just create may be gone: the agent died while we were offline
+        // (its `chat.error` was missed) or the daemon restarted. Start over once.
+        if (!hadSession || !isDeadSession(e)) throw e;
         sessionId = await startSession(projectId);
         turnId = await daemon.api.prompt(projectId, sessionId, body);
       }
-      pc.restoredSession = false;
       turn.sessionId = sessionId;
       // Events may already have adopted the placeholder id; only claim it if not.
       if (turn.pending) {
@@ -175,6 +175,11 @@ export const useChatStore = defineStore("chat", () => {
       turn.status = "error";
       turn.pending = false;
       turn.error = errorMessage(e);
+      if (isDeadSession(e)) {
+        // Offer recovery (banner + "Restart session") instead of failing every later prompt.
+        pc.sessionError = errorMessage(e);
+        setSession(projectId, pc, null);
+      }
     } finally {
       pc.sending = false;
     }
@@ -267,6 +272,17 @@ export const useChatStore = defineStore("chat", () => {
     pc.permissions = pc.permissions.filter((p) => p.turnId !== turnId);
   }
 
+  /**
+   * Events in a gap (socket drop or `events.lagged`) were dropped: re-sync the history of every
+   * project we have shown. Session death cannot be observed directly, so a dead session is
+   * recovered on the next prompt (see `send`).
+   */
+  function resync() {
+    for (const [projectId, pc] of Object.entries(byProject.value)) {
+      if (pc.historyLoaded) void loadHistory(projectId);
+    }
+  }
+
   const offs = [
     daemon.on("chat.chunk", (e) => {
       const hit = findBySession(e.sessionId);
@@ -336,12 +352,8 @@ export const useChatStore = defineStore("chat", () => {
       };
       hit.pc.permissions.push(perm);
     }),
-    daemon.onReconnected(() => {
-      // Events in the gap were dropped; re-sync every project we have shown.
-      for (const [projectId, pc] of Object.entries(byProject.value)) {
-        if (pc.historyLoaded) void loadHistory(projectId);
-      }
-    }),
+    daemon.onReconnected(resync),
+    daemon.on("events.lagged", resync),
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 

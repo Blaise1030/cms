@@ -61,6 +61,22 @@ describe("CheckpointsPanel", () => {
     w.unmount();
   });
 
+  it("reloads the timeline on events.lagged and reconnect", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    api.listCheckpoints!.mockResolvedValueOnce([
+      { sha: "ddddddd444", summary: "checkpoint: missed", ts: 300 },
+    ]);
+    h.daemon.emit({ type: "events.lagged", missed: 2 });
+    await flushPromises();
+    expect(api.listCheckpoints).toHaveBeenCalledTimes(2);
+    expect(w.findAll("[data-testid='checkpoint-item']")).toHaveLength(1);
+    h.daemon.simulateReconnect();
+    await flushPromises();
+    expect(api.listCheckpoints).toHaveBeenCalledTimes(3);
+    w.unmount();
+  });
+
   it("opens a diff for the clicked checkpoint", async () => {
     const w = mountPanel();
     await flushPromises();

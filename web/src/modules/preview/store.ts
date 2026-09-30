@@ -51,7 +51,19 @@ export const usePreviewStore = defineStore("preview", () => {
     }
   }
 
+  /**
+   * Missed `devserver.status` events: forget the event-derived state so the panel falls back to
+   * the (freshly reloaded) project list, and reload the frame in case the server restarted.
+   */
+  function resync() {
+    status.value = {};
+    message.value = {};
+    reload();
+  }
+
   const offs = [
+    daemon.onReconnected(resync),
+    daemon.on("events.lagged", resync),
     daemon.on("devserver.status", (e) => {
       const before = status.value[e.projectId];
       status.value[e.projectId] = e.state;

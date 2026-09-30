@@ -64,6 +64,11 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
     }
   }
 
+  /** Missed `checkpoint.created` events: reload every timeline we have shown. */
+  function resync() {
+    for (const id of Object.keys(byProject.value)) void load(id);
+  }
+
   const offs = [
     daemon.on("checkpoint.created", (e) => {
       const list = byProject.value[e.projectId];
@@ -74,9 +79,8 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
         ...list,
       ];
     }),
-    daemon.onReconnected(() => {
-      for (const id of Object.keys(byProject.value)) void load(id);
-    }),
+    daemon.onReconnected(resync),
+    daemon.on("events.lagged", resync),
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 
