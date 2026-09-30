@@ -13,6 +13,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Component tests opt in with `// @vitest-environment happy-dom`; never load iframe URLs.
+    environmentOptions: { happyDOM: { settings: { disableIframePageLoading: true } } },
   },
   server: {
     proxy: {
