@@ -114,9 +114,10 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
     let ok = via_query
         || bearer_token(&req).is_some_and(|t| ct_eq(t, expected))
         || cookie_token(&req).is_some_and(|t| ct_eq(t, expected));
-    // The static app shell is public (it carries no data); a valid `?t=` on it still mints
-    // the session cookie below.
-    if !ok && !static_files::is_shell_request(req.method(), req.uri().path()) {
+    // Only the explicit static app-shell allowlist is public (it carries no data); everything
+    // else, including routes added in future, needs a token. A valid `?t=` on the shell still
+    // mints the session cookie below.
+    if !ok && !static_files::is_public_shell_request(req.method(), req.uri().path()) {
         return ApiError::unauth("missing or invalid token").into_response();
     }
 

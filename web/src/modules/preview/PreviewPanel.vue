@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { Monitor, RefreshCw, Smartphone, Tablet } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import { DEVICE_WIDTH, usePreviewStore, type Device } from "./store";
@@ -25,6 +26,14 @@ const state = computed<DevserverState>(
   () => store.status[props.projectId] ?? props.devserver ?? "starting",
 );
 const src = computed(() => daemon.api.previewUrl(props.projectId));
+// A cross-site daemon cannot authenticate the framed preview (SameSite=Lax `wb_session`); see
+// `previewUrl` in core/api.ts. Explain instead of showing a wall of 401s; the user may override
+// (e.g. sibling subdomains are same-site but look cross-site to us).
+const forceFrame = ref(false);
+const daemonOrigin = computed(() => daemon.config.value.origin);
+const crossSite = computed(
+  () => !forceFrame.value && isCrossSite(window.location.origin, daemonOrigin.value),
+);
 const width = computed(() => DEVICE_WIDTH[store.device]);
 
 const DOT: Record<DevserverState, string> = {
@@ -88,6 +97,20 @@ const LABEL: Record<DevserverState, string> = {
         class="text-muted-foreground flex items-center justify-center text-sm"
       >
         Starting dev server…
+      </div>
+      <div
+        v-else-if="crossSite"
+        class="flex max-w-md flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+        role="note"
+        data-testid="preview-cross-site"
+      >
+        <p class="font-medium">Live preview isn't available from this page</p>
+        <p class="text-muted-foreground">
+          The daemon at {{ daemonOrigin }} is on a different site than this app, so the
+          browser won't send its session cookie to the preview frame. Open the daemon link
+          directly (the one printed at startup) to use the live preview.
+        </p>
+        <Button variant="outline" size="sm" @click="forceFrame = true">Try anyway</Button>
       </div>
       <iframe
         v-else

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   STORAGE_KEY,
+  isCrossSite,
   parseDaemonLink,
   resolveDaemonConfig,
   saveDaemonConfig,
@@ -75,5 +76,15 @@ describe("parseDaemonLink", () => {
   it("rejects non-http links", () => {
     expect(parseDaemonLink("nope")).toBeNull();
     expect(parseDaemonLink("ftp://x")).toBeNull();
+  });
+});
+
+describe("isCrossSite", () => {
+  it("ignores ports but not scheme or host", () => {
+    expect(isCrossSite("http://localhost:5173", "http://localhost:7800")).toBe(false);
+    expect(isCrossSite("http://127.0.0.1:7800", "http://127.0.0.1:7800")).toBe(false);
+    expect(isCrossSite("https://app.example.com", "http://127.0.0.1:7800")).toBe(true);
+    expect(isCrossSite("http://localhost:5173", "http://127.0.0.1:7800")).toBe(true);
+    expect(isCrossSite("https://localhost", "http://localhost")).toBe(true);
   });
 });

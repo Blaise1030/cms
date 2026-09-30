@@ -26,10 +26,29 @@ pub fn is_daemon_path(path: &str) -> bool {
     })
 }
 
-/// Whether a request is for the public app shell (static SPA files). The shell holds no secrets
-/// and must load without a token (browsers fetch the manifest and service worker without
-/// credentials); everything it then talks to is authenticated.
-pub fn is_shell_request(method: &Method, path: &str) -> bool {
+/// Client-side route prefixes the SPA owns (deep links fall back to `index.html`).
+const SPA_ROUTE_PREFIXES: [&str; 3] = ["/p/", "/assets/", "/icons/"];
+
+/// Whether an unauthenticated request may be answered: an explicit allowlist of the public app
+/// shell (static SPA files). The shell holds no secrets and must load without a token (browsers
+/// fetch the manifest and service worker without credentials); everything it then talks to is
+/// authenticated.
+///
+/// This fails closed: a path is public only if it is `/`, an SPA route prefix, or a file
+/// actually embedded from `web/dist`. A route added to the router later (`/metrics`,
+/// `/healthz`, ...) therefore requires a token unless someone deliberately lists it here.
+pub fn is_public_shell_request(method: &Method, path: &str) -> bool {
+    if !matches!(*method, Method::GET | Method::HEAD) || is_daemon_path(path) {
+        return false;
+    }
+    path == "/"
+        || SPA_ROUTE_PREFIXES.iter().any(|p| path.starts_with(p))
+        || WebApp::get(path.trim_start_matches('/')).is_some()
+}
+
+/// Whether the SPA fallback may answer this request (any GET/HEAD outside the daemon paths).
+/// This only decides what `serve` does once a request has passed auth; it is NOT an auth rule.
+fn serves_spa(method: &Method, path: &str) -> bool {
     matches!(*method, Method::GET | Method::HEAD) && !is_daemon_path(path)
 }
 
@@ -82,7 +101,7 @@ fn hex(bytes: &[u8]) -> String {
 /// files (`/assets/missing.js`) are a real 404 rather than HTML masquerading as a script.
 pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     let path = uri.path();
-    if !is_shell_request(&method, path) {
+    if !serves_spa(&method, path) {
         return ApiError::enoent("route not found").into_response();
     }
     let rel = path.trim_start_matches('/');
@@ -160,6 +179,8 @@ mod tests {
             "package-lock.json",
             "AGENTS.md",
             ".gitignore",
+            ".github/workflows/deploy.yml",
+            "wrangler.toml",
             "astro.config.mjs",
             "src/content.config.ts",
             "src/content/site.json",

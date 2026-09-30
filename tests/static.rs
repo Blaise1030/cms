@@ -65,6 +65,64 @@ async fn shell_is_public_but_api_and_preview_still_require_a_token() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+/// Auth is an allowlist, not a denylist: anything that is not the embedded shell needs a token,
+/// so a route added to the router later (or a typo'd one) is never accidentally public.
+#[tokio::test]
+async fn paths_outside_the_shell_allowlist_require_a_token() {
+    for path in [
+        "/metrics",
+        "/healthz",
+        "/events",
+        "/admin",
+        "/debug/pprof",
+        "/apiary",
+        "/preview-notes",
+        "/some-unknown-route",
+        "/secret.txt",
+    ] {
+        let (status, _, _) = send(req(Method::GET, path)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "GET {path} must not be public"
+        );
+        let (status, _, _) = send(req(Method::HEAD, path)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "HEAD {path} must not be public"
+        );
+    }
+    // With a token the same path gets past auth (SPA fallback / 404), it is not rejected.
+    let mut r = req(Method::GET, "/metrics");
+    r.headers_mut().insert(
+        header::AUTHORIZATION,
+        format!("Bearer {TOKEN}").parse().unwrap(),
+    );
+    let (status, _, _) = send(r).await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[test]
+fn public_shell_allowlist_is_explicit() {
+    use workbench::static_files::is_public_shell_request as public;
+    assert!(public(&Method::GET, "/"));
+    assert!(public(&Method::HEAD, "/p/some-project"));
+    assert!(public(&Method::GET, "/assets/anything.js"));
+    assert!(public(&Method::GET, "/icons/icon-192.png"));
+    for p in [
+        "/api/projects",
+        "/ws/events",
+        "/preview/x/",
+        "/metrics",
+        "/healthz",
+    ] {
+        assert!(!public(&Method::GET, p), "{p}");
+    }
+    assert!(!public(&Method::POST, "/"));
+    assert!(!public(&Method::DELETE, "/assets/x.js"));
+}
+
 #[tokio::test]
 async fn root_serves_index_html_without_a_token_and_never_caches_it() {
     if !built() {

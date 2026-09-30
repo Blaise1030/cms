@@ -1,0 +1,42 @@
+# Push to main => build the static Astro site and deploy it to Cloudflare Pages.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   secrets:   CLOUDFLARE_API_TOKEN   (token with "Cloudflare Pages: Edit")
+#              CLOUDFLARE_ACCOUNT_ID
+#   variables: CLOUDFLARE_PAGES_PROJECT (optional; defaults to `name` in wrangler.toml)
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Fails on content-schema errors and missing section ids.
+      - run: npm run build
+
+      - name: Deploy ./dist to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'astro-marketing' }} --branch=${{ github.ref_name }}

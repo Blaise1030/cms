@@ -176,7 +176,17 @@ export function createApi(
     file: (project: string, path: string) =>
       json<FileContent>("GET", "/api/file", { query: { project, path } }),
 
-    /** URL to embed the live preview in an iframe. Auth is via the `wb_session` cookie. */
+    /**
+     * URL to embed the live preview in an iframe. Auth is via the `wb_session` cookie only (an
+     * iframe cannot send `Authorization`), and the daemon mints it `HttpOnly; SameSite=Lax`.
+     *
+     * KNOWN LIMITATION: when the page and the daemon are cross-site (hosted PWA at
+     * `app.<domain>` driving a loopback daemon) the browser neither stores nor sends that cookie
+     * for the framed request, so every request inside the frame 401s. Only the embedded topology
+     * (SPA served by the daemon, same origin) and same-site setups (e.g. `localhost:5173` ->
+     * `localhost:7800`) work. `PreviewPanel` shows a notice instead of a broken frame in that case
+     * (see `isCrossSite`); a real fix needs a relay or a short-lived URL-scoped preview token.
+     */
     previewUrl: (id: string) => `${cfg().origin}/preview/${enc(id)}/`,
   };
 }

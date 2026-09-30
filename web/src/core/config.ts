@@ -25,6 +25,23 @@ export function normalizeOrigin(input: string): string {
 }
 
 /**
+ * Whether embedding the daemon in an iframe on `pageOrigin` is (probably) cross-site, in which
+ * case the `SameSite=Lax` `wb_session` cookie is neither stored nor sent and the framed
+ * `/preview/*` 401s. Ports are ignored (cookies are not port-scoped); scheme and host must match.
+ * Sibling subdomains are also same-site but indistinguishable from unrelated hosts without the
+ * public-suffix list, so they are reported as cross-site (callers must not hard-block on this).
+ */
+export function isCrossSite(pageOrigin: string, daemonOrigin: string): boolean {
+  try {
+    const page = new URL(pageOrigin);
+    const daemon = new URL(daemonOrigin);
+    return page.protocol !== daemon.protocol || page.hostname !== daemon.hostname;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Parse a pasted daemon link (`http://127.0.0.1:7800/?t=<token>`). Returns the origin and
  * token, or `null` when it is not a usable http(s) URL.
  */

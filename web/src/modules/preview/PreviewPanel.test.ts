@@ -13,6 +13,8 @@ import { usePreviewStore } from "./store";
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
   h.daemon = createFakeDaemon(api);
+  // Default to the embedded topology (page and daemon share an origin).
+  h.daemon.config.value = { origin: window.location.origin };
   setActivePinia(createPinia());
   return mount(PreviewPanel, { props: { projectId: "site-1", devserver } });
 }
@@ -21,6 +23,17 @@ describe("PreviewPanel", () => {
   it("embeds the proxied preview URL", () => {
     const w = mountPanel();
     expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:7800/preview/site-1/");
+    w.unmount();
+  });
+
+  it("explains instead of framing a cross-site daemon, with a manual override", async () => {
+    const w = mountPanel();
+    h.daemon.config.value = { origin: "https://daemon.invalid:7800" };
+    await flushPromises();
+    expect(w.find("iframe").exists()).toBe(false);
+    expect(w.find("[data-testid='preview-cross-site']").text()).toContain("daemon.invalid");
+    await w.find("[data-testid='preview-cross-site'] button").trigger("click");
+    expect(w.find("iframe").exists()).toBe(true);
     w.unmount();
   });
 

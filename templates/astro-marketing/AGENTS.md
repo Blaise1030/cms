@@ -26,3 +26,7 @@ Static Astro site. All copy and structure live in content files; components only
 - New page: add `src/content/pages/<slug>.json` and a route in `src/pages/`.
 - Keep the dev server (`npm run dev`) running as-is; it is managed externally.
 - Always run `npm run build` to verify before finishing. It fails on schema errors and on missing section ids.
+
+## Deployment
+
+Push-and-live on Cloudflare Pages. `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`; `wrangler.toml` names the Pages project (`pages_build_output_dir = ./dist`). Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`.
