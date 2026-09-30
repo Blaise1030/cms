@@ -22,6 +22,7 @@ use crate::auth;
 use crate::error::ApiError;
 use crate::preview;
 use crate::state::AppState;
+use crate::static_files;
 
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
@@ -53,7 +54,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
         .route("/api/tree", get(files::tree))
         .route("/api/file", get(files::file))
-        .fallback(error::not_found)
+        .fallback(static_files::serve)
         .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.
         .layer(middleware::from_fn_with_state(

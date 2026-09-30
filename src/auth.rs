@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::error::ApiError;
 use crate::state::AppState;
+use crate::static_files;
 
 pub const SESSION_COOKIE: &str = "wb_session";
 const HEALTH_PATH: &str = "/api/health";
@@ -113,7 +114,9 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
     let ok = via_query
         || bearer_token(&req).is_some_and(|t| ct_eq(t, expected))
         || cookie_token(&req).is_some_and(|t| ct_eq(t, expected));
-    if !ok {
+    // The static app shell is public (it carries no data); a valid `?t=` on it still mints
+    // the session cookie below.
+    if !ok && !static_files::is_shell_request(req.method(), req.uri().path()) {
         return ApiError::unauth("missing or invalid token").into_response();
     }
 

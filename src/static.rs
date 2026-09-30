@@ -1,10 +1,104 @@
-//! Embedded assets. Currently the scaffold template (`templates/astro-marketing/`);
-//! the SPA (`web/dist`) is embedded in a later task.
+//! Embedded assets: the scaffold template (`templates/astro-marketing/`) and the built SPA
+//! (`web/dist`), which the daemon serves as its router fallback.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
+
+use crate::error::ApiError;
+
+/// The built web app. `web/dist` is produced by `pnpm -C web build` (`just build`); a checkout
+/// that has not built it still compiles, and the daemon then answers with a build hint.
+#[derive(RustEmbed)]
+#[folder = "web/dist/"]
+#[allow_missing = true]
+#[exclude = ".DS_Store"]
+pub struct WebApp;
+
+/// Paths owned by the daemon (API, event socket, preview proxy); never served from the SPA.
+pub fn is_daemon_path(path: &str) -> bool {
+    ["/api", "/ws", "/preview"].iter().any(|p| {
+        path.strip_prefix(p)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
+
+/// Whether a request is for the public app shell (static SPA files). The shell holds no secrets
+/// and must load without a token (browsers fetch the manifest and service worker without
+/// credentials); everything it then talks to is authenticated.
+pub fn is_shell_request(method: &Method, path: &str) -> bool {
+    matches!(*method, Method::GET | Method::HEAD) && !is_daemon_path(path)
+}
+
+fn cache_control(path: &str) -> &'static str {
+    // Vite fingerprints everything under assets/. All else (index.html, sw.js, manifest, ...)
+    // must revalidate so app updates and service-worker updates are picked up.
+    if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+fn asset_response(path: &str, headers: &HeaderMap, method: &Method) -> Option<Response> {
+    let file = WebApp::get(path)?;
+    let etag = format!("\"{}\"", hex(&file.metadata.sha256_hash()));
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+    let mut res = if not_modified {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else if *method == Method::HEAD {
+        StatusCode::OK.into_response()
+    } else {
+        file.data.into_owned().into_response()
+    };
+    let h = res.headers_mut();
+    if !not_modified {
+        if let Ok(v) = HeaderValue::from_str(file.metadata.mimetype()) {
+            h.insert(header::CONTENT_TYPE, v);
+        }
+    }
+    if let Ok(v) = HeaderValue::from_str(&etag) {
+        h.insert(header::ETAG, v);
+    }
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control(path)),
+    );
+    Some(res)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Router fallback: serve the SPA. Unknown daemon paths and non-GET methods keep the uniform
+/// JSON 404; unknown extension-less paths get `index.html` (client-side routing); unknown
+/// files (`/assets/missing.js`) are a real 404 rather than HTML masquerading as a script.
+pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
+    let path = uri.path();
+    if !is_shell_request(&method, path) {
+        return ApiError::enoent("route not found").into_response();
+    }
+    let rel = path.trim_start_matches('/');
+    let looks_like_file = rel.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
+    let target = if rel.is_empty() { "index.html" } else { rel };
+    if let Some(res) = asset_response(target, &headers, &method) {
+        return res;
+    }
+    if looks_like_file {
+        return ApiError::enoent("route not found").into_response();
+    }
+    asset_response("index.html", &headers, &method).unwrap_or_else(|| {
+        ApiError::enoent("web app not built: run `just build` (or `pnpm -C web build`)")
+            .into_response()
+    })
+}
 
 /// The Astro scaffold copied into every new project. Build artifacts that may exist in a
 /// developer checkout are excluded so they never leak into scaffolds.

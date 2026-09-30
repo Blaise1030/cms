@@ -152,13 +152,13 @@ async fn query_token_sets_session_cookie_and_cookie_authenticates() {
     assert!(cookie.starts_with("wb_session=abc123"), "{cookie}");
 
     let req = Request::builder()
-        .uri("/")
+        .uri("/api/nope")
         .header(header::HOST, "localhost")
         .header(header::COOKIE, "wb_session=abc123")
         .body(Body::empty())
         .unwrap();
     let res = router.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND); // authenticated, no route yet
+    assert_eq!(res.status(), StatusCode::NOT_FOUND); // authenticated, no such API route
 }
 
 #[tokio::test]
