@@ -25,6 +25,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "sync", "rt", "time", "io-util"] }
 tower-http = { version = "0.7.1", features = ["cors"] }
+notify = "8.2.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

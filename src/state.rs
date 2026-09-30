@@ -8,6 +8,7 @@ use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::ProjectRegistry;
+use crate::watch::WatchManager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -19,6 +20,8 @@ pub struct AppState {
     pub agents: Arc<AgentManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
+    /// `fs.change` watcher per project.
+    pub watchers: Arc<WatchManager>,
     /// HTTP client for the `/preview/{id}/*` reverse proxy.
     pub preview: UpstreamClient,
 }
@@ -42,6 +45,23 @@ impl AppState {
         Self::with_options(config, install, devserver)
     }
 
+    /// Watch one project's directory (failure is logged, never fatal).
+    pub async fn watch_project(&self, id: &str) {
+        let Some(p) = self.projects.get(id).await else {
+            return;
+        };
+        if let Err(e) = self.watchers.start(id, &p.dir) {
+            eprintln!("workbench: cannot watch {id}: {e}");
+        }
+    }
+
+    /// Watch every registered project (daemon start).
+    pub async fn watch_all(&self) {
+        for p in self.projects.list().await {
+            self.watch_project(&p.id).await;
+        }
+    }
+
     /// Full control over scaffolding and dev-server supervision (tests).
     pub fn with_options(config: Config, install: bool, devserver: DevServerOptions) -> Self {
         let projects = ProjectRegistry::open(config.projects_dir.clone(), install);
@@ -58,12 +78,14 @@ impl AppState {
             events.clone(),
             devserver,
         ));
+        let watchers = Arc::new(WatchManager::new(events.clone()));
         Self {
             config,
             projects,
             events,
             agents,
             devservers,
+            watchers,
             preview: preview::new_client(),
         }
     }

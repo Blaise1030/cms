@@ -13,6 +13,7 @@ pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod state;
+pub mod watch;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
 #[path = "static.rs"]
 pub mod static_files;
@@ -31,6 +32,8 @@ pub fn version() -> &'static str {
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     let agents = state.agents.clone();
     let devservers = state.devservers.clone();
+    let watchers = state.watchers.clone();
+    state.watch_all().await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;
     let app = http::router(state);
@@ -42,6 +45,7 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
     // Don't leave agent subprocesses behind.
     agents.shutdown().await;
     devservers.shutdown().await;
+    watchers.shutdown();
     served
 }
 

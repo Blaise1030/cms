@@ -29,6 +29,7 @@ pub async fn create(
     let req: CreateRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{\"name\": string}}: {e}")))?;
     let mut info = state.projects.create(&req.name).await?;
+    state.watch_project(&info.id).await;
     // Scaffold done: supervise `npm run dev`. A failure here (no usable port) leaves the
     // project created but `crashed`; the restart endpoint retries.
     // `start` marks the project `crashed` (and publishes it) if it cannot supervise, so
@@ -87,9 +88,11 @@ pub async fn remove(
     // from) a directory being removed.
     state.devservers.stop(&id).await;
     state.agents.terminate_project(&id).await;
+    state.watchers.stop(&id);
     if let Err(e) = state.projects.delete(&id).await {
         // Delete failed and the project lives on: bring its preview back.
         if state.projects.get(&id).await.is_some() {
+            state.watch_project(&id).await;
             let _ = state.devservers.start(&id).await;
         }
         return Err(e);
