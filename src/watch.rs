@@ -5,22 +5,28 @@
 //! emitted as `{ projectId, path, kind }` with `path` project-relative and `/`-separated.
 //! VCS and build-output directories are ignored: they churn constantly (dev server, git
 //! checkpoints) and are hidden from the file tree anyway.
+//!
+//! Memory is bounded: the `notify` callback filters ignored paths *before* storing anything
+//! and records the rest in a pending set capped at [`MAX_PER_BATCH`] distinct paths. Past
+//! the cap the set collapses into a single "something changed" flag, so no amount of churn
+//! (ignored or not) can grow a queue.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use notify::{recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::events::EventBus;
 
 /// Raw events are batched for this long before being emitted.
 const COALESCE: Duration = Duration::from_millis(100);
-/// Above this many distinct paths in a batch, emit one project-wide event instead.
+/// Above this many distinct paths in a batch, emit one project-wide event instead. This is
+/// also the hard cap on what the watcher callback will ever hold in memory.
 const MAX_PER_BATCH: usize = 200;
 
 const IGNORED_DIRS: &[&str] = &[
@@ -34,7 +40,7 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 struct Running {
-    /// Dropping the watcher closes the raw-event channel and ends the task.
+    /// Dropping the watcher stops OS event delivery; `task` is aborted on stop.
     _watcher: RecommendedWatcher,
     task: JoinHandle<()>,
 }
@@ -57,14 +63,19 @@ impl WatchManager {
     pub fn start(&self, id: &str, dir: &Path) -> notify::Result<()> {
         // FSEvents reports canonical paths (/var → /private/var); strip against the same.
         let root = dir.canonicalize().map_err(notify::Error::io)?;
-        let (raw_tx, raw_rx) = mpsc::unbounded_channel::<Event>();
+        let pending = Arc::new(Pending::default());
+        let cb_pending = pending.clone();
+        let cb_root = root.clone();
         let mut watcher = recommended_watcher(move |res: notify::Result<Event>| {
             if let Ok(ev) = res {
-                let _ = raw_tx.send(ev);
+                // Filter here, on notify's thread, before anything is stored.
+                if cb_pending.absorb(&cb_root, &ev) {
+                    cb_pending.wake.notify_one();
+                }
             }
         })?;
         watcher.watch(&root, RecursiveMode::Recursive)?;
-        let task = tokio::spawn(pump(self.events.clone(), id.to_string(), root, raw_rx));
+        let task = tokio::spawn(pump(self.events.clone(), id.to_string(), root, pending));
         let old = self
             .running
             .lock()
@@ -107,34 +118,64 @@ impl WatchManager {
     }
 }
 
-async fn pump(
-    events: EventBus,
-    id: String,
-    root: std::path::PathBuf,
-    mut rx: mpsc::UnboundedReceiver<Event>,
-) {
-    while let Some(first) = rx.recv().await {
-        let mut batch: BTreeMap<String, &'static str> = BTreeMap::new();
-        absorb(&root, &first, &mut batch);
-        let deadline = tokio::time::sleep(COALESCE);
-        tokio::pin!(deadline);
-        loop {
-            tokio::select! {
-                _ = &mut deadline => break,
-                next = rx.recv() => match next {
-                    Some(ev) => absorb(&root, &ev, &mut batch),
-                    None => break,
-                },
+/// Changes seen since the last flush. Bounded by [`MAX_PER_BATCH`].
+#[derive(Default)]
+struct Pending {
+    state: Mutex<PendingState>,
+    wake: Notify,
+}
+
+#[derive(Default)]
+struct PendingState {
+    paths: BTreeMap<String, &'static str>,
+    /// More than [`MAX_PER_BATCH`] distinct paths: individual paths are no longer tracked.
+    overflow: bool,
+}
+
+impl Pending {
+    /// Record the relevant paths of `ev`. Returns whether anything is now pending.
+    fn absorb(&self, root: &Path, ev: &Event) -> bool {
+        let Some(kind) = kind_of(&ev.kind) else {
+            return false;
+        };
+        let mut relevant = false;
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        for p in &ev.paths {
+            let Some(rel) = relative(root, p) else {
+                continue;
+            };
+            relevant = true;
+            if st.overflow {
+                continue;
+            }
+            st.paths.insert(rel, kind);
+            if st.paths.len() > MAX_PER_BATCH {
+                st.paths.clear();
+                st.overflow = true;
             }
         }
-        if batch.len() > MAX_PER_BATCH {
+        relevant
+    }
+
+    fn take(&self) -> PendingState {
+        std::mem::take(&mut *self.state.lock().unwrap_or_else(|p| p.into_inner()))
+    }
+}
+
+async fn pump(events: EventBus, id: String, root: std::path::PathBuf, pending: Arc<Pending>) {
+    loop {
+        pending.wake.notified().await;
+        // Let a burst of related events (editor save, git checkout) land in one batch.
+        tokio::time::sleep(COALESCE).await;
+        let batch = pending.take();
+        if batch.overflow {
             events.emit(
                 "fs.change",
                 json!({ "projectId": id, "path": "", "kind": "modify" }),
             );
             continue;
         }
-        for (path, mut kind) in batch {
+        for (path, mut kind) in batch.paths {
             // FSEvents merges flags (a file created then removed reports both), so the
             // reported kind can be stale: what is on disk now is the truth.
             if std::fs::symlink_metadata(root.join(&path)).is_err() {
@@ -146,17 +187,6 @@ async fn pump(
                 "fs.change",
                 json!({ "projectId": id, "path": path, "kind": kind }),
             );
-        }
-    }
-}
-
-fn absorb(root: &Path, ev: &Event, batch: &mut BTreeMap<String, &'static str>) {
-    let Some(kind) = kind_of(&ev.kind) else {
-        return;
-    };
-    for p in &ev.paths {
-        if let Some(rel) = relative(root, p) {
-            batch.insert(rel, kind);
         }
     }
 }
@@ -216,6 +246,46 @@ mod tests {
         ] {
             assert_eq!(relative(root, Path::new(ignored)), None, "{ignored}");
         }
+    }
+
+    fn ev(kind: EventKind, paths: &[&str]) -> Event {
+        let mut e = Event::new(kind);
+        for p in paths {
+            e = e.add_path(Path::new(p).to_path_buf());
+        }
+        e
+    }
+
+    #[test]
+    fn ignored_churn_is_never_stored() {
+        let root = Path::new("/p/site");
+        let pending = Pending::default();
+        let create = EventKind::Create(notify::event::CreateKind::File);
+        for i in 0..10_000 {
+            let path = format!("/p/site/node_modules/pkg/f{i}.js");
+            assert!(!pending.absorb(root, &ev(create, &[&path])));
+        }
+        let st = pending.take();
+        assert!(st.paths.is_empty() && !st.overflow);
+    }
+
+    #[test]
+    fn pending_is_capped_and_collapses_on_overflow() {
+        let root = Path::new("/p/site");
+        let pending = Pending::default();
+        let create = EventKind::Create(notify::event::CreateKind::File);
+        for i in 0..(MAX_PER_BATCH * 50) {
+            let path = format!("/p/site/src/f{i}.txt");
+            assert!(pending.absorb(root, &ev(create, &[&path])));
+            let st = pending.state.lock().unwrap();
+            assert!(st.paths.len() <= MAX_PER_BATCH);
+        }
+        let st = pending.take();
+        assert!(st.overflow && st.paths.is_empty());
+        // After a flush it tracks individual paths again.
+        assert!(pending.absorb(root, &ev(create, &["/p/site/src/a.txt"])));
+        let st = pending.take();
+        assert!(!st.overflow && st.paths.len() == 1);
     }
 
     #[test]
