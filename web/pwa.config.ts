@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { VitePWAOptions } from "vite-plugin-pwa";
+import { isShellEntry, shellScripts } from "./scripts/pwa-shell.mjs";
+
+// Shell selection (positive: only what index.html loads) lives in scripts/pwa-shell.mjs,
+// shared with the post-build check.
+export { isShellEntry, shellScripts };
 
 /**
  * PWA policy: precache the app shell only (hosted-origin JS/CSS/HTML/icons).
@@ -11,29 +16,6 @@ import type { VitePWAOptions } from "vite-plugin-pwa";
  *    SPA navigation fallback so the iframe preview and API are always live;
  *  - `?t=` link navigations hit the network so the daemon can mint its `wb_session` cookie.
  */
-/**
- * Shell JS = the scripts `index.html` loads (entry + `modulepreload` static deps). Every other
- * emitted chunk is a lazy `import()` (Shiki grammars/themes/wasm, ...): fetched from the network
- * on demand, never precached. A positive selection, so new lazy chunks stay out by default.
- */
-export function shellScripts(html: string): Set<string> {
-  const urls = new Set<string>();
-  const tag = /<(?:script|link)\b[^>]*>/g;
-  for (const [t] of html.matchAll(tag)) {
-    const isScript = t.startsWith("<script") && /\btype="module"/.test(t);
-    const isPreload = /\brel="modulepreload"/.test(t);
-    if (!isScript && !isPreload) continue;
-    const m = /\b(?:src|href)="([^"]+)"/.exec(t);
-    if (m) urls.add(m[1]!.replace(/^\//, ""));
-  }
-  return urls;
-}
-
-/** Keep non-JS shell files; keep JS only when it is a shell script. */
-export function isShellEntry(url: string, shell: Set<string>): boolean {
-  return !url.endsWith(".js") || shell.has(url) || !url.startsWith("assets/");
-}
-
 const DIST = path.resolve(import.meta.dirname, "dist");
 
 export const SHELL_GLOB_PATTERNS = ["**/*.{js,css,html,ico,png,svg,webmanifest,woff2}"];

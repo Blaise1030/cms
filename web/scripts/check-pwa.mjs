@@ -1,6 +1,13 @@
 // Post-build PWA checks: app shell precached, manifest/icons valid, no live-data caching.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import {
+  isShellEntry,
+  SHELL_MAX_BYTES,
+  SHELL_MAX_ENTRIES,
+  SHIKI_PACK_NAME,
+  shellScripts,
+} from "./pwa-shell.mjs";
 
 const dist = path.resolve(import.meta.dirname, "../dist");
 const failures = [];
@@ -30,27 +37,12 @@ if (failures.length === 0) {
 
   // App shell only: JS must be what index.html loads (entry + modulepreload). Every other chunk
   // is a lazy import (Shiki grammars/themes/wasm) and must stay out of the precache.
-  const html = read("index.html");
-  const shellJs = new Set(
-    [...html.matchAll(/<(?:script|link)\b[^>]*>/g)]
-      .map(([t]) => t)
-      .filter((t) => /type="module"|rel="modulepreload"/.test(t))
-      .map((t) => /(?:src|href)="\/?([^"]+)"/.exec(t)?.[1])
-      .filter(Boolean),
-  );
+  const shellJs = shellScripts(read("index.html"));
   check(shellJs.size > 0, "index.html loads no module script");
-  const lazyJs = readdirSync(path.join(dist, "assets"))
-    .map((f) => `assets/${f}`)
-    .filter((f) => f.endsWith(".js") && !shellJs.has(f));
   for (const u of precached) {
-    check(!lazyJs.includes(u), `lazy chunk precached (not app shell): ${u}`);
-    check(
-      !/^assets\/(cpp|emacs-lisp|wasm|wolfram|typescript|javascript|tsx|jsx|vue-vine|angular-ts|objective-cpp|typst|mdx|dist)-/.test(u),
-      `shiki pack precached: ${u}`,
-    );
+    check(isShellEntry(u, shellJs), `lazy chunk precached (not app shell): ${u}`);
+    check(!SHIKI_PACK_NAME.test(u), `shiki pack precached: ${u}`);
   }
-  const SHELL_MAX_ENTRIES = 40;
-  const SHELL_MAX_BYTES = 2 * 1024 * 1024; // gzip-free, on disk
   check(
     precached.length <= SHELL_MAX_ENTRIES,
     `precache has ${precached.length} entries (max ${SHELL_MAX_ENTRIES})`,
@@ -59,7 +51,7 @@ if (failures.length === 0) {
     const f = path.join(dist, u);
     return n + (existsSync(f) ? statSync(f).size : 0);
   }, 0);
-  check(bytes <= SHELL_MAX_BYTES, `precache is ${(bytes / 1048576).toFixed(1)} MiB (max 2 MiB)`);
+  check(bytes <= SHELL_MAX_BYTES, `precache is ${(bytes / 1048576).toFixed(1)} MiB (max ${SHELL_MAX_BYTES / 1048576} MiB)`);
 
   // Only the precache route + the navigation fallback may be registered: no runtime caching.
   check(!/\bNetworkFirst\b|\bStaleWhileRevalidate\b|\bCacheFirst\b/.test(sw), "runtime caching strategy found in sw.js");
