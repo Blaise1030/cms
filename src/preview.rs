@@ -1,14 +1,17 @@
 //! Reverse proxy `/preview/{id}/*` → `127.0.0.1:{port}` of the project's dev server.
 //!
-//! The dev server runs with `PUBLIC_BASE=/preview/{id}/`, so it already serves everything
-//! under the prefix: the request path is forwarded unchanged and bodies are streamed
-//! untouched (no HTML rewriting). Upgrade requests (Vite/Astro HMR WebSocket) are
-//! tunnelled at the byte level: the upgrade handshake is forwarded, and after the dev
-//! server answers `101` both connections are spliced together, so subprotocols,
-//! extensions and frames pass through exactly as sent.
+//! The dev server runs with `PUBLIC_BASE=/preview/{id}/`, so page URLs and most assets are
+//! under the prefix and are forwarded unchanged (no HTML rewriting). Astro/Vite still
+//! injects a few absolute root paths (`/@vite/client`, `/@id/…`, `/src/…`, …); those are
+//! handled by [`handle_vite_root`], keyed by a short-lived `wb_vite` cookie set on every
+//! successful preview response.
 //!
-//! The daemon's own credentials (`Authorization`, the `wb_session` cookie, the `?t=`
-//! query token) are stripped before forwarding: dev-server code never sees them.
+//! Upgrade requests (Vite/Astro HMR WebSocket) are tunnelled at the byte level: the upgrade
+//! handshake is forwarded, and after the dev server answers `101` both connections are
+//! spliced together, so subprotocols, extensions and frames pass through exactly as sent.
+//!
+//! The daemon's own credentials (`Authorization`, the `wb_session` / `wb_vite` cookies, the
+//! `?t=` query token) are stripped before forwarding: dev-server code never sees them.
 
 use std::time::Duration;
 
@@ -30,6 +33,22 @@ pub type UpstreamClient = Client<HttpConnector, Body>;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Cookie that pins root-absolute Vite/Astro module requests (`/@vite/client`, …) to the
+/// project whose preview last answered. Path=/ so the browser sends it on those root URLs.
+pub const VITE_COOKIE: &str = "wb_vite";
+
+/// Paths Astro/Vite serve from the site root even when `base` is `/preview/{id}/`.
+pub fn is_vite_dev_path(path: &str) -> bool {
+    const PREFIXES: [&str; 5] = ["/@vite", "/@id/", "/@fs/", "/node_modules/", "/src/"];
+    PREFIXES.iter().any(|p| {
+        path == p.trim_end_matches('/')
+            || path.strip_prefix(p).is_some_and(|rest| {
+                // `/@vite` matches `/@vite` and `/@vite/…`; the others already end with `/`.
+                rest.is_empty() || rest.starts_with('/') || p.ends_with('/')
+            })
+    })
+}
+
 /// HTTP client shared by all preview requests (connection-pooled, loopback only).
 pub fn new_client() -> UpstreamClient {
     let mut http = HttpConnector::new();
@@ -42,7 +61,24 @@ pub fn new_client() -> UpstreamClient {
 
 /// Router handler for `/preview/{id}`, `/preview/{id}/` and `/preview/{id}/{*rest}`.
 pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
-    match forward(&state, req).await {
+    match forward(&state, req, None).await {
+        Ok(res) => res,
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Router handler for Astro/Vite root-absolute module URLs (`/@vite/client`, …).
+pub async fn handle_vite_root(State(state): State<AppState>, req: Request) -> Response {
+    if !is_vite_dev_path(req.uri().path()) {
+        return ApiError::enoent("not a vite dev path").into_response();
+    }
+    let Some(id) = vite_project_id(req.headers()) else {
+        return ApiError::badreq(
+            "open a project preview first so Vite modules can resolve (missing wb_vite cookie)",
+        )
+        .into_response();
+    };
+    match forward(&state, req, Some(id)).await {
         Ok(res) => res,
         Err(e) => e.into_response(),
     }
@@ -55,10 +91,41 @@ fn project_id(path: &str) -> Option<&str> {
     (!id.is_empty()).then_some(id)
 }
 
-async fn forward(state: &AppState, mut req: Request) -> Result<Response, ApiError> {
-    let id = project_id(req.uri().path())
-        .ok_or_else(|| ApiError::enoent("no such project"))?
-        .to_string();
+/// Project id from `wb_vite` cookie, else from a `/preview/{id}/…` Referer.
+fn vite_project_id(headers: &HeaderMap) -> Option<String> {
+    let prefix = format!("{VITE_COOKIE}=");
+    for jar in headers.get_all(header::COOKIE) {
+        let Ok(s) = jar.to_str() else { continue };
+        for part in s.split(';') {
+            let part = part.trim();
+            if let Some(v) = part.strip_prefix(&prefix) {
+                if !v.is_empty() && !v.contains('/') {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    let referer = headers.get(header::REFERER)?.to_str().ok()?;
+    let path = referer
+        .strip_prefix("http://")
+        .or_else(|| referer.strip_prefix("https://"))
+        .and_then(|rest| rest.split_once('/').map(|(_, p)| format!("/{p}")))
+        .unwrap_or_else(|| referer.to_string());
+    project_id(&path).map(str::to_string)
+}
+
+/// `project_override` is set for root Vite paths; otherwise the id comes from the URL.
+async fn forward(
+    state: &AppState,
+    mut req: Request,
+    project_override: Option<String>,
+) -> Result<Response, ApiError> {
+    let id = match project_override {
+        Some(id) => id,
+        None => project_id(req.uri().path())
+            .ok_or_else(|| ApiError::enoent("no such project"))?
+            .to_string(),
+    };
     let project = state
         .projects
         .get(&id)
@@ -145,6 +212,14 @@ async fn forward(state: &AppState, mut req: Request) -> Result<Response, ApiErro
         out.headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
     }
+    // Pin subsequent `/@vite/…` fetches to this project (Astro hardcodes those at `/`).
+    if out.status().is_success() || out.status().is_redirection() {
+        if let Ok(v) = HeaderValue::from_str(&format!(
+            "{VITE_COOKIE}={id}; Path=/; SameSite=Lax"
+        )) {
+            out.headers_mut().append(header::SET_COOKIE, v);
+        }
+    }
     Ok(out)
 }
 
@@ -208,14 +283,15 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
 /// Remove the daemon's auth material from a request headed for the dev server.
 fn strip_credentials(headers: &mut HeaderMap) {
     headers.remove(header::AUTHORIZATION);
-    let prefix = format!("{}=", auth::SESSION_COOKIE);
+    let session = format!("{}=", auth::SESSION_COOKIE);
+    let vite = format!("{VITE_COOKIE}=");
     let kept: Vec<String> = headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .map(str::trim)
-        .filter(|c| !c.is_empty() && !c.starts_with(&prefix))
+        .filter(|c| !c.is_empty() && !c.starts_with(&session) && !c.starts_with(&vite))
         .map(str::to_string)
         .collect();
     headers.remove(header::COOKIE);
@@ -273,5 +349,32 @@ mod tests {
         assert!(!is_upgrade(&h));
         h.insert(header::CONNECTION, "keep-alive, Upgrade".parse().unwrap());
         assert!(is_upgrade(&h));
+    }
+
+    #[test]
+    fn vite_dev_paths() {
+        assert!(is_vite_dev_path("/@vite/client"));
+        assert!(is_vite_dev_path("/@id/astro/runtime/client/dev-toolbar/entrypoint.js"));
+        assert!(is_vite_dev_path("/@fs/Users/x/project/foo.ts"));
+        assert!(is_vite_dev_path("/node_modules/vite/dist/client/env.mjs"));
+        assert!(is_vite_dev_path("/src/layouts/Base.astro"));
+        assert!(!is_vite_dev_path("/preview/site/"));
+        assert!(!is_vite_dev_path("/assets/index.js"));
+        assert!(!is_vite_dev_path("/api/health"));
+    }
+
+    #[test]
+    fn vite_project_from_cookie_or_referer() {
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, "a=1; wb_vite=site-1; b=2".parse().unwrap());
+        assert_eq!(vite_project_id(&h).as_deref(), Some("site-1"));
+        h.clear();
+        h.insert(
+            header::REFERER,
+            "http://127.0.0.1:7800/preview/site-2/@vite/client"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(vite_project_id(&h).as_deref(), Some("site-2"));
     }
 }

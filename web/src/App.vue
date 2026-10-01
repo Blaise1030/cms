@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
-import Shell from "@/app/Shell.vue";
+import Shell, { type WorkspaceTab } from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
-import { Button } from "@/components/ui/button";
 import { useDaemon } from "@/core/daemon";
 import ChatPanel from "@/modules/chat/ChatPanel.vue";
 import { useChatStore } from "@/modules/chat/store";
 import ProjectsGrid from "@/modules/projects/ProjectsGrid.vue";
 import { useProjectsStore } from "@/modules/projects/store";
+import PreviewToolbar from "@/modules/preview/PreviewToolbar.vue";
 import { toast } from "vue-sonner";
-import { ArrowLeft } from "@lucide/vue";
 
 const daemon = useDaemon();
 const projects = useProjectsStore();
 const chat = useChatStore();
+const tab = ref<WorkspaceTab>("preview");
 
 // Keep the offline screen up (with a spinner) while a manual retry is in flight, instead of
 // flashing the shell back in.
@@ -26,6 +26,13 @@ watch(daemon.status, (s) => {
   // First successful connect (or a retry after the daemon was down): fetch the project list.
   if (s === "open" && !projects.loaded) void projects.load();
 });
+
+watch(
+  () => projects.selected?.id,
+  () => {
+    tab.value = "preview";
+  },
+);
 
 async function toggleAutoApprove() {
   const p = projects.selected;
@@ -60,15 +67,23 @@ onBeforeUnmount(() => daemon.stop());
     @retry="retry"
     @connect="connect"
   />
-  <Shell v-else :status="daemon.status.value">
-    <template v-if="projects.selected" #header>
-      <Button variant="ghost" size="sm" @click="projects.select(null)">
-        <ArrowLeft /> Projects
-      </Button>
-      <span class="text-muted-foreground text-sm">{{ projects.selected.name }}</span>
+  <Shell
+    v-else
+    :status="daemon.status.value"
+    :project-name="projects.selected?.name"
+    :tab="tab"
+    @update:tab="tab = $event"
+    @back="projects.select(null)"
+  >
+    <template #toolbar>
+      <PreviewToolbar
+        v-if="projects.selected && tab === 'preview'"
+        :project-id="projects.selected.id"
+        :devserver="projects.selected.devserver"
+      />
     </template>
-    <template #preview>
-      <Workspace v-if="projects.selected" :project="projects.selected" />
+    <template #workspace>
+      <Workspace v-if="projects.selected" :project="projects.selected" :tab="tab" />
       <ProjectsGrid v-else @deleted="chat.forget" />
     </template>
     <template #chat>
@@ -79,7 +94,10 @@ onBeforeUnmount(() => daemon.stop());
         :auto-approve="projects.selected.autoApprove"
         @toggle-auto-approve="toggleAutoApprove"
       />
-      <div v-else class="text-muted-foreground flex h-full items-center justify-center p-6 text-center text-sm">
+      <div
+        v-else
+        class="text-muted-foreground flex h-full items-center justify-center p-6 text-center text-sm"
+      >
         Open a project to start chatting with the agent.
       </div>
     </template>

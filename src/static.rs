@@ -18,12 +18,13 @@ use crate::error::ApiError;
 #[exclude = ".DS_Store"]
 pub struct WebApp;
 
-/// Paths owned by the daemon (API, event socket, preview proxy); never served from the SPA.
+/// Paths owned by the daemon (API, event socket, preview proxy, Vite root modules); never
+/// served from the SPA.
 pub fn is_daemon_path(path: &str) -> bool {
     ["/api", "/ws", "/preview"].iter().any(|p| {
         path.strip_prefix(p)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-    })
+    }) || crate::preview::is_vite_dev_path(path)
 }
 
 /// Client-side route prefixes the SPA owns (deep links fall back to `index.html`).

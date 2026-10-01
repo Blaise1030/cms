@@ -1,22 +1,38 @@
 // @vitest-environment happy-dom
+import { defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
-vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+const hDaemon = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
 
 import PreviewPanel from "./PreviewPanel.vue";
+import PreviewToolbar from "./PreviewToolbar.vue";
 import { usePreviewStore } from "./store";
+
+const PreviewWithToolbar = defineComponent({
+  props: {
+    projectId: { type: String, required: true },
+    devserver: { type: String, required: true },
+  },
+  setup(props) {
+    return () =>
+      h("div", [
+        h(PreviewToolbar, { projectId: props.projectId, devserver: props.devserver as never }),
+        h(PreviewPanel, { projectId: props.projectId, devserver: props.devserver as never }),
+      ]);
+  },
+});
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
-  h.daemon = createFakeDaemon(api);
+  hDaemon.daemon = createFakeDaemon(api);
   // Default to the embedded topology (page and daemon share an origin).
-  h.daemon.config.value = { origin: window.location.origin };
+  hDaemon.daemon.config.value = { origin: window.location.origin };
   setActivePinia(createPinia());
-  return mount(PreviewPanel, { props: { projectId: "site-1", devserver } });
+  return mount(PreviewWithToolbar, { props: { projectId: "site-1", devserver } });
 }
 
 describe("PreviewPanel", () => {
@@ -28,7 +44,7 @@ describe("PreviewPanel", () => {
 
   it("explains instead of framing a cross-site daemon, with a manual override", async () => {
     const w = mountPanel();
-    h.daemon.config.value = { origin: "https://daemon.invalid:7800" };
+    hDaemon.daemon.config.value = { origin: "https://daemon.invalid:7800" };
     await flushPromises();
     expect(w.find("iframe").exists()).toBe(false);
     expect(w.find("[data-testid='preview-cross-site']").text()).toContain("daemon.invalid");
@@ -64,7 +80,7 @@ describe("PreviewPanel", () => {
     const w = mountPanel("starting");
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("starting");
     expect(w.find("iframe").exists()).toBe(false);
-    h.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "ready", port: 4000 });
+    hDaemon.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "ready", port: 4000 });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
     expect(w.find("iframe").exists()).toBe(true);
@@ -84,11 +100,11 @@ describe("PreviewPanel", () => {
 
   it("drops event-derived status and reloads the frame on events.lagged", async () => {
     const w = mountPanel("ready");
-    h.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "crashed" });
+    hDaemon.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "crashed" });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("crashed");
     // The crash was superseded by events we missed; the project list says ready.
-    h.daemon.emit({ type: "events.lagged", missed: 4 });
+    hDaemon.daemon.emit({ type: "events.lagged", missed: 4 });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
     expect(w.find("iframe").exists()).toBe(true);
@@ -97,7 +113,7 @@ describe("PreviewPanel", () => {
 
   it("ignores status events for other projects", async () => {
     const w = mountPanel("ready");
-    h.daemon.emit({ type: "devserver.status", projectId: "other", state: "crashed" });
+    hDaemon.daemon.emit({ type: "devserver.status", projectId: "other", state: "crashed" });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
     w.unmount();

@@ -37,8 +37,9 @@ impl AppState {
     /// `node_modules`). This is an internal hook so tests do not need the network; use
     /// [`AppState::with_options`] to supervise a stand-in command instead.
     pub fn with_scaffold_install(config: Config, install: bool) -> Self {
+        let proxy_port = config.port;
         let devserver = if install {
-            DevServerOptions::npm()
+            DevServerOptions::npm(proxy_port)
         } else {
             DevServerOptions::disabled()
         };

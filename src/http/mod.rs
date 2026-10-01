@@ -39,6 +39,13 @@ pub fn router(state: AppState) -> Router {
         .route("/preview/{id}", any(preview::handle))
         .route("/preview/{id}/", any(preview::handle))
         .route("/preview/{id}/{*rest}", any(preview::handle))
+        // Astro hardcodes these at the site root even when `base` is `/preview/{id}/`.
+        .route("/@vite", any(preview::handle_vite_root))
+        .route("/@vite/{*rest}", any(preview::handle_vite_root))
+        .route("/@id/{*rest}", any(preview::handle_vite_root))
+        .route("/@fs/{*rest}", any(preview::handle_vite_root))
+        .route("/node_modules/{*rest}", any(preview::handle_vite_root))
+        .route("/src/{*rest}", any(preview::handle_vite_root))
         .route("/api/agents", get(agent::providers))
         .route("/api/agent/session", post(agent::start_session))
         .route("/api/agent/prompt", post(agent::prompt))

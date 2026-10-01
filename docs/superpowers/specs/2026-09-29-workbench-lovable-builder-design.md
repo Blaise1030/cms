@@ -144,7 +144,7 @@ Styling: Tailwind CSS v4 (`@tailwindcss/vite`) with `shadcn-vue` (New York / Neu
   - `src/content/sections/*.mdx` — actual copy, one file per section instance.
 - `src/pages/index.astro` renders `pages`+`sections` via typed components in `src/components/sections/`.
 - `astro.config.mjs` reads `PUBLIC_BASE` env (default `/`) → sets `base`, so the dev server works under the proxy prefix.
-- `AGENTS.md` at repo root: the content model, file map, conventions ("content edits → edit MDX in src/content; new section type → add schema variant + component; run `npm run build` to verify"). This is what makes small-prompt, high-quality agent turns possible.
+- `AGENTS.md` at repo root: the content model, file map, conventions ("content edits → edit MDX in src/content; new section type → add schema variant + component; save and rely on Astro HMR — do not run `npm run build` after ordinary edits"). This is what makes small-prompt, high-quality agent turns possible.
 - `.github/workflows/deploy.yml`: build + deploy to Cloudflare Pages (via CF Pages git integration or `wrangler-pages-action`), plus `wrangler.toml` if needed. Repo is push-and-live.
 - `package.json` pinned, `npm install` at scaffold time (daemon runs it before first dev server start).
 

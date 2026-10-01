@@ -24,8 +24,7 @@ Static Astro site. All copy and structure live in content files; components only
 - New section instance: add `src/content/sections/<id>.mdx` and add `<id>` to `sections` in `pages/home.json`.
 - New section type: add a schema variant to `sectionSchema` in `src/content.config.ts`, add a component in `src/components/sections/`, and register it in `components/sections/index.ts`.
 - New page: add `src/content/pages/<slug>.json` and a route in `src/pages/`.
-- Keep the dev server (`npm run dev`) running as-is; it is managed externally.
-- Always run `npm run build` to verify before finishing. It fails on schema errors and on missing section ids.
+- Keep the dev server (`npm run dev`) running as-is; it is managed externally. Edits hot-reload in the live preview — just save the files and stop. Do **not** run `npm run build` (or `astro build`) after ordinary content/component edits; a full build is only for deploy or when the user explicitly asks to verify the production build.
 
 ## Deployment
 

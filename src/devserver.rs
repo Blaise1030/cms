@@ -66,26 +66,30 @@ pub struct DevServerOptions {
     pub launcher: Launcher,
     pub backoff_base: Duration,
     pub stable_after: Duration,
+    /// Daemon listen port; exposed to Astro as `WORKBENCH_PROXY_PORT` so Vite HMR
+    /// connects through the preview proxy instead of the raw Astro port.
+    pub proxy_port: u16,
 }
 
 impl DevServerOptions {
-    pub fn npm() -> Self {
-        Self::with_launcher(Launcher::Npm)
+    pub fn npm(proxy_port: u16) -> Self {
+        Self::with_launcher(Launcher::Npm, proxy_port)
     }
 
     pub fn disabled() -> Self {
-        Self::with_launcher(Launcher::Disabled)
+        Self::with_launcher(Launcher::Disabled, 0)
     }
 
     pub fn custom(factory: impl Fn(&LaunchSpec) -> Command + Send + Sync + 'static) -> Self {
-        Self::with_launcher(Launcher::Custom(Arc::new(factory)))
+        Self::with_launcher(Launcher::Custom(Arc::new(factory)), 0)
     }
 
-    fn with_launcher(launcher: Launcher) -> Self {
+    fn with_launcher(launcher: Launcher, proxy_port: u16) -> Self {
         Self {
             launcher,
             backoff_base: BACKOFF_BASE,
             stable_after: STABLE_AFTER,
+            proxy_port,
         }
     }
 }
@@ -332,6 +336,12 @@ async fn run_once(
         .kill_on_drop(true)
         // Own group, so terminating also reaches npm's node grandchild.
         .process_group(0);
+    if shared.opts.proxy_port > 0 {
+        cmd.env(
+            "WORKBENCH_PROXY_PORT",
+            shared.opts.proxy_port.to_string(),
+        );
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {

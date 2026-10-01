@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Monitor, RefreshCw, Smartphone, Tablet } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
-import { DEVICE_WIDTH, usePreviewStore, type Device } from "./store";
+import { DEVICE_WIDTH, usePreviewStore } from "./store";
 
 const props = defineProps<{ projectId: string; devserver?: DevserverState }>();
 
@@ -35,51 +32,10 @@ const crossSite = computed(
   () => !forceFrame.value && isCrossSite(window.location.origin, daemonOrigin.value),
 );
 const width = computed(() => DEVICE_WIDTH[store.device]);
-
-const DOT: Record<DevserverState, string> = {
-  starting: "bg-amber-500 animate-pulse",
-  ready: "bg-emerald-500",
-  crashed: "bg-red-500",
-};
-const LABEL: Record<DevserverState, string> = {
-  starting: "Dev server starting",
-  ready: "Dev server ready",
-  crashed: "Dev server crashed",
-};
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
-    <div class="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-3">
-      <Tabs :model-value="store.device" @update:model-value="(v) => store.setDevice(v as Device)">
-        <TabsList>
-          <TabsTrigger value="desktop" aria-label="Desktop"><Monitor /></TabsTrigger>
-          <TabsTrigger value="tablet" aria-label="Tablet"><Tablet /></TabsTrigger>
-          <TabsTrigger value="mobile" aria-label="Mobile"><Smartphone /></TabsTrigger>
-        </TabsList>
-      </Tabs>
-      <div class="flex items-center gap-2">
-        <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <span
-              class="size-2 rounded-full"
-              :class="DOT[state]"
-              :data-state="state"
-              role="status"
-              :aria-label="LABEL[state]"
-              data-testid="status-dot"
-            />
-          </TooltipTrigger>
-          <TooltipContent>{{ LABEL[state] }}</TooltipContent>
-        </Tooltip>
-        </TooltipProvider>
-        <Button variant="ghost" size="icon-sm" aria-label="Reload preview" @click="store.reload()">
-          <RefreshCw />
-        </Button>
-      </div>
-    </div>
-
     <div class="bg-muted/30 flex min-h-0 flex-1 justify-center overflow-auto">
       <div
         v-if="state === 'crashed'"

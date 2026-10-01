@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { PanelLeft, PanelRight } from "@lucide/vue";
+import { computed } from "vue";
+import { ArrowLeft, Code2, Eye, History } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -8,78 +8,113 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ConnectionStatus } from "@/core/types";
 
-defineProps<{ status?: ConnectionStatus }>();
+export type WorkspaceTab = "preview" | "files" | "history";
 
-type PanelApi = { collapse: () => void; expand: () => void; isCollapsed: boolean };
-const preview = ref<PanelApi | null>(null);
-const chat = ref<PanelApi | null>(null);
+const props = defineProps<{
+  status?: ConnectionStatus;
+  projectName?: string | null;
+  tab?: WorkspaceTab;
+}>();
 
-function toggle(panel: PanelApi | null) {
-  if (!panel) return;
-  if (panel.isCollapsed) panel.expand();
-  else panel.collapse();
-}
+const emit = defineEmits<{
+  "update:tab": [tab: WorkspaceTab];
+  back: [];
+}>();
+
+const hasProject = computed(() => !!props.projectName);
+
+const nav: { id: WorkspaceTab; label: string; icon: typeof Eye }[] = [
+  { id: "preview", label: "Preview", icon: Eye },
+  { id: "files", label: "Code", icon: Code2 },
+  { id: "history", label: "History", icon: History },
+];
 </script>
 
 <template>
-  <div class="dark bg-background text-foreground flex h-screen flex-col">
-    <header class="flex h-10 shrink-0 items-center justify-between border-b px-3">
-      <div class="flex items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label="Toggle preview" @click="toggle(preview)">
-          <PanelLeft />
-        </Button>
-        <span class="text-sm font-medium">workbench</span>
-        <slot name="header" />
-      </div>
-      <div class="flex items-center gap-2">
-        <span
-          v-if="status"
-          class="text-muted-foreground flex items-center gap-1.5 text-xs"
-          :data-status="status"
-        >
-          <span
-            class="size-1.5 rounded-full"
-            :class="status === 'open' ? 'bg-emerald-500' : 'bg-amber-500'"
-          />
-          {{ status === "open" ? "connected" : status }}
-        </span>
-        <Button variant="ghost" size="icon-sm" aria-label="Toggle chat" @click="toggle(chat)">
-          <PanelRight />
-        </Button>
-      </div>
-    </header>
-
-    <ResizablePanelGroup direction="horizontal" auto-save-id="workbench-shell" class="min-h-0 flex-1">
-      <ResizablePanel
-        id="preview"
-        ref="preview"
-        :default-size="60"
-        :min-size="25"
-        collapsible
-        :collapsed-size="0"
-      >
-        <slot name="preview">
-          <div class="text-muted-foreground flex h-full items-center justify-center text-sm">
-            Preview
+  <div class="dark bg-background text-foreground flex h-svh flex-col overflow-hidden">
+    <ResizablePanelGroup
+      direction="horizontal"
+      auto-save-id="workbench-shell"
+      class="min-h-0 flex-1"
+    >
+      <ResizablePanel id="workspace" :default-size="65" :min-size="30">
+        <div class="flex h-full min-h-0 flex-col overflow-hidden">
+          <header class="bg-background flex h-11 shrink-0 items-center gap-2 px-3">
+            <div class="flex min-w-0 flex-1 items-center gap-1">
+              <Button
+                v-if="hasProject"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Back to projects"
+                @click="emit('back')"
+              >
+                <ArrowLeft />
+              </Button>
+              <span class="truncate px-1 text-sm font-medium">workbench</span>
+              <span v-if="projectName" class="text-muted-foreground truncate text-sm">
+                / {{ projectName }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 pr-1">
+              <span
+                v-if="status"
+                class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                :data-status="status"
+              >
+                <span
+                  class="size-1.5 rounded-full"
+                  :class="status === 'open' ? 'bg-emerald-500' : 'bg-amber-500'"
+                />
+                {{ status === "open" ? "connected" : status }}
+              </span>
+            </div>
+          </header>
+          <div class="min-h-0 flex-1 overflow-hidden">
+            <slot name="workspace" />
           </div>
-        </slot>
+        </div>
       </ResizablePanel>
       <ResizableHandle with-handle />
       <ResizablePanel
         id="chat"
-        ref="chat"
-        :default-size="40"
-        :min-size="25"
+        :default-size="35"
+        :min-size="22"
         collapsible
         :collapsed-size="0"
       >
-        <slot name="chat">
-          <div class="text-muted-foreground flex h-full items-center justify-center text-sm">
-            Chat
+        <div class="bg-background flex h-full min-h-0 flex-col overflow-hidden border-l">
+          <header
+            v-if="hasProject"
+            class="bg-background flex h-11 w-full shrink-0 items-center justify-end gap-1 px-2"
+          >
+            <TooltipProvider>
+              <div class="flex items-center gap-0.5 rounded-md border p-0.5">
+                <Tooltip v-for="item in nav" :key="item.id">
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="item.label"
+                      :aria-pressed="tab === item.id"
+                      :class="tab === item.id ? 'bg-accent text-accent-foreground' : ''"
+                      @click="emit('update:tab', item.id)"
+                    >
+                      <component :is="item.icon" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ item.label }}</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+            <slot name="toolbar" />
+          </header>
+          <div class="min-h-0 flex-1 overflow-hidden">
+            <slot name="chat" />
           </div>
-        </slot>
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
     <Toaster />

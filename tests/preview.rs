@@ -53,6 +53,11 @@ fn upstream_router() -> Router {
         )
         .route("/preview/site/echo", any(echo))
         .route("/preview/site/hmr", get(hmr))
+        // Astro serves these at the site root even when `base` is `/preview/{id}/`.
+        .route(
+            "/@vite/client",
+            get(|| async { ([("x-vite", "client")], "import.meta.hot=true") }),
+        )
 }
 
 async fn echo(req: Request) -> Json<Value> {
@@ -172,6 +177,33 @@ async fn html_is_forwarded_byte_for_byte_under_the_prefix() {
     assert_eq!(r.headers["x-upstream"], "yes");
     assert!(r.headers["content-type"].starts_with("text/html"));
     assert_eq!(String::from_utf8(r.body).unwrap(), INDEX);
+    assert!(
+        r.headers
+            .get("set-cookie")
+            .is_some_and(|c| c.contains("wb_vite=site")),
+        "preview pins vite root modules via wb_vite: {:?}",
+        r.headers.get("set-cookie")
+    );
+}
+
+#[tokio::test]
+async fn vite_root_modules_follow_wb_vite_cookie() {
+    let env = env(None).await;
+    // Without a pin, root Vite paths cannot choose a project.
+    let r = raw(env.daemon, "GET", "/@vite/client", &[], "").await;
+    assert_eq!(r.status, 400, "{}", String::from_utf8_lossy(&r.body));
+
+    let r = raw(
+        env.daemon,
+        "GET",
+        "/@vite/client",
+        &["Cookie: wb_vite=site"],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(r.headers["x-vite"], "client");
+    assert_eq!(String::from_utf8(r.body).unwrap(), "import.meta.hot=true");
 }
 
 #[tokio::test]
