@@ -39,6 +39,8 @@ watch(open, (isOpen) => {
   filter.value = "";
   error.value = null;
   if (gh.user) loadRepos();
+  // Signed out: the user may have just run `gh auth login`; re-check (the gh.user watch loads repos).
+  else gh.load().catch(() => {});
 });
 
 // Right after signing in from this dialog, fetch the list.

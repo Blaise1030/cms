@@ -93,4 +93,19 @@ describe("OpenRepoDialog", () => {
     expect(document.body.querySelector("[data-testid='open-sign-in']")).toBeNull();
     expect(document.body.textContent).toContain("gh auth login");
   });
+
+  it("re-checks the sign-in status when opened while signed out", async () => {
+    const githubStatus = vi.fn(async () => ({
+      configured: true, deviceFlow: false, source: "cli" as const,
+      user: { login: "ada", id: 1, name: "Ada", avatarUrl: "" },
+    }));
+    const githubRepos = vi.fn(async () => repos);
+    h.daemon = createFakeDaemon({ githubStatus, githubRepos } as never);
+    setActivePinia(createPinia());
+    const w = mount(OpenRepoDialog, { props: { open: false }, attachTo: document.body });
+    await w.setProps({ open: true });
+    await flushPromises();
+    expect(githubStatus).toHaveBeenCalled();
+    expect(githubRepos).toHaveBeenCalled();
+  });
 });
