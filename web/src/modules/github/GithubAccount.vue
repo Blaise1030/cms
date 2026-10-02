@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { watch } from "vue";
 import { LogIn, LogOut } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
@@ -9,17 +9,26 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDaemon } from "@/core/daemon";
 import { errorMessage } from "@/lib/errors";
 import DeviceCodeDialog from "./DeviceCodeDialog.vue";
 import { useGithubStore } from "./store";
 
 const gh = useGithubStore();
 
-onMounted(() => {
-  gh.load().catch(() => {
-    // Older daemons have no /api/github: keep the control hidden.
-  });
-});
+const daemon = useDaemon();
+
+// Load once the daemon is reachable (and again after a reconnect).
+watch(
+  daemon.status,
+  (s) => {
+    if (s !== "open") return;
+    gh.load().catch(() => {
+      // Older daemons have no /api/github: keep the control hidden.
+    });
+  },
+  { immediate: true },
+);
 
 watch(
   () => gh.error,

@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -17,7 +18,6 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { errorMessage } from "@/lib/errors";
 import { useGithubStore } from "@/modules/github/store";
 import { useProjectsStore } from "./store";
@@ -30,12 +30,30 @@ const filter = ref("");
 const opening = ref<string | null>(null);
 const error = ref<string | null>(null);
 
+function loadRepos() {
+  gh.loadRepos().catch((e) => (error.value = errorMessage(e)));
+}
+
 watch(open, (isOpen) => {
   if (!isOpen) return;
   filter.value = "";
   error.value = null;
-  if (gh.user) gh.loadRepos().catch((e) => (error.value = errorMessage(e)));
+  if (gh.user) loadRepos();
 });
+
+// Right after signing in from this dialog, fetch the list.
+watch(
+  () => gh.user,
+  (u) => {
+    if (open.value && u) loadRepos();
+  },
+);
+
+// Don't let the dialog close mid-clone: a failure would otherwise go unseen.
+function onOpenChange(v: boolean) {
+  if (!v && opening.value) return;
+  open.value = v;
+}
 
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
@@ -58,7 +76,7 @@ async function openRepo(fullName: string) {
 </script>
 
 <template>
-  <Dialog v-model:open="open">
+  <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>Open from GitHub</DialogTitle>
@@ -66,10 +84,13 @@ async function openRepo(fullName: string) {
           Pick a site repository. It's downloaded to this computer so you can edit and preview it.
         </DialogDescription>
       </DialogHeader>
-      <p v-if="!gh.user" class="text-sm">Sign in with GitHub first (top right).</p>
+      <div v-if="!gh.user" class="flex flex-col items-start gap-2">
+        <p class="text-sm">Sign in with GitHub to see your repositories.</p>
+        <Button size="sm" data-testid="open-sign-in" @click="gh.signIn()">Sign in with GitHub</Button>
+      </div>
       <template v-else>
         <Input v-model="filter" placeholder="Filter repositories…" aria-label="Filter repositories" />
-        <ScrollArea class="max-h-72">
+        <div class="max-h-72 overflow-y-auto">
           <p v-if="gh.reposLoading" class="text-muted-foreground p-2 text-sm">Loading…</p>
           <ItemGroup v-else>
             <Item
@@ -78,7 +99,8 @@ async function openRepo(fullName: string) {
               as="button"
               type="button"
               size="sm"
-              class="hover:bg-accent/60 w-full text-left"
+              class="hover:bg-accent/60 w-full text-left disabled:pointer-events-none disabled:opacity-50"
+              :aria-busy="opening === r.fullName"
               :disabled="!!opening"
               data-testid="repo-item"
               @click="openRepo(r.fullName)"
@@ -93,11 +115,11 @@ async function openRepo(fullName: string) {
                 <Loader2 v-if="opening === r.fullName" class="size-4 animate-spin" />
               </ItemActions>
             </Item>
-            <p v-if="shown.length === 0" class="text-muted-foreground p-2 text-sm">
-              No repositories match.
+            <p v-if="shown.length === 0 && !error" class="text-muted-foreground p-2 text-sm">
+              {{ filter.trim() ? "No repositories match." : "No repositories found." }}
             </p>
           </ItemGroup>
-        </ScrollArea>
+        </div>
       </template>
       <p v-if="error" class="text-destructive text-sm" role="alert">{{ error }}</p>
     </DialogContent>
