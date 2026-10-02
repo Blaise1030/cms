@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Message, MessageContent } from "@/components/ai-elements/message";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import ToolCard from "./ToolCard.vue";
 import type { TurnView } from "./types";
 
@@ -23,13 +23,12 @@ defineProps<{ turn: TurnView }>();
         class="max-w-full"
       >
         <MessageContent class="w-full">
-          <p
+          <MessageResponse
             v-if="turn.assistantText"
-            class="leading-relaxed whitespace-pre-wrap"
+            :content="turn.assistantText"
+            class="leading-relaxed"
             data-testid="assistant-text"
-          >
-            {{ turn.assistantText }}
-          </p>
+          />
           <p
             v-else-if="turn.status === 'streaming' && turn.tools.length === 0"
             class="text-muted-foreground text-xs"

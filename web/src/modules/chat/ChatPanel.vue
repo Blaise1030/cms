@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
-import { Bot, ChevronDown } from "@lucide/vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { ArrowUp, ChevronDown, Loader2, Shield, ShieldCheck, Sparkle, Square } from "@lucide/vue";
 import type { ChatStatus } from "ai";
 import {
   Conversation,
@@ -13,7 +13,6 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
-  PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
@@ -26,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ChatMessage from "./ChatMessage.vue";
+import ComposerEditor from "./ComposerEditor.vue";
 import PermissionPrompt from "./PermissionPrompt.vue";
 import { useChatStore } from "./store";
 
@@ -33,6 +33,7 @@ const props = defineProps<{ projectId: string; autoApprove?: boolean }>();
 const emit = defineEmits<{ toggleAutoApprove: [] }>();
 
 const store = useChatStore();
+const composer = ref<InstanceType<typeof ComposerEditor> | null>(null);
 const pc = computed(() => store.byProject[props.projectId]);
 const busy = computed(() => store.isBusy(props.projectId));
 const canStop = computed(() => !!pc.value?.turns.some((t) => t.status === "streaming" && !t.pending));
@@ -64,6 +65,7 @@ async function onSubmit(message: PromptInputMessage) {
   }
   const text = message.text;
   if (!text.trim()) return;
+  composer.value?.focus();
   await store.send(props.projectId, text);
 }
 </script>
@@ -102,20 +104,26 @@ async function onSubmit(message: PromptInputMessage) {
       <ConversationScrollButton />
     </Conversation>
 
-    <div class="shrink-0 border-t p-3">
-      <PromptInput class="rounded-xl" @submit="onSubmit">
+    <div class="shrink-0 p-3">
+      <PromptInput
+        class="[&_[data-slot=input-group]]:bg-muted/40 [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:shadow-none [&_[data-slot=input-group]:focus-within]:border-ring"
+        @submit="onSubmit"
+      >
         <PromptInputBody>
-          <PromptInputTextarea
-            placeholder="Ask for a change…"
-            aria-label="Message"
-          />
+          <ComposerEditor ref="composer" placeholder="Ask for a change…" aria-label="Message" />
         </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools>
+        <PromptInputFooter class="px-2 pb-2">
+          <PromptInputTools class="gap-0.5">
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm" :disabled="store.providers.length === 0">
-                  <Bot /> {{ provider || "no provider" }} <ChevronDown />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-muted-foreground hover:text-foreground gap-1.5 px-2 font-normal"
+                  :disabled="store.providers.length === 0"
+                  data-testid="provider"
+                >
+                  <Sparkle /> {{ provider || "no provider" }} <ChevronDown class="opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
@@ -129,22 +137,45 @@ async function onSubmit(message: PromptInputMessage) {
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="sm"
-              :aria-pressed="!!autoApprove"
-              data-testid="auto-approve"
-              @click="emit('toggleAutoApprove')"
-            >
-              Auto-approve: {{ autoApprove ? "on" : "off" }}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-muted-foreground hover:text-foreground gap-1.5 px-2 font-normal"
+                  data-testid="auto-approve"
+                >
+                  <component :is="autoApprove ? ShieldCheck : Shield" />
+                  {{ autoApprove ? "Auto mode" : "Ask first" }}
+                  <ChevronDown class="opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  :model-value="autoApprove ? 'auto' : 'ask'"
+                  @update:model-value="(v) => (v === 'auto') !== !!autoApprove && emit('toggleAutoApprove')"
+                >
+                  <DropdownMenuRadioItem value="auto" data-testid="mode-auto">
+                    Auto mode
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="ask" data-testid="mode-ask">
+                    Ask before running tools
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </PromptInputTools>
           <PromptInputSubmit
             :status="submitStatus"
             :disabled="busy && !canStop"
             :data-testid="busy ? 'stop' : 'send'"
             :aria-label="busy ? 'Stop' : 'Send'"
-          />
+            class="size-8 rounded-full bg-emerald-600 text-white hover:bg-emerald-500"
+          >
+            <Square v-if="submitStatus === 'streaming'" class="size-3.5 fill-current" />
+            <Loader2 v-else-if="submitStatus === 'submitted'" class="size-4 animate-spin" />
+            <ArrowUp v-else class="size-4" />
+          </PromptInputSubmit>
         </PromptInputFooter>
       </PromptInput>
     </div>

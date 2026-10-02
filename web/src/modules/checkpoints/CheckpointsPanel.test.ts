@@ -17,8 +17,8 @@ let api: Record<string, ReturnType<typeof vi.fn>>;
 function mountPanel() {
   api = {
     listCheckpoints: vi.fn(async () => [
-      { sha: "aaaaaaa111", summary: "checkpoint: initial", ts: 100 },
-      { sha: "bbbbbbb222", summary: "checkpoint: hero", ts: 200 },
+      { sha: "aaaaaaa111", summary: "checkpoint: initial", author: "Ada", ts: 100 },
+      { sha: "bbbbbbb222", summary: "checkpoint: hero", author: "Workbench", ts: 200 },
     ]),
     checkpointDiff: vi.fn(async () => DIFF),
     restoreCheckpoint: vi.fn(async () => ({ restored: "aaaaaaa111" })),
@@ -49,15 +49,23 @@ describe("CheckpointsPanel", () => {
       expect.stringContaining("checkpoint: hero"),
       expect.stringContaining("checkpoint: initial"),
     ]);
+    expect(w.findAll("[data-testid='checkpoint-author']").map((a) => a.text())).toEqual([
+      "Workbench",
+      "Ada",
+    ]);
     w.unmount();
   });
 
   it("prepends checkpoint.created events", async () => {
     const w = mountPanel();
     await flushPromises();
-    h.daemon.emit({ type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: new" });
+    h.daemon.emit({
+      type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: new",
+      author: "Grace", ts: 400,
+    });
     await flushPromises();
     expect(w.findAll("[data-testid='checkpoint-item']")[0]!.text()).toContain("checkpoint: new");
+    expect(w.findAll("[data-testid='checkpoint-author']")[0]!.text()).toBe("Grace");
     w.unmount();
   });
 
@@ -65,7 +73,7 @@ describe("CheckpointsPanel", () => {
     const w = mountPanel();
     await flushPromises();
     api.listCheckpoints!.mockResolvedValueOnce([
-      { sha: "ddddddd444", summary: "checkpoint: missed", ts: 300 },
+      { sha: "ddddddd444", summary: "checkpoint: missed", author: "Workbench", ts: 300 },
     ]);
     h.daemon.emit({ type: "events.lagged", missed: 2 });
     await flushPromises();

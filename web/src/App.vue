@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
+import EditorMenubar from "@/app/EditorMenubar.vue";
 import Shell, { type WorkspaceTab } from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
@@ -8,7 +9,6 @@ import ChatPanel from "@/modules/chat/ChatPanel.vue";
 import { useChatStore } from "@/modules/chat/store";
 import ProjectsGrid from "@/modules/projects/ProjectsGrid.vue";
 import { useProjectsStore } from "@/modules/projects/store";
-import PreviewToolbar from "@/modules/preview/PreviewToolbar.vue";
 import { toast } from "vue-sonner";
 
 const daemon = useDaemon();
@@ -71,15 +71,15 @@ onBeforeUnmount(() => daemon.stop());
     v-else
     :status="daemon.status.value"
     :project-name="projects.selected?.name"
-    :tab="tab"
-    @update:tab="tab = $event"
-    @back="projects.select(null)"
   >
-    <template #toolbar>
-      <PreviewToolbar
-        v-if="projects.selected && tab === 'preview'"
+    <template #menubar>
+      <EditorMenubar
+        v-if="projects.selected"
+        class="ml-2"
         :project-id="projects.selected.id"
-        :devserver="projects.selected.devserver"
+        :tab="tab"
+        @update:tab="tab = $event"
+        @back="projects.select(null)"
       />
     </template>
     <template #workspace>

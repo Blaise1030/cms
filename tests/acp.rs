@@ -392,6 +392,8 @@ async fn file_edits_are_auto_approved_and_checkpointed() {
     let cp = ev.wait("checkpoint.created").await;
     assert_eq!(cp["projectId"], e.project);
     assert_eq!(cp["summary"], "edit the notes");
+    assert_eq!(cp["author"], "Workbench");
+    assert!(cp["ts"].as_i64().unwrap() > 1_600_000_000);
     assert!(
         !ev.types().contains(&"permission.request"),
         "{:?}",

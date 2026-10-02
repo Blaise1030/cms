@@ -75,7 +75,7 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
       if (!list) return; // never opened; loaded fresh on first view
       if (list.some((c) => c.sha === e.sha)) return;
       byProject.value[e.projectId] = [
-        { sha: e.sha, summary: e.summary, ts: Math.floor(Date.now() / 1000) },
+        { sha: e.sha, summary: e.summary, author: e.author, ts: e.ts },
         ...list,
       ];
     }),

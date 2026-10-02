@@ -41,7 +41,7 @@ describe("decodeEvent", () => {
       { type: "chat.error", sessionId: "s", turnId: "t", message: "boom" },
       { type: "permission.request", sessionId: "s", requestId: "r", tool: "execute", command: "ls" },
       { type: "devserver.status", projectId: "p", state: "ready", port: 4000 },
-      { type: "checkpoint.created", projectId: "p", sha: "abc", summary: "s" },
+      { type: "checkpoint.created", projectId: "p", sha: "abc", summary: "s", author: "a", ts: 1 },
       { type: "fs.change", projectId: "p", path: "a.md", kind: "modify" },
       { type: "events.lagged", missed: 3 },
     ];

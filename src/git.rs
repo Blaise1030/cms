@@ -18,11 +18,13 @@ const CHECKPOINT_PREFIX: &str = "checkpoint: ";
 const MAX_SUMMARY_CHARS: usize = 100;
 const FALLBACK_SUMMARY: &str = "agent turn";
 
-/// `{ sha, summary, ts }` — `ts` is the commit time in unix seconds.
+/// `{ sha, summary, author, ts }` — `author` is the commit author name, `ts` the commit time in
+/// unix seconds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Checkpoint {
     pub sha: String,
     pub summary: String,
+    pub author: String,
     pub ts: i64,
 }
 
@@ -108,12 +110,14 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
     )
     .await?;
     let sha = run(dir, &["rev-parse", "HEAD"]).await?.trim().to_string();
-    let ts = run(dir, &["show", "-s", "--format=%ct", "HEAD"])
-        .await?
-        .trim()
-        .parse()
-        .unwrap_or_default();
-    Ok(Some(Checkpoint { sha, summary, ts }))
+    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an", "HEAD"]).await?;
+    let (ts, author) = meta.trim().split_once('\u{1f}').unwrap_or((meta.trim(), ""));
+    Ok(Some(Checkpoint {
+        sha,
+        summary,
+        author: author.to_string(),
+        ts: ts.parse().unwrap_or_default(),
+    }))
 }
 
 /// Commits on the current branch, newest first. Includes the scaffold's initial commit so
@@ -126,19 +130,20 @@ pub async fn log(dir: &Path) -> Result<Vec<Checkpoint>, ApiError> {
     {
         return Ok(Vec::new());
     }
-    let out = run(dir, &["log", "--format=%H%x1f%ct%x1f%s"]).await?;
+    let out = run(dir, &["log", "--format=%H%x1f%ct%x1f%an%x1f%s"]).await?;
     Ok(out
         .lines()
         .filter_map(|line| {
-            let mut it = line.splitn(3, '\u{1f}');
+            let mut it = line.splitn(4, '\u{1f}');
             let sha = it.next()?.to_string();
             let ts = it.next()?.parse().ok()?;
+            let author = it.next()?.to_string();
             let subject = it.next().unwrap_or("");
             let summary = subject
                 .strip_prefix(CHECKPOINT_PREFIX)
                 .unwrap_or(subject)
                 .to_string();
-            Some(Checkpoint { sha, summary, ts })
+            Some(Checkpoint { sha, summary, author, ts })
         })
         .collect())
 }

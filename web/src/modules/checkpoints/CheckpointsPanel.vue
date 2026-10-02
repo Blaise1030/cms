@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ArrowLeft, History, RotateCcw } from "@lucide/vue";
+import { ArrowLeft, ChevronRight, GitCommitVertical, History, RotateCcw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -13,7 +13,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Stepper,
+  StepperIndicator,
+  StepperItem,
+  StepperSeparator,
+} from "@/components/ui/stepper";
 import { errorMessage } from "@/lib/errors";
 import DiffView from "./DiffView.vue";
 import { useCheckpointsStore } from "./store";
@@ -56,7 +63,7 @@ async function restore() {
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="checkpoints-panel">
     <template v-if="selected">
-      <div class="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-3">
+      <div class="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
         <Button variant="ghost" size="sm" @click="store.select(projectId, null)">
           <ArrowLeft /> Timeline
         </Button>
@@ -74,7 +81,7 @@ async function restore() {
         <div class="flex flex-col gap-4 p-3">
           <div>
             <p class="text-sm font-medium">{{ selected.summary }}</p>
-            <p class="text-muted-foreground text-xs">{{ short(selected.sha) }} · {{ when(selected.ts) }}</p>
+            <p class="text-muted-foreground text-xs">{{ selected.author }} · {{ short(selected.sha) }} · {{ when(selected.ts) }}</p>
           </div>
           <p v-if="store.diffLoading" class="text-muted-foreground text-sm">Loading diff…</p>
           <p v-else-if="store.diffError" class="text-destructive text-sm" role="alert">
@@ -101,7 +108,7 @@ async function restore() {
     </template>
 
     <template v-else>
-      <div class="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-sm font-medium">
+      <div class="flex h-10 shrink-0 items-center gap-2 px-3 text-sm font-medium">
         <History class="size-4" /> Checkpoints
       </div>
       <ScrollArea class="min-h-0 flex-1">
@@ -111,23 +118,56 @@ async function restore() {
           <p v-else-if="list.length === 0" class="text-muted-foreground text-sm">
             No checkpoints yet. One is saved after each agent turn that changes files.
           </p>
-          <ol v-else class="border-border relative ml-2 border-l" data-testid="timeline">
-            <li v-for="(cp, i) in list" :key="cp.sha" class="relative pb-4 pl-4 last:pb-0">
-              <span class="bg-primary absolute top-2 -left-[4.5px] size-2 rounded-full" />
-              <button
+          <!-- Newest first; the current checkpoint is the active step. Non-linear so every step
+               stays clickable (linear steppers disable steps past the next one). -->
+          <Stepper
+            v-else
+            orientation="vertical"
+            :model-value="1"
+            :linear="false"
+            class="flex w-full flex-col gap-0"
+            data-testid="timeline"
+          >
+            <StepperItem
+              v-for="(cp, i) in list"
+              :key="cp.sha"
+              :step="i + 1"
+              class="relative w-full items-center gap-2"
+            >
+              <!-- Runs from just below this node to just above the next one: rows are equal
+                   height (single-line title and meta), so the next centre is one row down. -->
+              <StepperSeparator
+                v-if="i < list.length - 1"
+                class="bg-border absolute top-[calc(50%+16px)] bottom-[calc(16px-50%)] left-[11.5px] w-px"
+              />
+              <StepperIndicator
+                class="bg-muted text-muted-foreground size-6 shrink-0 group-data-[state=active]:bg-primary"
+              >
+                <GitCommitVertical class="size-3.5" />
+              </StepperIndicator>
+              <Item
+                as="button"
                 type="button"
-                class="hover:bg-accent w-full rounded-md p-2 text-left"
+                size="sm"
+                class="hover:bg-accent/60 min-w-0 flex-1 flex-nowrap px-2.5 text-left"
                 data-testid="checkpoint-item"
                 @click="store.select(projectId, cp.sha)"
               >
-                <div class="flex items-center justify-between gap-2">
-                  <span class="truncate text-sm font-medium">{{ cp.summary }}</span>
+                <ItemContent class="min-w-0 gap-0.5">
+                  <ItemTitle class="w-full">
+                    <span class="truncate">{{ cp.summary }}</span>
+                  </ItemTitle>
+                  <ItemDescription class="text-xs">
+                    <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ when(cp.ts) }}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
                   <Badge v-if="i === 0" variant="secondary">Current</Badge>
-                </div>
-                <span class="text-muted-foreground text-xs">{{ short(cp.sha) }} · {{ when(cp.ts) }}</span>
-              </button>
-            </li>
-          </ol>
+                  <ChevronRight class="text-muted-foreground size-4" />
+                </ItemActions>
+              </Item>
+            </StepperItem>
+          </Stepper>
         </div>
       </ScrollArea>
     </template>

@@ -64,6 +64,8 @@ export interface Turn {
 export interface Checkpoint {
   sha: string;
   summary: string;
+  /** Commit author name. */
+  author: string;
   /** Unix seconds. */
   ts: number;
 }
@@ -159,6 +161,9 @@ export interface CheckpointCreatedEvent {
   projectId: string;
   sha: string;
   summary: string;
+  author: string;
+  /** Unix seconds. */
+  ts: number;
 }
 
 export interface FsChangeEvent {

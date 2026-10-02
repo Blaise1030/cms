@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -9,22 +8,7 @@ const hDaemon = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
 
 import PreviewPanel from "./PreviewPanel.vue";
-import PreviewToolbar from "./PreviewToolbar.vue";
 import { usePreviewStore } from "./store";
-
-const PreviewWithToolbar = defineComponent({
-  props: {
-    projectId: { type: String, required: true },
-    devserver: { type: String, required: true },
-  },
-  setup(props) {
-    return () =>
-      h("div", [
-        h(PreviewToolbar, { projectId: props.projectId, devserver: props.devserver as never }),
-        h(PreviewPanel, { projectId: props.projectId, devserver: props.devserver as never }),
-      ]);
-  },
-});
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
@@ -32,7 +16,7 @@ function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api =
   // Default to the embedded topology (page and daemon share an origin).
   hDaemon.daemon.config.value = { origin: window.location.origin };
   setActivePinia(createPinia());
-  return mount(PreviewWithToolbar, { props: { projectId: "site-1", devserver } });
+  return mount(PreviewPanel, { props: { projectId: "site-1", devserver } });
 }
 
 describe("PreviewPanel", () => {
@@ -73,6 +57,18 @@ describe("PreviewPanel", () => {
     await w.find("[aria-label='Reload preview']").trigger("click");
     await flushPromises();
     expect(w.find("iframe").element).not.toBe(before);
+    w.unmount();
+  });
+
+  it("shows the browser bar and navigates the frame from the address field", async () => {
+    const w = mountPanel();
+    expect(w.find("[aria-label='Back']").attributes("disabled")).toBeDefined();
+    expect(w.find("[aria-label='Forward']").attributes("disabled")).toBeDefined();
+    const address = w.find("[data-testid='preview-address']");
+    expect((address.element as HTMLInputElement).value).toBe("/");
+    await address.setValue("about/");
+    await w.find("form").trigger("submit");
+    expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:7800/preview/site-1/about/");
     w.unmount();
   });
 

@@ -100,7 +100,10 @@ fn npm_command(spec: &LaunchSpec) -> Command {
         .arg(spec.port.to_string())
         // Bind IPv4 loopback explicitly: the proxy dials 127.0.0.1, and `localhost` may
         // resolve to ::1 only.
-        .args(["--host", "127.0.0.1"]);
+        .args(["--host", "127.0.0.1"])
+        // Astro auto-backgrounds `astro dev` (detached, exit 0) when it detects an AI agent in
+        // the environment, which the supervisor would see as a crash. Keep it in the foreground.
+        .arg("--ignore-lock");
     cmd
 }
 
@@ -525,6 +528,11 @@ mod tests {
             ready_port("  ➜  Local:   http://127.0.0.1:5173/"),
             Some(5173)
         );
+        // Astro's `--json` logging (used when it detects an agent) keeps the URL in the message.
+        assert_eq!(
+            ready_port(r#"{"message":" astro  v7.3.5 ready in 657 ms\n┃ Local    http://127.0.0.1:4999/","label":"SKIP_FORMAT","level":"info"}"#),
+            Some(4999)
+        );
         assert_eq!(ready_port(" ┃ Network  use --host to expose"), None);
         assert_eq!(ready_port("Network http://192.168.1.4:4321/"), None);
         assert_eq!(ready_port("astro v7 ready in 300 ms"), None);
@@ -548,7 +556,7 @@ mod tests {
             .collect();
         assert_eq!(
             args,
-            ["run", "dev", "--", "--port", "4567", "--host", "127.0.0.1"]
+            ["run", "dev", "--", "--port", "4567", "--host", "127.0.0.1", "--ignore-lock"]
         );
     }
 

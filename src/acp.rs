@@ -195,6 +195,18 @@ impl ToolRec {
     }
 }
 
+/// The text to append for an agent message chunk. ACP has no message boundaries, so agent
+/// messages separated by tool calls would run together ("…done.Next I'll…"); start a new
+/// markdown paragraph when text resumes after a tool call. The separator is part of the
+/// streamed delta so live chat and reloaded history render the same.
+fn text_delta(assistant: &str, text_break: bool, text: &str) -> String {
+    if text_break && !assistant.is_empty() && !assistant.ends_with('\n') && !text.starts_with('\n') {
+        format!("\n\n{text}")
+    } else {
+        text.to_string()
+    }
+}
+
 struct TurnState {
     id: String,
     user_text: String,
@@ -203,6 +215,8 @@ struct TurnState {
     last_activity: Instant,
     /// `session/prompt` has returned (the turn may still be settling).
     responded: bool,
+    /// A tool call happened since the last text chunk: the next text is a new agent message.
+    text_break: bool,
 }
 
 impl TurnState {
@@ -689,13 +703,16 @@ impl Session {
                     let content = &update["content"];
                     match (content["type"].as_str(), content["text"].as_str()) {
                         (Some("text"), Some(text)) if !text.is_empty() => {
-                            turn.assistant.push_str(text);
-                            Some(("chat.chunk", json!({ "turnId": turn.id, "delta": text })))
+                            let delta = text_delta(&turn.assistant, turn.text_break, text);
+                            turn.text_break = false;
+                            turn.assistant.push_str(&delta);
+                            Some(("chat.chunk", json!({ "turnId": turn.id, "delta": delta })))
                         }
                         _ => None,
                     }
                 }
                 "tool_call" | "tool_call_update" => {
+                    turn.text_break = true;
                     let tool = upsert_tool(turn, update, kind == "tool_call");
                     tool.map(|t| {
                         (
@@ -993,6 +1010,8 @@ async fn run_turn(
                     "projectId": session.project_id,
                     "sha": cp.sha,
                     "summary": cp.summary,
+                    "author": cp.author,
+                    "ts": cp.ts,
                 }),
             ),
             Ok(None) => {}
@@ -1204,6 +1223,7 @@ impl AgentManager {
             tools: Vec::new(),
             last_activity: Instant::now(),
             responded: false,
+            text_break: false,
         });
         guard.1 = false; // `run_turn` owns clearing `awaiting` from here on.
         tokio::spawn(run_turn(
@@ -1270,6 +1290,16 @@ impl AgentManager {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn text_after_a_tool_call_starts_a_new_paragraph() {
+        use super::text_delta;
+        assert_eq!(text_delta("", true, "Hi"), "Hi");
+        assert_eq!(text_delta("Done.", false, " More"), " More");
+        assert_eq!(text_delta("Done.", true, "Next"), "\n\nNext");
+        assert_eq!(text_delta("Done.\n", true, "Next"), "Next");
+        assert_eq!(text_delta("Done.", true, "\nNext"), "\nNext");
+    }
     use super::*;
 
     fn opts() -> Vec<Value> {
@@ -1327,6 +1357,7 @@ mod tests {
             tools: vec![],
             last_activity: Instant::now(),
             responded: false,
+            text_break: false,
         };
         let (_, kind, state, summary) = upsert_tool(
             &mut turn,

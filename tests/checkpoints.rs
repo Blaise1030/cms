@@ -96,6 +96,7 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
         .unwrap()
         .expect("checkpoint");
     assert_eq!(cp.summary, "Update hero");
+    assert_eq!(cp.author, "Workbench");
     assert_eq!(cp.sha, git_cli(&dir, &["rev-parse", "HEAD"]));
     assert_ne!(cp.sha, base);
     assert_eq!(git_cli(&dir, &["rev-list", "--count", "HEAD"]), "2");
@@ -123,6 +124,7 @@ async fn log_and_diff_endpoints_match_git() {
     assert_eq!(list.len(), 2);
     assert_eq!(list[0]["sha"], cp.sha);
     assert_eq!(list[0]["summary"], "Edit hero");
+    assert_eq!(list[0]["author"], "Workbench");
     assert!(list[0]["ts"].as_i64().unwrap() > 1_600_000_000);
     assert!(list[1]["summary"]
         .as_str()

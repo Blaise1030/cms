@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import ChatPanel from "./ChatPanel.vue";
+import ComposerEditor from "./ComposerEditor.vue";
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -25,8 +26,13 @@ function mountPanel() {
   return mount(ChatPanel, { props: { projectId: "p", autoApprove: false }, attachTo: document.body });
 }
 
+async function type(w: ReturnType<typeof mountPanel>, text: string) {
+  w.findComponent(ComposerEditor).vm.editor!.commands.insertContent(text);
+  await flushPromises();
+}
+
 async function send(w: ReturnType<typeof mountPanel>, text: string) {
-  await w.find("textarea").setValue(text);
+  await type(w, text);
   await w.find("form").trigger("submit");
   await flushPromises();
 }
@@ -52,6 +58,22 @@ describe("ChatPanel", () => {
     const card = w.find("[data-testid='tool-card']");
     expect(card.text()).toContain("edit hero.mdx");
     expect(card.find("[data-testid='tool-state']").text()).toBe("running");
+    w.unmount();
+  });
+
+  it("renders assistant markdown", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    await send(w, "summarise");
+    h.daemon.emit({
+      type: "chat.chunk", sessionId: "s1", turnId: "t1",
+      delta: "Done.\n\n- Added `/pricing/`\n- Updated the **header**",
+    });
+    await flushPromises();
+    const text = w.find("[data-testid='assistant-text']");
+    expect(text.findAll("li")).toHaveLength(2);
+    expect(text.find("code").text()).toBe("/pricing/");
+    expect(text.find("strong").text()).toBe("header");
     w.unmount();
   });
 
@@ -114,20 +136,31 @@ describe("ChatPanel", () => {
   it("sends on Enter but not Shift+Enter", async () => {
     const w = mountPanel();
     await flushPromises();
-    const ta = w.find("textarea");
-    await ta.setValue("hello");
-    await ta.trigger("keydown", { key: "Enter", shiftKey: true });
+    await type(w, "hello");
+    const editor = w.find("[data-testid='composer-editor']");
+    await editor.trigger("keydown", { key: "Enter", shiftKey: true });
     await flushPromises();
     expect(api.prompt).not.toHaveBeenCalled();
-    await ta.trigger("keydown", { key: "Enter" });
+    await editor.trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(api.prompt).toHaveBeenCalledWith("p", "s1", "hello");
+    expect(w.findComponent(ComposerEditor).vm.editor!.isEmpty).toBe(true);
     w.unmount();
   });
 
-  it("emits toggleAutoApprove", async () => {
+  it("emits toggleAutoApprove when the permission mode changes", async () => {
     const w = mountPanel();
-    await w.find("[data-testid='auto-approve']").trigger("click");
+    await flushPromises();
+    await w.find("[data-testid='auto-approve']").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    // Already "ask" (autoApprove: false): picking it again is a no-op.
+    document.querySelector<HTMLElement>("[data-testid='mode-ask']")!.click();
+    await flushPromises();
+    expect(w.emitted("toggleAutoApprove")).toBeUndefined();
+    await w.find("[data-testid='auto-approve']").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    document.querySelector<HTMLElement>("[data-testid='mode-auto']")!.click();
+    await flushPromises();
     expect(w.emitted("toggleAutoApprove")).toHaveLength(1);
     w.unmount();
   });
