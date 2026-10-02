@@ -31,11 +31,8 @@ pub async fn create(
     let req: CreateRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{\"name\": string}}: {e}")))?;
     let identity = state.github.identity().await;
-    let info = create_detached(&state, req.name, Source::Template, identity.clone()).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(started(&state, info, &identity).await),
-    ))
+    let info = create_and_start(&state, req.name, Source::Template, identity).await?;
+    Ok((StatusCode::CREATED, Json(info)))
 }
 
 #[derive(Deserialize)]
@@ -66,26 +63,27 @@ pub async fn clone(
         env,
     };
     let identity = state.github.identity().await;
-    let info = create_detached(&state, name, source, identity.clone()).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(started(&state, info, &identity).await),
-    ))
+    let info = create_and_start(&state, name, source, identity).await?;
+    Ok((StatusCode::CREATED, Json(info)))
 }
 
-/// Run `create_from` on its own task: axum drops the handler future when the client
-/// disconnects, which would abort a clone midway and leak the reserved id/port and a
-/// half-filled directory. Spawned, creation always runs to completion and cleans up.
-async fn create_detached(
+/// Create a project and finish its start-up (identity re-check, watcher, dev server) on
+/// its own task: axum drops the handler future when the client disconnects, which would
+/// abort a clone midway and leak the reserved id/port and a half-filled directory.
+/// Spawned, it always runs to completion and cleans up after itself.
+async fn create_and_start(
     state: &AppState,
     name: String,
     source: Source,
     identity: Identity,
 ) -> Result<ProjectInfo, ApiError> {
-    let projects = state.projects.clone();
-    tokio::spawn(async move { projects.create_from(&name, source, &identity).await })
-        .await
-        .map_err(|e| ApiError::io(format!("project creation task failed: {e}")))?
+    let state = state.clone();
+    tokio::spawn(async move {
+        let info = state.projects.create_from(&name, source, &identity).await?;
+        Ok(started(&state, info, &identity).await)
+    })
+    .await
+    .map_err(|e| ApiError::io(format!("project creation task failed: {e}")))?
 }
 
 /// Watch a freshly created project and supervise its dev server; return its current info.
