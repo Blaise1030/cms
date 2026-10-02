@@ -59,6 +59,7 @@ fn config(root: &Path, agents: &Path, token: Option<&str>) -> Config {
         no_auth: token.is_none(),
         token: token.map(str::to_string),
         agents_config: Some(agents.to_path_buf()),
+        ..Default::default()
     }
 }
 

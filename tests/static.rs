@@ -21,6 +21,7 @@ fn app() -> axum::Router {
         no_auth: false,
         token: Some(TOKEN.to_string()),
         agents_config: None,
+        ..Default::default()
     }))
 }
 

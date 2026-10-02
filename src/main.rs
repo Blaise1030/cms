@@ -37,6 +37,9 @@ enum Command {
         /// Path to agents.json (default: ~/.config/workbench/agents.json).
         #[arg(long)]
         agents_config: Option<PathBuf>,
+        /// GitHub OAuth App client id (enables "Sign in with GitHub").
+        #[arg(long, env = "WORKBENCH_GITHUB_CLIENT_ID")]
+        github_client_id: Option<String>,
     },
 }
 
@@ -55,6 +58,7 @@ async fn main() -> ExitCode {
         no_auth,
         token,
         agents_config,
+        github_client_id,
     } = Cli::parse().command;
     let config = Config {
         port,
@@ -65,6 +69,10 @@ async fn main() -> ExitCode {
         agents_config: Some(
             agents_config.unwrap_or_else(|| home().join(".config/workbench/agents.json")),
         ),
+        github: workbench::config::GithubConfig {
+            client_id: github_client_id,
+            ..Default::default()
+        },
     };
     match workbench::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

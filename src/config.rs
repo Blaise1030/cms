@@ -4,7 +4,31 @@ use std::path::PathBuf;
 
 use rand::Rng;
 
+/// Where GitHub lives. Overridable so tests can point at a fake server and a local bare repo.
 #[derive(Debug, Clone)]
+pub struct GithubConfig {
+    /// OAuth App client id (device flow enabled). `None` disables sign-in.
+    pub client_id: Option<String>,
+    /// REST API base, e.g. `https://api.github.com`.
+    pub api_url: String,
+    /// Web base for `/login/device/code` and `/login/oauth/access_token`.
+    pub web_url: String,
+    /// Base for clone URLs: `{git_url}/{owner}/{repo}.git`.
+    pub git_url: String,
+}
+
+impl Default for GithubConfig {
+    fn default() -> Self {
+        Self {
+            client_id: None,
+            api_url: "https://api.github.com".into(),
+            web_url: "https://github.com".into(),
+            git_url: "https://github.com".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     pub port: u16,
     /// Hosted PWA origin allowed via CORS + Host allowlist.
@@ -14,6 +38,7 @@ pub struct Config {
     /// Auth token. `None` only when `no_auth` is set.
     pub token: Option<String>,
     pub agents_config: Option<PathBuf>,
+    pub github: GithubConfig,
 }
 
 impl Config {
@@ -99,6 +124,7 @@ mod tests {
             no_auth: false,
             token: Some("a;b".into()),
             agents_config: None,
+            ..Default::default()
         };
         assert!(c.validate().is_err());
         c.token = Some("ab12".into());

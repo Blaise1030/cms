@@ -18,6 +18,7 @@ fn config(no_auth: bool, token: Option<&str>, origin: Option<&str>) -> Config {
         no_auth,
         token: token.map(str::to_string),
         agents_config: None,
+        ..Default::default()
     }
 }
 

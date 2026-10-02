@@ -23,6 +23,7 @@ fn config(dir: &Path) -> Config {
         no_auth: true,
         token: None,
         agents_config: None,
+        ..Default::default()
     }
 }
 

@@ -18,6 +18,7 @@ fn config(dir: &Path, no_auth: bool) -> Config {
         no_auth,
         token: if no_auth { None } else { Some("abc123".into()) },
         agents_config: None,
+        ..Default::default()
     }
 }
 

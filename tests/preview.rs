@@ -35,6 +35,7 @@ fn config(dir: &Path, token: Option<&str>) -> Config {
         no_auth: token.is_none(),
         token: token.map(str::to_string),
         agents_config: None,
+        ..Default::default()
     }
 }
 
