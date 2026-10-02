@@ -17,6 +17,7 @@ pub enum ErrorCode {
     GitErr,
     Io,
     Badreq,
+    GithubErr,
 }
 
 impl ErrorCode {
@@ -31,6 +32,7 @@ impl ErrorCode {
             Self::GitErr => "GIT_ERR",
             Self::Io => "IO",
             Self::Badreq => "BADREQ",
+            Self::GithubErr => "GITHUB_ERR",
         }
     }
 
@@ -42,7 +44,7 @@ impl ErrorCode {
             Self::Enoent => 404,
             Self::Conflict => 409,
             Self::Badreq => 400,
-            Self::AgentErr | Self::DevserverErr => 502,
+            Self::AgentErr | Self::DevserverErr | Self::GithubErr => 502,
             Self::GitErr | Self::Io => 500,
         }
     }
@@ -98,6 +100,9 @@ impl ApiError {
     }
     pub fn git(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::GitErr, message)
+    }
+    pub fn github(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::GithubErr, message)
     }
 }
 
@@ -167,6 +172,7 @@ mod tests {
             GitErr,
             Io,
             Badreq,
+            GithubErr,
         ]
         .iter()
         .map(|c| c.as_str())
@@ -182,7 +188,8 @@ mod tests {
                 "DEVSERVER_ERR",
                 "GIT_ERR",
                 "IO",
-                "BADREQ"
+                "BADREQ",
+                "GITHUB_ERR"
             ]
         );
     }

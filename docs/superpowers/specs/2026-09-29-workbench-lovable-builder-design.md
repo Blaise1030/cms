@@ -70,7 +70,7 @@ app.<domain> (Vue PWA, hosted)            http://127.0.0.1:7800 (same PWA, embed
 | `http/` | Thin handlers: parse → module call → JSON. |
 | `auth.rs` | Token middleware (REST: Bearer or `wb_session` cookie). WS: token via query param. Host-header allowlist (`localhost`, `*.localhost`, loopback IPs, `--origin` host) — DNS-rebinding protection. CORS: only `--origin`. Cookie flow: hitting `/?t=<token>` once sets `wb_session` so `<iframe>`-loaded preview and proxy URLs authenticate without headers. |
 | `static.rs` | rust-embed of `web/dist` (SPA) and `templates/` (scaffold source). |
-| `error.rs` | `{ "error": { "code", "message" } }`. Codes: `UNAUTH`, `SANDBOX`, `ENOENT`, `CONFLICT`, `AGENT_ERR`, `DEVSERVER_ERR`, `GIT_ERR`, `IO`, `BADREQ`. |
+| `error.rs` | `{ "error": { "code", "message" } }`. Codes: `UNAUTH`, `SANDBOX`, `ENOENT`, `CONFLICT`, `AGENT_ERR`, `DEVSERVER_ERR`, `GIT_ERR`, `IO`, `BADREQ`, `GITHUB_ERR`. |
 
 ## REST API (JSON; auth as above)
 

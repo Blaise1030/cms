@@ -10,7 +10,8 @@ export type ErrorCode =
   | "DEVSERVER_ERR"
   | "GIT_ERR"
   | "IO"
-  | "BADREQ";
+  | "BADREQ"
+  | "GITHUB_ERR";
 
 /** Codes the daemon documents; anything else maps to `UNKNOWN`. */
 export const ERROR_CODES: readonly ErrorCode[] = [
@@ -23,6 +24,7 @@ export const ERROR_CODES: readonly ErrorCode[] = [
   "GIT_ERR",
   "IO",
   "BADREQ",
+  "GITHUB_ERR",
 ];
 
 export type DevserverState = "starting" | "ready" | "crashed";
