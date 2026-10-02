@@ -54,6 +54,19 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
+  /** Open a GitHub repository as a project (the daemon clones it) and select it. */
+  async function cloneRepo(repo: string): Promise<Project> {
+    creating.value = true;
+    try {
+      const project = await daemon.api.cloneProject(repo);
+      projects.value = [...projects.value.filter((p) => p.id !== project.id), project];
+      select(project.id);
+      return project;
+    } finally {
+      creating.value = false;
+    }
+  }
+
   /** Delete a project (the api client sends the daemon's mandatory `?confirm=true`). */
   async function remove(id: string) {
     await daemon.api.deleteProject(id);
@@ -86,6 +99,7 @@ export const useProjectsStore = defineStore("projects", () => {
     loaded,
     creating,
     error,
+    cloneRepo,
     selectedId,
     selected,
     select,

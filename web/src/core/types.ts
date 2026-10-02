@@ -205,3 +205,38 @@ export type ConnectionStatus =
   | "reconnecting"
   /** Could not connect (never opened, or too many consecutive failures). */
   | "unreachable";
+
+export interface GithubUser {
+  login: string;
+  id: number;
+  name: string | null;
+  avatarUrl: string;
+}
+
+export interface GithubStatus {
+  /** The daemon was started with a GitHub OAuth client id. */
+  configured: boolean;
+  user: GithubUser | null;
+}
+
+export interface DeviceStart {
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  /** Seconds between polls. */
+  interval: number;
+}
+
+export type DevicePoll =
+  | { status: "pending" }
+  | { status: "slowDown"; interval: number }
+  | { status: "signedIn"; user: GithubUser }
+  | { status: "expired" }
+  | { status: "denied" };
+
+export interface GithubRepo {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  canPush: boolean;
+}

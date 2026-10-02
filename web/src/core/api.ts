@@ -3,7 +3,11 @@ import {
   ERROR_CODES,
   type Checkpoint,
   type ErrorCode,
+  type DeviceStart,
+  type DevicePoll,
   type FileContent,
+  type GithubRepo,
+  type GithubStatus,
   type Health,
   type PermissionDecision,
   type Project,
@@ -136,6 +140,14 @@ export function createApi(
       json<{ deleted: string }>("DELETE", `/api/projects/${enc(id)}`, {
         query: { confirm: true },
       }),
+    cloneProject: (repo: string, name?: string) =>
+      json<Project>("POST", "/api/github/clone", { body: name ? { repo, name } : { repo } }),
+    githubStatus: () => json<GithubStatus>("GET", "/api/github/status"),
+    githubDeviceStart: () => json<DeviceStart>("POST", "/api/github/device"),
+    githubDevicePoll: () => json<DevicePoll>("POST", "/api/github/device/poll"),
+    githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),
+    githubRepos: async (): Promise<GithubRepo[]> =>
+      (await json<{ repos: GithubRepo[] }>("GET", "/api/github/repos")).repos,
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
