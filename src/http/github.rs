@@ -50,17 +50,15 @@ pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
 
 /// `GET /api/github/repos` → `{ repos: [{ fullName, private, defaultBranch, canPush }] }`.
 pub async fn repos(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    match state.github.repos().await {
-        Ok(repos) => Ok(Json(json!({ "repos": repos }))),
-        Err(e) => {
-            // An expired session is cleared by `repos`; projects revert to `Workbench`.
-            if state.github.status().await.user.is_none() {
-                state
-                    .projects
-                    .apply_identity(&state.github.identity().await)
-                    .await;
-            }
-            Err(e)
+    let (result, cleared) = state.github.repos_checked().await;
+    if cleared {
+        // This call dropped an expired session; projects revert to `Workbench`.
+        let applied = Identity::workbench();
+        state.projects.apply_identity(&applied).await;
+        let current = state.github.identity().await;
+        if current != applied {
+            state.projects.apply_identity(&current).await;
         }
     }
+    Ok(Json(json!({ "repos": result? })))
 }

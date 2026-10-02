@@ -358,23 +358,50 @@ impl GithubAuth {
         let _ = std::fs::remove_file(&self.path);
     }
 
+    /// Clear the session (and its file) only if it holds `token`. Returns whether it did.
+    pub async fn sign_out_if_token(&self, token: &str) -> bool {
+        let mut inner = self.inner.lock().await;
+        if inner.session.as_ref().is_none_or(|s| s.token != token) {
+            return false;
+        }
+        inner.session = None;
+        inner.pending = None;
+        let _ = std::fs::remove_file(&self.path);
+        true
+    }
+
     /// Repositories the user can access, most recently pushed first (first 100).
     pub async fn repos(&self) -> Result<Vec<RepoInfo>, ApiError> {
-        let token = self.token().await.ok_or_else(not_signed_in)?;
+        self.repos_checked().await.0
+    }
+
+    /// Like [`GithubAuth::repos`], also reporting whether this call cleared the session
+    /// because GitHub rejected its token.
+    pub async fn repos_checked(&self) -> (Result<Vec<RepoInfo>, ApiError>, bool) {
+        let Some(token) = self.token().await else {
+            return (Err(not_signed_in()), false);
+        };
+        let mut cleared = false;
+        let r = self.list_repos(&token, &mut cleared).await;
+        (r, cleared)
+    }
+
+    async fn list_repos(&self, token: &str, cleared: &mut bool) -> Result<Vec<RepoInfo>, ApiError> {
         let res = self
             .http
             .get(format!(
                 "{}/user/repos?per_page=100&sort=pushed",
                 self.api()
             ))
-            .bearer_auth(&token)
+            .bearer_auth(token)
             .header(ACCEPT, GITHUB_JSON)
             .send()
             .await
             .map_err(unreachable)?;
         if res.status() == reqwest::StatusCode::UNAUTHORIZED {
             // Revoked or expired token: forget the session so the UI offers sign-in.
-            self.sign_out().await;
+            // Only if it is still the rejected token: a slow 401 must not wipe a newer session.
+            *cleared = self.sign_out_if_token(token).await;
             return Err(
                 ApiError::github("your GitHub session expired — sign in again").with_status(400),
             );
@@ -703,6 +730,30 @@ mod tests {
         assert!(dir.join("github.json").exists());
         assert_eq!(auth.token().await.as_deref(), Some("tok"));
         assert!(auth.inner.lock().await.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn sign_out_if_token_only_clears_the_matching_session() {
+        let dir = tmp_dir("signout-if");
+        let auth = GithubAuth::open(GithubConfig::default(), &dir);
+        auth.inner.lock().await.pending = Some(Pending {
+            device_code: "dc".into(),
+            expires_at: Instant::now() + Duration::from_secs(60),
+            interval: 5,
+        });
+        let session = Session {
+            token: "new".into(),
+            user: ada(),
+        };
+        assert!(auth.commit_session("dc", session).await.unwrap());
+
+        assert!(!auth.sign_out_if_token("old").await);
+        assert_eq!(auth.token().await.as_deref(), Some("new"));
+        assert!(dir.join("github.json").exists());
+
+        assert!(auth.sign_out_if_token("new").await);
+        assert!(auth.token().await.is_none());
+        assert!(!dir.join("github.json").exists());
     }
 
     #[test]

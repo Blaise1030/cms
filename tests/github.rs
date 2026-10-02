@@ -337,6 +337,16 @@ async fn expired_token_signs_out_on_repos() {
     call(&app, req("POST", "/api/github/device/poll", None)).await;
     let (_, body) = call(&app, req("POST", "/api/github/device/poll", None)).await;
     assert_eq!(body["status"], "signedIn");
+    let (_, made) = call(
+        &app,
+        req("POST", "/api/projects", Some(json!({ "name": "Fresh" }))),
+    )
+    .await;
+    let fresh = projects.join(made["id"].as_str().unwrap());
+    assert_eq!(
+        git(&fresh, &["config", "--local", "user.name"]),
+        "Ada Lovelace"
+    );
 
     let (s, body) = call(&app, req("GET", "/api/github/repos", None)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
@@ -344,6 +354,10 @@ async fn expired_token_signs_out_on_repos() {
     let (_, body) = call(&app, req("GET", "/api/github/status", None)).await;
     assert_eq!(body["user"], Value::Null);
     assert!(!projects.join(".workbench/github.json").exists());
+    assert_eq!(
+        git(&fresh, &["config", "--local", "user.name"]),
+        "Workbench"
+    );
 }
 
 #[tokio::test]
