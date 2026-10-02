@@ -1,6 +1,23 @@
 # GitHub sign-in setup
 
-Done once per organisation by an admin.
+## Easiest: use the GitHub CLI
+
+1. Install the [GitHub CLI](https://cli.github.com) (`brew install gh`).
+2. Run `gh auth login` once and follow the prompts.
+3. Start `workbench serve`. You are signed in: your avatar and name appear in the top-right,
+   and **Open from GitHub** lists your repositories.
+
+No OAuth App or client id is needed, and Workbench never stores your token: it runs
+`gh api …` for your profile and repositories, and git asks `gh auth git-credential` for
+credentials when cloning. Commits are authored with your global git name and email
+(`git config --global user.name` / `user.email`) when set, otherwise your GitHub name and
+noreply address. There is no Sign out in this mode; use `gh auth logout`. (Status is cached
+for a minute, so changes to the `gh` login show up shortly after.)
+
+## Optional: in-app sign-in without the GitHub CLI
+
+Done once per organisation by an admin. Only needed for people who do not use `gh`.
+An in-app session takes priority over the CLI login.
 
 1. GitHub → Settings → Developer settings → **OAuth Apps** → *New OAuth App*
    (for an organisation: Organisation settings → Developer settings).
