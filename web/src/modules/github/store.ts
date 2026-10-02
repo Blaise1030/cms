@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { onScopeDispose, ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { DeviceStart, GithubRepo, GithubUser } from "@/core/types";
@@ -15,6 +15,9 @@ export const useGithubStore = defineStore("github", () => {
   const repos = ref<GithubRepo[]>([]);
   const reposLoading = ref(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on every cancel/sign-in so results from superseded flows are ignored. */
+  let flow = 0;
+  onScopeDispose(stopTimer);
 
   async function load() {
     const s = await daemon.api.githubStatus();
@@ -27,34 +30,37 @@ export const useGithubStore = defineStore("github", () => {
     timer = null;
   }
 
-  function schedule(seconds: number) {
+  function schedule(id: number, seconds: number) {
     stopTimer();
-    timer = setTimeout(() => void poll(seconds), seconds * 1000);
+    if (id !== flow) return;
+    timer = setTimeout(() => void poll(id, seconds), seconds * 1000);
   }
 
   async function signIn() {
     cancel();
-    error.value = null;
+    const id = flow;
     try {
-      device.value = await daemon.api.githubDeviceStart();
-      schedule(device.value.interval);
+      const start = await daemon.api.githubDeviceStart();
+      if (id !== flow) return;
+      device.value = start;
+      schedule(id, start.interval);
     } catch (e) {
-      error.value = errorMessage(e);
+      if (id === flow) error.value = errorMessage(e);
     }
   }
 
-  async function poll(interval: number) {
+  async function poll(id: number, interval: number) {
     timer = null;
-    if (!device.value) return;
+    if (id !== flow || !device.value) return;
     try {
       const r = await daemon.api.githubDevicePoll();
-      if (!device.value) return; // cancelled while the request was in flight
+      if (id !== flow || !device.value) return; // cancelled or superseded while in flight
       switch (r.status) {
         case "pending":
-          schedule(interval);
+          schedule(id, interval);
           break;
         case "slowDown":
-          schedule(r.interval);
+          schedule(id, r.interval);
           break;
         case "signedIn":
           user.value = r.user;
@@ -70,14 +76,17 @@ export const useGithubStore = defineStore("github", () => {
           break;
       }
     } catch (e) {
+      if (id !== flow) return;
       error.value = errorMessage(e);
       device.value = null;
     }
   }
 
   function cancel() {
+    flow++;
     stopTimer();
     device.value = null;
+    error.value = null;
   }
 
   async function signOut() {
@@ -95,6 +104,7 @@ export const useGithubStore = defineStore("github", () => {
       if (user.value && e instanceof ApiError && e.code === "GITHUB_ERR" && e.status === 400) {
         user.value = null;
         repos.value = [];
+        void load().catch(() => {}); // resync with the daemon's real state
       }
       throw e;
     } finally {

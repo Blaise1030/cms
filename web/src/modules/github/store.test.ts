@@ -94,6 +94,41 @@ describe("github store", () => {
     expect(gh.user).toBeNull();
   });
 
+  it("cancel while the device request is pending never starts polling", async () => {
+    let resolve!: (v: unknown) => void;
+    const poll = vi.fn(async () => ({ status: "pending" }));
+    const gh = setup({
+      githubDeviceStart: vi.fn(() => new Promise((r) => (resolve = r))),
+      githubDevicePoll: poll,
+    });
+    const p = gh.signIn();
+    gh.cancel();
+    resolve({ userCode: "X", verificationUri: "u", expiresIn: 900, interval: 1 });
+    await p;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(poll).not.toHaveBeenCalled();
+    expect(gh.device).toBeNull();
+  });
+
+  it("ignores the result of a superseded flow's in-flight poll", async () => {
+    let resolveOld!: (v: unknown) => void;
+    const poll = vi.fn().mockImplementationOnce(() => new Promise((r) => (resolveOld = r)));
+    const start = vi
+      .fn()
+      .mockResolvedValueOnce({ userCode: "OLD", verificationUri: "u", expiresIn: 900, interval: 1 })
+      .mockResolvedValueOnce({ userCode: "NEW", verificationUri: "u", expiresIn: 900, interval: 1000 });
+    const gh = setup({ githubDeviceStart: start, githubDevicePoll: poll });
+    await gh.signIn();
+    await vi.advanceTimersByTimeAsync(1000); // old poll now in flight
+    expect(poll).toHaveBeenCalledTimes(1);
+    gh.cancel();
+    await gh.signIn();
+    resolveOld({ status: "expired" });
+    await flushPromises();
+    expect(gh.device?.userCode).toBe("NEW");
+    expect(gh.error).toBeNull();
+  });
+
   it("clears the user when the daemon reports the session expired", async () => {
     const gh = setup({
       githubRepos: vi.fn(async () => {
