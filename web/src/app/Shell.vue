@@ -26,6 +26,7 @@ const hasProject = computed(() => !!props.projectName);
         <slot v-if="hasProject" name="menubar" />
       </div>
       <div class="flex items-center gap-2 pr-1">
+        <slot name="account" />
         <span
           v-if="status"
           class="text-muted-foreground flex items-center gap-1.5 text-xs"

@@ -7,6 +7,7 @@ import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
 import ChatPanel from "@/modules/chat/ChatPanel.vue";
 import { useChatStore } from "@/modules/chat/store";
+import GithubAccount from "@/modules/github/GithubAccount.vue";
 import ProjectsGrid from "@/modules/projects/ProjectsGrid.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 import { toast } from "vue-sonner";
@@ -81,6 +82,9 @@ onBeforeUnmount(() => daemon.stop());
         @update:tab="tab = $event"
         @back="projects.select(null)"
       />
+    </template>
+    <template #account>
+      <GithubAccount />
     </template>
     <template #workspace>
       <Workspace v-if="projects.selected" :project="projects.selected" :tab="tab" />
