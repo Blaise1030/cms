@@ -9,6 +9,7 @@ pub mod error;
 pub mod events;
 pub mod fs;
 pub mod git;
+pub mod github;
 pub mod http;
 pub mod preview;
 pub mod projects;
