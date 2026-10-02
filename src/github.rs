@@ -136,6 +136,8 @@ struct Session {
 struct Pending {
     device_code: String,
     expires_at: Instant,
+    /// Seconds between polls, as GitHub asked (raised on `slow_down`).
+    interval: u64,
 }
 
 #[derive(Default)]
@@ -233,6 +235,7 @@ impl GithubAuth {
         self.inner.lock().await.pending = Some(Pending {
             device_code: code.device_code,
             expires_at: Instant::now() + Duration::from_secs(code.expires_in),
+            interval: code.interval,
         });
         Ok(DeviceStart {
             user_code: code.user_code,
@@ -273,32 +276,78 @@ impl GithubAuth {
         let tok: ApiToken = parse(res).await?;
         match (tok.access_token, tok.error.as_deref()) {
             (Some(token), _) => {
-                let user = self.fetch_user(&token).await?;
-                self.save(Session {
+                let user = match self.fetch_user(&token).await {
+                    Ok(u) => u,
+                    Err(e) => {
+                        self.clear_pending(&device_code).await;
+                        return Err(e);
+                    }
+                };
+                let session = Session {
                     token,
                     user: user.clone(),
-                })
-                .await?;
-                Ok(PollOutcome::SignedIn { user })
+                };
+                match self.commit_session(&device_code, session).await {
+                    Ok(true) => Ok(PollOutcome::SignedIn { user }),
+                    Ok(false) => Err(ApiError::github("sign-in was cancelled").with_status(409)),
+                    Err(e) => {
+                        self.clear_pending(&device_code).await;
+                        Err(e)
+                    }
+                }
             }
             (None, Some("authorization_pending")) => Ok(PollOutcome::Pending),
-            (None, Some("slow_down")) => Ok(PollOutcome::SlowDown {
-                interval: tok.interval.unwrap_or(10),
-            }),
+            (None, Some("slow_down")) => {
+                let mut inner = self.inner.lock().await;
+                let current = match &inner.pending {
+                    Some(p) if p.device_code == device_code => p.interval,
+                    _ => 5,
+                };
+                let interval = tok.interval.unwrap_or(current + 5);
+                if let Some(p) = inner
+                    .pending
+                    .as_mut()
+                    .filter(|p| p.device_code == device_code)
+                {
+                    p.interval = interval;
+                }
+                Ok(PollOutcome::SlowDown { interval })
+            }
             (None, Some("expired_token")) => {
-                self.inner.lock().await.pending = None;
+                self.clear_pending(&device_code).await;
                 Ok(PollOutcome::Expired)
             }
             (None, Some("access_denied")) => {
-                self.inner.lock().await.pending = None;
+                self.clear_pending(&device_code).await;
                 Ok(PollOutcome::Denied)
             }
-            (None, other) => Err(ApiError::github(format!(
-                "GitHub sign-in failed: {}",
-                tok.error_description
-                    .or(other.map(str::to_string))
-                    .unwrap_or_else(|| "no token in the response".into())
-            ))),
+            (None, other) => {
+                // Terminal: incorrect_device_code, device_flow_disabled, bad credentials, ...
+                self.clear_pending(&device_code).await;
+                let msg = if other == Some("device_flow_disabled") {
+                    "Device Flow is not enabled for this GitHub OAuth App: tick \"Enable Device Flow\" in its settings".to_string()
+                } else {
+                    format!(
+                        "GitHub sign-in failed: {}",
+                        tok.error_description
+                            .or(other.map(str::to_string))
+                            .unwrap_or_else(|| "no token in the response".into())
+                    )
+                };
+                Err(ApiError::github(msg))
+            }
+        }
+    }
+
+    /// Drop the pending device flow if it is still the one for `device_code`.
+    async fn clear_pending(&self, device_code: &str) {
+        let mut inner = self.inner.lock().await;
+        if inner
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.device_code == device_code)
+        {
+            inner.pending = None;
         }
     }
 
@@ -353,14 +402,24 @@ impl GithubAuth {
         })
     }
 
-    async fn save(&self, session: Session) -> Result<(), ApiError> {
+    /// Persist and activate `session`, but only if the flow for `device_code` is still the
+    /// pending one (not signed out or restarted meanwhile). Returns whether it was committed.
+    /// The check and the write happen under one lock so a concurrent sign-out cannot be undone.
+    async fn commit_session(&self, device_code: &str, session: Session) -> Result<bool, ApiError> {
         let bytes = serde_json::to_vec_pretty(&session)
             .map_err(|e| ApiError::io(format!("serialize GitHub session: {e}")))?;
-        write_private(&self.path, &bytes)?;
         let mut inner = self.inner.lock().await;
+        if inner
+            .pending
+            .as_ref()
+            .is_none_or(|p| p.device_code != device_code)
+        {
+            return Ok(false);
+        }
+        write_private(&self.path, &bytes)?;
         inner.session = Some(session);
         inner.pending = None;
-        Ok(())
+        Ok(true)
     }
 
     fn client_id(&self) -> Result<&str, ApiError> {
@@ -387,10 +446,15 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
+    // A leftover file could carry looser permissions; `create_new` also refuses a symlink.
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
     let mut f = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(&tmp)?;
     f.write_all(bytes)?;
@@ -408,8 +472,8 @@ async fn parse<T: DeserializeOwned>(res: reqwest::Response) -> Result<T, ApiErro
             "GitHub returned {status}: {text}"
         )));
     }
-    serde_json::from_slice(&body)
-        .map_err(|e| ApiError::github(format!("unexpected response from GitHub: {e}")))
+    // Not serde's message: it can quote parts of the body (e.g. a token).
+    serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
 }
 
 fn unreachable(e: reqwest::Error) -> ApiError {
@@ -426,7 +490,7 @@ pub fn validate_repo(s: &str) -> Result<String, ApiError> {
     let ok = s
         .split_once('/')
         .is_some_and(|(owner, name)| valid_part(owner) && valid_part(name));
-    if ok {
+    if ok && !s.ends_with(".git") {
         Ok(s.to_string())
     } else {
         Err(ApiError::badreq(format!(
@@ -438,7 +502,8 @@ pub fn validate_repo(s: &str) -> Result<String, ApiError> {
 fn valid_part(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 100
-        && !p.starts_with('.')
+        && p != "."
+        && p != ".."
         && !p.starts_with('-')
         && p.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
@@ -468,19 +533,21 @@ fn urlencode(s: &str) -> String {
 pub fn git_auth_env(git_url: &str, token: &str) -> Vec<(String, String)> {
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
     let base = git_url.trim_end_matches('/');
+    let key = format!("http.{base}/.extraheader");
     vec![
         ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-        ("GIT_CONFIG_COUNT".into(), "2".into()),
+        ("GIT_ASKPASS".into(), String::new()),
+        ("GIT_CONFIG_COUNT".into(), "3".into()),
+        // Reset any user-level extraheader for this host, then set ours.
+        ("GIT_CONFIG_KEY_0".into(), key.clone()),
+        ("GIT_CONFIG_VALUE_0".into(), String::new()),
+        ("GIT_CONFIG_KEY_1".into(), key),
         (
-            "GIT_CONFIG_KEY_0".into(),
-            format!("http.{base}/.extraheader"),
-        ),
-        (
-            "GIT_CONFIG_VALUE_0".into(),
+            "GIT_CONFIG_VALUE_1".into(),
             format!("AUTHORIZATION: basic {basic}"),
         ),
-        ("GIT_CONFIG_KEY_1".into(), "credential.helper".into()),
-        ("GIT_CONFIG_VALUE_1".into(), String::new()),
+        ("GIT_CONFIG_KEY_2".into(), "credential.helper".into()),
+        ("GIT_CONFIG_VALUE_2".into(), String::new()),
     ]
 }
 
@@ -491,6 +558,7 @@ mod tests {
     #[test]
     fn repo_names_are_owner_slash_name() {
         assert_eq!(validate_repo("acme/site").unwrap(), "acme/site");
+        assert_eq!(validate_repo("acme/.github").unwrap(), "acme/.github");
         assert_eq!(
             validate_repo(" Acme-Co/site.docs_2 ").unwrap(),
             "Acme-Co/site.docs_2"
@@ -504,6 +572,9 @@ mod tests {
             "acme/..",
             "acme/si te",
             "-x/../y",
+            "acme/site.git",
+            "acme/.",
+            "./site",
         ] {
             assert!(validate_repo(bad).is_err(), "{bad:?}");
         }
@@ -522,18 +593,19 @@ mod tests {
         let env = git_auth_env("https://github.com/", "tok");
         let get = |k: &str| env.iter().find(|(a, _)| a == k).map(|(_, b)| b.as_str());
         assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
-        assert_eq!(get("GIT_CONFIG_COUNT"), Some("2"));
-        assert_eq!(
-            get("GIT_CONFIG_KEY_0"),
-            Some("http.https://github.com/.extraheader")
-        );
+        assert_eq!(get("GIT_ASKPASS"), Some(""));
+        assert_eq!(get("GIT_CONFIG_COUNT"), Some("3"));
+        let key = "http.https://github.com/.extraheader";
+        assert_eq!(get("GIT_CONFIG_KEY_0"), Some(key));
+        assert_eq!(get("GIT_CONFIG_VALUE_0"), Some(""));
+        assert_eq!(get("GIT_CONFIG_KEY_1"), Some(key));
         // base64("x-access-token:tok")
         assert_eq!(
-            get("GIT_CONFIG_VALUE_0"),
+            get("GIT_CONFIG_VALUE_1"),
             Some("AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46dG9r")
         );
-        assert_eq!(get("GIT_CONFIG_KEY_1"), Some("credential.helper"));
-        assert_eq!(get("GIT_CONFIG_VALUE_1"), Some(""));
+        assert_eq!(get("GIT_CONFIG_KEY_2"), Some("credential.helper"));
+        assert_eq!(get("GIT_CONFIG_VALUE_2"), Some(""));
     }
 
     #[test]
@@ -561,5 +633,96 @@ mod tests {
         assert!(!st.configured);
         assert!(st.user.is_none());
         assert_eq!(auth.identity().await, Identity::workbench());
+    }
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("wb-gh-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn ada() -> GithubUser {
+        GithubUser {
+            login: "ada".into(),
+            id: 42,
+            name: Some("Ada Lovelace".into()),
+            avatar_url: "https://a/x.png".into(),
+        }
+    }
+
+    #[test]
+    fn write_private_resets_permissions_of_a_stale_tmp_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp_dir("perm");
+        let path = dir.join("github.json");
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, "old").unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, b"secret").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read(&path).unwrap(), b"secret");
+    }
+
+    #[tokio::test]
+    async fn commit_session_refuses_after_sign_out_or_a_new_flow() {
+        let dir = tmp_dir("race");
+        let auth = GithubAuth::open(GithubConfig::default(), &dir);
+        let pending = |code: &str| Pending {
+            device_code: code.into(),
+            expires_at: Instant::now() + Duration::from_secs(60),
+            interval: 5,
+        };
+        let session = || Session {
+            token: "tok".into(),
+            user: ada(),
+        };
+
+        // Signed out while the poll was in flight.
+        auth.inner.lock().await.pending = Some(pending("dc1"));
+        auth.sign_out().await;
+        assert!(!auth.commit_session("dc1", session()).await.unwrap());
+        assert!(!dir.join("github.json").exists());
+        assert!(auth.token().await.is_none());
+
+        // A newer flow replaced the one being polled.
+        auth.inner.lock().await.pending = Some(pending("dc2"));
+        assert!(!auth.commit_session("dc1", session()).await.unwrap());
+        assert!(!dir.join("github.json").exists());
+
+        // Still the same flow: committed.
+        assert!(auth.commit_session("dc2", session()).await.unwrap());
+        assert!(dir.join("github.json").exists());
+        assert_eq!(auth.token().await.as_deref(), Some("tok"));
+        assert!(auth.inner.lock().await.pending.is_none());
+    }
+
+    #[test]
+    fn poll_outcomes_serialize_to_the_web_contract() {
+        let j = |o: PollOutcome| serde_json::to_value(o).unwrap();
+        assert_eq!(
+            j(PollOutcome::Pending),
+            serde_json::json!({"status": "pending"})
+        );
+        assert_eq!(
+            j(PollOutcome::SlowDown { interval: 10 }),
+            serde_json::json!({"status": "slowDown", "interval": 10})
+        );
+        assert_eq!(
+            j(PollOutcome::SignedIn { user: ada() }),
+            serde_json::json!({
+                "status": "signedIn",
+                "user": {"login": "ada", "id": 42, "name": "Ada Lovelace", "avatarUrl": "https://a/x.png"}
+            })
+        );
+        assert_eq!(
+            j(PollOutcome::Expired),
+            serde_json::json!({"status": "expired"})
+        );
+        assert_eq!(
+            j(PollOutcome::Denied),
+            serde_json::json!({"status": "denied"})
+        );
     }
 }
