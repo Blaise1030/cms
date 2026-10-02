@@ -15,6 +15,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::error::ApiError;
+use crate::git::Identity;
 use crate::static_files;
 
 /// Longest accepted project name (chars).
@@ -112,6 +113,38 @@ pub struct ProjectRegistry {
 }
 
 impl ProjectRegistry {
+    fn dirs(inner: &Inner) -> Vec<PathBuf> {
+        inner.projects.iter().map(|p| p.dir.clone()).collect()
+    }
+
+    /// Author every project's future commits as `identity` (sign-in / sign-out).
+    pub async fn apply_identity(&self, identity: &Identity) {
+        let dirs = Self::dirs(&*self.inner.lock().await);
+        for dir in dirs {
+            if let Err(e) = crate::git::set_identity(&dir, identity).await {
+                eprintln!(
+                    "workbench: cannot set git identity in {}: {e}",
+                    dir.display()
+                );
+            }
+        }
+    }
+
+    /// Daemon start: projects created before per-repo identities get `identity`.
+    pub async fn ensure_identities(&self, identity: &Identity) {
+        let dirs = Self::dirs(&*self.inner.lock().await);
+        for dir in dirs {
+            if !crate::git::has_identity(&dir).await {
+                if let Err(e) = crate::git::set_identity(&dir, identity).await {
+                    eprintln!(
+                        "workbench: cannot set git identity in {}: {e}",
+                        dir.display()
+                    );
+                }
+            }
+        }
+    }
+
     /// Open the registry, loading any persisted projects whose directory still exists.
     pub fn open(projects_dir: PathBuf, install: bool) -> Self {
         let (stored, init_error) = match load_stored(&projects_dir) {
@@ -312,7 +345,7 @@ impl ProjectRegistry {
         };
 
         let dir = self.projects_dir.join(&id);
-        let built = self.scaffold(&dir).await;
+        let built = self.scaffold(&dir, &Identity::workbench()).await;
 
         let mut inner = self.inner.lock().await;
         inner.reserved_ids.remove(&id);
@@ -439,7 +472,7 @@ impl ProjectRegistry {
         Ok(())
     }
 
-    async fn scaffold(&self, dir: &Path) -> Result<(), ApiError> {
+    async fn scaffold(&self, dir: &Path, identity: &Identity) -> Result<(), ApiError> {
         // `create_dir` (not `_all`) fails if something raced us into existence.
         tokio::fs::create_dir(dir).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -459,6 +492,7 @@ impl ProjectRegistry {
         }
 
         git(dir, &["init", "-b", "main"]).await?;
+        crate::git::set_identity(dir, identity).await?;
         git(dir, &["add", "-A"]).await?;
         git(
             dir,
@@ -617,17 +651,10 @@ async fn npm_install(dir: &Path) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Run git in `dir` with a fixed identity so scaffolding works without global git config.
+/// Run git in `dir` (identity comes from the repo's local config).
 async fn git(dir: &Path, args: &[&str]) -> Result<(), ApiError> {
     let out = Command::new("git")
-        .args([
-            "-c",
-            "user.name=Workbench",
-            "-c",
-            "user.email=workbench@localhost",
-            "-c",
-            "commit.gpgsign=false",
-        ])
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
         .stdin(std::process::Stdio::null())

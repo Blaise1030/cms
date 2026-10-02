@@ -33,6 +33,10 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
     let agents = state.agents.clone();
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
+    state
+        .projects
+        .ensure_identities(&crate::git::Identity::workbench())
+        .await;
     state.watch_all().await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;

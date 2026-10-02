@@ -14,6 +14,35 @@ use tokio::sync::Mutex;
 
 use crate::error::ApiError;
 
+/// Commit author/committer for a project repo, stored in its local git config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    pub email: String,
+}
+
+impl Identity {
+    /// Used when nobody is signed in.
+    pub fn workbench() -> Self {
+        Self {
+            name: "Workbench".into(),
+            email: "workbench@localhost".into(),
+        }
+    }
+}
+
+/// Make `identity` the author of future commits in `dir` (agent commits included).
+pub async fn set_identity(dir: &Path, identity: &Identity) -> Result<(), ApiError> {
+    run(dir, &["config", "--local", "user.name", &identity.name]).await?;
+    run(dir, &["config", "--local", "user.email", &identity.email]).await?;
+    Ok(())
+}
+
+/// Whether `dir` has a repo-local author name.
+pub async fn has_identity(dir: &Path) -> bool {
+    run(dir, &["config", "--local", "user.name"]).await.is_ok()
+}
+
 const CHECKPOINT_PREFIX: &str = "checkpoint: ";
 const MAX_SUMMARY_CHARS: usize = 100;
 const FALLBACK_SUMMARY: &str = "agent turn";
@@ -37,15 +66,11 @@ fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     map.entry(dir.to_path_buf()).or_default().clone()
 }
 
-/// Run git in `dir`, returning stdout. Hooks are disabled: the tree is agent-authored and
+/// Run git in `dir`, returning stdout. Commit identity comes from the repo's local config. Hooks are disabled: the tree is agent-authored and
 /// we never want it to execute code on our behalf.
 async fn run(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
     let out = Command::new("git")
         .args([
-            "-c",
-            "user.name=Workbench",
-            "-c",
-            "user.email=workbench@localhost",
             "-c",
             "commit.gpgsign=false",
             "-c",
@@ -111,7 +136,10 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
     .await?;
     let sha = run(dir, &["rev-parse", "HEAD"]).await?.trim().to_string();
     let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an", "HEAD"]).await?;
-    let (ts, author) = meta.trim().split_once('\u{1f}').unwrap_or((meta.trim(), ""));
+    let (ts, author) = meta
+        .trim()
+        .split_once('\u{1f}')
+        .unwrap_or((meta.trim(), ""));
     Ok(Some(Checkpoint {
         sha,
         summary,
@@ -143,7 +171,12 @@ pub async fn log(dir: &Path) -> Result<Vec<Checkpoint>, ApiError> {
                 .strip_prefix(CHECKPOINT_PREFIX)
                 .unwrap_or(subject)
                 .to_string();
-            Some(Checkpoint { sha, summary, author, ts })
+            Some(Checkpoint {
+                sha,
+                summary,
+                author,
+                ts,
+            })
         })
         .collect())
 }
