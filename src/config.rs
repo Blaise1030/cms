@@ -17,6 +17,8 @@ pub struct GithubConfig {
     pub git_url: String,
     /// The GitHub CLI binary. An empty path disables the CLI login.
     pub gh_path: PathBuf,
+    /// Global git config file to read the commit identity from (tests); `None` = the real one.
+    pub git_global_config: Option<PathBuf>,
 }
 
 impl Default for GithubConfig {
@@ -27,6 +29,7 @@ impl Default for GithubConfig {
             web_url: "https://github.com".into(),
             git_url: "https://github.com".into(),
             gh_path: "gh".into(),
+            git_global_config: None,
         }
     }
 }

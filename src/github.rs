@@ -29,8 +29,12 @@ const SESSION_FILE: &str = "github.json";
 const SCOPES: &str = "repo read:user";
 const FORM: &str = "application/x-www-form-urlencoded";
 const GITHUB_JSON: &str = "application/vnd.github+json";
-/// How long a `gh api user` result (success or failure) is reused.
+/// How long a successful `gh api user` is reused.
 const CLI_TTL: Duration = Duration::from_secs(60);
+/// Logged-out or failed results are re-checked soon: the user may be about to run `gh auth login`.
+const CLI_RETRY: Duration = Duration::from_secs(5);
+/// Retry delay while serving the last good login through a transient `gh` failure.
+const CLI_STALE_RETRY: Duration = Duration::from_secs(10);
 const REPOS_PATH: &str = "/user/repos?per_page=100&sort=pushed";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,16 +176,40 @@ struct Inner {
 /// What `gh` told us, cached for [`CLI_TTL`].
 #[derive(Clone)]
 struct CliState {
-    at: Instant,
+    /// When this result must be refreshed.
+    expires: Instant,
     user: Option<GithubUser>,
     /// The machine's global git identity, if both name and email are set.
     git_identity: Option<Identity>,
+}
+
+enum CliUser {
+    LoggedIn(GithubUser),
+    /// `gh` is missing or says it is not logged in.
+    LoggedOut,
+    /// Timeout, network error, 5xx, unparsable output: says nothing about the login.
+    Failed,
 }
 
 struct GhOutput {
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
+}
+
+impl GhOutput {
+    /// gh's own "not logged in": exit code 4, or its `gh auth login` hint.
+    fn logged_out(&self) -> bool {
+        self.code == Some(4)
+            || self.stderr.contains("auth login")
+            || self.stderr.contains("not logged in")
+    }
+}
+
+struct GhFail {
+    /// The binary does not exist.
+    missing: bool,
+    err: ApiError,
 }
 
 pub struct GithubAuth {
@@ -241,42 +269,70 @@ impl GithubAuth {
     /// The `gh` login (cached for a minute). Runs `gh api user` when the cache is stale.
     async fn cli_state(&self) -> CliState {
         let mut cache = self.cli.lock().await;
-        if let Some(c) = cache.as_ref().filter(|c| c.at.elapsed() < CLI_TTL) {
+        if let Some(c) = cache.as_ref().filter(|c| Instant::now() < c.expires) {
             return c.clone();
         }
-        let user = self.fetch_cli_user().await;
-        let git_identity = match user {
-            Some(_) => global_git_identity().await,
-            None => None,
-        };
-        let state = CliState {
-            at: Instant::now(),
-            user,
-            git_identity,
+        let state = match self.fetch_cli_user().await {
+            CliUser::LoggedIn(user) => CliState {
+                expires: Instant::now() + CLI_TTL,
+                git_identity: global_git_identity(self.cfg.git_global_config.as_deref()).await,
+                user: Some(user),
+            },
+            CliUser::LoggedOut => CliState {
+                expires: Instant::now() + CLI_RETRY,
+                user: None,
+                git_identity: None,
+            },
+            // A transient failure is not a logout: keep serving the last good login.
+            CliUser::Failed => match cache.as_ref().filter(|c| c.user.is_some()) {
+                Some(prev) => CliState {
+                    expires: Instant::now() + CLI_STALE_RETRY,
+                    ..prev.clone()
+                },
+                None => CliState {
+                    expires: Instant::now() + CLI_RETRY,
+                    user: None,
+                    git_identity: None,
+                },
+            },
         };
         *cache = Some(state.clone());
         state
     }
 
-    async fn fetch_cli_user(&self) -> Option<GithubUser> {
-        let out = self.run_gh(&["api", "user"], 10).await.ok()?;
-        if out.code != Some(0) {
-            return None;
+    async fn fetch_cli_user(&self) -> CliUser {
+        let out = match self.run_gh(&["api", "user"], 10).await {
+            Ok(o) => o,
+            Err(f) if f.missing => return CliUser::LoggedOut,
+            Err(_) => return CliUser::Failed,
+        };
+        if out.code == Some(0) {
+            return match serde_json::from_slice::<ApiUser>(&out.stdout) {
+                Ok(u) => CliUser::LoggedIn(GithubUser {
+                    login: u.login,
+                    id: u.id,
+                    name: u.name,
+                    avatar_url: u.avatar_url,
+                }),
+                Err(_) => CliUser::Failed,
+            };
         }
-        let u: ApiUser = serde_json::from_slice(&out.stdout).ok()?;
-        Some(GithubUser {
-            login: u.login,
-            id: u.id,
-            name: u.name,
-            avatar_url: u.avatar_url,
-        })
+        if out.logged_out() {
+            CliUser::LoggedOut
+        } else {
+            CliUser::Failed
+        }
     }
 
     /// Run `gh` without a terminal, with a deadline. Only exit status, stdout and stderr
     /// come back; callers must not log stdout.
-    async fn run_gh(&self, args: &[&str], secs: u64) -> Result<GhOutput, ApiError> {
+    async fn run_gh(&self, args: &[&str], secs: u64) -> Result<GhOutput, GhFail> {
+        let fail = |missing: bool, msg: String| GhFail {
+            missing,
+            err: ApiError::github(msg),
+        };
         if self.cfg.gh_path.as_os_str().is_empty() {
-            return Err(ApiError::github("GitHub CLI is not available"));
+            return Err(fail(true, "GitHub CLI is not available".into()));
         }
         let mut cmd = tokio::process::Command::new(&self.cfg.gh_path);
         cmd.args(args)
@@ -288,8 +344,11 @@ impl GithubAuth {
             .kill_on_drop(true);
         let out = match tokio::time::timeout(Duration::from_secs(secs), cmd.output()).await {
             Ok(Ok(o)) => o,
-            Ok(Err(e)) => return Err(ApiError::github(format!("GitHub CLI: cannot run gh: {e}"))),
-            Err(_) => return Err(ApiError::github("GitHub CLI: gh timed out")),
+            Ok(Err(e)) => {
+                let missing = e.kind() == std::io::ErrorKind::NotFound;
+                return Err(fail(missing, format!("GitHub CLI: cannot run gh: {e}")));
+            }
+            Err(_) => return Err(fail(false, "GitHub CLI: gh timed out".into())),
         };
         Ok(GhOutput {
             code: out.status.code(),
@@ -321,21 +380,15 @@ impl GithubAuth {
         }
     }
 
-    /// Record that the projects now carry `identity`.
+    /// Record that the projects now carry `identity` (daemon start).
     pub async fn note_applied(&self, identity: &Identity) {
         *self.applied.lock().await = Some(identity.clone());
     }
 
-    /// The current identity if it differs from the one last applied to the projects
-    /// (e.g. `gh` was logged in after the daemon started); marks it applied.
-    pub async fn identity_change(&self) -> Option<Identity> {
-        let current = self.identity().await;
-        let mut applied = self.applied.lock().await;
-        if applied.as_ref() == Some(&current) {
-            return None;
-        }
-        *applied = Some(current.clone());
-        Some(current)
+    /// The identity last written to the projects. Hold the guard while re-reading
+    /// [`GithubAuth::identity`] and writing the projects so concurrent updates serialize.
+    pub async fn applied_guard(&self) -> tokio::sync::MutexGuard<'_, Option<Identity>> {
+        self.applied.lock().await
     }
 
     /// `{git_url}/{repo}.git` for a validated `owner/name`.
@@ -527,10 +580,10 @@ impl GithubAuth {
         }
         let out = match self.run_gh(&["api", REPOS_PATH], 30).await {
             Ok(o) => o,
-            Err(e) => return (Err(e.with_status(502)), false),
+            Err(f) => return (Err(f.err.with_status(502)), false),
         };
         if out.code != Some(0) {
-            if out.code == Some(4) || out.stderr.contains("auth login") {
+            if out.logged_out() {
                 *self.cli.lock().await = None;
                 return (
                     Err(
@@ -786,10 +839,14 @@ pub fn git_cli_env(git_url: &str, gh: &Path) -> Vec<(String, String)> {
     ]
 }
 
-/// `git config --global user.name/email`, when both are set.
-async fn global_git_identity() -> Option<Identity> {
-    async fn get(key: &str) -> Option<String> {
+/// `git config --global user.name/email`, when both are set. `global` overrides the
+/// global config file (tests); `None` uses the real one.
+async fn global_git_identity(global: Option<&Path>) -> Option<Identity> {
+    async fn get(key: &str, global: Option<&Path>) -> Option<String> {
         let mut cmd = tokio::process::Command::new("git");
+        if let Some(g) = global {
+            cmd.env("GIT_CONFIG_GLOBAL", g);
+        }
         cmd.args(["config", "--global", "--get", key])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -803,8 +860,8 @@ async fn global_git_identity() -> Option<Identity> {
         (out.status.success() && !v.is_empty()).then_some(v)
     }
     Some(Identity {
-        name: get("user.name").await?,
-        email: get("user.email").await?,
+        name: get("user.name", global).await?,
+        email: get("user.email", global).await?,
     })
 }
 
@@ -918,6 +975,70 @@ mod tests {
         assert!(env
             .iter()
             .any(|(_, v)| v == "!'/a b/gh' auth git-credential"));
+    }
+
+    fn write_gh(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join("gh");
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    const OK_GH: &str = r#"printf '%s' '{"login":"ada","id":42,"name":"Ada","avatar_url":"a"}'"#;
+
+    async fn expire(auth: &GithubAuth) {
+        auth.cli.lock().await.as_mut().unwrap().expires = Instant::now();
+    }
+
+    #[tokio::test]
+    async fn a_transient_gh_failure_keeps_the_last_login_but_a_logout_clears_it() {
+        let dir = tmp_dir("stale");
+        let gh = write_gh(&dir, OK_GH);
+        let cfg = GithubConfig {
+            gh_path: gh.clone(),
+            git_global_config: Some(dir.join("none")),
+            ..GithubConfig::default()
+        };
+        let auth = GithubAuth::open(cfg, &dir);
+        assert_eq!(auth.status().await.user.unwrap().login, "ada");
+        let before = auth.identity().await;
+
+        // Network error, exit 1: still signed in, identity unchanged.
+        write_gh(&dir, "echo 'dial tcp: i/o timeout' >&2; exit 1");
+        expire(&auth).await;
+        let st = auth.status().await;
+        assert_eq!(st.user.unwrap().login, "ada");
+        assert_eq!(st.source, Some("cli"));
+        assert_eq!(auth.identity().await, before);
+        // ...and it is retried soon, not after a minute.
+        let left = auth.cli.lock().await.as_ref().unwrap().expires - Instant::now();
+        assert!(left <= CLI_STALE_RETRY);
+
+        // Exit 4: logged out.
+        write_gh(
+            &dir,
+            "echo 'To get started, run: gh auth login' >&2; exit 4",
+        );
+        expire(&auth).await;
+        assert!(auth.status().await.user.is_none());
+        assert_eq!(auth.identity().await, Identity::workbench());
+        let left = auth.cli.lock().await.as_ref().unwrap().expires - Instant::now();
+        assert!(left <= CLI_RETRY);
+    }
+
+    #[tokio::test]
+    async fn a_failing_gh_without_a_previous_login_is_signed_out_and_rechecked_soon() {
+        let dir = tmp_dir("nofirst");
+        let gh = write_gh(&dir, "exit 1");
+        let cfg = GithubConfig {
+            gh_path: gh,
+            ..GithubConfig::default()
+        };
+        let auth = GithubAuth::open(cfg, &dir);
+        assert!(auth.status().await.user.is_none());
+        let left = auth.cli.lock().await.as_ref().unwrap().expires - Instant::now();
+        assert!(left <= CLI_RETRY);
     }
 
     fn tmp_dir(tag: &str) -> PathBuf {

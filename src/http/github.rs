@@ -5,14 +5,20 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::git::Identity;
 use crate::github::{DeviceStart, PollOutcome, Status};
 use crate::state::AppState;
 
-/// Make every project's commits authored as `identity`, and remember that.
-async fn apply(state: &AppState, identity: &Identity) {
-    state.github.note_applied(identity).await;
-    state.projects.apply_identity(identity).await;
+/// Make every project's commits authored as the current identity, unless they already are.
+/// The applied-identity lock is held across the read and the write, so concurrent
+/// sign-in, sign-out and status calls cannot leave the projects on a stale identity.
+pub async fn apply_current(state: &AppState) {
+    let mut applied = state.github.applied_guard().await;
+    let current = state.github.identity().await;
+    if applied.as_ref() == Some(&current) {
+        return;
+    }
+    state.projects.apply_identity(&current).await;
+    *applied = Some(current);
 }
 
 /// `GET /api/github/status` → `{ configured, deviceFlow, source, user | null }`. If the
@@ -20,9 +26,7 @@ async fn apply(state: &AppState, identity: &Identity) {
 /// new identity.
 pub async fn status(State(state): State<AppState>) -> Json<Status> {
     let status = state.github.status().await;
-    if let Some(identity) = state.github.identity_change().await {
-        state.projects.apply_identity(&identity).await;
-    }
+    apply_current(&state).await;
     Json(status)
 }
 
@@ -35,14 +39,8 @@ pub async fn device_start(State(state): State<AppState>) -> Result<Json<DeviceSt
 /// project's future commits are authored by the new user.
 pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutcome>, ApiError> {
     let outcome = state.github.poll_device().await?;
-    if let PollOutcome::SignedIn { user } = &outcome {
-        let applied = user.identity();
-        apply(&state, &applied).await;
-        // A sign-out may have raced in; make the projects match the current session.
-        let current = state.github.identity().await;
-        if current != applied {
-            apply(&state, &current).await;
-        }
+    if matches!(outcome, PollOutcome::SignedIn { .. }) {
+        apply_current(&state).await;
     }
     Ok(Json(outcome))
 }
@@ -50,13 +48,7 @@ pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutco
 /// `POST /api/github/signout`. Projects go back to the `Workbench` identity.
 pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
     state.github.sign_out().await;
-    let applied = Identity::workbench();
-    apply(&state, &applied).await;
-    // A sign-in may have raced in; make the projects match the current session.
-    let current = state.github.identity().await;
-    if current != applied {
-        apply(&state, &current).await;
-    }
+    apply_current(&state).await;
     Json(json!({ "signedOut": true }))
 }
 
@@ -64,13 +56,8 @@ pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
 pub async fn repos(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let (result, cleared) = state.github.repos_checked().await;
     if cleared {
-        // This call dropped an expired session; projects revert to `Workbench`.
-        let applied = Identity::workbench();
-        apply(&state, &applied).await;
-        let current = state.github.identity().await;
-        if current != applied {
-            apply(&state, &current).await;
-        }
+        // This call dropped an expired session: projects follow the identity that remains.
+        apply_current(&state).await;
     }
     Ok(Json(json!({ "repos": result? })))
 }

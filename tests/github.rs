@@ -155,6 +155,7 @@ fn config(projects: &Path, base: &str, git_root: &Path) -> Config {
             web_url: base.into(),
             git_url: format!("file://{}", git_root.display()),
             gh_path: no_gh(),
+            git_global_config: None,
         },
         ..Default::default()
     }
@@ -204,6 +205,8 @@ fn cli_config(projects: &Path, git_root: &Path, gh: &Path) -> Config {
             web_url: "http://127.0.0.1:1".into(),
             git_url: format!("file://{}", git_root.display()),
             gh_path: gh.to_path_buf(),
+            // Never the real global git config; tests that need one set their own.
+            git_global_config: Some(git_root.join("no-such-gitconfig")),
         },
         ..Default::default()
     }
@@ -460,15 +463,8 @@ async fn project_named_clone_can_still_be_deleted() {
     assert_eq!(s, StatusCode::OK);
 }
 
-/// Tests that point `GIT_CONFIG_GLOBAL` somewhere take turns.
-async fn lock_global_git_env() -> tokio::sync::MutexGuard<'static, ()> {
-    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    LOCK.lock().await
-}
-
 #[tokio::test]
 async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
-    let _g = lock_global_git_env().await;
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
     let git_root = tmp.path().join("git");
@@ -480,11 +476,9 @@ async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
         "[user]\n\tname = Ada Global\n\temail = ada@example.com\n",
     )
     .unwrap();
-    std::env::set_var("GIT_CONFIG_GLOBAL", &global);
-    let app = http::router(AppState::with_scaffold_install(
-        cli_config(&projects, &git_root, &gh),
-        false,
-    ));
+    let mut cfg = cli_config(&projects, &git_root, &gh);
+    cfg.github.git_global_config = Some(global);
+    let app = http::router(AppState::with_scaffold_install(cfg, false));
 
     let (_, body) = call(&app, req("GET", "/api/github/status", None)).await;
     assert_eq!(
@@ -513,10 +507,11 @@ async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
         ),
     )
     .await;
-    std::env::remove_var("GIT_CONFIG_GLOBAL");
     assert_eq!(s, StatusCode::CREATED, "{info}");
     let dir = projects.join("site");
     assert!(dir.join("package.json").exists());
+    // file:// never invokes credential helpers, so the `gh auth git-credential` helper path
+    // was verified manually (see git_cli_env's unit test for the exact config).
     // Authored as the machine's own git identity.
     assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Ada Global");
     assert_eq!(
@@ -532,24 +527,20 @@ async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
 
 #[tokio::test]
 async fn cli_identity_falls_back_to_the_noreply_address_without_a_global_git_identity() {
-    let _g = lock_global_git_env().await;
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
     let git_root = tmp.path().join("git");
     let gh = fake_gh(&tmp.path().join("bin"), true);
     let global = tmp.path().join("gitconfig");
     std::fs::write(&global, "").unwrap();
-    std::env::set_var("GIT_CONFIG_GLOBAL", &global);
-    let app = http::router(AppState::with_scaffold_install(
-        cli_config(&projects, &git_root, &gh),
-        false,
-    ));
+    let mut cfg = cli_config(&projects, &git_root, &gh);
+    cfg.github.git_global_config = Some(global);
+    let app = http::router(AppState::with_scaffold_install(cfg, false));
     let (s, made) = call(
         &app,
         req("POST", "/api/projects", Some(json!({ "name": "Fresh" }))),
     )
     .await;
-    std::env::remove_var("GIT_CONFIG_GLOBAL");
     assert_eq!(s, StatusCode::CREATED, "{made}");
     let fresh = projects.join(made["id"].as_str().unwrap());
     assert_eq!(
@@ -662,13 +653,11 @@ async fn oauth_session_takes_priority_over_the_cli() {
 
 #[tokio::test]
 async fn status_applies_the_cli_identity_to_existing_projects() {
-    let _g = lock_global_git_env().await;
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
     let gh = fake_gh(&tmp.path().join("bin"), true);
     let global = tmp.path().join("gitconfig");
     std::fs::write(&global, "").unwrap();
-    std::env::set_var("GIT_CONFIG_GLOBAL", &global);
     // The project is made while gh is missing (Workbench identity), then gh appears.
     let app_no_gh = http::router(AppState::with_scaffold_install(
         cli_config(&projects, &tmp.path().join("git"), &no_gh()),
@@ -684,12 +673,10 @@ async fn status_applies_the_cli_identity_to_existing_projects() {
         git(&fresh, &["config", "--local", "user.name"]),
         "Workbench"
     );
-    let app = http::router(AppState::with_scaffold_install(
-        cli_config(&projects, &tmp.path().join("git"), &gh),
-        false,
-    ));
+    let mut cfg = cli_config(&projects, &tmp.path().join("git"), &gh);
+    cfg.github.git_global_config = Some(global);
+    let app = http::router(AppState::with_scaffold_install(cfg, false));
     call(&app, req("GET", "/api/github/status", None)).await;
-    std::env::remove_var("GIT_CONFIG_GLOBAL");
     assert_eq!(
         git(&fresh, &["config", "--local", "user.name"]),
         "Ada Lovelace"
