@@ -98,7 +98,6 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
         .expect("checkpoint");
     assert_eq!(cp.summary, "Update hero");
     assert_eq!(cp.author, "Workbench");
-
     assert_eq!(cp.sha, git_cli(&dir, &["rev-parse", "HEAD"]));
     assert_ne!(cp.sha, base);
     assert_eq!(git_cli(&dir, &["rev-list", "--count", "HEAD"]), "2");

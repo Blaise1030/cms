@@ -66,8 +66,9 @@ fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     map.entry(dir.to_path_buf()).or_default().clone()
 }
 
-/// Run git in `dir`, returning stdout. Commit identity comes from the repo's local config. Hooks are disabled: the tree is agent-authored and
-/// we never want it to execute code on our behalf.
+/// Run git in `dir`, returning stdout. Commit identity comes from the repo's local config.
+/// Hooks are disabled: the tree is agent-authored and we never want it to execute code on our
+/// behalf.
 async fn run(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
     let out = Command::new("git")
         .args([
