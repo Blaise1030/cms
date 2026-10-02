@@ -20,7 +20,7 @@ Roadmap and assumptions: `docs/superpowers/plans/2026-10-02-multi-writer-roadmap
 | `src/http/github.rs` (new) | `/api/github/*` handlers |
 | `src/git.rs` | `Identity`, `set_identity`, `has_identity`; `run()` stops forcing an identity |
 | `src/projects.rs` | `Source` (template / clone), `create_from`, `repo` field, `apply_identity`, `ensure_identities` |
-| `src/http/projects.rs` | `POST /api/projects/clone`; `create` uses the signed-in identity |
+| `src/http/projects.rs` | `POST /api/github/clone`; `create` uses the signed-in identity |
 | `src/config.rs`, `src/main.rs` | `GithubConfig`, `--github-client-id` / `WORKBENCH_GITHUB_CLIENT_ID` |
 | `src/error.rs` | `GITHUB_ERR` code |
 | `src/state.rs`, `src/lib.rs` | `AppState.github`; identity migration at startup |
@@ -1241,7 +1241,7 @@ async fn sign_in_open_repo_and_author_commits() {
     assert_eq!(body, json!({ "configured": true, "user": null }));
 
     // Opening a repo needs a session.
-    let (s, body) = call(&app, req("POST", "/api/projects/clone", Some(json!({ "repo": "acme/site" })))).await;
+    let (s, body) = call(&app, req("POST", "/api/github/clone", Some(json!({ "repo": "acme/site" })))).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "GITHUB_ERR");
 
@@ -1266,7 +1266,7 @@ async fn sign_in_open_repo_and_author_commits() {
         "fullName": "acme/site", "private": true, "defaultBranch": "main", "canPush": true
     }]));
 
-    let (s, info) = call(&app, req("POST", "/api/projects/clone", Some(json!({ "repo": "acme/site" })))).await;
+    let (s, info) = call(&app, req("POST", "/api/github/clone", Some(json!({ "repo": "acme/site" })))).await;
     assert_eq!(s, StatusCode::CREATED, "{info}");
     assert_eq!(info["id"], "site");
     assert_eq!(info["repo"], "acme/site");
@@ -1386,7 +1386,7 @@ pub async fn repos(State(state): State<AppState>) -> Result<Json<Value>, ApiErro
 In `src/http/mod.rs` add `pub mod github;` and these routes next to `/api/projects`:
 
 ```rust
-        .route("/api/projects/clone", post(projects::clone))
+        .route("/api/github/clone", post(projects::clone))
         .route("/api/github/status", get(github::status))
         .route("/api/github/device", post(github::device_start))
         .route("/api/github/device/poll", post(github::device_poll))
@@ -1394,7 +1394,7 @@ In `src/http/mod.rs` add `pub mod github;` and these routes next to `/api/projec
         .route("/api/github/repos", get(github::repos))
 ```
 
-(`/api/projects/clone` must be registered so it doesn't collide with `/api/projects/{id}`; axum prefers the static segment.)
+(Clone lives under `/api/github/` on purpose: a static `/api/projects/clone` would shadow `DELETE`/`PATCH /api/projects/{id}` for a project whose id is `clone`, because axum 0.8 matches the path before the method.)
 
 - [ ] **Step 5: Project handlers**
 
@@ -1425,7 +1425,7 @@ struct CloneRequest {
     name: Option<String>,
 }
 
-/// `POST /api/projects/clone` `{ repo: "owner/name", name? }` → the new project (201).
+/// `POST /api/github/clone` `{ repo: "owner/name", name? }` → the new project (201).
 pub async fn clone(
     State(state): State<AppState>,
     body: Bytes,
@@ -1544,7 +1544,7 @@ In `web/src/core/api.ts` import the new types and add to the object `createApi` 
 
 ```ts
     cloneProject: (repo: string, name?: string) =>
-      json<Project>("POST", "/api/projects/clone", { body: name ? { repo, name } : { repo } }),
+      json<Project>("POST", "/api/github/clone", { body: name ? { repo, name } : { repo } }),
     githubStatus: () => json<GithubStatus>("GET", "/api/github/status"),
     githubDeviceStart: () => json<DeviceStart>("POST", "/api/github/device"),
     githubDevicePoll: () => json<DevicePoll>("POST", "/api/github/device/poll"),
