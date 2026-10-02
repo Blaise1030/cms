@@ -6,6 +6,7 @@ pub mod devserver;
 pub mod error;
 pub mod events;
 pub mod files;
+pub mod github;
 pub mod health;
 pub mod projects;
 
@@ -28,6 +29,12 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
         .route("/api/projects", get(projects::list).post(projects::create))
+        .route("/api/projects/clone", post(projects::clone))
+        .route("/api/github/status", get(github::status))
+        .route("/api/github/device", post(github::device_start))
+        .route("/api/github/device/poll", post(github::device_poll))
+        .route("/api/github/signout", post(github::sign_out))
+        .route("/api/github/repos", get(github::repos))
         .route(
             "/api/projects/{id}",
             delete(projects::remove).patch(projects::update),

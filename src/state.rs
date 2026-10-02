@@ -6,6 +6,7 @@ use crate::acp::AgentManager;
 use crate::config::Config;
 use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
+use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::ProjectRegistry;
 use crate::watch::WatchManager;
@@ -22,6 +23,8 @@ pub struct AppState {
     pub devservers: Arc<DevServerManager>,
     /// `fs.change` watcher per project.
     pub watchers: Arc<WatchManager>,
+    /// GitHub session (device-flow sign-in) and API access.
+    pub github: Arc<GithubAuth>,
     /// HTTP client for the `/preview/{id}/*` reverse proxy.
     pub preview: UpstreamClient,
 }
@@ -66,6 +69,10 @@ impl AppState {
     /// Full control over scaffolding and dev-server supervision (tests).
     pub fn with_options(config: Config, install: bool, devserver: DevServerOptions) -> Self {
         let projects = ProjectRegistry::open(config.projects_dir.clone(), install);
+        let github = Arc::new(GithubAuth::open(
+            config.github.clone(),
+            &config.projects_dir.join(crate::projects::STATE_DIR),
+        ));
         let config = Arc::new(config);
         let projects = Arc::new(projects);
         let events = EventBus::new();
@@ -87,6 +94,7 @@ impl AppState {
             agents,
             devservers,
             watchers,
+            github,
             preview: preview::new_client(),
         }
     }

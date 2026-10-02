@@ -8,7 +8,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::projects::ProjectInfo;
+use crate::git::Identity;
+use crate::github;
+use crate::projects::{ProjectInfo, Source};
 use crate::state::AppState;
 
 pub async fn list(State(state): State<AppState>) -> Json<Value> {
@@ -28,19 +30,86 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<ProjectInfo>), ApiError> {
     let req: CreateRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{\"name\": string}}: {e}")))?;
-    let mut info = state.projects.create(&req.name).await?;
+    let identity = state.github.identity().await;
+    let info = create_detached(&state, req.name, Source::Template, identity.clone()).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(started(&state, info, &identity).await),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CloneRequest {
+    repo: String,
+    name: Option<String>,
+}
+
+/// `POST /api/projects/clone` `{ repo: "owner/name", name? }` → the new project (201).
+pub async fn clone(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<ProjectInfo>), ApiError> {
+    let req: CloneRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"repo\": \"owner/name\", \"name\"?: string}}: {e}"
+        ))
+    })?;
+    let repo = github::validate_repo(&req.repo)?;
+    let env = state.github.git_env().await?;
+    let name = req
+        .name
+        .unwrap_or_else(|| repo.rsplit('/').next().unwrap_or(&repo).to_string());
+    let source = Source::Clone {
+        url: state.github.clone_url(&repo),
+        repo,
+        env,
+    };
+    let identity = state.github.identity().await;
+    let info = create_detached(&state, name, source, identity.clone()).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(started(&state, info, &identity).await),
+    ))
+}
+
+/// Run `create_from` on its own task: axum drops the handler future when the client
+/// disconnects, which would abort a clone midway and leak the reserved id/port and a
+/// half-filled directory. Spawned, creation always runs to completion and cleans up.
+async fn create_detached(
+    state: &AppState,
+    name: String,
+    source: Source,
+    identity: Identity,
+) -> Result<ProjectInfo, ApiError> {
+    let projects = state.projects.clone();
+    tokio::spawn(async move { projects.create_from(&name, source, &identity).await })
+        .await
+        .map_err(|e| ApiError::io(format!("project creation task failed: {e}")))?
+}
+
+/// Watch a freshly created project and supervise its dev server; return its current info.
+/// `used` is the identity the project was created with: if the user signed in or out while
+/// scaffolding, `apply_identity` missed this project, so bring it up to date here.
+async fn started(state: &AppState, info: ProjectInfo, used: &Identity) -> ProjectInfo {
+    let current = state.github.identity().await;
+    if current != *used {
+        if let Some(p) = state.projects.get(&info.id).await {
+            if let Err(e) = crate::git::set_identity(&p.dir, &current).await {
+                eprintln!("workbench: cannot update identity for {}: {e}", info.id);
+            }
+        }
+    }
     state.watch_project(&info.id).await;
-    // Scaffold done: supervise `npm run dev`. A failure here (no usable port) leaves the
-    // project created but `crashed`; the restart endpoint retries.
     // `start` marks the project `crashed` (and publishes it) if it cannot supervise, so
-    // the response below reflects the real state either way.
+    // the response reflects the real state either way; the restart endpoint retries.
     if let Err(e) = state.devservers.start(&info.id).await {
         eprintln!("workbench: cannot start dev server for {}: {e}", info.id);
     }
-    if let Some(p) = state.projects.get(&info.id).await {
-        info = ProjectInfo::from(&p);
+    match state.projects.get(&info.id).await {
+        Some(p) => ProjectInfo::from(&p),
+        None => info,
     }
-    Ok((StatusCode::CREATED, Json(info)))
 }
 
 #[derive(Deserialize)]
