@@ -17,6 +17,7 @@ const p = (id: string, devserver: Project["devserver"]): Project => ({
   port: 4000,
   devserver,
   autoApprove: false,
+  repo: null,
 });
 
 let api: Record<string, ReturnType<typeof vi.fn>>;

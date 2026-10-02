@@ -575,3 +575,82 @@ async fn startup_repairs_a_half_written_identity() {
         "workbench@localhost"
     );
 }
+
+#[tokio::test]
+async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
+    use workbench::git::Identity;
+    use workbench::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-b", "main"]);
+    std::fs::write(src.join("package.json"), "{}").unwrap();
+    git(&src, &["add", "-A"]);
+    git(
+        &src,
+        &[
+            "-c",
+            "user.name=Grace",
+            "-c",
+            "user.email=g@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    let bare = tmp.path().join("git/acme/site.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "--bare",
+            src.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+
+    let projects_dir = tmp.path().join("projects");
+    let state = AppState::with_scaffold_install(config(&projects_dir, true), false);
+    let info = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", bare.display()),
+                env: vec![],
+            },
+            &Identity {
+                name: "Ada".into(),
+                email: "ada@example.com".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(info.repo.as_deref(), Some("acme/site"));
+
+    let dir = projects_dir.join(&info.id);
+    assert!(dir.join("package.json").exists());
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Ada");
+    assert_eq!(git(&dir, &["log", "-1", "--format=%an"]), "Grace");
+    assert!(git(&dir, &["remote", "get-url", "origin"]).ends_with("acme/site.git"));
+
+    // Persisted across a registry reopen.
+    let reopened = AppState::with_scaffold_install(config(&projects_dir, true), false);
+    let p = reopened.projects.get(&info.id).await.unwrap();
+    assert_eq!(p.repo.as_deref(), Some("acme/site"));
+
+    // Template projects serialize `repo: null`.
+    state.projects.create("Other").await.unwrap();
+    let (status, body) = call(&app(&projects_dir), req("GET", "/api/projects", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let other = body["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Other")
+        .unwrap();
+    assert!(other.get("repo").is_some_and(Value::is_null), "{other}");
+}

@@ -15,6 +15,7 @@ const project = (id: string, over: Partial<Project> = {}): Project => ({
   port: 4000,
   devserver: "ready",
   autoApprove: false,
+  repo: null,
   ...over,
 });
 

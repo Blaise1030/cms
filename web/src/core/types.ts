@@ -35,6 +35,8 @@ export interface Project {
   port: number;
   devserver: DevserverState;
   autoApprove: boolean;
+  /** `owner/name` when opened from GitHub; null for template projects. */
+  repo: string | null;
 }
 
 export interface Provider {

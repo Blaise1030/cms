@@ -48,6 +48,18 @@ impl DevserverStatus {
     }
 }
 
+/// Where a new project's files come from.
+pub enum Source {
+    /// The embedded astro-marketing template, committed as the first checkpoint.
+    Template,
+    /// `git clone` of `url`; `env` authenticates git (see [`crate::github::git_auth_env`]).
+    Clone {
+        repo: String,
+        url: String,
+        env: Vec<(String, String)>,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     pub id: String,
@@ -57,9 +69,11 @@ pub struct Project {
     pub devserver: DevserverStatus,
     /// Agent auto-approve toggle: skip permission prompts for this project.
     pub auto_approve: bool,
+    /// `owner/name` when the project was opened from GitHub.
+    pub repo: Option<String>,
 }
 
-/// API view of a project: `{ id, name, port, devserver, autoApprove }`.
+/// API view of a project: `{ id, name, port, devserver, autoApprove, repo }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
@@ -68,6 +82,8 @@ pub struct ProjectInfo {
     pub port: u16,
     pub devserver: DevserverStatus,
     pub auto_approve: bool,
+    /// `owner/name` for GitHub projects, null for template projects.
+    pub repo: Option<String>,
 }
 
 impl From<&Project> for ProjectInfo {
@@ -78,6 +94,7 @@ impl From<&Project> for ProjectInfo {
             port: p.port,
             devserver: p.devserver,
             auto_approve: p.auto_approve,
+            repo: p.repo.clone(),
         }
     }
 }
@@ -91,6 +108,8 @@ struct StoredProject {
     port: u16,
     #[serde(default, rename = "autoApprove")]
     auto_approve: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    repo: Option<String>,
 }
 
 #[derive(Default)]
@@ -166,6 +185,7 @@ impl ProjectRegistry {
                 port: s.port,
                 devserver: DevserverStatus::Starting,
                 auto_approve: s.auto_approve,
+                repo: s.repo,
             })
             .filter(|p| p.dir.is_dir())
             .collect();
@@ -308,8 +328,19 @@ impl ProjectRegistry {
         Ok(ProjectInfo::from(&inner.projects[idx]))
     }
 
-    /// Scaffold a new project from the embedded template.
+    /// New project from the template, authored as [`Identity::workbench`] (tests, defaults).
     pub async fn create(&self, name: &str) -> Result<ProjectInfo, ApiError> {
+        self.create_from(name, Source::Template, &Identity::workbench())
+            .await
+    }
+
+    /// Create a project from `source`; the id always derives from `slugify(name)`.
+    pub async fn create_from(
+        &self,
+        name: &str,
+        source: Source,
+        identity: &Identity,
+    ) -> Result<ProjectInfo, ApiError> {
         self.check_writable()?;
         let name = validate_name(name)?;
         let slug = slugify(&name);
@@ -345,7 +376,11 @@ impl ProjectRegistry {
         };
 
         let dir = self.projects_dir.join(&id);
-        let built = self.scaffold(&dir, &Identity::workbench()).await;
+        let repo = match &source {
+            Source::Clone { repo, .. } => Some(repo.clone()),
+            Source::Template => None,
+        };
+        let built = self.scaffold(&dir, &source, identity).await;
 
         let mut inner = self.inner.lock().await;
         inner.reserved_ids.remove(&id);
@@ -362,6 +397,7 @@ impl ProjectRegistry {
             port,
             devserver: DevserverStatus::Starting,
             auto_approve: false,
+            repo,
         };
         let info = ProjectInfo::from(&project);
         inner.projects.push(project);
@@ -472,7 +508,12 @@ impl ProjectRegistry {
         Ok(())
     }
 
-    async fn scaffold(&self, dir: &Path, identity: &Identity) -> Result<(), ApiError> {
+    async fn scaffold(
+        &self,
+        dir: &Path,
+        source: &Source,
+        identity: &Identity,
+    ) -> Result<(), ApiError> {
         // `create_dir` (not `_all`) fails if something raced us into existence.
         tokio::fs::create_dir(dir).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -482,27 +523,37 @@ impl ProjectRegistry {
             }
         })?;
 
-        let dest = dir.to_path_buf();
-        tokio::task::spawn_blocking(move || static_files::extract_template(&dest))
-            .await
-            .map_err(|e| ApiError::io(format!("template copy task failed: {e}")))??;
-
-        if self.install {
-            npm_install(dir).await?;
+        match source {
+            Source::Template => {
+                let dest = dir.to_path_buf();
+                tokio::task::spawn_blocking(move || static_files::extract_template(&dest))
+                    .await
+                    .map_err(|e| ApiError::io(format!("template copy task failed: {e}")))??;
+                if self.install {
+                    npm_install(dir).await?;
+                }
+                git(dir, &["init", "-b", "main"]).await?;
+                crate::git::set_identity(dir, identity).await?;
+                git(dir, &["add", "-A"]).await?;
+                git(
+                    dir,
+                    &[
+                        "commit",
+                        "-m",
+                        "Initial commit from astro-marketing template",
+                    ],
+                )
+                .await?;
+            }
+            Source::Clone { url, env, .. } => {
+                // Into the (empty) directory we just created.
+                git_env(dir, &["clone", "--", url, "."], env).await?;
+                crate::git::set_identity(dir, identity).await?;
+                if self.install {
+                    npm_install(dir).await?;
+                }
+            }
         }
-
-        git(dir, &["init", "-b", "main"]).await?;
-        crate::git::set_identity(dir, identity).await?;
-        git(dir, &["add", "-A"]).await?;
-        git(
-            dir,
-            &[
-                "commit",
-                "-m",
-                "Initial commit from astro-marketing template",
-            ],
-        )
-        .await?;
         Ok(())
     }
 
@@ -514,6 +565,7 @@ impl ProjectRegistry {
                 name: p.name.clone(),
                 port: p.port,
                 auto_approve: p.auto_approve,
+                repo: p.repo.clone(),
             })
             .collect();
         let state_dir = self.projects_dir.join(STATE_DIR);
@@ -653,9 +705,15 @@ async fn npm_install(dir: &Path) -> Result<(), ApiError> {
 
 /// Run git in `dir` (identity comes from the repo's local config).
 async fn git(dir: &Path, args: &[&str]) -> Result<(), ApiError> {
+    git_env(dir, args, &[]).await
+}
+
+/// [`git`] with extra environment (e.g. GitHub auth for `clone`).
+async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<(), ApiError> {
     let out = Command::new("git")
         .args(["-c", "commit.gpgsign=false"])
         .args(args)
+        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(dir)
         .stdin(std::process::Stdio::null())
         .output()
