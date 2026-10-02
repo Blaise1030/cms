@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { Plus, Trash2 } from "@lucide/vue";
+import { FolderGit2, Plus, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -18,14 +18,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
+import { useGithubStore } from "@/modules/github/store";
 import NewProjectDialog from "./NewProjectDialog.vue";
+import OpenRepoDialog from "./OpenRepoDialog.vue";
 import { STATUS_LABEL, STATUS_TONE } from "./status";
 import { useProjectsStore } from "./store";
 
 const emit = defineEmits<{ open: [id: string]; deleted: [id: string] }>();
 const store = useProjectsStore();
+const gh = useGithubStore();
 
 const showNew = ref(false);
+const showOpen = ref(false);
 const pendingDelete = ref<Project | null>(null);
 const deleting = ref(false);
 
@@ -63,7 +67,12 @@ function open(id: string) {
           <h1 class="text-lg font-semibold">Projects</h1>
           <p class="text-muted-foreground text-sm">Pick a site to keep building, or start a new one.</p>
         </div>
-        <Button @click="showNew = true"><Plus /> New project</Button>
+        <div class="flex gap-2">
+          <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
+            <FolderGit2 /> Open from GitHub
+          </Button>
+          <Button @click="showNew = true"><Plus /> New project</Button>
+        </div>
       </div>
 
       <p v-if="store.error" class="text-destructive text-sm" role="alert">
@@ -113,6 +122,7 @@ function open(id: string) {
   </ScrollArea>
 
   <NewProjectDialog v-model:open="showNew" />
+  <OpenRepoDialog v-model:open="showOpen" />
 
   <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
     <AlertDialogContent>
