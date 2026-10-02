@@ -33,14 +33,17 @@ impl Identity {
 
 /// Make `identity` the author of future commits in `dir` (agent commits included).
 pub async fn set_identity(dir: &Path, identity: &Identity) -> Result<(), ApiError> {
+    let lock = lock_for(dir);
+    let _guard = lock.lock().await;
     run(dir, &["config", "--local", "user.name", &identity.name]).await?;
     run(dir, &["config", "--local", "user.email", &identity.email]).await?;
     Ok(())
 }
 
-/// Whether `dir` has a repo-local author name.
+/// Whether `dir` has both a repo-local author name and email.
 pub async fn has_identity(dir: &Path) -> bool {
     run(dir, &["config", "--local", "user.name"]).await.is_ok()
+        && run(dir, &["config", "--local", "user.email"]).await.is_ok()
 }
 
 const CHECKPOINT_PREFIX: &str = "checkpoint: ";

@@ -525,6 +525,7 @@ async fn new_projects_carry_a_local_identity_and_it_can_be_replaced() {
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
     assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["log", "-1", "--format=%an"]), "Workbench");
 
     let ada = workbench::git::Identity {
         name: "Ada Lovelace".into(),
@@ -555,4 +556,22 @@ async fn startup_gives_older_projects_a_local_identity() {
         .ensure_identities(&workbench::git::Identity::workbench())
         .await;
     assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+}
+
+#[tokio::test]
+async fn startup_repairs_a_half_written_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = AppState::with_scaffold_install(config(tmp.path(), true), false);
+    let info = state.projects.create("Site").await.unwrap();
+    let dir = tmp.path().join(&info.id);
+    git(&dir, &["config", "--local", "--unset", "user.email"]);
+
+    state
+        .projects
+        .ensure_identities(&workbench::git::Identity::workbench())
+        .await;
+    assert_eq!(
+        git(&dir, &["config", "--local", "user.email"]),
+        "workbench@localhost"
+    );
 }
