@@ -42,7 +42,7 @@ struct CloneRequest {
     name: Option<String>,
 }
 
-/// `POST /api/projects/clone` `{ repo: "owner/name", name? }` → the new project (201).
+/// `POST /api/github/clone` `{ repo: "owner/name", name? }` → the new project (201).
 pub async fn clone(
     State(state): State<AppState>,
     body: Bytes,

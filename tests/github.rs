@@ -19,6 +19,10 @@ use workbench::http;
 use workbench::state::AppState;
 
 async fn fake_github() -> String {
+    fake_github_with(false).await
+}
+
+async fn fake_github_with(repos_unauthorized: bool) -> String {
     let polls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
@@ -69,11 +73,20 @@ async fn fake_github() -> String {
         )
         .route(
             "/user/repos",
-            get(|| async {
-                Json(json!([{
-                    "full_name": "acme/site", "private": true,
-                    "default_branch": "main", "permissions": { "push": true }
-                }]))
+            get(move || async move {
+                if repos_unauthorized {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "message": "Bad credentials" })),
+                    );
+                }
+                (
+                    StatusCode::OK,
+                    Json(json!([{
+                        "full_name": "acme/site", "private": true,
+                        "default_branch": "main", "permissions": { "push": true }
+                    }])),
+                )
             }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -191,7 +204,7 @@ async fn sign_in_open_repo_and_author_commits() {
         &app,
         req(
             "POST",
-            "/api/projects/clone",
+            "/api/github/clone",
             Some(json!({ "repo": "acme/site" })),
         ),
     )
@@ -227,7 +240,7 @@ async fn sign_in_open_repo_and_author_commits() {
         &app,
         req(
             "POST",
-            "/api/projects/clone",
+            "/api/github/clone",
             Some(json!({ "repo": "../etc" })),
         ),
     )
@@ -239,7 +252,7 @@ async fn sign_in_open_repo_and_author_commits() {
         &app,
         req(
             "POST",
-            "/api/projects/clone",
+            "/api/github/clone",
             Some(json!({ "repo": "acme/site" })),
         ),
     )
@@ -259,9 +272,15 @@ async fn sign_in_open_repo_and_author_commits() {
     );
     assert!(git(&dir, &["remote", "get-url", "origin"]).ends_with("acme/site.git"));
     // The token was only in the environment of the clone.
-    assert!(!std::fs::read_to_string(dir.join(".git/config"))
-        .unwrap()
-        .contains("extraheader"));
+    let cfg = std::fs::read_to_string(dir.join(".git/config")).unwrap();
+    let origin = git(&dir, &["remote", "get-url", "origin"]);
+    assert!(!cfg.contains("extraheader"));
+    for leak in ["eC1hY2Nlc3MtdG9rZW46dG9r", "tok@"] {
+        assert!(
+            !cfg.contains(leak) && !origin.contains(leak),
+            "token leaked: {leak}"
+        );
+    }
 
     // New template projects are authored by the signed-in user too.
     let (_, made) = call(
@@ -302,4 +321,70 @@ async fn sign_in_is_unavailable_without_a_client_id() {
     let (s, body) = call(&app, req("POST", "/api/github/device", None)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "GITHUB_ERR");
+}
+
+#[tokio::test]
+async fn expired_token_signs_out_on_repos() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    let git_root = tmp.path().join("git");
+    let base = fake_github_with(true).await;
+    let app = http::router(AppState::with_scaffold_install(
+        config(&projects, &base, &git_root),
+        false,
+    ));
+    call(&app, req("POST", "/api/github/device", None)).await;
+    call(&app, req("POST", "/api/github/device/poll", None)).await;
+    let (_, body) = call(&app, req("POST", "/api/github/device/poll", None)).await;
+    assert_eq!(body["status"], "signedIn");
+
+    let (s, body) = call(&app, req("GET", "/api/github/repos", None)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "GITHUB_ERR");
+    let (_, body) = call(&app, req("GET", "/api/github/status", None)).await;
+    assert_eq!(body["user"], Value::Null);
+    assert!(!projects.join(".workbench/github.json").exists());
+}
+
+#[tokio::test]
+async fn github_endpoints_require_auth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        projects_dir: tmp.path().to_path_buf(),
+        no_auth: false,
+        token: Some("abc123".into()),
+        ..Default::default()
+    };
+    let app = http::router(AppState::with_scaffold_install(cfg, false));
+    let (s, _) = call(&app, req("GET", "/api/github/status", None)).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let mut r = req("GET", "/api/github/status", None);
+    r.headers_mut()
+        .insert(header::AUTHORIZATION, "Bearer abc123".parse().unwrap());
+    let (s, _) = call(&app, r).await;
+    assert_eq!(s, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn project_named_clone_can_still_be_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        projects_dir: tmp.path().to_path_buf(),
+        no_auth: true,
+        ..Default::default()
+    };
+    let app = http::router(AppState::with_scaffold_install(cfg, false));
+    let (s, made) = call(
+        &app,
+        req("POST", "/api/projects", Some(json!({ "name": "Clone" }))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{made}");
+    assert_eq!(made["id"], "clone");
+    let (s, _) = call(
+        &app,
+        req("DELETE", "/api/projects/clone?confirm=true", None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
 }

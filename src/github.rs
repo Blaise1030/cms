@@ -372,6 +372,13 @@ impl GithubAuth {
             .send()
             .await
             .map_err(unreachable)?;
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Revoked or expired token: forget the session so the UI offers sign-in.
+            self.sign_out().await;
+            return Err(
+                ApiError::github("your GitHub session expired — sign in again").with_status(400),
+            );
+        }
         let repos: Vec<ApiRepo> = parse(res).await?;
         Ok(repos
             .into_iter()

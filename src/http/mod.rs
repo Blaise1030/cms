@@ -29,7 +29,7 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
         .route("/api/projects", get(projects::list).post(projects::create))
-        .route("/api/projects/clone", post(projects::clone))
+        .route("/api/github/clone", post(projects::clone))
         .route("/api/github/status", get(github::status))
         .route("/api/github/device", post(github::device_start))
         .route("/api/github/device/poll", post(github::device_poll))

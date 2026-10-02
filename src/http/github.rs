@@ -24,7 +24,13 @@ pub async fn device_start(State(state): State<AppState>) -> Result<Json<DeviceSt
 pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutcome>, ApiError> {
     let outcome = state.github.poll_device().await?;
     if let PollOutcome::SignedIn { user } = &outcome {
-        state.projects.apply_identity(&user.identity()).await;
+        let applied = user.identity();
+        state.projects.apply_identity(&applied).await;
+        // A sign-out may have raced in; make the projects match the current session.
+        let current = state.github.identity().await;
+        if current != applied {
+            state.projects.apply_identity(&current).await;
+        }
     }
     Ok(Json(outcome))
 }
@@ -32,11 +38,29 @@ pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutco
 /// `POST /api/github/signout`. Projects go back to the `Workbench` identity.
 pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
     state.github.sign_out().await;
-    state.projects.apply_identity(&Identity::workbench()).await;
+    let applied = Identity::workbench();
+    state.projects.apply_identity(&applied).await;
+    // A sign-in may have raced in; make the projects match the current session.
+    let current = state.github.identity().await;
+    if current != applied {
+        state.projects.apply_identity(&current).await;
+    }
     Json(json!({ "signedOut": true }))
 }
 
 /// `GET /api/github/repos` → `{ repos: [{ fullName, private, defaultBranch, canPush }] }`.
 pub async fn repos(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(json!({ "repos": state.github.repos().await? })))
+    match state.github.repos().await {
+        Ok(repos) => Ok(Json(json!({ "repos": repos }))),
+        Err(e) => {
+            // An expired session is cleared by `repos`; projects revert to `Workbench`.
+            if state.github.status().await.user.is_none() {
+                state
+                    .projects
+                    .apply_identity(&state.github.identity().await)
+                    .await;
+            }
+            Err(e)
+        }
+    }
 }
