@@ -1,4 +1,8 @@
-//! GitHub sign-in (OAuth device flow), the signed-in account, and repository access.
+//! GitHub sign-in, the signed-in account, and repository access.
+//!
+//! Two sources, in order: a device-flow session saved by this daemon (`oauth`), else the
+//! machine's GitHub CLI login (`cli`). The CLI token is never read: the daemon only runs
+//! `gh api ...` and lets git call `gh auth git-credential`.
 //!
 //! The session (token + profile) lives in `{projects-dir}/.workbench/github.json`, mode 0600.
 //! The token is sent to the GitHub API as a bearer token and to git per command through
@@ -7,6 +11,7 @@
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -24,6 +29,9 @@ const SESSION_FILE: &str = "github.json";
 const SCOPES: &str = "repo read:user";
 const FORM: &str = "application/x-www-form-urlencoded";
 const GITHUB_JSON: &str = "application/vnd.github+json";
+/// How long a `gh api user` result (success or failure) is reused.
+const CLI_TTL: Duration = Duration::from_secs(60);
+const REPOS_PATH: &str = "/user/repos?per_page=100&sort=pushed";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +63,10 @@ impl GithubUser {
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub configured: bool,
+    /// A client id is configured, so in-app (device flow) sign-in is offered.
+    pub device_flow: bool,
+    /// `"oauth"` (device-flow session) or `"cli"` (GitHub CLI login).
+    pub source: Option<&'static str>,
     pub user: Option<GithubUser>,
 }
 
@@ -85,6 +97,17 @@ pub struct RepoInfo {
     pub private: bool,
     pub default_branch: String,
     pub can_push: bool,
+}
+
+impl From<ApiRepo> for RepoInfo {
+    fn from(r: ApiRepo) -> Self {
+        RepoInfo {
+            full_name: r.full_name,
+            private: r.private,
+            default_branch: r.default_branch,
+            can_push: r.permissions.is_some_and(|p| p.push),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -146,11 +169,29 @@ struct Inner {
     pending: Option<Pending>,
 }
 
+/// What `gh` told us, cached for [`CLI_TTL`].
+#[derive(Clone)]
+struct CliState {
+    at: Instant,
+    user: Option<GithubUser>,
+    /// The machine's global git identity, if both name and email are set.
+    git_identity: Option<Identity>,
+}
+
+struct GhOutput {
+    code: Option<i32>,
+    stdout: Vec<u8>,
+    stderr: String,
+}
+
 pub struct GithubAuth {
     cfg: GithubConfig,
     path: PathBuf,
     http: reqwest::Client,
     inner: Mutex<Inner>,
+    cli: Mutex<Option<CliState>>,
+    /// The identity last written to the projects, to notice changes (see `identity_change`).
+    applied: Mutex<Option<Identity>>,
 }
 
 impl GithubAuth {
@@ -173,20 +214,88 @@ impl GithubAuth {
                 session,
                 pending: None,
             }),
+            cli: Mutex::new(None),
+            applied: Mutex::new(None),
         }
     }
 
     pub async fn status(&self) -> Status {
-        Status {
-            configured: self.cfg.client_id.is_some(),
-            user: self
-                .inner
-                .lock()
-                .await
-                .session
-                .as_ref()
-                .map(|s| s.user.clone()),
+        let device_flow = self.cfg.client_id.is_some();
+        if let Some(s) = self.inner.lock().await.session.as_ref() {
+            return Status {
+                configured: true,
+                device_flow,
+                source: Some("oauth"),
+                user: Some(s.user.clone()),
+            };
         }
+        let user = self.cli_state().await.user;
+        Status {
+            configured: device_flow || user.is_some(),
+            device_flow,
+            source: user.as_ref().map(|_| "cli"),
+            user,
+        }
+    }
+
+    /// The `gh` login (cached for a minute). Runs `gh api user` when the cache is stale.
+    async fn cli_state(&self) -> CliState {
+        let mut cache = self.cli.lock().await;
+        if let Some(c) = cache.as_ref().filter(|c| c.at.elapsed() < CLI_TTL) {
+            return c.clone();
+        }
+        let user = self.fetch_cli_user().await;
+        let git_identity = match user {
+            Some(_) => global_git_identity().await,
+            None => None,
+        };
+        let state = CliState {
+            at: Instant::now(),
+            user,
+            git_identity,
+        };
+        *cache = Some(state.clone());
+        state
+    }
+
+    async fn fetch_cli_user(&self) -> Option<GithubUser> {
+        let out = self.run_gh(&["api", "user"], 10).await.ok()?;
+        if out.code != Some(0) {
+            return None;
+        }
+        let u: ApiUser = serde_json::from_slice(&out.stdout).ok()?;
+        Some(GithubUser {
+            login: u.login,
+            id: u.id,
+            name: u.name,
+            avatar_url: u.avatar_url,
+        })
+    }
+
+    /// Run `gh` without a terminal, with a deadline. Only exit status, stdout and stderr
+    /// come back; callers must not log stdout.
+    async fn run_gh(&self, args: &[&str], secs: u64) -> Result<GhOutput, ApiError> {
+        if self.cfg.gh_path.as_os_str().is_empty() {
+            return Err(ApiError::github("GitHub CLI is not available"));
+        }
+        let mut cmd = tokio::process::Command::new(&self.cfg.gh_path);
+        cmd.args(args)
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let out = match tokio::time::timeout(Duration::from_secs(secs), cmd.output()).await {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => return Err(ApiError::github(format!("GitHub CLI: cannot run gh: {e}"))),
+            Err(_) => return Err(ApiError::github("GitHub CLI: gh timed out")),
+        };
+        Ok(GhOutput {
+            code: out.status.code(),
+            stdout: out.stdout,
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        })
     }
 
     pub async fn token(&self) -> Option<String> {
@@ -198,15 +307,35 @@ impl GithubAuth {
             .map(|s| s.token.clone())
     }
 
-    /// The signed-in person's commit identity, or [`Identity::workbench`].
+    /// The signed-in person's commit identity, or [`Identity::workbench`]. With the GitHub
+    /// CLI it is the machine's global git identity when set, else the GitHub profile.
     pub async fn identity(&self) -> Identity {
-        self.inner
-            .lock()
-            .await
-            .session
-            .as_ref()
-            .map(|s| s.user.identity())
-            .unwrap_or_else(Identity::workbench)
+        if let Some(s) = self.inner.lock().await.session.as_ref() {
+            return s.user.identity();
+        }
+        let cli = self.cli_state().await;
+        match (cli.git_identity, cli.user) {
+            (Some(id), _) => id,
+            (None, Some(u)) => u.identity(),
+            (None, None) => Identity::workbench(),
+        }
+    }
+
+    /// Record that the projects now carry `identity`.
+    pub async fn note_applied(&self, identity: &Identity) {
+        *self.applied.lock().await = Some(identity.clone());
+    }
+
+    /// The current identity if it differs from the one last applied to the projects
+    /// (e.g. `gh` was logged in after the daemon started); marks it applied.
+    pub async fn identity_change(&self) -> Option<Identity> {
+        let current = self.identity().await;
+        let mut applied = self.applied.lock().await;
+        if applied.as_ref() == Some(&current) {
+            return None;
+        }
+        *applied = Some(current.clone());
+        Some(current)
     }
 
     /// `{git_url}/{repo}.git` for a validated `owner/name`.
@@ -216,8 +345,13 @@ impl GithubAuth {
 
     /// Environment that authenticates git to `git_url` with the session token.
     pub async fn git_env(&self) -> Result<Vec<(String, String)>, ApiError> {
-        let token = self.token().await.ok_or_else(not_signed_in)?;
-        Ok(git_auth_env(&self.cfg.git_url, &token))
+        if let Some(token) = self.token().await {
+            return Ok(git_auth_env(&self.cfg.git_url, &token));
+        }
+        if self.cli_state().await.user.is_some() {
+            return Ok(git_cli_env(&self.cfg.git_url, &self.cfg.gh_path));
+        }
+        Err(not_signed_in())
     }
 
     pub async fn start_device(&self) -> Result<DeviceStart, ApiError> {
@@ -379,11 +513,58 @@ impl GithubAuth {
     /// because GitHub rejected its token.
     pub async fn repos_checked(&self) -> (Result<Vec<RepoInfo>, ApiError>, bool) {
         let Some(token) = self.token().await else {
-            return (Err(not_signed_in()), false);
+            return self.cli_repos().await;
         };
         let mut cleared = false;
         let r = self.list_repos(&token, &mut cleared).await;
         (r, cleared)
+    }
+
+    /// Repositories through `gh api`. The flag says the CLI turned out to be logged out.
+    async fn cli_repos(&self) -> (Result<Vec<RepoInfo>, ApiError>, bool) {
+        if self.cli_state().await.user.is_none() {
+            return (Err(not_signed_in()), false);
+        }
+        let out = match self.run_gh(&["api", REPOS_PATH], 30).await {
+            Ok(o) => o,
+            Err(e) => return (Err(e.with_status(502)), false),
+        };
+        if out.code != Some(0) {
+            if out.code == Some(4) || out.stderr.contains("auth login") {
+                *self.cli.lock().await = None;
+                return (
+                    Err(
+                        ApiError::github("GitHub CLI is not logged in — run `gh auth login`")
+                            .with_status(400),
+                    ),
+                    true,
+                );
+            }
+            let tail: String = out
+                .stderr
+                .chars()
+                .rev()
+                .take(300)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            return (
+                Err(ApiError::github(format!("GitHub CLI: {tail}")).with_status(502)),
+                false,
+            );
+        }
+        let repos: Vec<ApiRepo> = match serde_json::from_slice(&out.stdout) {
+            Ok(r) => r,
+            Err(_) => {
+                return (
+                    Err(ApiError::github("unexpected response from the GitHub CLI")
+                        .with_status(502)),
+                    false,
+                )
+            }
+        };
+        (Ok(repos.into_iter().map(RepoInfo::from).collect()), false)
     }
 
     async fn list_repos(&self, token: &str, cleared: &mut bool) -> Result<Vec<RepoInfo>, ApiError> {
@@ -407,15 +588,7 @@ impl GithubAuth {
             );
         }
         let repos: Vec<ApiRepo> = parse(res).await?;
-        Ok(repos
-            .into_iter()
-            .map(|r| RepoInfo {
-                full_name: r.full_name,
-                private: r.private,
-                default_branch: r.default_branch,
-                can_push: r.permissions.is_some_and(|p| p.push),
-            })
-            .collect())
+        Ok(repos.into_iter().map(RepoInfo::from).collect())
     }
 
     async fn fetch_user(&self, token: &str) -> Result<GithubUser, ApiError> {
@@ -585,6 +758,56 @@ pub fn git_auth_env(git_url: &str, token: &str) -> Vec<(String, String)> {
     ]
 }
 
+/// Environment for one git command that gets HTTPS credentials for `git_url` from
+/// `gh auth git-credential`. The token never passes through this process.
+pub fn git_cli_env(git_url: &str, gh: &Path) -> Vec<(String, String)> {
+    let key = format!("credential.{}.helper", git_url.trim_end_matches('/'));
+    let gh = gh.to_string_lossy();
+    let gh = if gh
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"/._-+@:".contains(&b))
+    {
+        gh.into_owned()
+    } else {
+        format!("'{}'", gh.replace('\'', "'\\''"))
+    };
+    vec![
+        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
+        ("GIT_ASKPASS".into(), String::new()),
+        ("GIT_CONFIG_COUNT".into(), "2".into()),
+        // Reset any helpers for this host, then ask gh.
+        ("GIT_CONFIG_KEY_0".into(), key.clone()),
+        ("GIT_CONFIG_VALUE_0".into(), String::new()),
+        ("GIT_CONFIG_KEY_1".into(), key),
+        (
+            "GIT_CONFIG_VALUE_1".into(),
+            format!("!{gh} auth git-credential"),
+        ),
+    ]
+}
+
+/// `git config --global user.name/email`, when both are set.
+async fn global_git_identity() -> Option<Identity> {
+    async fn get(key: &str) -> Option<String> {
+        let mut cmd = tokio::process::Command::new("git");
+        cmd.args(["config", "--global", "--get", key])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let out = tokio::time::timeout(Duration::from_secs(5), cmd.output())
+            .await
+            .ok()?
+            .ok()?;
+        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !v.is_empty()).then_some(v)
+    }
+    Some(Identity {
+        name: get("user.name").await?,
+        email: get("user.email").await?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,11 +885,39 @@ mod tests {
     #[tokio::test]
     async fn opens_without_a_session_and_reports_unconfigured() {
         let dir = std::env::temp_dir().join(format!("wb-gh-{}", std::process::id()));
-        let auth = GithubAuth::open(GithubConfig::default(), &dir);
+        let auth = GithubAuth::open(test_cfg(), &dir);
         let st = auth.status().await;
         assert!(!st.configured);
         assert!(st.user.is_none());
         assert_eq!(auth.identity().await, Identity::workbench());
+    }
+
+    /// Never the real `gh`.
+    fn test_cfg() -> GithubConfig {
+        GithubConfig {
+            gh_path: PathBuf::new(),
+            ..GithubConfig::default()
+        }
+    }
+
+    #[test]
+    fn git_cli_env_asks_gh_for_credentials_for_the_host_only() {
+        let env = git_cli_env("https://github.com/", Path::new("/opt/bin/gh"));
+        let get = |k: &str| env.iter().find(|(a, _)| a == k).map(|(_, b)| b.as_str());
+        assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
+        assert_eq!(get("GIT_CONFIG_COUNT"), Some("2"));
+        let key = "credential.https://github.com.helper";
+        assert_eq!(get("GIT_CONFIG_KEY_0"), Some(key));
+        assert_eq!(get("GIT_CONFIG_VALUE_0"), Some(""));
+        assert_eq!(get("GIT_CONFIG_KEY_1"), Some(key));
+        assert_eq!(
+            get("GIT_CONFIG_VALUE_1"),
+            Some("!/opt/bin/gh auth git-credential")
+        );
+        let env = git_cli_env("https://github.com", Path::new("/a b/gh"));
+        assert!(env
+            .iter()
+            .any(|(_, v)| v == "!'/a b/gh' auth git-credential"));
     }
 
     fn tmp_dir(tag: &str) -> PathBuf {
@@ -702,7 +953,7 @@ mod tests {
     #[tokio::test]
     async fn commit_session_refuses_after_sign_out_or_a_new_flow() {
         let dir = tmp_dir("race");
-        let auth = GithubAuth::open(GithubConfig::default(), &dir);
+        let auth = GithubAuth::open(test_cfg(), &dir);
         let pending = |code: &str| Pending {
             device_code: code.into(),
             expires_at: Instant::now() + Duration::from_secs(60),
@@ -735,7 +986,7 @@ mod tests {
     #[tokio::test]
     async fn sign_out_if_token_only_clears_the_matching_session() {
         let dir = tmp_dir("signout-if");
-        let auth = GithubAuth::open(GithubConfig::default(), &dir);
+        let auth = GithubAuth::open(test_cfg(), &dir);
         auth.inner.lock().await.pending = Some(Pending {
             device_code: "dc".into(),
             expires_at: Instant::now() + Duration::from_secs(60),

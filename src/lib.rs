@@ -36,6 +36,7 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
     let watchers = state.watchers.clone();
     let identity = state.github.identity().await;
     state.projects.ensure_identities(&identity).await;
+    state.github.note_applied(&identity).await;
     state.watch_all().await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;

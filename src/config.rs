@@ -15,6 +15,8 @@ pub struct GithubConfig {
     pub web_url: String,
     /// Base for clone URLs: `{git_url}/{owner}/{repo}.git`.
     pub git_url: String,
+    /// The GitHub CLI binary. An empty path disables the CLI login.
+    pub gh_path: PathBuf,
 }
 
 impl Default for GithubConfig {
@@ -24,11 +26,26 @@ impl Default for GithubConfig {
             api_url: "https://api.github.com".into(),
             web_url: "https://github.com".into(),
             git_url: "https://github.com".into(),
+            gh_path: "gh".into(),
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// Resolve `gh` against `PATH` so git's credential helper gets an absolute path.
+/// A path containing `/` is kept as is; an unresolvable name is returned unchanged.
+pub fn resolve_gh(gh: &std::path::Path) -> PathBuf {
+    if gh.as_os_str().is_empty() || gh.components().count() > 1 || gh.is_absolute() {
+        return gh.to_path_buf();
+    }
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .map(|d| d.join(gh))
+        .find(|c| c.is_file())
+        .unwrap_or_else(|| gh.to_path_buf())
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
     /// Hosted PWA origin allowed via CORS + Host allowlist.
@@ -39,6 +56,25 @@ pub struct Config {
     pub token: Option<String>,
     pub agents_config: Option<PathBuf>,
     pub github: GithubConfig,
+}
+
+/// Tests build configs with `..Default::default()`, so the default must never run the
+/// `gh` installed on the machine: the CLI login is off unless a config enables it.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            port: 0,
+            origin: None,
+            projects_dir: PathBuf::new(),
+            no_auth: false,
+            token: None,
+            agents_config: None,
+            github: GithubConfig {
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+        }
+    }
 }
 
 impl Config {

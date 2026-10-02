@@ -71,6 +71,7 @@ async fn main() -> ExitCode {
         ),
         github: workbench::config::GithubConfig {
             client_id: github_client_id,
+            gh_path: workbench::config::resolve_gh(std::path::Path::new("gh")),
             ..Default::default()
         },
     };
