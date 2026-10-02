@@ -14,11 +14,21 @@ Done once per organisation by an admin.
 Everyone then starts the daemon with the client id:
 
 ```sh
-WORKBENCH_GITHUB_CLIENT_ID=Iv1.xxxxxxxx workbench serve
-# or: workbench serve --github-client-id Iv1.xxxxxxxx
+WORKBENCH_GITHUB_CLIENT_ID=<client-id> workbench serve
+# or: workbench serve --github-client-id <client-id>
 ```
 
 **Sign in with GitHub** appears in the top-right. Workbench asks for the `repo` scope
 (clone and push the site repositories) and `read:user` (your name on commits). The token is
-stored in `~/workbench-projects/.workbench/github.json`, readable only by you; **Sign out**
-deletes it.
+stored in `.workbench/github.json` inside your projects directory (`~/workbench-projects` by
+default), readable only by you. **Sign out** deletes that file; to revoke the token on GitHub
+itself, remove Workbench under github.com → Settings → Applications → Authorized OAuth Apps.
+
+## Known limitations
+
+- **Previews of opened repositories:** the live preview expects the site to accept the
+  workbench's preview base path (`/preview/<id>/`), which the Workbench Astro template does.
+  Other repositories open and can be edited, but their preview may not load until their
+  Astro config reads `PUBLIC_BASE` the same way.
+- Opening a repository runs `npm install`, which executes that repository's install scripts —
+  only open repositories you trust (the same trust you need to run `npm run dev` on them).
