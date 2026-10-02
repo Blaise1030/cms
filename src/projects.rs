@@ -49,6 +49,8 @@ impl DevserverStatus {
 }
 
 /// Where a new project's files come from.
+///
+/// Deliberately has no `Debug` derive: `Clone.env` carries the GitHub token.
 pub enum Source {
     /// The embedded astro-marketing template, committed as the first checkpoint.
     Template,
@@ -547,9 +549,10 @@ impl ProjectRegistry {
             }
             Source::Clone { url, env, .. } => {
                 // Into the (empty) directory we just created.
-                git_env(dir, &["clone", "--", url, "."], env).await?;
+                git_clone(dir, url, env).await?;
                 crate::git::set_identity(dir, identity).await?;
-                if self.install {
+                // Non-Node repos still open; their dev server will just report crashed.
+                if self.install && dir.join("package.json").exists() {
                     npm_install(dir).await?;
                 }
             }
@@ -703,15 +706,30 @@ async fn npm_install(dir: &Path) -> Result<(), ApiError> {
     Ok(())
 }
 
+const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Run git in `dir` (identity comes from the repo's local config).
 async fn git(dir: &Path, args: &[&str]) -> Result<(), ApiError> {
     git_env(dir, args, &[]).await
 }
 
+/// Clone `url` into `dir`, bounded by [`CLONE_TIMEOUT`].
+async fn git_clone(dir: &Path, url: &str, env: &[(String, String)]) -> Result<(), ApiError> {
+    tokio::time::timeout(CLONE_TIMEOUT, git_env(dir, &["clone", "--", url, "."], env))
+        .await
+        .map_err(|_| ApiError::git("git clone timed out"))?
+}
+
 /// [`git`] with extra environment (e.g. GitHub auth for `clone`).
 async fn git_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<(), ApiError> {
     let out = Command::new("git")
-        .args(["-c", "commit.gpgsign=false"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
+        .kill_on_drop(true)
         .args(args)
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(dir)

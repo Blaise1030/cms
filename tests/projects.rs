@@ -654,3 +654,31 @@ async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
         .unwrap();
     assert!(other.get("repo").is_some_and(Value::is_null), "{other}");
 }
+
+#[tokio::test]
+async fn failed_clone_leaves_nothing_behind() {
+    use workbench::git::Identity;
+    use workbench::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let projects_dir = tmp.path().join("projects");
+    let state = AppState::with_scaffold_install(config(&projects_dir, true), false);
+    let err = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/missing".into(),
+                url: format!("file://{}/nope.git", tmp.path().display()),
+                env: vec![],
+            },
+            &Identity::workbench(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code.as_str(), "GIT_ERR");
+    assert!(!projects_dir.join("site").exists());
+    assert!(state.projects.list().await.is_empty());
+    let info = state.projects.create("site").await.unwrap();
+    assert_eq!(info.id, "site");
+}
