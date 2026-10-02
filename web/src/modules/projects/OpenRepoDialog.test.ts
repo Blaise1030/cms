@@ -78,4 +78,19 @@ describe("OpenRepoDialog", () => {
     await flushPromises();
     expect(w.emitted("update:open")?.at(-1)).toEqual([false]);
   });
+
+  it("signed out: offers sign-in only when the device flow is configured", async () => {
+    h.daemon = createFakeDaemon({ githubRepos: vi.fn(async () => repos) } as never);
+    setActivePinia(createPinia());
+    const store = useGithubStore();
+    store.deviceFlow = true;
+    const w = mount(OpenRepoDialog, { props: { open: false }, attachTo: document.body });
+    await w.setProps({ open: true });
+    await flushPromises();
+    expect(document.body.querySelector("[data-testid='open-sign-in']")).not.toBeNull();
+    store.deviceFlow = false;
+    await flushPromises();
+    expect(document.body.querySelector("[data-testid='open-sign-in']")).toBeNull();
+    expect(document.body.textContent).toContain("gh auth login");
+  });
 });

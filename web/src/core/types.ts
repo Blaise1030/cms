@@ -214,8 +214,12 @@ export interface GithubUser {
 }
 
 export interface GithubStatus {
-  /** The daemon was started with a GitHub OAuth client id. */
+  /** Some way to sign in or be signed in exists: a client id, or a logged-in GitHub CLI. */
   configured: boolean;
+  /** The daemon was started with a GitHub OAuth client id (in-app sign-in is offered). */
+  deviceFlow: boolean;
+  /** Where the account comes from: an in-app session or the machine's `gh` login. */
+  source: "oauth" | "cli" | null;
   user: GithubUser | null;
 }
 

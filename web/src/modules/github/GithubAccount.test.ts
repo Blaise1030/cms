@@ -20,7 +20,7 @@ enableAutoUnmount(afterEach);
 
 describe("GithubAccount", () => {
   it("renders nothing when sign-in is not configured", async () => {
-    const w = mountWith({ configured: false, user: null });
+    const w = mountWith({ configured: false, deviceFlow: false, source: null, user: null });
     await flushPromises();
     expect(w.find("[data-testid='github-sign-in']").exists()).toBe(false);
   });
@@ -29,7 +29,7 @@ describe("GithubAccount", () => {
     const start = vi.fn(async () => ({
       userCode: "ABCD-1234", verificationUri: "https://github.com/login/device", expiresIn: 900, interval: 5,
     }));
-    const w = mountWith({ configured: true, user: null }, { githubDeviceStart: start, githubDevicePoll: vi.fn() });
+    const w = mountWith({ configured: true, deviceFlow: true, source: null, user: null }, { githubDeviceStart: start, githubDevicePoll: vi.fn() });
     await flushPromises();
     await w.find("[data-testid='github-sign-in']").trigger("click");
     await flushPromises();
@@ -39,8 +39,35 @@ describe("GithubAccount", () => {
   });
 
   it("shows the signed-in account", async () => {
-    const w = mountWith({ configured: true, user: { login: "ada", id: 1, name: "Ada", avatarUrl: "a.png" } });
+    const w = mountWith({
+      configured: true, deviceFlow: true, source: "oauth",
+      user: { login: "ada", id: 1, name: "Ada", avatarUrl: "a.png" },
+    });
     await flushPromises();
     expect(w.find("[data-testid='github-account']").text()).toContain("Ada");
+    await w.find("[data-testid='github-account']").trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("Sign out");
+  });
+
+  it("shows the GitHub CLI account without a Sign out item", async () => {
+    const w = mountWith({
+      configured: true, deviceFlow: false, source: "cli",
+      user: { login: "ada", id: 1, name: "Ada", avatarUrl: "a.png" },
+    });
+    await flushPromises();
+    const trigger = w.find("[data-testid='github-account']");
+    expect(trigger.text()).toContain("Ada");
+    await trigger.trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("Signed in with GitHub CLI (gh)");
+    expect(document.body.textContent).not.toContain("Sign out");
+  });
+
+  it("offers no sign-in button when only the CLI could sign in and it is logged out", async () => {
+    const w = mountWith({ configured: false, deviceFlow: false, source: null, user: null });
+    await flushPromises();
+    expect(w.find("[data-testid='github-sign-in']").exists()).toBe(false);
+    expect(w.find("[data-testid='github-account']").exists()).toBe(false);
   });
 });

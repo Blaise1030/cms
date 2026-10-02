@@ -47,7 +47,7 @@ async function signOut() {
 </script>
 
 <template>
-  <template v-if="gh.configured">
+  <template v-if="gh.configured || gh.user">
     <DropdownMenu v-if="gh.user">
       <DropdownMenuTrigger as-child>
         <Button variant="ghost" size="sm" class="gap-1.5" data-testid="github-account">
@@ -56,10 +56,13 @@ async function signOut() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem @select="signOut"><LogOut /> Sign out</DropdownMenuItem>
+        <DropdownMenuItem v-if="gh.source === 'cli'" disabled>
+          Signed in with GitHub CLI (gh)
+        </DropdownMenuItem>
+        <DropdownMenuItem v-else @select="signOut"><LogOut /> Sign out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-    <Button v-else variant="outline" size="sm" data-testid="github-sign-in" @click="gh.signIn()">
+    <Button v-else-if="gh.deviceFlow" variant="outline" size="sm" data-testid="github-sign-in" @click="gh.signIn()">
       <LogIn /> Sign in with GitHub
     </Button>
     <DeviceCodeDialog />

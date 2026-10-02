@@ -2,12 +2,14 @@ import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { DeviceStart, GithubRepo, GithubUser } from "@/core/types";
+import type { DeviceStart, GithubRepo, GithubStatus, GithubUser } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 
 export const useGithubStore = defineStore("github", () => {
   const daemon = useDaemon();
   const configured = ref(false);
+  const deviceFlow = ref(false);
+  const source = ref<GithubStatus["source"]>(null);
   const user = ref<GithubUser | null>(null);
   /** The code being shown while the user approves it on github.com. */
   const device = ref<DeviceStart | null>(null);
@@ -22,6 +24,8 @@ export const useGithubStore = defineStore("github", () => {
   async function load() {
     const s = await daemon.api.githubStatus();
     configured.value = s.configured;
+    deviceFlow.value = s.deviceFlow;
+    source.value = s.source;
     user.value = s.user;
   }
 
@@ -64,6 +68,7 @@ export const useGithubStore = defineStore("github", () => {
           break;
         case "signedIn":
           user.value = r.user;
+          source.value = "oauth";
           device.value = null;
           break;
         case "expired":
@@ -92,7 +97,9 @@ export const useGithubStore = defineStore("github", () => {
   async function signOut() {
     await daemon.api.githubSignOut();
     user.value = null;
+    source.value = null;
     repos.value = [];
+    void load().catch(() => {}); // a gh login may still apply
   }
 
   async function loadRepos() {
@@ -112,5 +119,5 @@ export const useGithubStore = defineStore("github", () => {
     }
   }
 
-  return { configured, user, device, error, repos, reposLoading, load, signIn, cancel, signOut, loadRepos };
+  return { configured, deviceFlow, source, user, device, error, repos, reposLoading, load, signIn, cancel, signOut, loadRepos };
 });

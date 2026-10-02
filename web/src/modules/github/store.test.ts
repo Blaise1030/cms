@@ -23,9 +23,11 @@ afterEach(() => vi.useRealTimers());
 
 describe("github store", () => {
   it("loads status", async () => {
-    const gh = setup({ githubStatus: vi.fn(async () => ({ configured: true, user: ada })) });
+    const gh = setup({ githubStatus: vi.fn(async () => ({ configured: true, deviceFlow: false, source: "cli", user: ada })) });
     await gh.load();
     expect(gh.configured).toBe(true);
+    expect(gh.deviceFlow).toBe(false);
+    expect(gh.source).toBe("cli");
     expect(gh.user).toEqual(ada);
   });
 

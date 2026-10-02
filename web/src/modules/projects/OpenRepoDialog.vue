@@ -85,8 +85,13 @@ async function openRepo(fullName: string) {
         </DialogDescription>
       </DialogHeader>
       <div v-if="!gh.user" class="flex flex-col items-start gap-2">
-        <p class="text-sm">Sign in with GitHub to see your repositories.</p>
-        <Button size="sm" data-testid="open-sign-in" @click="gh.signIn()">Sign in with GitHub</Button>
+        <template v-if="gh.deviceFlow">
+          <p class="text-sm">Sign in with GitHub to see your repositories.</p>
+          <Button size="sm" data-testid="open-sign-in" @click="gh.signIn()">Sign in with GitHub</Button>
+        </template>
+        <p v-else class="text-sm">
+          Run <code class="bg-muted rounded px-1">gh auth login</code> in a terminal, then reopen this dialog.
+        </p>
       </div>
       <template v-else>
         <Input v-model="filter" placeholder="Filter repositories…" aria-label="Filter repositories" />
