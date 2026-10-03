@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { FolderGit2, Plus, Trash2 } from "@lucide/vue";
+import { RouterLink, useRouter } from "vue-router";
+import { EllipsisVertical, FolderGit2, Plus, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -13,20 +14,42 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
+import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useGithubStore } from "@/modules/github/store";
 import NewProjectDialog from "./NewProjectDialog.vue";
 import OpenRepoDialog from "./OpenRepoDialog.vue";
-import { STATUS_LABEL, STATUS_TONE } from "./status";
+import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
+import { projectPath } from "@/router";
 
-const emit = defineEmits<{ open: [id: string]; deleted: [id: string] }>();
+const emit = defineEmits<{ deleted: [id: string] }>();
+const router = useRouter();
 const store = useProjectsStore();
 const gh = useGithubStore();
+
+const STATUS_DOT: Record<Project["devserver"], string> = {
+  starting: "bg-amber-500 animate-pulse",
+  ready: "bg-emerald-500",
+  crashed: "bg-red-500",
+};
 
 const showNew = ref(false);
 const showOpen = ref(false);
@@ -53,76 +76,99 @@ async function confirmDelete() {
   }
 }
 
-function open(id: string) {
-  store.select(id);
-  emit("open", id);
+function open(project: Project) {
+  void router.push(projectPath(project.id));
 }
 </script>
 
 <template>
-  <ScrollArea class="h-full">
-    <div class="mx-auto flex max-w-4xl flex-col gap-6 p-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-lg font-semibold">Projects</h1>
-          <p class="text-muted-foreground text-sm">Pick a site to keep building, or start a new one.</p>
-        </div>
-        <div class="flex gap-2">
-          <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
-            <FolderGit2 /> Open from GitHub
-          </Button>
-          <Button @click="showNew = true"><Plus /> New project</Button>
-        </div>
-      </div>
-
-      <p v-if="store.error" class="text-destructive text-sm" role="alert">
-        {{ store.error }}
-        <Button variant="link" size="sm" @click="store.load()">Retry</Button>
-      </p>
-
-      <div v-if="store.loading && !store.loaded" class="grid gap-4 sm:grid-cols-2">
-        <Skeleton v-for="n in 2" :key="n" class="h-28 w-full" />
-      </div>
-
-      <p
-        v-else-if="store.loaded && store.projects.length === 0"
-        class="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm"
-      >
-        No projects yet. Create one to get started.
-      </p>
-
-      <div v-else class="grid gap-4 sm:grid-cols-2" data-testid="project-grid">
-        <Card
-          v-for="project in store.projects"
-          :key="project.id"
-          class="hover:border-ring cursor-pointer transition-colors"
-          :data-testid="`project-${project.id}`"
-          @click="open(project.id)"
-        >
-          <CardHeader class="flex flex-row items-start justify-between gap-2">
-            <CardTitle class="truncate">{{ project.name }}</CardTitle>
-            <Badge :variant="STATUS_TONE[project.devserver]" data-testid="project-status">
-              {{ STATUS_LABEL[project.devserver] }}
-            </Badge>
-          </CardHeader>
-          <CardContent class="flex items-center justify-between">
-            <span class="text-muted-foreground text-xs">port {{ project.port }}</span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              :aria-label="`Delete ${project.name}`"
-              @click.stop="pendingDelete = project"
-            >
-              <Trash2 />
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+  <div class="relative h-full overflow-y-auto">
+    <div class="absolute top-3 right-3">
+      <GithubAccount />
     </div>
-  </ScrollArea>
+    <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
+    <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[12vh] pb-10">
+      <header class="text-center">
+        <h1 class="text-3xl font-light tracking-tight">workbench</h1>
+        <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
+      </header>
 
-  <NewProjectDialog v-model:open="showNew" />
-  <OpenRepoDialog v-model:open="showOpen" />
+      <div class="flex gap-2">
+        <Button @click="showNew = true"><Plus /> New project</Button>
+        <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
+          <FolderGit2 /> Open from GitHub
+        </Button>
+      </div>
+
+      <section class="flex w-full max-w-xl flex-col gap-3">
+        <h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
+
+        <p v-if="store.error" class="text-destructive text-sm" role="alert">
+          {{ store.error }}
+          <Button variant="link" size="sm" @click="store.load()">Retry</Button>
+        </p>
+
+        <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
+          <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
+        </div>
+
+        <p
+          v-else-if="store.loaded && store.projects.length === 0"
+          class="text-muted-foreground text-sm"
+        >
+          No projects yet.
+        </p>
+
+        <ItemGroup v-else class="gap-2" data-testid="project-grid">
+          <!-- The whole row links to the project; the menu stops its clicks from following it. -->
+          <Item
+            v-for="project in store.projects"
+            :key="project.id"
+            as-child
+            variant="outline"
+            size="sm"
+          >
+            <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
+            <ItemMedia>
+              <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
+                <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
+                <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
+              </span>
+            </ItemMedia>
+            <ItemContent class="min-w-0">
+              <ItemTitle>{{ project.name }}</ItemTitle>
+              <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Badge variant="outline">localhost:{{ project.port }}</Badge>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="`Actions for ${project.name}`"
+                    @click.stop.prevent
+                    @keydown.enter.stop
+                  >
+                    <EllipsisVertical />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
+                    <Trash2 /> Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </ItemActions>
+            </RouterLink>
+          </Item>
+        </ItemGroup>
+      </section>
+    </div>
+  </div>
+
+  <NewProjectDialog v-model:open="showNew" @created="open" />
+  <OpenRepoDialog v-model:open="showOpen" @created="open" />
 
   <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
     <AlertDialogContent>

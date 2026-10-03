@@ -1,29 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { Toaster } from "@/components/ui/sonner";
 import type { ConnectionStatus } from "@/core/types";
 
 export type WorkspaceTab = "preview" | "files" | "history";
 
-const props = defineProps<{
-  status?: ConnectionStatus;
-  projectName?: string | null;
-}>();
-
-const hasProject = computed(() => !!props.projectName);
+defineProps<{ status?: ConnectionStatus }>();
 </script>
 
 <template>
-  <div class="dark bg-background text-foreground flex h-svh flex-col overflow-hidden">
+  <div class="flex h-full flex-col overflow-hidden">
     <header class="bg-background flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <div class="flex min-w-0 flex-1 items-center gap-1">
         <span class="truncate px-1 text-sm font-medium">workbench</span>
-        <slot v-if="hasProject" name="menubar" />
+        <slot name="menubar" />
       </div>
       <div class="flex items-center gap-2 pr-1">
         <slot name="account" />
@@ -63,6 +56,5 @@ const hasProject = computed(() => !!props.projectName);
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
-    <Toaster />
   </div>
 </template>

@@ -1,11 +1,8 @@
 import { defineStore } from "pinia";
-import { computed, onScopeDispose, ref } from "vue";
+import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { Project } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
-import { readPref, writePref } from "@/lib/storage";
-
-const SELECTED_KEY = "workbench.project";
 
 export const useProjectsStore = defineStore("projects", () => {
   const daemon = useDaemon();
@@ -15,14 +12,6 @@ export const useProjectsStore = defineStore("projects", () => {
   const loaded = ref(false);
   const creating = ref(false);
   const error = ref<string | null>(null);
-  const selectedId = ref<string | null>(readPref(SELECTED_KEY));
-
-  const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) ?? null);
-
-  function select(id: string | null) {
-    selectedId.value = id;
-    writePref(SELECTED_KEY, id);
-  }
 
   async function load() {
     loading.value = true;
@@ -30,8 +19,6 @@ export const useProjectsStore = defineStore("projects", () => {
     try {
       projects.value = await daemon.api.listProjects();
       loaded.value = true;
-      // A project deleted elsewhere must not stay selected.
-      if (selectedId.value && !projects.value.some((p) => p.id === selectedId.value)) select(null);
     } catch (e) {
       error.value = errorMessage(e);
     } finally {
@@ -39,7 +26,7 @@ export const useProjectsStore = defineStore("projects", () => {
     }
   }
 
-  /** Create a project and open it. Throws on failure so the dialog can show the error. */
+  /** Create a project (the caller navigates to it). Throws on failure so the dialog can show the error. */
   async function create(name: string): Promise<Project> {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Project name is required");
@@ -47,20 +34,18 @@ export const useProjectsStore = defineStore("projects", () => {
     try {
       const project = await daemon.api.createProject(trimmed);
       projects.value = [...projects.value.filter((p) => p.id !== project.id), project];
-      select(project.id);
       return project;
     } finally {
       creating.value = false;
     }
   }
 
-  /** Open a GitHub repository as a project (the daemon clones it) and select it. */
+  /** Open a GitHub repository as a project (the daemon clones it). */
   async function cloneRepo(repo: string): Promise<Project> {
     creating.value = true;
     try {
       const project = await daemon.api.cloneProject(repo);
       projects.value = [...projects.value.filter((p) => p.id !== project.id), project];
-      select(project.id);
       return project;
     } finally {
       creating.value = false;
@@ -71,7 +56,6 @@ export const useProjectsStore = defineStore("projects", () => {
   async function remove(id: string) {
     await daemon.api.deleteProject(id);
     projects.value = projects.value.filter((p) => p.id !== id);
-    if (selectedId.value === id) select(null);
   }
 
   async function setAutoApprove(id: string, autoApprove: boolean) {
@@ -100,9 +84,6 @@ export const useProjectsStore = defineStore("projects", () => {
     creating,
     error,
     cloneRepo,
-    selectedId,
-    selected,
-    select,
     load,
     create,
     remove,

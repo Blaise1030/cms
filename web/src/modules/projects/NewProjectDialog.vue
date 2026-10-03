@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@/lib/errors";
+import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";
 
 const open = defineModel<boolean>("open", { default: false });
+const emit = defineEmits<{ created: [project: Project] }>();
 const store = useProjectsStore();
 
 const name = ref("");
@@ -30,7 +32,8 @@ async function submit() {
   if (!name.value.trim() || store.creating) return;
   error.value = null;
   try {
-    await store.create(name.value);
+    const project = await store.create(name.value);
+    emit("created", project);
     open.value = false;
   } catch (e) {
     error.value = errorMessage(e);

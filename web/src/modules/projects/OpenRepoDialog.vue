@@ -20,9 +20,11 @@ import {
 } from "@/components/ui/item";
 import { errorMessage } from "@/lib/errors";
 import { useGithubStore } from "@/modules/github/store";
+import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";
 
 const open = defineModel<boolean>("open", { default: false });
+const emit = defineEmits<{ created: [project: Project] }>();
 const gh = useGithubStore();
 const projects = useProjectsStore();
 
@@ -67,7 +69,8 @@ async function openRepo(fullName: string) {
   opening.value = fullName;
   error.value = null;
   try {
-    await projects.cloneRepo(fullName);
+    const project = await projects.cloneRepo(fullName);
+    emit("created", project);
     open.value = false;
   } catch (e) {
     error.value = errorMessage(e);

@@ -2,5 +2,11 @@ import { createPinia } from "pinia";
 import { createApp } from "vue";
 import "./index.css";
 import App from "./App.vue";
+import { useDaemon } from "./core/daemon";
+import { createAppRouter } from "./router";
 
-createApp(App).use(createPinia()).mount("#app");
+// Resolve the daemon config first: it removes the one-time `?t=` token from the URL, and the
+// router must not pick that token up as part of its initial route.
+useDaemon();
+
+createApp(App).use(createPinia()).use(createAppRouter()).mount("#app");

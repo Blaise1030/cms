@@ -47,15 +47,14 @@ describe("projects store", () => {
     expect(store.loaded).toBe(false);
   });
 
-  it("creates a project with a trimmed name and selects it", async () => {
+  it("creates a project with a trimmed name", async () => {
     const createProject = vi.fn(async (name: string) => project("my-site", { name }));
     const store = setup({ createProject });
     const created = await store.create("  My Site ");
     expect(createProject).toHaveBeenCalledWith("My Site");
     expect(created.id).toBe("my-site");
     expect(store.projects).toHaveLength(1);
-    expect(store.selectedId).toBe("my-site");
-    expect(store.selected?.name).toBe("My Site");
+    expect(store.projects[0]!.name).toBe("My Site");
   });
 
   it("rejects an empty name without calling the daemon", async () => {
@@ -65,22 +64,13 @@ describe("projects store", () => {
     expect(createProject).not.toHaveBeenCalled();
   });
 
-  it("removes a project and clears the selection", async () => {
+  it("removes a project", async () => {
     const deleteProject = vi.fn(async () => ({ deleted: "a" }));
     const store = setup({ listProjects: async () => [project("a"), project("b")], deleteProject });
     await store.load();
-    store.select("a");
     await store.remove("a");
     expect(deleteProject).toHaveBeenCalledWith("a");
     expect(store.projects.map((p) => p.id)).toEqual(["b"]);
-    expect(store.selectedId).toBeNull();
-  });
-
-  it("drops a stale selection when the project no longer exists", async () => {
-    const store = setup({ listProjects: async () => [project("a")] });
-    store.select("gone");
-    await store.load();
-    expect(store.selectedId).toBeNull();
   });
 
   it("applies devserver.status events and reloads after reconnect", async () => {
