@@ -87,7 +87,7 @@ function open(project: Project) {
       <GithubAccount />
     </div>
     <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
-    <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[12vh] pb-10">
+    <div class="flex min-h-full flex-col items-center justify-center gap-10 p-10">
       <header class="text-center">
         <h1 class="text-3xl font-light tracking-tight">workbench</h1>
         <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
