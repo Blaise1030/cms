@@ -27,12 +27,14 @@ import {
 import ChatMessage from "./ChatMessage.vue";
 import ComposerEditor from "./ComposerEditor.vue";
 import PermissionPrompt from "./PermissionPrompt.vue";
+import { usePreviewStore } from "@/modules/preview/store";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; autoApprove?: boolean }>();
 const emit = defineEmits<{ toggleAutoApprove: [] }>();
 
 const store = useChatStore();
+const preview = usePreviewStore();
 const composer = ref<InstanceType<typeof ComposerEditor> | null>(null);
 const pc = computed(() => store.byProject[props.projectId]);
 const busy = computed(() => store.isBusy(props.projectId));
@@ -57,6 +59,15 @@ watch(
 onMounted(() => {
   void store.openProject(props.projectId);
 });
+
+// An element picked in the preview becomes a chip in the composer.
+watch(
+  () => preview.picked,
+  (picked) => {
+    if (!picked || !composer.value) return;
+    composer.value.insertElement(preview.takePicked()!);
+  },
+);
 
 async function onSubmit(message: PromptInputMessage) {
   if (busy.value) {

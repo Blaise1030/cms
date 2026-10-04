@@ -3,6 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
+import type { PickedElement } from "./elementPicker";
 
 export type Device = "desktop" | "tablet" | "mobile";
 
@@ -24,9 +25,29 @@ export const usePreviewStore = defineStore("preview", () => {
   const message = ref<Record<string, string | undefined>>({});
   const restarting = ref(false);
   const error = ref<string | null>(null);
+  /** Element-picker mode in the preview frame. */
+  const picking = ref(false);
+  /** The last element picked, waiting for the chat composer to take it. */
+  const picked = ref<PickedElement | null>(null);
 
   function setDevice(next: Device) {
     device.value = next;
+  }
+
+  function setPicking(on: boolean) {
+    picking.value = on;
+  }
+
+  function pick(element: PickedElement) {
+    picked.value = element;
+    picking.value = false;
+  }
+
+  /** Hand the pending pick to its consumer (the composer), clearing it. */
+  function takePicked(): PickedElement | null {
+    const element = picked.value;
+    picked.value = null;
+    return element;
   }
 
   function reload() {
@@ -74,5 +95,21 @@ export const usePreviewStore = defineStore("preview", () => {
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 
-  return { device, reloadNonce, status, message, restarting, error, setDevice, reload, seed, restart };
+  return {
+    device,
+    reloadNonce,
+    status,
+    message,
+    restarting,
+    error,
+    picking,
+    picked,
+    setDevice,
+    setPicking,
+    pick,
+    takePicked,
+    reload,
+    seed,
+    restart,
+  };
 });

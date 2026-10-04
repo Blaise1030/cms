@@ -4,6 +4,8 @@ import { EditorContent, useEditor, type JSONContent } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import { Placeholder } from "@tiptap/extensions";
 import { usePromptInput } from "@/components/ai-elements/prompt-input/context";
+import { elementPrompt, type PickedElement } from "@/modules/preview/elementPicker";
+import { ElementRef } from "./elementRef";
 
 const props = withDefaults(defineProps<{ placeholder?: string; ariaLabel?: string }>(), {
   placeholder: "",
@@ -33,6 +35,7 @@ const extensions = [
     trailingNode: false,
   }),
   Placeholder.configure({ placeholder: () => props.placeholder }),
+  ElementRef,
 ];
 
 function textOf(): string {
@@ -83,9 +86,23 @@ watch(textInput, (value) => {
 
 onBeforeUnmount(() => editor.value?.destroy());
 
+/** Insert a picked preview element as a chip at the cursor (or the end if unfocused). */
+function insertElement(pick: PickedElement) {
+  const ed = editor.value;
+  if (!ed) return;
+  const chain = ed.isFocused ? ed.chain().focus() : ed.chain().focus("end");
+  chain
+    .insertContent([
+      { type: "elementRef", attrs: { label: pick.label, prompt: elementPrompt(pick) } },
+      { type: "text", text: " " },
+    ])
+    .run();
+}
+
 defineExpose({
   editor,
   focus: () => editor.value?.commands.focus("end"),
+  insertElement,
 });
 </script>
 
