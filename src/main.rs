@@ -40,6 +40,9 @@ enum Command {
         /// GitHub OAuth App client id (enables "Sign in with GitHub").
         #[arg(long, env = "WORKBENCH_GITHUB_CLIENT_ID")]
         github_client_id: Option<String>,
+        /// Base URL to print in the ready link (e.g. the Vite dev server in `just dev`).
+        #[arg(long, env = "WORKBENCH_UI_URL")]
+        ui_url: Option<String>,
     },
 }
 
@@ -59,6 +62,7 @@ async fn main() -> ExitCode {
         token,
         agents_config,
         github_client_id,
+        ui_url,
     } = Cli::parse().command;
     let config = Config {
         port,
@@ -74,6 +78,7 @@ async fn main() -> ExitCode {
             gh_path: workbench::config::resolve_gh(std::path::Path::new("gh")),
             ..Default::default()
         },
+        ui_url,
     };
     match workbench::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

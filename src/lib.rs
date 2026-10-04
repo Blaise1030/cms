@@ -65,11 +65,13 @@ pub async fn serve(config: Config) -> std::io::Result<()> {
     if let Some(e) = state.projects.init_error() {
         return Err(std::io::Error::other(e.to_string()));
     }
+    let base = match state.config.ui_url.as_deref() {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => format!("http://{bound}"),
+    };
     match state.config.token.as_deref() {
-        Some(token) if !state.config.no_auth => {
-            println!("workbench ready: http://{bound}/?t={token}")
-        }
-        _ => println!("workbench ready: http://{bound}/ (auth disabled)"),
+        Some(token) if !state.config.no_auth => println!("workbench ready: {base}/?t={token}"),
+        _ => println!("workbench ready: {base}/ (auth disabled)"),
     }
     serve_on(listener, state).await
 }

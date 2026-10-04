@@ -59,6 +59,9 @@ pub struct Config {
     pub token: Option<String>,
     pub agents_config: Option<PathBuf>,
     pub github: GithubConfig,
+    /// Base URL printed in the ready link instead of the daemon's own address (dev: the Vite
+    /// server, so the link opens the live HMR app rather than the embedded `web/dist` build).
+    pub ui_url: Option<String>,
 }
 
 /// Tests build configs with `..Default::default()`, so the default must never run the
@@ -76,6 +79,7 @@ impl Default for Config {
                 gh_path: PathBuf::new(),
                 ..GithubConfig::default()
             },
+            ui_url: None,
         }
     }
 }
