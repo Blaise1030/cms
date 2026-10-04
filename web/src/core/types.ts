@@ -74,6 +74,12 @@ export interface Checkpoint {
   ts: number;
 }
 
+/** Active content-change branch. */
+export interface Change {
+  branch: string;
+  title: string;
+}
+
 export interface TreeEntry {
   name: string;
   path: string;
