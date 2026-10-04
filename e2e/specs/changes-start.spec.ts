@@ -58,12 +58,21 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
   );
   expect(() => git(projectDir, ["merge-base", "--is-ancestor", changeTip, "main"])).toThrow();
   expect(git(bareRemote, ["rev-parse", "refs/heads/main"])).toBe(bareHeadBefore);
-  expect(() => git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"])).toThrow();
+  const remoteBranches = git(bareRemote, ["branch", "-a"]);
+  expect(remoteBranches).not.toContain("content/launch-week");
+
+  // Ensure the daemon is still up before the collision path (checkpoint writes must not kill it).
+  const health = await page.request.get(`${origin}/api/health`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(health.ok()).toBeTruthy();
 
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill("New post: Launch week");
   await page.getByRole("button", { name: "Create change" }).click();
 
+  await expect
+    .poll(() => git(projectDir, ["branch", "--show-current"]))
+    .toBe("content/launch-week-2");
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  expect(git(projectDir, ["branch", "--show-current"])).toBe("content/launch-week-2");
 });

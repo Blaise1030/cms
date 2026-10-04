@@ -77,12 +77,8 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   fs.writeFileSync(agents, "{}\n");
 
   const child = spawn(
-    "cargo",
+    path.join(root, "target/release/workbench"),
     [
-      "run",
-      "--release",
-      "--quiet",
-      "--",
       "serve",
       "--port",
       "0",
@@ -105,6 +101,14 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+
+  let exited: number | null = null;
+  child.on("exit", (code) => {
+    exited = code;
+    if (code !== null && code !== 0) {
+      process.stderr.write(`workbench exited ${code}\n`);
+    }
+  });
 
   const ready = await new Promise<string>((resolve, reject) => {
     const onLine = (line: string) => {
@@ -133,8 +137,10 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     bareRemote,
     tmp,
     stop: async () => {
-      child.kill("SIGTERM");
-      await new Promise<void>((r) => child.once("exit", () => r()));
+      if (exited === null) {
+        child.kill("SIGTERM");
+        await new Promise<void>((r) => child.once("exit", () => r()));
+      }
       await stub.close();
       fs.rmSync(tmp, { recursive: true, force: true });
     },
