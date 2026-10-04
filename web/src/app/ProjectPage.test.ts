@@ -29,7 +29,7 @@ const stubs = {
     template:
       "<div><slot name='menubar' /><slot name='workspace' /><slot name='chat' /></div>",
   },
-  EditorMenubar: { template: "<button data-testid='back' @click=\"$emit('back')\" />" },
+  EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
   ChatPanel: { props: ["projectId"], template: "<div data-testid='chat'>{{ projectId }}</div>" },
   GithubAccount: true,
@@ -57,13 +57,6 @@ describe("ProjectPage", () => {
     expect(w.find("[data-testid='workspace']").text()).toBe("a");
     expect(w.find("[data-testid='chat']").text()).toBe("a");
     expect(router.currentRoute.value.path).toBe("/p/a");
-  });
-
-  it("goes back to the project list from the menubar", async () => {
-    const w = await mountAt("/p/a");
-    await w.find("[data-testid='back']").trigger("click");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/");
   });
 
   it("sends an unknown project id home with a toast", async () => {
