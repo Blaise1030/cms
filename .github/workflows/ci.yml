@@ -53,12 +53,14 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
       - run: pnpm -C web install --frozen-lockfile && pnpm -C web build
       - run: cargo build --release
       # Same as `just e2e` after the web/release rebuild (already done above).
       - run: |
-          pnpm -C e2e install
+          pnpm -C e2e install --frozen-lockfile
           pnpm -C e2e exec playwright install --with-deps chromium
           pnpm -C e2e test
           pnpm -C e2e e2e

@@ -27,6 +27,9 @@ Fixture helpers create temp dirs under the OS temp directory and remove them in 
 Prefer stable `data-testid` attributes (`files-panel`, `preview-panel`, `project-grid`,
 `project-${id}`, …). Avoid CSS classes or DOM structure.
 
+The default editor layout may hide the file tree; smoke (and later specs) open **View → Code**
+before asserting `files-panel`.
+
 ## Unit tests
 
 Vitest covers stub and bare-remote helpers:
