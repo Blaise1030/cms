@@ -14,6 +14,8 @@ export type WorkbenchEnv = {
   origin: string;
   token: string;
   projectId: string;
+  projectDir: string;
+  bareRemote: string;
   tmp: string;
   stop: () => Promise<void>;
 };
@@ -66,7 +68,7 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   const projectsDir = path.join(tmp, "projects");
   const gitRoot = path.join(tmp, "git");
   fs.mkdirSync(projectsDir, { recursive: true });
-  createBareRemote(gitRoot);
+  const bareRemote = createBareRemote(gitRoot);
   const stub = await startGithubStub();
   const gitUrl = fileGitUrl(gitRoot);
 
@@ -121,11 +123,14 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
 
   const origin = ready;
   const projectId = await signInAndClone(origin, E2E_TOKEN);
+  const projectDir = path.join(projectsDir, projectId);
 
   return {
     origin,
     token: E2E_TOKEN,
     projectId,
+    projectDir,
+    bareRemote,
     tmp,
     stop: async () => {
       child.kill("SIGTERM");
