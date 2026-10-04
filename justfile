@@ -9,10 +9,11 @@ setup:
     npm --prefix templates/astro-marketing ci
 
 # Daemon (API on :7800) + Vite dev server (HMR, proxies /api /ws /preview to the daemon).
-# The daemon prints its token link; open the Vite URL with `?t=<token>`. Ctrl-C stops both.
+# The daemon's ready link points at Vite (:5173), not :7800, which serves the embedded
+# `web/dist` build and never hot-reloads. Ctrl-C stops both.
 dev:
     trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT; \
-    cargo run -- serve & \
+    cargo run -- serve --ui-url http://localhost:5173 & \
     pnpm -C web dev & \
     wait
 

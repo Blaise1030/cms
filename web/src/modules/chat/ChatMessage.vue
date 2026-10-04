@@ -1,16 +1,32 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { parseElementRefs } from "@/modules/preview/elementPicker";
+import { ELEMENT_CHIP_CLASS } from "./elementRef";
 import ToolCard from "./ToolCard.vue";
 import type { TurnView } from "./types";
 
-defineProps<{ turn: TurnView }>();
+const props = defineProps<{ turn: TurnView }>();
+
+// Picked preview elements travel as text references; show them as the chips they were typed as.
+const userParts = computed(() => parseElementRefs(props.turn.userText ?? ""));
 </script>
 
 <template>
   <div class="flex flex-col gap-3" data-testid="chat-turn">
     <Message v-if="turn.userText" from="user">
       <MessageContent>
-        <p class="whitespace-pre-wrap" data-testid="user-text">{{ turn.userText }}</p>
+        <p class="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-text">
+          <template v-for="(part, i) in userParts" :key="i">
+            <span
+              v-if="'element' in part"
+              :class="ELEMENT_CHIP_CLASS"
+              :title="part.element.prompt"
+              data-testid="user-element-ref"
+            >&lt;{{ part.element.label }}&gt;</span>
+            <template v-else>{{ part.text }}</template>
+          </template>
+        </p>
       </MessageContent>
     </Message>
 

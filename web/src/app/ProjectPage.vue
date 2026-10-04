@@ -58,7 +58,6 @@ async function toggleAutoApprove() {
         :project-id="project.id"
         :tab="tab"
         @update:tab="tab = $event"
-        @back="router.push('/')"
       />
     </template>
     <template #account>

@@ -9,6 +9,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import ChatPanel from "./ChatPanel.vue";
 import ComposerEditor from "./ComposerEditor.vue";
+import { usePreviewStore } from "@/modules/preview/store";
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -58,6 +59,34 @@ describe("ChatPanel", () => {
     const card = w.find("[data-testid='tool-card']");
     expect(card.text()).toContain("edit hero.mdx");
     expect(card.find("[data-testid='tool-state']").text()).toBe("running");
+    w.unmount();
+  });
+
+  it("turns an element picked in the preview into a composer chip sent as a reference", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    await type(w, "make ");
+    usePreviewStore().pick({
+      label: "h1.title",
+      tag: '<h1 class="title">',
+      selector: "body > h1",
+      text: "Hello",
+      file: "src/pages/index.astro",
+      loc: "4:5",
+    });
+    await flushPromises();
+    expect(w.find("[data-element-ref]").text()).toBe("<h1.title>");
+    expect(usePreviewStore().picked).toBeNull();
+
+    await send(w, "bigger");
+    expect(api.prompt).toHaveBeenCalledWith(
+      "p",
+      "s1",
+      'make [element <h1 class="title"> "Hello" in src/pages/index.astro:4:5] bigger',
+    );
+    const bubble = w.find("[data-testid='user-text']");
+    expect(bubble.find("[data-testid='user-element-ref']").text()).toBe("<h1.title>");
+    expect(bubble.text()).toBe("make <h1.title> bigger");
     w.unmount();
   });
 

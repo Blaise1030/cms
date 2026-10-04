@@ -19,6 +19,9 @@ export default defineConfig({
     environmentOptions: { happyDOM: { settings: { disableIframePageLoading: true } } },
   },
   server: {
+    // Fixed so the daemon's dev ready link (`just dev`, --ui-url) always points here.
+    port: 5173,
+    strictPort: true,
     proxy: {
       "/api": "http://127.0.0.1:7800",
       "/ws": { target: "ws://127.0.0.1:7800", ws: true },

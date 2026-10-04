@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { ArrowLeft, ArrowRight, ExternalLink, Maximize2, Minimize2, RotateCw } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ExternalLink,
+  Maximize2,
+  Minimize2,
+  MousePointerClick,
+  RotateCw,
+} from "@lucide/vue";
 import { useEventListener } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
+import { attachPicker, describeElement } from "./elementPicker";
 import { frameHref, framePath, useFrameHistory } from "./frameHistory";
 import { DEVICE_WIDTH, usePreviewStore } from "./store";
 
@@ -87,6 +96,7 @@ function frameWindow(): Window | null {
 
 function onLoad() {
   const win = frameWindow();
+  syncPicker();
   if (!win) return;
   const sync = () => history.visit(framePath(win.location.href, base.value));
   sync();
@@ -95,6 +105,39 @@ function onLoad() {
   win.addEventListener("hashchange", sync);
   win.document.addEventListener("astro:page-load", sync);
 }
+
+// --- Element picker ----------------------------------------------------------------------------
+
+let detachPicker: (() => void) | null = null;
+
+/** Attach to (or detach from) the current frame document to match `store.picking`. */
+function syncPicker() {
+  detachPicker?.();
+  detachPicker = null;
+  if (!store.picking) return;
+  const win = frameWindow();
+  // Cross-origin or not yet loaded: nothing to pick from.
+  if (!win || state.value !== "ready") {
+    store.setPicking(false);
+    return;
+  }
+  detachPicker = attachPicker(
+    win,
+    (el) => store.pick(describeElement(el, props.projectId)),
+    () => store.setPicking(false),
+  );
+}
+
+watch(() => store.picking, syncPicker);
+// A remount (reload, project switch) replaces the document; `onLoad` re-attaches.
+watch(() => [props.projectId, store.reloadNonce, state.value], () => {
+  detachPicker = null;
+  if (state.value !== "ready") store.setPicking(false);
+});
+onBeforeUnmount(() => {
+  detachPicker?.();
+  store.setPicking(false);
+});
 
 function goBack() {
   if (history.back()) frameWindow()?.history.back();
@@ -204,6 +247,24 @@ function toggleFullscreen() {
             </div>
           </form>
 
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                :variant="store.picking ? 'secondary' : 'ghost'"
+                size="icon-sm"
+                aria-label="Select an element"
+                :aria-pressed="store.picking"
+                :disabled="state !== 'ready' || crossSite"
+                data-testid="element-picker"
+                @click="store.setPicking(!store.picking)"
+              >
+                <MousePointerClick />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ store.picking ? "Cancel selection (Esc)" : "Select an element to mention in chat" }}
+            </TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
               <Button variant="ghost" size="icon-sm" aria-label="Open in new tab" @click="openExternal">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, RefreshCw, RotateCcw } from "@lucide/vue";
+import { RefreshCw, RotateCcw } from "@lucide/vue";
 import {
   Menubar,
   MenubarContent,
@@ -17,7 +17,6 @@ defineProps<{ projectId: string; tab: WorkspaceTab }>();
 
 const emit = defineEmits<{
   "update:tab": [tab: WorkspaceTab];
-  back: [];
 }>();
 
 const preview = usePreviewStore();
@@ -37,16 +36,6 @@ const devices: { id: Device; label: string }[] = [
 
 <template>
   <Menubar class="h-8 border-none bg-transparent p-0 shadow-none" data-testid="editor-menubar">
-    <MenubarMenu>
-      <MenubarTrigger>File</MenubarTrigger>
-      <MenubarContent>
-        <MenubarItem @select="emit('back')">
-          <ArrowLeft />
-          Back to projects
-        </MenubarItem>
-      </MenubarContent>
-    </MenubarMenu>
-
     <MenubarMenu>
       <MenubarTrigger>View</MenubarTrigger>
       <MenubarContent>
