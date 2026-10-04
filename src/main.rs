@@ -40,6 +40,15 @@ enum Command {
         /// GitHub OAuth App client id (enables "Sign in with GitHub").
         #[arg(long, env = "WORKBENCH_GITHUB_CLIENT_ID")]
         github_client_id: Option<String>,
+        /// GitHub REST API base (tests/e2e: stub server).
+        #[arg(long, env = "WORKBENCH_GITHUB_API_URL")]
+        github_api_url: Option<String>,
+        /// GitHub web base for OAuth device flow (defaults to [`github_api_url`] when set).
+        #[arg(long, env = "WORKBENCH_GITHUB_WEB_URL")]
+        github_web_url: Option<String>,
+        /// Base for clone URLs: `{git_url}/{owner}/{repo}.git` (e2e: local bare repo root).
+        #[arg(long, env = "WORKBENCH_GITHUB_GIT_URL")]
+        github_git_url: Option<String>,
         /// Base URL to print in the ready link (e.g. the Vite dev server in `just dev`).
         #[arg(long, env = "WORKBENCH_UI_URL")]
         ui_url: Option<String>,
@@ -62,8 +71,15 @@ async fn main() -> ExitCode {
         token,
         agents_config,
         github_client_id,
+        github_api_url,
+        github_web_url,
+        github_git_url,
         ui_url,
     } = Cli::parse().command;
+    let github_defaults = workbench::config::GithubConfig::default();
+    let api_url = github_api_url.unwrap_or_else(|| github_defaults.api_url.clone());
+    let web_url = github_web_url.unwrap_or_else(|| api_url.clone());
+    let git_url = github_git_url.unwrap_or_else(|| github_defaults.git_url.clone());
     let config = Config {
         port,
         origin,
@@ -75,8 +91,11 @@ async fn main() -> ExitCode {
         ),
         github: workbench::config::GithubConfig {
             client_id: github_client_id,
+            api_url,
+            web_url,
+            git_url,
             gh_path: workbench::config::resolve_gh(std::path::Path::new("gh")),
-            ..Default::default()
+            ..github_defaults
         },
         ui_url,
     };

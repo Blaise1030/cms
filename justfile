@@ -31,3 +31,13 @@ test:
     pnpm -C web test
     npm --prefix templates/astro-marketing ci
     npm --prefix templates/astro-marketing run build
+
+# Playwright smoke e2e (rebuilds the daemon so `web/dist` is embedded).
+e2e:
+    pnpm -C web install --frozen-lockfile
+    pnpm -C web build
+    cargo build --release
+    pnpm -C e2e install
+    pnpm -C e2e exec playwright install chromium
+    pnpm -C e2e test
+    pnpm -C e2e e2e
