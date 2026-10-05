@@ -87,6 +87,7 @@ async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
 pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     let title = display_title(raw_title)?;
     let base = branch_name(raw_title)?;
+    ensure_clean(dir).await?;
     // Always refresh main from the remote before branching.
     run(dir, &["fetch", "origin", "main"]).await?;
     let branch = unique_branch(dir, &base).await?;
@@ -105,6 +106,19 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     )
     .await?;
     Ok(Change { branch, title })
+}
+
+/// Refuse to create a change while tracked files have uncommitted modifications.
+async fn ensure_clean(dir: &Path) -> Result<(), ApiError> {
+    // Ignore untracked (e.g. `node_modules` / build output from preview); those do not
+    // block `checkout -b` and are not what "checkpoint first" means.
+    let status = run(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
+    if !status.trim().is_empty() {
+        return Err(ApiError::conflict(
+            "Uncommitted changes — checkpoint or discard them before starting a new change",
+        ));
+    }
+    Ok(())
 }
 
 /// Active change = current `content/*` branch (with its description title), else `None`.

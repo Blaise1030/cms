@@ -92,7 +92,15 @@ const devices: { id: Device; label: string }[] = [
     </Button>
 
     <span
-      v-if="changes.active"
+      v-if="changes.error"
+      class="text-destructive truncate text-xs"
+      data-testid="changes-error"
+      role="alert"
+    >
+      {{ changes.error }}
+    </span>
+    <span
+      v-else-if="changes.active"
       class="text-muted-foreground truncate text-xs"
       data-testid="active-change"
     >

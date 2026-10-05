@@ -27,5 +27,6 @@ describe("bareRemote", () => {
       encoding: "utf8",
     });
     expect(tree).toContain("package.json");
+    expect(tree).toContain(".gitignore");
   });
 });

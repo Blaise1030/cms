@@ -1,29 +1,10 @@
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
 
+import { agentCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-}
-
-/** Simulate an agent turn settling: write a file, then commit via the checkpoint message form. */
-function agentCheckpoint(projectDir: string, relPath: string, contents: string, summary: string) {
-  const full = path.join(projectDir, relPath);
-  fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, contents);
-  git(projectDir, ["add", "-A"]);
-  git(projectDir, [
-    "-c",
-    "commit.gpgsign=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "commit",
-    "--no-verify",
-    "-m",
-    `checkpoint: ${summary}`,
-  ]);
 }
 
 test("starts a change, checkpoints on the branch, suffixes collisions", async ({
@@ -48,20 +29,20 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
     "Launch week",
   );
 
-  agentCheckpoint(projectDir, "notes.md", "launch notes\n", "add notes");
+  // Real ACP settle path (fake agent → git::checkpoint), not a raw git commit.
+  await agentCheckpoint(workbench, "edit the notes");
 
   const changeTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   const mainTip = git(projectDir, ["rev-parse", "main"]);
   expect(changeTip).not.toBe(mainTip);
-  expect(git(projectDir, ["log", "-1", "--format=%s", "content/launch-week"])).toBe(
-    "checkpoint: add notes",
+  expect(git(projectDir, ["log", "-1", "--format=%s", "content/launch-week"])).toMatch(
+    /^checkpoint:/,
   );
   expect(() => git(projectDir, ["merge-base", "--is-ancestor", changeTip, "main"])).toThrow();
   expect(git(bareRemote, ["rev-parse", "refs/heads/main"])).toBe(bareHeadBefore);
   const remoteBranches = git(bareRemote, ["branch", "-a"]);
   expect(remoteBranches).not.toContain("content/launch-week");
 
-  // Ensure the daemon is still up before the collision path (checkpoint writes must not kill it).
   const health = await page.request.get(`${origin}/api/health`, {
     headers: { Authorization: `Bearer ${token}` },
   });

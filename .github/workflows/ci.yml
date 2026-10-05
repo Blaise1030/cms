@@ -58,6 +58,7 @@ jobs:
             e2e/pnpm-lock.yaml
       - run: pnpm -C web install --frozen-lockfile && pnpm -C web build
       - run: cargo build --release
+      - run: cargo build --release --example fake_acp_agent
       # Same as `just e2e` after the web/release rebuild (already done above).
       - run: |
           pnpm -C e2e install --frozen-lockfile

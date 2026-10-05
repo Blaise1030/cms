@@ -116,6 +116,41 @@ async fn create_suffixes_on_collision() {
 }
 
 #[tokio::test]
+async fn create_refuses_dirty_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    // Modify a tracked file (untracked alone must not block create).
+    std::fs::write(work.join("README.md"), "dirty tracked\n").unwrap();
+
+    let err = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
+    assert!(
+        err.message.to_lowercase().contains("checkpoint"),
+        "expected checkpoint-first message, got: {}",
+        err.message
+    );
+    assert_eq!(
+        git_cli(&work, &["branch", "--show-current"]),
+        "main",
+        "must stay on current branch"
+    );
+    assert!(
+        git_cli(&work, &["branch", "--list", "content/launch-week"]).is_empty(),
+        "must not create the branch"
+    );
+
+    // Untracked files alone are fine.
+    std::fs::write(work.join("README.md"), "hello\n").unwrap();
+    std::fs::write(work.join("untracked.md"), "only untracked\n").unwrap();
+    let change = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+    assert_eq!(change.branch, "content/launch-week");
+}
+
+#[tokio::test]
 async fn create_fetches_main_first() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
