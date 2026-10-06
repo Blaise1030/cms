@@ -70,6 +70,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
         .route("/api/changes/{branch}/switch", post(changes::switch))
+        .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/tree", get(files::tree))
         .route("/api/file", get(files::file))
         .fallback(static_files::serve)

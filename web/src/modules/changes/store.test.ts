@@ -168,4 +168,46 @@ describe("changes store", () => {
     expect(store.active).toBeNull();
     expect(store.error).toMatch(/git failed/i);
   });
+
+  it("share sets prUrl and clears needsSignIn", async () => {
+    const shareChange = vi.fn(async () => ({
+      branch: "content/launch-week",
+      title: "Launch week",
+      prUrl: "https://github.com/acme/site/pull/1",
+    }));
+    const store = setup({ shareChange });
+    store.active = { branch: "content/launch-week", title: "Launch week" };
+    store.needsSignIn = true;
+
+    const url = await store.share("site", "content/launch-week");
+    expect(shareChange).toHaveBeenCalledWith("site", "content/launch-week");
+    expect(url).toBe("https://github.com/acme/site/pull/1");
+    expect(store.prUrl).toBe("https://github.com/acme/site/pull/1");
+    expect(store.needsSignIn).toBe(false);
+    expect(store.active?.prUrl).toBe("https://github.com/acme/site/pull/1");
+  });
+
+  it("share 403 surfaces push-access error", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => {
+        throw new ApiError("SANDBOX", "You don't have push access", 403);
+      }),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await expect(store.share("site", "content/x")).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toMatch(/push access/i);
+    expect(store.needsSignIn).toBe(false);
+  });
+
+  it("share 401 sets needsSignIn without error text", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => {
+        throw new ApiError("UNAUTH", "your GitHub session expired — sign in again", 401);
+      }),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await expect(store.share("site", "content/x")).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsSignIn).toBe(true);
+    expect(store.error).toBeNull();
+  });
 });

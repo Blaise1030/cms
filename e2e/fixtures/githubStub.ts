@@ -9,14 +9,42 @@ export const STUB_USER = {
   avatar_url: "https://avatars.example/ada.png",
 };
 
+export type PullsPost = {
+  path: string;
+  body: {
+    title?: string;
+    head?: string;
+    base?: string;
+    draft?: boolean;
+    body?: string;
+  };
+};
+
 export type GithubStub = {
   baseUrl: string;
+  /** Bodies of every `POST /repos/{o}/{r}/pulls` the daemon sent. */
+  pullsPosts: () => PullsPost[];
+  /** Force pulls endpoints to return this HTTP status (null = normal). */
+  setPullsStatus: (status: number | null) => void;
   close: () => Promise<void>;
 };
 
-/** Minimal GitHub API stub: device flow + `/user` + one repo for clone smoke tests. */
+type StoredPr = {
+  number: number;
+  title: string;
+  head: string;
+  html_url: string;
+  draft: boolean;
+};
+
+/** Minimal GitHub API stub: device flow + `/user` + repos + draft pulls. */
 export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
   let pollCount = 0;
+  let pullsStatus: number | null = null;
+  const pullsPosts: PullsPost[] = [];
+  const prs: StoredPr[] = [];
+  let nextPr = 1;
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const auth = req.headers.authorization;
@@ -97,6 +125,68 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       return;
     }
 
+    const pullsMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/);
+    if (pullsMatch) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Bad credentials" }));
+        return;
+      }
+      if (pullsStatus !== null) {
+        res.writeHead(pullsStatus, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: pullsStatus === 403 ? "Resource not accessible" : "error" }));
+        return;
+      }
+
+      if (req.method === "GET") {
+        const head = url.searchParams.get("head");
+        const matching = head ? prs.filter((p) => p.head === head) : prs;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(matching));
+        return;
+      }
+
+      if (req.method === "POST") {
+        let raw = "";
+        req.on("data", (c) => {
+          raw += c;
+        });
+        req.on("end", () => {
+          let body: PullsPost["body"] = {};
+          try {
+            body = JSON.parse(raw) as PullsPost["body"];
+          } catch {
+            res.writeHead(400).end();
+            return;
+          }
+          pullsPosts.push({ path: url.pathname, body });
+          const number = nextPr++;
+          const owner = pullsMatch[1]!;
+          const repo = pullsMatch[2]!;
+          const headRef = typeof body.head === "string" ? body.head : "";
+          const stored: StoredPr = {
+            number,
+            title: typeof body.title === "string" ? body.title : "",
+            head: `${owner}:${headRef}`,
+            html_url: `https://github.com/${owner}/${repo}/pull/${number}`,
+            draft: body.draft === true,
+          };
+          prs.push(stored);
+          res.writeHead(201, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              number: stored.number,
+              title: stored.title,
+              html_url: stored.html_url,
+              draft: stored.draft,
+              head: { ref: headRef },
+            }),
+          );
+        });
+        return;
+      }
+    }
+
     res.writeHead(404).end();
   });
 
@@ -105,6 +195,10 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       const { port } = server.address() as AddressInfo;
       resolve({
         baseUrl: `http://127.0.0.1:${port}`,
+        pullsPosts: () => pullsPosts.slice(),
+        setPullsStatus: (status) => {
+          pullsStatus = status;
+        },
         close: () =>
           new Promise((done, err) => {
             server.close((e) => (e ? err(e) : done()));

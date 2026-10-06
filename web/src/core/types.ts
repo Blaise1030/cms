@@ -80,8 +80,17 @@ export interface Checkpoint {
 export interface Change {
   branch: string;
   title: string;
+  /** Set after a successful Share preview. */
+  prUrl?: string;
   /** Unix seconds of the branch tip commit (list entries). */
   lastEdited?: number;
+}
+
+/** Result of `POST /api/changes/{branch}/share`. */
+export interface SharedChange {
+  branch: string;
+  title: string;
+  prUrl: string;
 }
 
 export interface TreeEntry {

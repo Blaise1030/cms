@@ -1,50 +1,29 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { unifiedMergeView } from "@codemirror/merge";
-import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { FileDiff, type FileDiffMetadata } from "@pierre/diffs";
 
-const props = defineProps<{ oldText: string; newText: string }>();
+const props = defineProps<{ diff: FileDiffMetadata }>();
 
 const host = ref<HTMLElement | null>(null);
-let view: EditorView | null = null;
-
-const theme = EditorView.theme(
-  {
-    "&": { backgroundColor: "transparent", fontSize: "12px", color: "inherit" },
-    ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
-    ".cm-gutters": { backgroundColor: "transparent", border: "none" },
-  },
-  { dark: true },
-);
+let view: FileDiff | null = null;
 
 function mount() {
-  view?.destroy();
   if (!host.value) return;
-  view = new EditorView({
-    parent: host.value,
-    state: EditorState.create({
-      doc: props.newText,
-      extensions: [
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-        EditorView.lineWrapping,
-        theme,
-        unifiedMergeView({
-          original: props.oldText,
-          mergeControls: false,
-          gutter: true,
-          highlightChanges: true,
-          syntaxHighlightDeletions: false,
-        }),
-      ],
-    }),
+  view ??= new FileDiff({
+    themeType: "dark",
+    diffStyle: "unified",
+    overflow: "wrap",
+    lineDiffType: "word",
   });
+  view.render({ fileDiff: props.diff, containerWrapper: host.value });
 }
 
 onMounted(mount);
-watch(() => [props.oldText, props.newText], mount);
-onBeforeUnmount(() => view?.destroy());
+watch(() => props.diff, mount);
+onBeforeUnmount(() => {
+  view?.cleanUp();
+  view = null;
+});
 </script>
 
 <template>

@@ -103,6 +103,26 @@ pub struct RepoInfo {
     pub can_push: bool,
 }
 
+/// A pull request returned by [`GithubAuth::find_pr`] / [`GithubAuth::create_draft_pr`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u64,
+    pub html_url: String,
+    pub title: String,
+    pub draft: bool,
+}
+
+/// Draft PR title is the change's display title.
+pub fn pr_title(change_title: &str) -> String {
+    change_title.trim().to_string()
+}
+
+/// Draft PR body references the change title.
+pub fn pr_body(change_title: &str) -> String {
+    format!("Preview of change: {}", change_title.trim())
+}
+
 impl From<ApiRepo> for RepoInfo {
     fn from(r: ApiRepo) -> Self {
         RepoInfo {
@@ -135,6 +155,26 @@ struct ApiRepo {
 struct ApiPermissions {
     #[serde(default)]
     push: bool,
+}
+
+#[derive(Deserialize)]
+struct ApiPull {
+    number: u64,
+    html_url: String,
+    title: String,
+    #[serde(default)]
+    draft: bool,
+}
+
+impl From<ApiPull> for PullRequest {
+    fn from(p: ApiPull) -> Self {
+        Self {
+            number: p.number,
+            html_url: p.html_url,
+            title: p.title,
+            draft: p.draft,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -682,6 +722,64 @@ impl GithubAuth {
         Ok(true)
     }
 
+    /// Open draft PR for `head_branch` on `owner/name`, or the existing open one for that head.
+    pub async fn find_pr(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<PullRequest>, ApiError> {
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let owner = repo
+            .split_once('/')
+            .map(|(o, _)| o)
+            .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
+        let url = format!(
+            "{}/repos/{repo}/pulls?head={}:{}&state=open",
+            self.api(),
+            urlencode(owner),
+            urlencode(head_branch)
+        );
+        let res = self
+            .http
+            .get(url)
+            .bearer_auth(&token)
+            .header(ACCEPT, GITHUB_JSON)
+            .send()
+            .await
+            .map_err(unreachable)?;
+        let pulls: Vec<ApiPull> = parse_github(res, self, &token).await?;
+        Ok(pulls.into_iter().next().map(PullRequest::from))
+    }
+
+    /// Create a draft pull request from `head_branch` into `main`.
+    pub async fn create_draft_pr(
+        &self,
+        repo: &str,
+        head_branch: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<PullRequest, ApiError> {
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let res = self
+            .http
+            .post(format!("{}/repos/{repo}/pulls", self.api()))
+            .bearer_auth(&token)
+            .header(ACCEPT, GITHUB_JSON)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&serde_json::json!({
+                "title": title,
+                "head": head_branch,
+                "base": "main",
+                "draft": true,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(unreachable)?;
+        let pull: ApiPull = parse_github(res, self, &token).await?;
+        Ok(PullRequest::from(pull))
+    }
+
     fn client_id(&self) -> Result<&str, ApiError> {
         self.cfg.client_id.as_deref().ok_or_else(|| {
             ApiError::github(
@@ -733,6 +831,39 @@ async fn parse<T: DeserializeOwned>(res: reqwest::Response) -> Result<T, ApiErro
         )));
     }
     // Not serde's message: it can quote parts of the body (e.g. a token).
+    serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
+}
+
+/// Like [`parse`], but maps 401/403/422 to distinct [`ApiError`] codes and clears an
+/// expired oauth session on 401.
+async fn parse_github<T: DeserializeOwned>(
+    res: reqwest::Response,
+    auth: &GithubAuth,
+    token: &str,
+) -> Result<T, ApiError> {
+    let status = res.status();
+    let body = res.bytes().await.map_err(unreachable)?;
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        let _ = auth.sign_out_if_token(token).await;
+        return Err(ApiError::unauth(
+            "your GitHub session expired — sign in again",
+        ));
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ApiError::sandbox("You don't have push access"));
+    }
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        let text: String = String::from_utf8_lossy(&body).chars().take(200).collect();
+        return Err(ApiError::conflict(format!(
+            "GitHub could not open the pull request: {text}"
+        )));
+    }
+    if !status.is_success() {
+        let text: String = String::from_utf8_lossy(&body).chars().take(300).collect();
+        return Err(ApiError::github(format!(
+            "GitHub returned {status}: {text}"
+        )));
+    }
     serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
 }
 
@@ -868,6 +999,13 @@ async fn global_git_identity(global: Option<&Path>) -> Option<Identity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorCode;
+
+    #[test]
+    fn draft_pr_copy_uses_change_title() {
+        assert_eq!(pr_title("Launch week"), "Launch week");
+        assert_eq!(pr_body("Launch week"), "Preview of change: Launch week");
+    }
 
     #[test]
     fn repo_names_are_owner_slash_name() {
@@ -1154,5 +1292,194 @@ mod tests {
             j(PollOutcome::Denied),
             serde_json::json!({"status": "denied"})
         );
+    }
+
+    fn write_session(dir: &Path, token: &str) {
+        let user = ada();
+        let json = serde_json::json!({
+            "token": token,
+            "user": {
+                "login": user.login,
+                "id": user.id,
+                "name": user.name,
+                "avatarUrl": user.avatar_url,
+            }
+        });
+        std::fs::write(dir.join("github.json"), json.to_string()).unwrap();
+    }
+
+    async fn mock_api(routes: axum::Router) -> (String, impl FnOnce()) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, routes).await.ok();
+        });
+        (
+            format!("http://{addr}"),
+            move || {
+                handle.abort();
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn find_pr_returns_existing_by_head_before_create() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let creates = Arc::new(AtomicUsize::new(0));
+        let creates2 = creates.clone();
+        let routes = Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async {
+                Json(serde_json::json!([{
+                    "number": 7,
+                    "html_url": "https://github.com/acme/site/pull/7",
+                    "title": "Launch week",
+                    "draft": true
+                }]))
+            })
+            .post(move || {
+                let creates2 = creates2.clone();
+                async move {
+                    creates2.fetch_add(1, Ordering::SeqCst);
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(serde_json::json!({
+                            "number": 99,
+                            "html_url": "https://github.com/acme/site/pull/99",
+                            "title": "new",
+                            "draft": true
+                        })),
+                    )
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let dir = tmp_dir("findpr");
+        write_session(&dir, "tok");
+        let auth = GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        );
+
+        let found = auth
+            .find_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap()
+            .expect("existing PR");
+        assert_eq!(found.number, 7);
+        assert_eq!(found.html_url, "https://github.com/acme/site/pull/7");
+        assert_eq!(creates.load(Ordering::SeqCst), 0);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn create_draft_pr_sends_title_body_and_draft() {
+        use axum::extract::Json as AxJson;
+        use axum::routing::post;
+        use axum::{Json, Router};
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let seen2 = seen.clone();
+        let routes = Router::new().route(
+            "/repos/acme/site/pulls",
+            post(move |AxJson(body): AxJson<serde_json::Value>| {
+                let seen2 = seen2.clone();
+                async move {
+                    *seen2.lock().unwrap() = Some(body);
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(serde_json::json!({
+                            "number": 1,
+                            "html_url": "https://github.com/acme/site/pull/1",
+                            "title": "Launch week",
+                            "draft": true
+                        })),
+                    )
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let dir = tmp_dir("createdraft");
+        write_session(&dir, "tok");
+        let auth = GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        );
+
+        let title = pr_title("Launch week");
+        let body = pr_body("Launch week");
+        let pr = auth
+            .create_draft_pr("acme/site", "content/launch-week", &title, &body)
+            .await
+            .unwrap();
+        assert_eq!(pr.number, 1);
+        let sent = seen.lock().unwrap().clone().unwrap();
+        assert_eq!(sent["draft"], true);
+        assert_eq!(sent["title"], "Launch week");
+        assert_eq!(sent["body"], "Preview of change: Launch week");
+        assert_eq!(sent["head"], "content/launch-week");
+        assert_eq!(sent["base"], "main");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pulls_errors_map_to_distinct_api_error_codes() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        for (status, want_code) in [
+            (axum::http::StatusCode::UNAUTHORIZED, ErrorCode::Unauth),
+            (axum::http::StatusCode::FORBIDDEN, ErrorCode::Sandbox),
+            (
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                ErrorCode::Conflict,
+            ),
+        ] {
+            let routes = Router::new().route(
+                "/repos/acme/site/pulls",
+                get(move || async move {
+                    (
+                        status,
+                        Json(serde_json::json!({ "message": "nope" })),
+                    )
+                }),
+            );
+            let (base, stop) = mock_api(routes).await;
+            let dir = tmp_dir(&format!("err-{}", status.as_u16()));
+            write_session(&dir, "tok");
+            let auth = GithubAuth::open(
+                GithubConfig {
+                    api_url: base.clone(),
+                    web_url: base,
+                    gh_path: PathBuf::new(),
+                    ..GithubConfig::default()
+                },
+                &dir,
+            );
+            let err = auth
+                .find_pr("acme/site", "content/x")
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, want_code, "status {status}");
+            if want_code == ErrorCode::Sandbox {
+                assert!(err.message.contains("push access"));
+            }
+            stop();
+        }
     }
 }

@@ -16,9 +16,10 @@ import type { WorkspaceTab } from "@/app/Shell.vue";
 import ChangesMenu from "@/modules/changes/ChangesMenu.vue";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
+import { useGithubStore } from "@/modules/github/store";
 import { usePreviewStore, type Device } from "@/modules/preview/store";
 
-defineProps<{ projectId: string; tab: WorkspaceTab }>();
+const props = defineProps<{ projectId: string; tab: WorkspaceTab }>();
 
 const emit = defineEmits<{
   "update:tab": [tab: WorkspaceTab];
@@ -26,7 +27,17 @@ const emit = defineEmits<{
 
 const preview = usePreviewStore();
 const changes = useChangesStore();
+const github = useGithubStore();
 const showNewChange = ref(false);
+
+async function onShare() {
+  if (!changes.active) return;
+  try {
+    await changes.share(props.projectId, changes.active.branch);
+  } catch {
+    // error / needsSignIn set on the store
+  }
+}
 
 const tabs: { id: WorkspaceTab; label: string }[] = [
   { id: "preview", label: "Preview" },
@@ -92,6 +103,40 @@ const devices: { id: Device; label: string }[] = [
       @click="showNewChange = true"
     >
       New change
+    </Button>
+
+    <Button
+      v-if="changes.active"
+      variant="ghost"
+      size="sm"
+      class="h-7 px-2 text-xs"
+      data-testid="share-preview"
+      :disabled="changes.sharing"
+      @click="onShare"
+    >
+      Share preview
+    </Button>
+
+    <a
+      v-if="changes.prUrl"
+      class="text-muted-foreground hover:text-foreground truncate text-xs underline-offset-2 hover:underline"
+      data-testid="pr-link"
+      :href="changes.prUrl"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Open PR
+    </a>
+
+    <Button
+      v-if="changes.needsSignIn"
+      variant="outline"
+      size="sm"
+      class="h-7 px-2 text-xs"
+      data-testid="share-sign-in"
+      @click="github.signIn()"
+    >
+      Sign in with GitHub
     </Button>
 
     <span

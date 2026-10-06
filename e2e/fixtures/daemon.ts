@@ -17,6 +17,11 @@ export type WorkbenchEnv = {
   projectDir: string;
   bareRemote: string;
   tmp: string;
+  /** GitHub API stub — inspect pulls POSTs / force error statuses. */
+  github: {
+    pullsPosts: () => import("./githubStub").PullsPost[];
+    setPullsStatus: (status: number | null) => void;
+  };
   stop: () => Promise<void>;
 };
 
@@ -201,6 +206,10 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     projectDir,
     bareRemote,
     tmp,
+    github: {
+      pullsPosts: () => stub.pullsPosts(),
+      setPullsStatus: (status) => stub.setPullsStatus(status),
+    },
     stop: async () => {
       if (exited === null) {
         child.kill("SIGTERM");

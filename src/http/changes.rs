@@ -1,5 +1,5 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
-//! `POST /api/changes/{branch}/switch`.
+//! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use super::{project_dir, query_or_badreq};
 use crate::changes;
 use crate::error::ApiError;
+use crate::github::{pr_body, pr_title};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -94,4 +95,53 @@ pub async fn switch(
     let dir = project_dir(&state, &req.project).await?;
     let change = changes::switch(&dir, &branch).await?;
     Ok(Json(change_json(&change)))
+}
+
+#[derive(Deserialize)]
+struct ShareRequest {
+    project: String,
+}
+
+/// `POST /api/changes/{branch}/share` `{ project }` → `{ branch, title, prUrl }`.
+/// Pushes the branch and opens (or reuses) a draft PR titled after the change.
+pub async fn share(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    let repo = project.repo.ok_or_else(|| {
+        ApiError::badreq("this project has no GitHub remote — open a repository first")
+    })?;
+    let dir = project.dir;
+    let change = changes::get(&dir, &branch).await?;
+    let env = state.github.git_env().await?;
+    changes::push(&dir, &branch, &env).await?;
+
+    let pr = match state.github.find_pr(&repo, &branch).await? {
+        Some(existing) => existing,
+        None => {
+            let title = pr_title(&change.title);
+            let body = pr_body(&change.title);
+            state
+                .github
+                .create_draft_pr(&repo, &branch, &title, &body)
+                .await?
+        }
+    };
+
+    Ok(Json(json!({
+        "branch": change.branch,
+        "title": change.title,
+        "prUrl": pr.html_url,
+    })))
 }
