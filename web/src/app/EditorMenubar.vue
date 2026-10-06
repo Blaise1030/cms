@@ -13,6 +13,7 @@ import {
   MenubarTrigger,
 } from "@/components/ui/menubar";
 import type { WorkspaceTab } from "@/app/Shell.vue";
+import ChangesMenu from "@/modules/changes/ChangesMenu.vue";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import { useGithubStore } from "@/modules/github/store";
@@ -91,6 +92,8 @@ const devices: { id: Device; label: string }[] = [
         </MenubarContent>
       </MenubarMenu>
     </Menubar>
+
+    <ChangesMenu :project-id="projectId" />
 
     <Button
       variant="ghost"

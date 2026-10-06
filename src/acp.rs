@@ -1003,22 +1003,36 @@ async fn run_turn(
     }
 
     if outcome == Settle::Settled {
-        match git::checkpoint(&session.dir, &text).await {
-            Ok(Some(cp)) => session.shared.events.emit(
-                "checkpoint.created",
-                json!({
-                    "projectId": session.project_id,
-                    "sha": cp.sha,
-                    "summary": cp.summary,
-                    "author": cp.author,
-                    "ts": cp.ts,
-                }),
-            ),
-            Ok(None) => {}
-            Err(e) => eprintln!(
-                "workbench: checkpoint failed for {}: {e}",
+        let github_repo = session
+            .shared
+            .projects
+            .get(&session.project_id)
+            .await
+            .and_then(|p| p.repo);
+        if let Err(e) = crate::changes::require_change(&session.dir, github_repo.as_deref()).await
+        {
+            eprintln!(
+                "workbench: checkpoint blocked for {}: {e}",
                 session.project_id
-            ),
+            );
+        } else {
+            match git::checkpoint(&session.dir, &text).await {
+                Ok(Some(cp)) => session.shared.events.emit(
+                    "checkpoint.created",
+                    json!({
+                        "projectId": session.project_id,
+                        "sha": cp.sha,
+                        "summary": cp.summary,
+                        "author": cp.author,
+                        "ts": cp.ts,
+                    }),
+                ),
+                Ok(None) => {}
+                Err(e) => eprintln!(
+                    "workbench: checkpoint failed for {}: {e}",
+                    session.project_id
+                ),
+            }
         }
     }
     *lock(&session.turn) = None;

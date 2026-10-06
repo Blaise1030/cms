@@ -13,18 +13,27 @@ export const useChangesStore = defineStore("changes", () => {
   const projectId = ref<string | null>(null);
   const active = ref<Change | null>(null);
   const prUrl = ref<string | null>(null);
+  const items = ref<Change[]>([]);
   const creating = ref(false);
+  const switching = ref(false);
+  const listing = ref(false);
   const sharing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
   /** Share failed with expired/missing auth — show a sign-in prompt. */
   const needsSignIn = ref(false);
 
+  async function refreshTreeAndPreview() {
+    await useFilesStore().refresh();
+    usePreviewStore().reload();
+  }
+
   async function load(id: string) {
     // Invalidate immediately so a previous project's title cannot linger.
     if (projectId.value !== id) {
       active.value = null;
       prUrl.value = null;
+      items.value = [];
       error.value = null;
       needsSignIn.value = false;
     }
@@ -50,6 +59,21 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  async function list(id: string) {
+    projectId.value = id;
+    listing.value = true;
+    error.value = null;
+    try {
+      items.value = await daemon.api.listChanges(id);
+    } catch (e) {
+      items.value = [];
+      error.value = errorMessage(e);
+      throw e;
+    } finally {
+      listing.value = false;
+    }
+  }
+
   async function create(id: string, title: string): Promise<Change> {
     const trimmed = title.trim();
     if (!trimmed) throw new Error("Change title is required");
@@ -62,14 +86,31 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = null;
       // Checkout may change the tree (newer origin/main) — refresh UI.
-      await useFilesStore().refresh();
-      usePreviewStore().reload();
+      await refreshTreeAndPreview();
       return change;
     } catch (e) {
       error.value = errorMessage(e);
       throw e;
     } finally {
       creating.value = false;
+    }
+  }
+
+  async function switchTo(id: string, branch: string): Promise<Change> {
+    switching.value = true;
+    error.value = null;
+    try {
+      const change = await daemon.api.switchChange(id, branch);
+      projectId.value = id;
+      active.value = change;
+      prUrl.value = change.prUrl ?? null;
+      await refreshTreeAndPreview();
+      return change;
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    } finally {
+      switching.value = false;
     }
   }
 
@@ -105,13 +146,18 @@ export const useChangesStore = defineStore("changes", () => {
     projectId,
     active,
     prUrl,
+    items,
     creating,
+    switching,
+    listing,
     sharing,
     loading,
     error,
     needsSignIn,
     load,
+    list,
     create,
+    switchTo,
     share,
   };
 });

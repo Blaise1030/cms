@@ -18,6 +18,8 @@ pub enum ErrorCode {
     Io,
     Badreq,
     GithubErr,
+    /// GitHub projects must start a change before editing on `main`.
+    ChangeRequired,
 }
 
 impl ErrorCode {
@@ -33,6 +35,7 @@ impl ErrorCode {
             Self::Io => "IO",
             Self::Badreq => "BADREQ",
             Self::GithubErr => "GITHUB_ERR",
+            Self::ChangeRequired => "CHANGE_REQUIRED",
         }
     }
 
@@ -42,7 +45,7 @@ impl ErrorCode {
             Self::Unauth => 401,
             Self::Sandbox => 403,
             Self::Enoent => 404,
-            Self::Conflict => 409,
+            Self::Conflict | Self::ChangeRequired => 409,
             Self::Badreq => 400,
             Self::AgentErr | Self::DevserverErr | Self::GithubErr => 502,
             Self::GitErr | Self::Io => 500,
@@ -103,6 +106,9 @@ impl ApiError {
     }
     pub fn github(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::GithubErr, message)
+    }
+    pub fn change_required(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::ChangeRequired, message)
     }
 }
 
@@ -173,6 +179,7 @@ mod tests {
             Io,
             Badreq,
             GithubErr,
+            ChangeRequired,
         ]
         .iter()
         .map(|c| c.as_str())
@@ -189,7 +196,8 @@ mod tests {
                 "GIT_ERR",
                 "IO",
                 "BADREQ",
-                "GITHUB_ERR"
+                "GITHUB_ERR",
+                "CHANGE_REQUIRED"
             ]
         );
     }

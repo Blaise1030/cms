@@ -11,7 +11,8 @@ export type ErrorCode =
   | "GIT_ERR"
   | "IO"
   | "BADREQ"
-  | "GITHUB_ERR";
+  | "GITHUB_ERR"
+  | "CHANGE_REQUIRED";
 
 /** Codes the daemon documents; anything else maps to `UNKNOWN`. */
 export const ERROR_CODES: readonly ErrorCode[] = [
@@ -25,6 +26,7 @@ export const ERROR_CODES: readonly ErrorCode[] = [
   "IO",
   "BADREQ",
   "GITHUB_ERR",
+  "CHANGE_REQUIRED",
 ];
 
 export type DevserverState = "starting" | "ready" | "crashed";
@@ -74,12 +76,14 @@ export interface Checkpoint {
   ts: number;
 }
 
-/** Active content-change branch. */
+/** Content-change branch (active or listed). */
 export interface Change {
   branch: string;
   title: string;
   /** Set after a successful Share preview. */
   prUrl?: string;
+  /** Unix seconds of the branch tip commit (list entries). */
+  lastEdited?: number;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */
