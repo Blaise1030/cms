@@ -37,6 +37,7 @@ e2e:
     pnpm -C web install --frozen-lockfile
     pnpm -C web build
     cargo build --release
+    cargo build --release --example fake_acp_agent
     pnpm -C e2e install
     pnpm -C e2e exec playwright install chromium
     pnpm -C e2e test

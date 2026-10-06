@@ -14,6 +14,8 @@ export type WorkbenchEnv = {
   origin: string;
   token: string;
   projectId: string;
+  projectDir: string;
+  bareRemote: string;
   tmp: string;
   stop: () => Promise<void>;
 };
@@ -22,7 +24,21 @@ function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
-async function api(
+/** Path to the scripted ACP agent used by e2e (built by `just e2e` / CI). */
+export function fakeAgentPath(root = repoRoot()): string {
+  const candidates = [
+    path.join(root, "target/release/examples/fake_acp_agent"),
+    path.join(root, "target/debug/examples/fake_acp_agent"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  throw new Error(
+    "fake_acp_agent not found; run: cargo build --release --example fake_acp_agent",
+  );
+}
+
+export async function api(
   origin: string,
   token: string,
   method: string,
@@ -37,6 +53,54 @@ async function api(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+/**
+ * Drive a fake-agent turn that edits a file and settles into a product checkpoint
+ * (same path as a real ACP turn — not a raw `git commit`).
+ */
+export async function agentCheckpoint(
+  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  prompt = "edit the notes",
+): Promise<void> {
+  const beforeRes = await api(
+    env.origin,
+    env.token,
+    "GET",
+    `/api/checkpoints?project=${encodeURIComponent(env.projectId)}`,
+  );
+  if (!beforeRes.ok) throw new Error(`checkpoints list failed: ${await beforeRes.text()}`);
+  const before = (await beforeRes.json()) as { checkpoints: unknown[] };
+  const beforeCount = before.checkpoints.length;
+
+  const session = await api(env.origin, env.token, "POST", "/api/agent/session", {
+    project: env.projectId,
+    provider: "fake",
+  });
+  if (!session.ok) throw new Error(`agent session failed: ${await session.text()}`);
+  const { sessionId } = (await session.json()) as { sessionId: string };
+
+  const turn = await api(env.origin, env.token, "POST", "/api/agent/prompt", {
+    project: env.projectId,
+    sessionId,
+    text: prompt,
+  });
+  if (!turn.ok) throw new Error(`agent prompt failed: ${await turn.text()}`);
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const list = await api(
+      env.origin,
+      env.token,
+      "GET",
+      `/api/checkpoints?project=${encodeURIComponent(env.projectId)}`,
+    );
+    if (!list.ok) throw new Error(`checkpoints list failed: ${await list.text()}`);
+    const body = (await list.json()) as { checkpoints: unknown[] };
+    if (body.checkpoints.length > beforeCount) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("timed out waiting for checkpoint after agent turn");
 }
 
 async function signInAndClone(origin: string, token: string): Promise<string> {
@@ -60,27 +124,26 @@ async function signInAndClone(origin: string, token: string): Promise<string> {
   return info.id;
 }
 
-/** Boot `cargo run -- serve`, stub GitHub, bare remote, and a cloned project. */
+/** Boot release `workbench serve`, stub GitHub, bare remote, fake ACP agent, and a cloned project. */
 export async function startWorkbench(): Promise<WorkbenchEnv> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-e2e-"));
   const projectsDir = path.join(tmp, "projects");
   const gitRoot = path.join(tmp, "git");
   fs.mkdirSync(projectsDir, { recursive: true });
-  createBareRemote(gitRoot);
+  const bareRemote = createBareRemote(gitRoot);
   const stub = await startGithubStub();
   const gitUrl = fileGitUrl(gitRoot);
 
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
-  fs.writeFileSync(agents, "{}\n");
+  fs.writeFileSync(
+    agents,
+    JSON.stringify({ fake: [fakeAgentPath(root)] }) + "\n",
+  );
 
   const child = spawn(
-    "cargo",
+    path.join(root, "target/release/workbench"),
     [
-      "run",
-      "--release",
-      "--quiet",
-      "--",
       "serve",
       "--port",
       "0",
@@ -104,6 +167,14 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     },
   );
 
+  let exited: number | null = null;
+  child.on("exit", (code) => {
+    exited = code;
+    if (code !== null && code !== 0) {
+      process.stderr.write(`workbench exited ${code}\n`);
+    }
+  });
+
   const ready = await new Promise<string>((resolve, reject) => {
     const onLine = (line: string) => {
       const m = line.match(/^workbench ready: (https?:\/\/[^\s/]+(?::\d+)?)/);
@@ -121,15 +192,20 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
 
   const origin = ready;
   const projectId = await signInAndClone(origin, E2E_TOKEN);
+  const projectDir = path.join(projectsDir, projectId);
 
   return {
     origin,
     token: E2E_TOKEN,
     projectId,
+    projectDir,
+    bareRemote,
     tmp,
     stop: async () => {
-      child.kill("SIGTERM");
-      await new Promise<void>((r) => child.once("exit", () => r()));
+      if (exited === null) {
+        child.kill("SIGTERM");
+        await new Promise<void>((r) => child.once("exit", () => r()));
+      }
       await stub.close();
       fs.rmSync(tmp, { recursive: true, force: true });
     },

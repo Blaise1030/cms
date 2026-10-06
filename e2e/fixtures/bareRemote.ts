@@ -28,6 +28,11 @@ export function createBareRemote(root: string, repo = DEFAULT_REPO): string {
   const src = path.join(root, "src-repo");
   fs.mkdirSync(src, { recursive: true });
   fs.writeFileSync(path.join(src, "package.json"), PACKAGE_JSON);
+  // So `npm install` / the stubbing `dev` script leave the tree clean for change create.
+  fs.writeFileSync(
+    path.join(src, ".gitignore"),
+    ["node_modules/", "package-lock.json", "dist/", ".astro/", ".DS_Store", ""].join("\n"),
+  );
   git(src, ["init", "-b", "main"]);
   git(src, ["-c", "user.name=Grace", "-c", "user.email=g@example.com", "add", "-A"]);
   git(src, [
