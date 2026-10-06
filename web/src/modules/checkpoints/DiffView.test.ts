@@ -1,21 +1,29 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+
+const h = vi.hoisted(() => ({ render: vi.fn(), cleanUp: vi.fn() }));
+vi.mock("@pierre/diffs", () => ({
+  FileDiff: class {
+    render = h.render;
+    cleanUp = h.cleanUp;
+  },
+}));
+
 import DiffView from "./DiffView.vue";
 
 describe("DiffView", () => {
-  it("renders a read-only merge view highlighting the changed lines", () => {
-    const w = mount(DiffView, {
-      props: { oldText: "a\nold line\nc", newText: "a\nnew line\nc" },
-      attachTo: document.body,
+  it("renders the file diff into its host and cleans up on unmount", async () => {
+    const diff = { name: "a.txt" } as never;
+    const w = mount(DiffView, { props: { diff }, attachTo: document.body });
+    expect(h.render).toHaveBeenCalledWith({
+      fileDiff: diff,
+      containerWrapper: w.find("[data-testid='diff-view']").element,
     });
-    const content = w.find(".cm-content");
-    expect(content.exists()).toBe(true);
-    expect(content.text()).toContain("new line");
-    expect(content.attributes("contenteditable")).toBe("false");
-    // Removed text is shown in a deleted-chunk widget, inserted text is marked as changed.
-    expect(w.find(".cm-deletedChunk").text()).toContain("old line");
-    expect(w.find(".cm-changedLine").exists()).toBe(true);
+    const next = { name: "b.txt" } as never;
+    await w.setProps({ diff: next });
+    expect(h.render).toHaveBeenLastCalledWith(expect.objectContaining({ fileDiff: next }));
     w.unmount();
+    expect(h.cleanUp).toHaveBeenCalled();
   });
 });

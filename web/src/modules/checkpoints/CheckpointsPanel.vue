@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { ArrowLeft, ChevronRight, GitCommitVertical, History, RotateCcw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
@@ -22,13 +22,17 @@ import {
   StepperSeparator,
 } from "@/components/ui/stepper";
 import { errorMessage } from "@/lib/errors";
-import DiffView from "./DiffView.vue";
 import { useCheckpointsStore } from "./store";
+
+// Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
+const ChangedFilesTree = defineAsyncComponent(() => import("./ChangedFilesTree.vue"));
+const DiffView = defineAsyncComponent(() => import("./DiffView.vue"));
 
 const props = defineProps<{ projectId: string }>();
 const store = useCheckpointsStore();
 
 const confirming = ref(false);
+const diffs = ref<HTMLElement | null>(null);
 
 const list = computed(() => store.byProject[props.projectId] ?? []);
 const selected = computed(() => list.value.find((c) => c.sha === store.selectedSha) ?? null);
@@ -45,6 +49,14 @@ watch(
 
 const short = (sha: string) => sha.slice(0, 7);
 const when = (ts: number) => new Date(ts * 1000).toLocaleString();
+
+/** Scroll a file's diff into view when it is picked in the changed-files tree. */
+function reveal(path: string) {
+  const section = [...(diffs.value?.querySelectorAll<HTMLElement>("section[data-path]") ?? [])].find(
+    (el) => el.dataset.path === path,
+  );
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 async function restore() {
   const target = selected.value;
@@ -78,7 +90,7 @@ async function restore() {
         </Button>
       </div>
       <ScrollArea class="min-h-0 flex-1">
-        <div class="flex flex-col gap-4 p-3">
+        <div ref="diffs" class="flex flex-col gap-4 p-3">
           <div>
             <p class="text-sm font-medium">{{ selected.summary }}</p>
             <p class="text-muted-foreground text-xs">{{ selected.author }} · {{ short(selected.sha) }} · {{ when(selected.ts) }}</p>
@@ -91,17 +103,23 @@ async function restore() {
             <p v-if="store.diff.files.length === 0" class="text-muted-foreground text-sm">
               No file changes in this checkpoint.
             </p>
-            <section v-for="file in store.diff.files" :key="file.path" class="flex flex-col gap-1.5">
-              <div class="flex items-center justify-between gap-2 font-mono text-xs">
-                <span class="truncate">{{ file.path }}</span>
-                <span class="shrink-0">
-                  <span class="text-emerald-500">+{{ file.added }}</span>
-                  <span class="text-destructive ml-1">-{{ file.removed }}</span>
-                </span>
-              </div>
-              <p v-if="file.binary" class="text-muted-foreground text-xs">Binary file changed.</p>
-              <DiffView v-else :old-text="file.oldText" :new-text="file.newText" />
-            </section>
+            <template v-else>
+              <ChangedFilesTree :files="store.diff.files" @select="reveal" />
+              <section
+                v-for="file in store.diff.files"
+                :key="file.path"
+                :data-path="file.path"
+                class="flex scroll-mt-3 flex-col gap-1.5"
+              >
+                <template v-if="file.binary">
+                  <div class="flex items-center justify-between gap-2 font-mono text-xs">
+                    <span class="truncate">{{ file.path }}</span>
+                  </div>
+                  <p class="text-muted-foreground text-xs">Binary file changed.</p>
+                </template>
+                <DiffView v-else :diff="file.meta" />
+              </section>
+            </template>
           </template>
         </div>
       </ScrollArea>
