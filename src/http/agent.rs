@@ -56,6 +56,7 @@ pub async fn prompt(State(state): State<AppState>, body: Bytes) -> Result<Json<V
         &body,
         "{\"project\": string, \"sessionId\": string, \"text\": string}",
     )?;
+    super::checkpoints::require_change(&state, &req.project).await?;
     let turn_id = state
         .agents
         .prompt(&req.project, &req.session_id, &req.text)

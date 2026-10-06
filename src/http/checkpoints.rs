@@ -1,4 +1,7 @@
 //! `GET /api/checkpoints`, `GET /api/checkpoints/{sha}/diff`, `POST /api/checkpoints/{sha}/restore`.
+//!
+//! Also hosts the "start a change first" guard used by mutating edit paths (agent prompt;
+//! ACP checkpoint). Restore on `main` is intentionally not gated (Slice 3 out of scope).
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -10,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{project_dir, query_or_badreq};
+use crate::changes;
 use crate::error::ApiError;
 use crate::git;
 use crate::state::AppState;
@@ -17,6 +21,18 @@ use crate::state::AppState;
 #[derive(Deserialize)]
 pub struct ProjectQuery {
     project: String,
+}
+
+/// Reject edits on `main` for GitHub-remote projects. Local-only projects may edit `main`.
+///
+/// Used by agent prompt and by the ACP settle → checkpoint path. Restore stays ungated.
+pub(crate) async fn require_change(state: &AppState, project_id: &str) -> Result<(), ApiError> {
+    let project = state
+        .projects
+        .get(project_id)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project_id}")))?;
+    changes::require_change(&project.dir, project.repo.as_deref()).await
 }
 
 /// `GET /api/checkpoints?project=` → `{ checkpoints: [{ sha, summary, ts }] }` (newest first).
