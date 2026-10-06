@@ -7,6 +7,32 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// The panel loads these lazily; stand-ins keep Pierre's renderers out of happy-dom.
+vi.mock("./DiffView.vue", async () => {
+  const { defineComponent, h } = await import("vue");
+  return {
+    __esModule: true,
+    default: defineComponent({
+      props: { diff: { type: Object, required: true } },
+      setup: (p) => () => h("pre", { "data-testid": "diff-stub" }, p.diff.name),
+    }),
+  };
+});
+vi.mock("./ChangedFilesTree.vue", async () => {
+  const { defineComponent, h } = await import("vue");
+  return {
+    __esModule: true,
+    default: defineComponent({
+      props: { files: { type: Array, required: true } },
+      setup: (p) => () =>
+        h(
+          "ul",
+          { "data-testid": "tree-stub" },
+          (p.files as { path: string; status: string }[]).map((f) => h("li", `${f.path}:${f.status}`)),
+        ),
+    }),
+  };
+});
 
 import CheckpointsPanel from "./CheckpointsPanel.vue";
 import { useCheckpointsStore } from "./store";
@@ -28,7 +54,6 @@ function mountPanel() {
   return mount(CheckpointsPanel, {
     props: { projectId: "p" },
     attachTo: document.body,
-    global: { stubs: { DiffView: { props: ["oldText", "newText"], template: "<pre data-testid='diff-stub'>{{ oldText }}=>{{ newText }}</pre>" } } },
   });
 }
 
@@ -91,10 +116,9 @@ describe("CheckpointsPanel", () => {
     await w.findAll("[data-testid='checkpoint-item']")[1]!.trigger("click");
     await flushPromises();
     expect(api.checkpointDiff).toHaveBeenCalledWith("p", "aaaaaaa111");
-    const stub = w.find("[data-testid='diff-stub']").text();
-    expect(stub).toContain("x");
-    expect(stub).toContain("=>");
-    expect(stub).toContain("y");
+    await vi.waitFor(() => expect(w.find("[data-testid='diff-stub']").exists()).toBe(true));
+    expect(w.find("[data-testid='diff-stub']").text()).toBe("a.txt");
+    expect(w.find("[data-testid='tree-stub']").text()).toBe("a.txt:modified");
     w.unmount();
   });
 

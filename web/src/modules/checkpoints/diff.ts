@@ -1,14 +1,17 @@
-// Turn a unified diff (`git show` / `git diff` output) into per-file before/after text so
-// `@codemirror/merge` can render it. Only hunks are available, so each side is the hunk lines
-// joined by an identical `@@` marker line (which the merge view treats as unchanged context).
+// Turn a unified diff (`git show` / `git diff` output) into per-file diffs for `@pierre/diffs`
+// to render, plus the change counts and git status the panel and file tree show.
+
+import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
+import type { GitStatus } from "@pierre/trees";
 
 export interface FileDiff {
   path: string;
-  oldText: string;
-  newText: string;
   added: number;
   removed: number;
+  /** No hunks: a binary file, or a pure rename / mode change. */
   binary: boolean;
+  status: GitStatus;
+  meta: FileDiffMetadata;
 }
 
 export interface ParsedDiff {
@@ -17,82 +20,39 @@ export interface ParsedDiff {
   files: FileDiff[];
 }
 
-interface Building {
-  path: string;
-  old: string[];
-  new: string[];
-  added: number;
-  removed: number;
-  binary: boolean;
-  inHunk: boolean;
-}
+const STATUS: Record<FileDiffMetadata["type"], GitStatus> = {
+  change: "modified",
+  new: "added",
+  deleted: "deleted",
+  "rename-pure": "renamed",
+  "rename-changed": "renamed",
+};
 
-function finish(b: Building): FileDiff {
+function toFile(meta: FileDiffMetadata): FileDiff {
+  let added = 0;
+  let removed = 0;
+  for (const hunk of meta.hunks) {
+    for (const part of hunk.hunkContent) {
+      if (part.type === "change") {
+        added += part.additions;
+        removed += part.deletions;
+      }
+    }
+  }
   return {
-    path: b.path,
-    oldText: b.old.join("\n"),
-    newText: b.new.join("\n"),
-    added: b.added,
-    removed: b.removed,
-    binary: b.binary,
+    path: meta.name,
+    added,
+    removed,
+    binary: meta.hunks.length === 0 && meta.type !== "rename-pure",
+    status: STATUS[meta.type],
+    meta,
   };
 }
 
-function stripPrefix(p: string): string {
-  return p.replace(/^[ab]\//, "");
-}
-
 export function parseUnifiedDiff(text: string): ParsedDiff {
-  const files: FileDiff[] = [];
-  const header: string[] = [];
-  let cur: Building | null = null;
-
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    const git = /^diff --git a\/(.*) b\/(.*)$/.exec(line);
-    if (git) {
-      if (cur) files.push(finish(cur));
-      cur = {
-        path: git[2]!,
-        old: [],
-        new: [],
-        added: 0,
-        removed: 0,
-        binary: false,
-        inHunk: false,
-      };
-      continue;
-    }
-    if (!cur) {
-      header.push(line);
-      continue;
-    }
-    if (line.startsWith("@@")) {
-      cur.inHunk = true;
-      cur.old.push(line);
-      cur.new.push(line);
-      continue;
-    }
-    if (!cur.inHunk) {
-      if (line.startsWith("Binary files") || line.startsWith("GIT binary patch")) cur.binary = true;
-      else if (line.startsWith("+++ ") && !line.includes("/dev/null")) cur.path = stripPrefix(line.slice(4));
-      else if (line.startsWith("--- ") && !line.includes("/dev/null")) cur.path = stripPrefix(line.slice(4));
-      continue;
-    }
-    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
-    const marker = line[0];
-    const body = line.slice(1);
-    if (marker === "+") {
-      cur.new.push(body);
-      cur.added++;
-    } else if (marker === "-") {
-      cur.old.push(body);
-      cur.removed++;
-    } else if (marker === " " || line === "") {
-      cur.old.push(body);
-      cur.new.push(body);
-    }
-  }
-  if (cur) files.push(finish(cur));
-
-  return { header: header.join("\n").trim(), files };
+  const patches = parsePatchFiles(text.replace(/\r\n/g, "\n"));
+  return {
+    header: patches.map((p) => p.patchMetadata ?? "").join("\n").trim(),
+    files: patches.flatMap((p) => p.files.map(toFile)),
+  };
 }
