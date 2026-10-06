@@ -192,6 +192,95 @@ async fn active_returns_branch_and_title() {
     assert_eq!(active.title, "Launch week");
 }
 
+fn commit_file(dir: &Path, name: &str, content: &str, msg: &str) {
+    std::fs::write(dir.join(name), content).unwrap();
+    git_cli(dir, &["add", "-A"]);
+    git_cli(dir, &["commit", "-m", msg]);
+}
+
+#[tokio::test]
+async fn list_open_content_branches_newest_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+
+    // Empty / tip==main change is treated as merged — not listed.
+    changes::create(&work, "New post: Empty").await.unwrap();
+    assert!(changes::list(&work).await.unwrap().is_empty());
+
+    // Older diverged change.
+    changes::create(&work, "New post: Older").await.unwrap();
+    commit_file(&work, "older.md", "a\n", "older edit");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Newer diverged change.
+    changes::create(&work, "New post: Newer").await.unwrap();
+    commit_file(&work, "newer.md", "b\n", "newer edit");
+
+    // Merged into main → excluded.
+    git_cli(&work, &["checkout", "main"]);
+    git_cli(&work, &["merge", "--ff-only", "content/older"]);
+    // Stay off the merged branch for list.
+    let listed = changes::list(&work).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|c| c.branch.as_str()).collect::<Vec<_>>(),
+        vec!["content/newer"]
+    );
+    assert_eq!(listed[0].title, "Newer");
+    assert!(listed[0].last_edited.is_some());
+
+    // Two open: recreate older-equivalent + ensure sort.
+    changes::create(&work, "New post: Mid").await.unwrap();
+    commit_file(&work, "mid.md", "c\n", "mid edit");
+    // Touch newer so it stays newest.
+    git_cli(&work, &["checkout", "content/newer"]);
+    commit_file(&work, "newer2.md", "d\n", "newer again");
+
+    let listed = changes::list(&work).await.unwrap();
+    let branches: Vec<_> = listed.iter().map(|c| c.branch.as_str()).collect();
+    assert_eq!(branches, vec!["content/newer", "content/mid"]);
+    assert!(
+        listed[0].last_edited.unwrap() >= listed[1].last_edited.unwrap(),
+        "newest first by last commit"
+    );
+}
+
+#[tokio::test]
+async fn switch_checks_out_and_refuses_dirty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+
+    changes::create(&work, "New post: Alpha").await.unwrap();
+    commit_file(&work, "alpha.md", "a\n", "alpha");
+    changes::create(&work, "New post: Beta").await.unwrap();
+    commit_file(&work, "beta.md", "b\n", "beta");
+
+    let switched = changes::switch(&work, "content/alpha").await.unwrap();
+    assert_eq!(switched.branch, "content/alpha");
+    assert_eq!(switched.title, "Alpha");
+    assert_eq!(
+        git_cli(&work, &["branch", "--show-current"]),
+        "content/alpha"
+    );
+    assert!(work.join("alpha.md").exists());
+    assert!(!work.join("beta.md").exists());
+
+    std::fs::write(work.join("alpha.md"), "dirty\n").unwrap();
+    let err = changes::switch(&work, "content/beta")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
+    assert!(
+        err.message.to_lowercase().contains("checkpoint"),
+        "expected checkpoint-first message, got: {}",
+        err.message
+    );
+    assert_eq!(
+        git_cli(&work, &["branch", "--show-current"]),
+        "content/alpha",
+        "must stay on current branch"
+    );
+}
+
 #[tokio::test]
 async fn http_create_and_active() {
     let tmp = tempfile::tempdir().unwrap();
@@ -242,4 +331,54 @@ async fn http_create_and_active() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["branch"], "content/launch-week");
     assert_eq!(body["title"], "Launch week");
+
+    // Diverged tip so list includes it.
+    std::fs::write(dir.join("post.md"), "hi\n").unwrap();
+    git_cli(&dir, &["add", "-A"]);
+    git_cli(&dir, &["commit", "-m", "post"]);
+
+    let (s, body) = call(
+        &app,
+        req(
+            "GET",
+            &format!("/api/changes?project={}", info.id),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["changes"][0]["branch"], "content/launch-week");
+    assert_eq!(body["changes"][0]["title"], "Launch week");
+    assert!(body["changes"][0]["lastEdited"].as_i64().unwrap() > 0);
+
+    // Second change, then switch back.
+    let (s, body) = call(
+        &app,
+        req(
+            "POST",
+            "/api/changes",
+            Some(json!({ "project": info.id, "title": "Other" })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    std::fs::write(dir.join("other.md"), "x\n").unwrap();
+    git_cli(&dir, &["add", "-A"]);
+    git_cli(&dir, &["commit", "-m", "other"]);
+
+    let (s, body) = call(
+        &app,
+        req(
+            "POST",
+            "/api/changes/content%2Flaunch-week/switch",
+            Some(json!({ "project": info.id })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["branch"], "content/launch-week");
+    assert_eq!(
+        git_cli(&dir, &["branch", "--show-current"]),
+        "content/launch-week"
+    );
 }

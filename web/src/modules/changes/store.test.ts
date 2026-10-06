@@ -50,6 +50,49 @@ describe("changes store", () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  it("list loads open changes", async () => {
+    const listChanges = vi.fn(async () => [
+      { branch: "content/newer", title: "Newer", lastEdited: 200 },
+      { branch: "content/older", title: "Older", lastEdited: 100 },
+    ]);
+    const store = setup({ listChanges });
+    await store.list("site");
+    expect(listChanges).toHaveBeenCalledWith("site");
+    expect(store.items.map((c) => c.branch)).toEqual(["content/newer", "content/older"]);
+  });
+
+  it("switchTo sets active and refreshes tree/preview", async () => {
+    const switchChange = vi.fn(async () => ({
+      branch: "content/alpha",
+      title: "Alpha",
+    }));
+    const store = setup({
+      switchChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const preview = usePreviewStore();
+    const reload = vi.spyOn(preview, "reload");
+
+    await store.switchTo("site", "content/alpha");
+    expect(switchChange).toHaveBeenCalledWith("site", "content/alpha");
+    expect(store.active).toEqual({ branch: "content/alpha", title: "Alpha" });
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("switchTo surfaces checkpoint-first errors", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "Uncommitted changes — checkpoint first", 409);
+      }),
+    });
+    await expect(store.switchTo("site", "content/alpha")).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toMatch(/checkpoint/i);
+  });
+
   it("load sets active from GET /api/changes/active", async () => {
     const activeChange = vi.fn(async () => ({
       branch: "content/launch-week",
