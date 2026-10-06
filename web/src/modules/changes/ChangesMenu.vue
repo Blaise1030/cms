@@ -78,7 +78,7 @@ async function onSelect(branch: string) {
         data-testid="change-item"
         :data-branch="c.branch"
         :disabled="store.switching"
-        @select="onSelect(c.branch)"
+        @select.prevent="onSelect(c.branch)"
       >
         <span class="text-sm">{{ c.title }}</span>
         <span class="text-muted-foreground text-xs">{{ formatEdited(c.lastEdited) }}</span>
