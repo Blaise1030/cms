@@ -198,6 +198,25 @@ fn commit_file(dir: &Path, name: &str, content: &str, msg: &str) {
     git_cli(dir, &["commit", "-m", msg]);
 }
 
+/// Commit with a fixed committer date so newest-first ordering is stable in tests.
+fn commit_file_at(dir: &Path, name: &str, content: &str, msg: &str, unix: i64) {
+    std::fs::write(dir.join(name), content).unwrap();
+    git_cli(dir, &["add", "-A"]);
+    let date = format!("@{unix}");
+    let out = Command::new("git")
+        .args(["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", msg])
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git commit: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[tokio::test]
 async fn list_open_content_branches_newest_first() {
     let tmp = tempfile::tempdir().unwrap();
@@ -209,39 +228,34 @@ async fn list_open_content_branches_newest_first() {
 
     // Older diverged change.
     changes::create(&work, "New post: Older").await.unwrap();
-    commit_file(&work, "older.md", "a\n", "older edit");
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    commit_file_at(&work, "older.md", "a\n", "older edit", 1_700_000_000);
 
     // Newer diverged change.
     changes::create(&work, "New post: Newer").await.unwrap();
-    commit_file(&work, "newer.md", "b\n", "newer edit");
+    commit_file_at(&work, "newer.md", "b\n", "newer edit", 1_700_000_100);
 
     // Merged into main → excluded.
     git_cli(&work, &["checkout", "main"]);
     git_cli(&work, &["merge", "--ff-only", "content/older"]);
-    // Stay off the merged branch for list.
     let listed = changes::list(&work).await.unwrap();
     assert_eq!(
         listed.iter().map(|c| c.branch.as_str()).collect::<Vec<_>>(),
         vec!["content/newer"]
     );
     assert_eq!(listed[0].title, "Newer");
-    assert!(listed[0].last_edited.is_some());
+    assert_eq!(listed[0].last_edited, Some(1_700_000_100));
 
-    // Two open: recreate older-equivalent + ensure sort.
+    // Second open change; tip dates force newest-first order.
     changes::create(&work, "New post: Mid").await.unwrap();
-    commit_file(&work, "mid.md", "c\n", "mid edit");
-    // Touch newer so it stays newest.
+    commit_file_at(&work, "mid.md", "c\n", "mid edit", 1_700_000_050);
     git_cli(&work, &["checkout", "content/newer"]);
-    commit_file(&work, "newer2.md", "d\n", "newer again");
+    commit_file_at(&work, "newer2.md", "d\n", "newer again", 1_700_000_200);
 
     let listed = changes::list(&work).await.unwrap();
     let branches: Vec<_> = listed.iter().map(|c| c.branch.as_str()).collect();
     assert_eq!(branches, vec!["content/newer", "content/mid"]);
-    assert!(
-        listed[0].last_edited.unwrap() >= listed[1].last_edited.unwrap(),
-        "newest first by last commit"
-    );
+    assert_eq!(listed[0].last_edited, Some(1_700_000_200));
+    assert_eq!(listed[1].last_edited, Some(1_700_000_050));
 }
 
 #[tokio::test]
