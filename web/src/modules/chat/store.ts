@@ -54,6 +54,7 @@ function emptyChat(projectId: string): ProjectChat {
     historyLoaded: false,
     loadingHistory: false,
     sending: false,
+    changeRequiredPrompt: null,
   };
 }
 
@@ -172,6 +173,12 @@ export const useChatStore = defineStore("chat", () => {
         turn.pending = false;
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === "CHANGE_REQUIRED") {
+        const idx = pc.turns.indexOf(turn);
+        if (idx >= 0) pc.turns.splice(idx, 1);
+        pc.changeRequiredPrompt = body;
+        return;
+      }
       turn.status = "error";
       turn.pending = false;
       turn.error = errorMessage(e);
@@ -183,6 +190,15 @@ export const useChatStore = defineStore("chat", () => {
     } finally {
       pc.sending = false;
     }
+  }
+
+  /** Consume a pending "Start a change first" prompt, if any. */
+  function takeChangeRequired(projectId: string): string | null {
+    const pc = byProject.value[projectId];
+    if (!pc?.changeRequiredPrompt) return null;
+    const text = pc.changeRequiredPrompt;
+    pc.changeRequiredPrompt = null;
+    return text;
   }
 
   /** Cancel the streaming turn; the daemon then emits `chat.done` with a cancelled reason. */
@@ -366,6 +382,7 @@ export const useChatStore = defineStore("chat", () => {
     loadHistory,
     openProject,
     send,
+    takeChangeRequired,
     stop,
     resolvePermission,
     restartSession,

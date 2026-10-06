@@ -128,6 +128,24 @@ async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// GitHub-remote projects cannot be edited (agent prompt / checkpoint) on `main`.
+/// Local-only projects (`github_repo == None`) may edit `main`.
+pub async fn require_change(dir: &Path, github_repo: Option<&str>) -> Result<(), ApiError> {
+    if github_repo.is_none() {
+        return Ok(());
+    }
+    let branch = run(dir, &["branch", "--show-current"])
+        .await?
+        .trim()
+        .to_string();
+    if branch == "main" {
+        return Err(ApiError::change_required(
+            "Start a change first — GitHub projects cannot be edited on main",
+        ));
+    }
+    Ok(())
+}
+
 /// Active change = current `content/*` branch (with its description title), else `None`.
 pub async fn active(dir: &Path) -> Result<Option<Change>, ApiError> {
     let branch = run(dir, &["branch", "--show-current"])
