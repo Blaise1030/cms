@@ -74,10 +74,12 @@ export interface Checkpoint {
   ts: number;
 }
 
-/** Active content-change branch. */
+/** Content-change branch (active or listed). */
 export interface Change {
   branch: string;
   title: string;
+  /** Unix seconds of the branch tip commit (list entries). */
+  lastEdited?: number;
 }
 
 export interface TreeEntry {

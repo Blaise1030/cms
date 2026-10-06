@@ -14,6 +14,9 @@ use crate::projects;
 pub struct Change {
     pub branch: String,
     pub title: String,
+    /// Unix seconds of the branch tip commit (set for list entries).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_edited: Option<i64>,
 }
 
 /// Strip leading "New post:" / "New page:" / "New:" (case-insensitive) and trim.
@@ -87,7 +90,7 @@ async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
 pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     let title = display_title(raw_title)?;
     let base = branch_name(raw_title)?;
-    ensure_clean(dir).await?;
+    ensure_clean(dir, "starting a new change").await?;
     // Always refresh main from the remote before branching.
     run(dir, &["fetch", "origin", "main"]).await?;
     let branch = unique_branch(dir, &base).await?;
@@ -105,18 +108,22 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
         ],
     )
     .await?;
-    Ok(Change { branch, title })
+    Ok(Change {
+        branch,
+        title,
+        last_edited: None,
+    })
 }
 
-/// Refuse to create a change while tracked files have uncommitted modifications.
-async fn ensure_clean(dir: &Path) -> Result<(), ApiError> {
+/// Refuse while tracked files have uncommitted modifications.
+async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     // Ignore untracked (e.g. `node_modules` / build output from preview); those do not
-    // block `checkout -b` and are not what "checkpoint first" means.
+    // block checkout and are not what "checkpoint first" means.
     let status = run(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
     if !status.trim().is_empty() {
-        return Err(ApiError::conflict(
-            "Uncommitted changes — checkpoint or discard them before starting a new change",
-        ));
+        return Err(ApiError::conflict(format!(
+            "Uncommitted changes — checkpoint or discard them before {action}"
+        )));
     }
     Ok(())
 }
@@ -130,14 +137,84 @@ pub async fn active(dir: &Path) -> Result<Option<Change>, ApiError> {
     if !branch.starts_with("content/") {
         return Ok(None);
     }
-    let title = match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await
-    {
+    let title = branch_title(dir, &branch).await;
+    Ok(Some(Change {
+        branch,
+        title,
+        last_edited: None,
+    }))
+}
+
+/// Local `content/*` branches whose tip is not an ancestor of `main`, newest tip first.
+pub async fn list(dir: &Path) -> Result<Vec<Change>, ApiError> {
+    let out = run(
+        dir,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname:short)\t%(committerdate:unix)",
+            "refs/heads/content/",
+        ],
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut changes = Vec::new();
+    for line in out.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((branch, ts)) = line.split_once('\t') else {
+            continue;
+        };
+        if !branch.starts_with("content/") {
+            continue;
+        }
+        // Tip reachable from main ⇒ already merged (or never diverged).
+        if run(dir, &["merge-base", "--is-ancestor", branch, "main"])
+            .await
+            .is_ok()
+        {
+            continue;
+        }
+        let last_edited = ts.parse::<i64>().ok();
+        let title = branch_title(dir, branch).await;
+        changes.push(Change {
+            branch: branch.to_string(),
+            title,
+            last_edited,
+        });
+    }
+    Ok(changes)
+}
+
+/// Check out `branch` when the working tree is clean.
+pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
+    if !branch.starts_with("content/") {
+        return Err(ApiError::badreq("branch must be a content/* change"));
+    }
+    if !branch_exists(dir, branch).await? {
+        return Err(ApiError::enoent(format!("no such change: {branch}")));
+    }
+    ensure_clean(dir, "switching changes").await?;
+    run(dir, &["checkout", branch]).await?;
+    let title = branch_title(dir, branch).await;
+    Ok(Change {
+        branch: branch.to_string(),
+        title,
+        last_edited: None,
+    })
+}
+
+async fn branch_title(dir: &Path, branch: &str) -> String {
+    match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await {
         Ok(t) => {
             let t = t.trim();
             if t.is_empty() {
                 branch
                     .strip_prefix("content/")
-                    .unwrap_or(&branch)
+                    .unwrap_or(branch)
                     .replace('-', " ")
             } else {
                 t.to_string()
@@ -145,10 +222,9 @@ pub async fn active(dir: &Path) -> Result<Option<Change>, ApiError> {
         }
         Err(_) => branch
             .strip_prefix("content/")
-            .unwrap_or(&branch)
+            .unwrap_or(branch)
             .replace('-', " "),
-    };
-    Ok(Some(Change { branch, title }))
+    }
 }
 
 async fn run(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
