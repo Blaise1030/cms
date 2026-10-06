@@ -14,20 +14,26 @@ defineOptions({
 })
 
 const props = withDefaults(
-  defineProps<DropdownMenuContentProps & { class?: HTMLAttributes["class"] }>(),
+  defineProps<
+    DropdownMenuContentProps & {
+      class?: HTMLAttributes["class"]
+      /** Portal target; defaults to `body` (pass the fullscreen element so the menu shows there). */
+      to?: string | HTMLElement | null
+    }
+  >(),
   {
     sideOffset: 4,
   },
 )
 const emits = defineEmits<DropdownMenuContentEmits>()
 
-const delegatedProps = reactiveOmit(props, "class")
+const delegatedProps = reactiveOmit(props, "class", "to")
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
-  <DropdownMenuPortal>
+  <DropdownMenuPortal :to="to ?? undefined">
     <DropdownMenuContent
       data-slot="dropdown-menu-content"
       v-bind="{ ...$attrs, ...forwarded }"
