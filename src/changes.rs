@@ -121,6 +121,50 @@ async fn ensure_clean(dir: &Path) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Push `branch` to `origin` (authenticated via `env` from [`crate::github::GithubAuth::git_env`]).
+pub async fn push(dir: &Path, branch: &str, env: &[(String, String)]) -> Result<(), ApiError> {
+    if !branch.starts_with("content/") {
+        return Err(ApiError::badreq("not a change branch"));
+    }
+    if !branch_exists(dir, branch).await? {
+        return Err(ApiError::enoent(format!("no such branch: {branch}")));
+    }
+    run_env(dir, &["push", "-u", "origin", branch], env).await?;
+    Ok(())
+}
+
+/// Load a change branch's display title (from branch description).
+pub async fn get(dir: &Path, branch: &str) -> Result<Change, ApiError> {
+    if !branch.starts_with("content/") {
+        return Err(ApiError::badreq("not a change branch"));
+    }
+    if !branch_exists(dir, branch).await? {
+        return Err(ApiError::enoent(format!("no such branch: {branch}")));
+    }
+    let title = match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await
+    {
+        Ok(t) => {
+            let t = t.trim();
+            if t.is_empty() {
+                branch
+                    .strip_prefix("content/")
+                    .unwrap_or(branch)
+                    .replace('-', " ")
+            } else {
+                t.to_string()
+            }
+        }
+        Err(_) => branch
+            .strip_prefix("content/")
+            .unwrap_or(branch)
+            .replace('-', " "),
+    };
+    Ok(Change {
+        branch: branch.to_string(),
+        title,
+    })
+}
+
 /// Active change = current `content/*` branch (with its description title), else `None`.
 pub async fn active(dir: &Path) -> Result<Option<Change>, ApiError> {
     let branch = run(dir, &["branch", "--show-current"])
@@ -152,27 +196,46 @@ pub async fn active(dir: &Path) -> Result<Option<Change>, ApiError> {
 }
 
 async fn run(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
-    let out = Command::new("git")
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.quotepath=off",
-        ])
-        .args(args)
-        .current_dir(dir)
-        .stdin(std::process::Stdio::null())
+    run_env(dir, args, &[]).await
+}
+
+async fn run_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<String, ApiError> {
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.quotepath=off",
+    ])
+    .args(args)
+    .current_dir(dir)
+    .stdin(std::process::Stdio::null());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd
         .output()
         .await
         .map_err(|e| ApiError::git(format!("failed to run git: {e}")))?;
     if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let lower = stderr.to_ascii_lowercase();
+        if lower.contains("permission") || lower.contains("denied") || lower.contains("403") {
+            return Err(ApiError::sandbox("You don't have push access"));
+        }
+        if lower.contains("authentication") || lower.contains("401") || lower.contains("credentials")
+        {
+            return Err(ApiError::unauth(
+                "your GitHub session expired — sign in again",
+            ));
+        }
         return Err(ApiError::git(format!(
             "git {} failed ({}): {}",
             args.first().copied().unwrap_or(""),
             out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
+            stderr.trim()
         )));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())

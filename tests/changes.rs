@@ -193,6 +193,27 @@ async fn active_returns_branch_and_title() {
 }
 
 #[tokio::test]
+async fn push_sends_branch_to_origin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let remote = tmp.path().join("remote.git");
+
+    let change = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+    std::fs::write(work.join("notes.md"), "hi\n").unwrap();
+    git_cli(&work, &["add", "-A"]);
+    git_cli(&work, &["commit", "-m", "checkpoint: notes"]);
+    let tip = git_cli(&work, &["rev-parse", "HEAD"]);
+
+    changes::push(&work, &change.branch, &[]).await.unwrap();
+    assert_eq!(
+        git_cli(&remote, &["rev-parse", "refs/heads/content/launch-week"]),
+        tip
+    );
+}
+
+#[tokio::test]
 async fn http_create_and_active() {
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");

@@ -78,6 +78,15 @@ export interface Checkpoint {
 export interface Change {
   branch: string;
   title: string;
+  /** Set after a successful Share preview. */
+  prUrl?: string;
+}
+
+/** Result of `POST /api/changes/{branch}/share`. */
+export interface SharedChange {
+  branch: string;
+  title: string;
+  prUrl: string;
 }
 
 export interface TreeEntry {
