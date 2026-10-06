@@ -1,6 +1,7 @@
 //! HTTP layer: router, middleware wiring.
 
 pub mod agent;
+pub mod changes;
 pub mod checkpoints;
 pub mod devserver;
 pub mod error;
@@ -66,6 +67,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
+        .route("/api/changes", get(changes::list).post(changes::create))
+        .route("/api/changes/active", get(changes::active))
+        .route("/api/changes/{branch}/switch", post(changes::switch))
+        .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/tree", get(files::tree))
         .route("/api/file", get(files::file))
         .fallback(static_files::serve)

@@ -8,6 +8,7 @@ import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
 import { errorMessage } from "@/lib/errors";
 import ChatPanel from "@/modules/chat/ChatPanel.vue";
+import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 
@@ -16,15 +17,18 @@ const props = defineProps<{ id: string }>();
 const daemon = useDaemon();
 const router = useRouter();
 const projects = useProjectsStore();
+const changes = useChangesStore();
 const tab = ref<WorkspaceTab>("preview");
 
 const project = computed(() => projects.projects.find((p) => p.id === props.id) ?? null);
 
 watch(
   () => props.id,
-  () => {
+  (id) => {
     tab.value = "preview";
+    void changes.load(id);
   },
+  { immediate: true },
 );
 
 // An unknown id (a stale link, or a project deleted elsewhere) goes back to the project list.

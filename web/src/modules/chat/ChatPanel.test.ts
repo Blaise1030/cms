@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { ApiError } from "@/core/api";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
@@ -21,6 +22,11 @@ function mountPanel() {
     prompt: vi.fn(async () => "t1"),
     cancelTurn: vi.fn(async () => ({})),
     resolvePermission: vi.fn(async () => ({})),
+    createChange: vi.fn(async () => ({ branch: "content/launch-week", title: "Launch week" })),
+    activeChange: vi.fn(async () => {
+      throw new ApiError("ENOENT", "no active change", 404);
+    }),
+    tree: vi.fn(async () => ({ entries: [] })),
   };
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
@@ -191,6 +197,35 @@ describe("ChatPanel", () => {
     document.querySelector<HTMLElement>("[data-testid='mode-auto']")!.click();
     await flushPromises();
     expect(w.emitted("toggleAutoApprove")).toHaveLength(1);
+    w.unmount();
+  });
+
+  it("shows Start a change first on CHANGE_REQUIRED and retries after create", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    api.prompt!
+      .mockRejectedValueOnce(new ApiError("CHANGE_REQUIRED", "Start a change first", 409))
+      .mockResolvedValueOnce("t2");
+
+    await send(w, "edit the notes");
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(w.find("[data-testid='user-text']").exists()).toBe(false);
+    expect(document.body.textContent).toContain("Start a change first");
+
+    const input = document.querySelector<HTMLInputElement>("[aria-label='Change title']")!;
+    expect(input).toBeTruthy();
+    // Native input + Vue v-model: set value then dispatch input for the binding.
+    input.value = "New post: Launch week";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushPromises();
+    const dialogForm = document.querySelector<HTMLFormElement>("[role='dialog'] form")!;
+    dialogForm.requestSubmit();
+    await flushPromises();
+
+    expect(api.createChange).toHaveBeenCalledWith("p", "New post: Launch week");
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(api.prompt).toHaveBeenLastCalledWith("p", "s1", "edit the notes");
+    expect(w.find("[data-testid='user-text']").text()).toBe("edit the notes");
     w.unmount();
   });
 });

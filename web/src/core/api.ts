@@ -1,6 +1,8 @@
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type Change,
+  type SharedChange,
   type Checkpoint,
   type ErrorCode,
   type DeviceStart,
@@ -173,6 +175,19 @@ export function createApi(
           query: { project, session },
         })
       ).turns,
+
+    createChange: (project: string, title: string) =>
+      json<Change>("POST", "/api/changes", { body: { project, title } }),
+    listChanges: async (project: string): Promise<Change[]> =>
+      (await json<{ changes: Change[] }>("GET", "/api/changes", { query: { project } })).changes,
+    activeChange: async (project: string): Promise<Change> =>
+      json<Change>("GET", "/api/changes/active", { query: { project } }),
+    switchChange: (project: string, branch: string) =>
+      json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    shareChange: (project: string, branch: string) =>
+      json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
+        body: { project },
+      }),
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))
