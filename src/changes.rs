@@ -283,107 +283,257 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
 pub struct Update {
     /// Local `main` moved forward to `origin/main`.
     pub main_updated: bool,
-    /// Change branches that now include `main` (merge commit, or fast-forward when empty).
-    pub updated: Vec<String>,
+    /// Local `main` has commits that are not on `origin/main`, so it was left as it is (the
+    /// change branches were still brought up to `origin/main`).
+    pub main_diverged: bool,
+    /// Change branches that now include latest `main` (merge commit, or fast-forward when the
+    /// active change has no work of its own yet).
+    pub updated: Vec<Change>,
     /// Change branches whose merge with `main` conflicts; left exactly as they were.
-    pub conflicts: Vec<String>,
+    pub conflicts: Vec<Change>,
 }
 
-/// Get latest: fetch and fast-forward `main` from `origin` (when there is one), then merge
-/// `main` into every open change branch — the active one plus every `content/*` branch with
-/// work not on `main`. Merges are commits authored by the repo's identity (never a rebase, so
-/// shared branches never need a force-push). Conflicting branches are reported and untouched.
-pub async fn get_latest(dir: &Path) -> Result<Update, ApiError> {
+/// `git merge-tree --write-tree` (how merges are computed without a checkout) needs 2.38+.
+/// `version` is `git --version` output.
+pub fn check_git_version(version: &str) -> Result<(), ApiError> {
+    let found = version
+        .trim()
+        .strip_prefix("git version ")
+        .and_then(|v| v.split_whitespace().next())
+        .unwrap_or("");
+    let mut parts = found.split('.').map(|p| p.parse::<u32>().ok());
+    match (parts.next().flatten(), parts.next().flatten()) {
+        (Some(major), Some(minor)) if (major, minor) >= (2, 38) => Ok(()),
+        _ => Err(ApiError::git(format!(
+            "Get latest needs git 2.38 or newer (found {}) — update git and try again",
+            if found.is_empty() { version.trim() } else { found }
+        ))),
+    }
+}
+
+/// Get latest: fetch `origin/main` (with `env`, the GitHub auth from
+/// [`crate::github::GithubAuth::git_env`]), fast-forward local `main`, and merge it into every
+/// open change branch — the active one plus every `content/*` branch with work not on `main`.
+/// Merges are commits authored by the repo's identity (never a rebase, so shared branches
+/// never need a force-push). Conflicting branches are reported and left untouched.
+///
+/// All or nothing: every merge is computed first (objects only, no refs); then the refs move
+/// in one atomic `update-ref` transaction and, last, the checked-out branch fast-forwards.
+/// Any failure before that leaves `main` and every change branch where they were.
+pub async fn get_latest(dir: &Path, env: &[(String, String)]) -> Result<Update, ApiError> {
+    check_git_version(&run(dir, &["--version"]).await?)?;
+    // Serialise with checkpoints/restore on the same repo.
+    let lock = crate::git::lock_for(dir);
+    let _guard = lock.lock().await;
     ensure_clean(dir, "getting the latest").await?;
     let current = run(dir, &["branch", "--show-current"])
         .await?
         .trim()
         .to_string();
+    let main = rev_parse(dir, "refs/heads/main").await?;
     let mut update = Update::default();
-    if has_remote(dir, "origin").await? {
-        run(dir, &["fetch", "origin", "main"]).await?;
-        update.main_updated = fast_forward_main(dir, &current).await?;
-    }
+    let mut plan: Vec<RefMove> = Vec::new();
 
-    let mut branches: Vec<String> = list(dir).await?.into_iter().map(|c| c.branch).collect();
-    if current.starts_with("content/") && !branches.contains(&current) {
-        branches.push(current.clone());
-    }
-    for branch in branches {
-        match merge_main_into(dir, &branch, branch == current).await? {
-            Merged::UpToDate => {}
-            Merged::Updated => update.updated.push(branch),
-            Merged::Conflict => update.conflicts.push(branch),
+    // `base`: what the change branches are brought up to.
+    let base = if has_remote(dir, "origin").await? {
+        run_env(dir, &["fetch", "origin", "main"], env).await?;
+        let remote = rev_parse(dir, "refs/remotes/origin/main").await?;
+        if remote == main || is_ancestor(dir, &remote, &main).await {
+            main.clone()
+        } else if is_ancestor(dir, &main, &remote).await {
+            update.main_updated = true;
+            plan.push(RefMove::new("main", &main, &remote));
+            remote
+        } else {
+            update.main_diverged = true;
+            remote
+        }
+    } else {
+        main.clone()
+    };
+
+    for branch in change_branches(dir).await? {
+        let tip = rev_parse(dir, &format!("refs/heads/{branch}")).await?;
+        let planned = plan_merge(dir, &tip, &base, branch == current).await?;
+        let change = || async {
+            Change {
+                title: branch_title(dir, &branch).await,
+                branch: branch.clone(),
+                last_edited: None,
+            }
+        };
+        match planned {
+            Planned::UpToDate => {}
+            Planned::Conflict => update.conflicts.push(change().await),
+            Planned::Advance(target) => {
+                plan.push(RefMove::new(&branch, &tip, &target));
+                update.updated.push(change().await);
+            }
         }
     }
+
+    apply(dir, &current, &plan).await?;
     Ok(update)
 }
 
-/// Move local `main` to `origin/main` when it is strictly behind. Returns whether it moved.
-async fn fast_forward_main(dir: &Path, current: &str) -> Result<bool, ApiError> {
-    let local = rev_parse(dir, "refs/heads/main").await?;
-    let remote = rev_parse(dir, "refs/remotes/origin/main").await?;
-    if local == remote || is_ancestor(dir, &remote, &local).await {
-        return Ok(false);
-    }
-    if !is_ancestor(dir, &local, &remote).await {
-        return Err(ApiError::conflict(
-            "main has local commits that are not on GitHub — cannot get the latest",
-        ));
-    }
-    if current == "main" {
-        run(dir, &["merge", "--ff-only", &remote]).await?;
-    } else {
-        run(dir, &["update-ref", "refs/heads/main", &remote, &local]).await?;
-    }
-    Ok(true)
+/// Local `content/*` branch names.
+async fn change_branches(dir: &Path) -> Result<Vec<String>, ApiError> {
+    let out = run(
+        dir,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/content/"],
+    )
+    .await?;
+    Ok(out
+        .lines()
+        .map(str::trim)
+        .filter(|b| b.starts_with("content/"))
+        .map(str::to_string)
+        .collect())
 }
 
-enum Merged {
+/// Move `refs/heads/{branch}` from `old` to `new`.
+struct RefMove {
+    branch: String,
+    old: String,
+    new: String,
+}
+
+impl RefMove {
+    fn new(branch: &str, old: &str, new: &str) -> Self {
+        Self {
+            branch: branch.to_string(),
+            old: old.to_string(),
+            new: new.to_string(),
+        }
+    }
+}
+
+/// What getting `base` into a branch takes. Computing it writes objects but no refs.
+enum Planned {
     UpToDate,
-    Updated,
+    Advance(String),
     Conflict,
 }
 
-/// Bring `main` into `branch` without touching other branches' working trees: the merge is
-/// computed with `merge-tree`, committed with `commit-tree`, then the ref is advanced (the
-/// active branch via `merge --ff-only`, so its checkout follows).
-async fn merge_main_into(dir: &Path, branch: &str, active: bool) -> Result<Merged, ApiError> {
-    let tip = rev_parse(dir, &format!("refs/heads/{branch}")).await?;
-    let main = rev_parse(dir, "refs/heads/main").await?;
-    if is_ancestor(dir, &main, &tip).await {
-        return Ok(Merged::UpToDate);
+/// Merge `base` into `tip` without a checkout: `merge-tree` computes the tree and
+/// `commit-tree` records it with both parents. Conflicts are detected here, so Slice 9 can
+/// resolve them on the same `merge-tree` result.
+async fn plan_merge(dir: &Path, tip: &str, base: &str, active: bool) -> Result<Planned, ApiError> {
+    if is_ancestor(dir, base, tip).await {
+        return Ok(Planned::UpToDate);
     }
-    let target = if is_ancestor(dir, &tip, &main).await {
-        // No work of its own yet (only reachable for the active branch): just catch up.
-        main
-    } else {
-        let Some(tree) = merge_tree(dir, &tip, &main).await? else {
-            return Ok(Merged::Conflict);
-        };
-        run(
-            dir,
-            &[
-                "commit-tree",
-                &tree,
-                "-p",
-                &tip,
-                "-p",
-                &main,
-                "-m",
-                "Get latest from main",
-            ],
-        )
-        .await?
-        .trim()
-        .to_string()
+    if is_ancestor(dir, tip, base).await {
+        // Already merged into main (not an open change) — unless it is the active change with
+        // no work of its own yet, which simply catches up.
+        return Ok(if active {
+            Planned::Advance(base.to_string())
+        } else {
+            Planned::UpToDate
+        });
+    }
+    let Some(tree) = merge_tree(dir, tip, base).await? else {
+        return Ok(Planned::Conflict);
     };
-    if active {
-        run(dir, &["merge", "--ff-only", &target]).await?;
-    } else {
-        run(dir, &["update-ref", &format!("refs/heads/{branch}"), &target, &tip]).await?;
+    let commit = run(
+        dir,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            tip,
+            "-p",
+            base,
+            "-m",
+            "Get latest from main",
+        ],
+    )
+    .await?;
+    Ok(Planned::Advance(commit.trim().to_string()))
+}
+
+/// Apply `plan`: refuse first if the checked-out branch's update would clobber untracked
+/// files; then move every other ref in one atomic transaction; then fast-forward the
+/// checked-out branch (rolling the transaction back if that fails).
+async fn apply(dir: &Path, current: &str, plan: &[RefMove]) -> Result<(), ApiError> {
+    let (active, others): (Vec<&RefMove>, Vec<&RefMove>) =
+        plan.iter().partition(|m| m.branch == current);
+    if let Some(m) = active.first() {
+        ensure_no_untracked_in_the_way(dir, &m.new).await?;
     }
-    Ok(Merged::Updated)
+    update_refs(dir, others.iter().map(|m| (m.branch.as_str(), &m.new, &m.old))).await?;
+    if let Some(m) = active.first() {
+        if let Err(e) = run(dir, &["merge", "--ff-only", &m.new]).await {
+            let _ = update_refs(dir, others.iter().map(|m| (m.branch.as_str(), &m.old, &m.new))).await;
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// Untracked (non-ignored) files the fast-forward to `target` would overwrite — `ensure_clean`
+/// ignores untracked files, but `merge --ff-only` refuses to clobber them.
+async fn ensure_no_untracked_in_the_way(dir: &Path, target: &str) -> Result<(), ApiError> {
+    let untracked = run(dir, &["ls-files", "--others", "--exclude-standard"]).await?;
+    if untracked.trim().is_empty() {
+        return Ok(());
+    }
+    let incoming = run(dir, &["diff", "--name-only", "--diff-filter=A", "HEAD", target]).await?;
+    let incoming: std::collections::HashSet<&str> = incoming.lines().map(str::trim).collect();
+    let blocking: Vec<&str> = untracked
+        .lines()
+        .map(str::trim)
+        .filter(|f| incoming.contains(f))
+        .collect();
+    if blocking.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::conflict(format!(
+        "The latest main adds files you already have uncommitted copies of: {} — move or delete them, then try again",
+        blocking.join(", ")
+    )))
+}
+
+/// Move `(branch, new, old)` refs in one atomic `git update-ref --stdin` transaction.
+async fn update_refs<'a>(
+    dir: &Path,
+    moves: impl Iterator<Item = (&'a str, &'a String, &'a String)>,
+) -> Result<(), ApiError> {
+    use tokio::io::AsyncWriteExt;
+    let mut input = String::from("start\n");
+    let mut any = false;
+    for (branch, new, old) in moves {
+        input.push_str(&format!("update refs/heads/{branch} {new} {old}\n"));
+        any = true;
+    }
+    if !any {
+        return Ok(());
+    }
+    input.push_str("prepare\ncommit\n");
+    let mut child = Command::new("git")
+        .args(["update-ref", "--stdin"])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| ApiError::git(format!("failed to run git: {e}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input.as_bytes())
+            .await
+            .map_err(|e| ApiError::git(format!("failed to write to git: {e}")))?;
+    }
+    let out = child
+        .wait_with_output()
+        .await
+        .map_err(|e| ApiError::git(format!("failed to run git: {e}")))?;
+    if !out.status.success() {
+        return Err(ApiError::git(format!(
+            "could not update the change branches (nothing was changed): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 /// Merged tree of `ours` and `theirs`, or `None` when they conflict.
