@@ -18,6 +18,7 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
+  await page.getByTestId("changes-menu").click();
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill("New post: Launch week");
   await page.getByRole("button", { name: "Create change" }).click();
@@ -48,6 +49,7 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
   });
   expect(health.ok()).toBeTruthy();
 
+  await page.getByTestId("changes-menu").click();
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill("New post: Launch week");
   await page.getByRole("button", { name: "Create change" }).click();

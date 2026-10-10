@@ -265,23 +265,18 @@ function toggleFullscreen() {
           </form>
 
           <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="`Viewport: ${device.label}`"
-                    data-testid="viewport-size"
-                  >
-                    <component :is="device.icon" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Viewport size</TooltipContent>
-            </Tooltip>
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="`Viewport: ${device.label}`"
+                data-testid="viewport-size"
+              >
+                <component :is="device.icon" />
+              </Button>
+            </DropdownMenuTrigger>
             <!-- Portal into the shell while it is fullscreen; `body` is not rendered then. -->
-            <DropdownMenuContent align="end" :to="isFullscreen ? shell : undefined">
+            <DropdownMenuContent align="end" side="bottom" :to="isFullscreen ? shell ?? undefined : undefined">
               <DropdownMenuRadioGroup
                 :model-value="store.device"
                 @update:model-value="store.setDevice($event as Device)"

@@ -1,24 +1,29 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { RouterView, useRoute } from "vue-router";
 import type { Project } from "@/core/types";
-import type { WorkspaceTab } from "@/app/Shell.vue";
-import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
-import FilesPanel from "@/modules/files/FilesPanel.vue";
+import { projectTabFromRoute } from "@/router";
 import PreviewPanel from "@/modules/preview/PreviewPanel.vue";
 
-defineProps<{ project: Project; tab: WorkspaceTab }>();
+defineProps<{ project: Project }>();
+
+const route = useRoute();
+const tab = computed(() => projectTabFromRoute(route.name));
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="min-h-0 flex-1">
+    <div class="relative min-h-0 flex-1">
       <!-- The preview stays mounted so switching tabs does not reload the iframe. -->
       <PreviewPanel
         v-show="tab === 'preview'"
+        class="absolute inset-0"
         :project-id="project.id"
         :devserver="project.devserver"
       />
-      <FilesPanel v-if="tab === 'files'" :project-id="project.id" />
-      <CheckpointsPanel v-if="tab === 'history'" :project-id="project.id" />
+      <div v-show="tab !== 'preview'" class="absolute inset-0">
+        <RouterView />
+      </div>
     </div>
   </div>
 </template>

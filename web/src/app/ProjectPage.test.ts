@@ -56,7 +56,7 @@ describe("ProjectPage", () => {
     const w = await mountAt("/p/a");
     expect(w.find("[data-testid='workspace']").text()).toBe("a");
     expect(w.find("[data-testid='chat']").text()).toBe("a");
-    expect(router.currentRoute.value.path).toBe("/p/a");
+    expect(router.currentRoute.value.path).toBe("/p/a/preview");
   });
 
   it("sends an unknown project id home with a toast", async () => {

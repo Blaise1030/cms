@@ -7,3 +7,4 @@ web/node_modules/
 templates/astro-marketing/node_modules/
 templates/astro-marketing/dist/
 templates/astro-marketing/.astro/
+.DS_Store

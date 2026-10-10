@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,24 +31,21 @@ const emit = defineEmits<{ created: [change: Change] }>();
 const store = useChangesStore();
 
 const title = ref("");
-const error = ref<string | null>(null);
 
 watch(open, (isOpen) => {
   if (isOpen) {
     title.value = "";
-    error.value = null;
   }
 });
 
 async function submit() {
   if (!title.value.trim() || store.creating) return;
-  error.value = null;
   try {
     const change = await store.create(props.projectId, title.value);
     open.value = false;
     emit("created", change);
   } catch (e) {
-    error.value = errorMessage(e);
+    toast.error(errorMessage(e));
   }
 }
 </script>
@@ -66,7 +64,6 @@ async function submit() {
           aria-label="Change title"
           autofocus
         />
-        <p v-if="error" class="text-destructive text-sm" role="alert">{{ error }}</p>
         <DialogFooter>
           <Button type="button" variant="outline" @click="open = false">Cancel</Button>
           <Button type="submit" :disabled="!title.trim() || store.creating">

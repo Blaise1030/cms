@@ -50,7 +50,7 @@ async function signOut() {
   <template v-if="gh.configured || gh.user">
     <DropdownMenu v-if="gh.user">
       <DropdownMenuTrigger as-child>
-        <Button variant="ghost" size="sm" class="gap-1.5" data-testid="github-account">
+        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs" data-testid="github-account">
           <img :src="gh.user.avatarUrl" alt="" class="size-5 rounded-full" />
           {{ gh.user.name || gh.user.login }}
         </Button>

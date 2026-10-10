@@ -2,18 +2,24 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FILE_TREE_DENSITY_PRESETS, FileTree, type GitStatus } from "@pierre/trees";
 
-const props = defineProps<{ files: { path: string; status: GitStatus }[] }>();
+const props = withDefaults(
+  defineProps<{ files: { path: string; status: GitStatus }[]; fill?: boolean }>(),
+  { fill: false },
+);
 const emit = defineEmits<{ select: [path: string] }>();
 
 const ROW = FILE_TREE_DENSITY_PRESETS.compact.itemHeight;
 const MAX_ROWS = 10;
 
 const host = ref<HTMLElement | null>(null);
+const measured = ref(0);
 let tree: FileTree | null = null;
+let ro: ResizeObserver | null = null;
 
 // The tree is virtualized, so it needs a fixed height: fit every row (files plus the folders
-// above them) up to a cap, then scroll.
+// above them) up to a cap, then scroll — or fill the sidebar when `fill` is set.
 const height = computed(() => {
+  if (props.fill) return Math.max(measured.value, ROW);
   const rows = new Set<string>();
   for (const { path } of props.files) {
     const parts = path.split("/");
@@ -24,7 +30,7 @@ const height = computed(() => {
 
 function mount() {
   tree?.cleanUp();
-  if (!host.value) return;
+  if (!host.value || (props.fill && measured.value <= 0)) return;
   const paths = props.files.map((f) => f.path);
   tree = new FileTree({
     paths,
@@ -40,9 +46,23 @@ function mount() {
   tree.render({ containerWrapper: host.value });
 }
 
-onMounted(mount);
+onMounted(() => {
+  if (props.fill && host.value?.parentElement) {
+    ro = new ResizeObserver((entries) => {
+      const next = Math.floor(entries[0]?.contentRect.height ?? 0);
+      if (next === measured.value) return;
+      measured.value = next;
+      mount();
+    });
+    ro.observe(host.value.parentElement);
+  } else {
+    mount();
+  }
+});
 watch(() => props.files, mount);
 onBeforeUnmount(() => {
+  ro?.disconnect();
+  ro = null;
   tree?.cleanUp();
   tree = null;
 });
@@ -51,7 +71,8 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="host"
-    class="changed-files-tree overflow-hidden rounded-md border"
+    class="changed-files-tree overflow-hidden"
+    :class="fill ? 'w-full' : 'rounded-md border'"
     :style="{ height: `${height}px` }"
     data-testid="changed-files-tree"
   />

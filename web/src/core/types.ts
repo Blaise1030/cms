@@ -76,14 +76,14 @@ export interface Checkpoint {
   ts: number;
 }
 
-/** Content-change branch (active or listed). */
+/** Active content-change branch. */
 export interface Change {
   branch: string;
   title: string;
-  /** Set after a successful Share preview. */
-  prUrl?: string;
   /** Unix seconds of the branch tip commit (list entries). */
   lastEdited?: number;
+  /** Set after a successful Share preview. */
+  prUrl?: string;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */

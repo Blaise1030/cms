@@ -17,6 +17,7 @@ async function startChangeAndCheckpoint(
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
+  await page.getByTestId("changes-menu").click();
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill(title);
   await page.getByRole("button", { name: "Create change" }).click();
@@ -77,7 +78,7 @@ test("share preview shows push-access error on 403", async ({ page, workbench })
   workbench.github.setPullsStatus(403);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("changes-error")).toContainText("You don't have push access");
+  await expect(page.locator("[data-sonner-toast]")).toContainText("You don't have push access");
 });
 
 test("share preview prompts sign-in on 401", async ({ page, workbench }) => {

@@ -1,160 +1,45 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { RefreshCw, RotateCcw } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarRadioGroup,
-  MenubarRadioItem,
-  MenubarSeparator,
-  MenubarTrigger,
-} from "@/components/ui/menubar";
-import type { WorkspaceTab } from "@/app/Shell.vue";
-import ChangesMenu from "@/modules/changes/ChangesMenu.vue";
-import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
-import { useChangesStore } from "@/modules/changes/store";
-import { useGithubStore } from "@/modules/github/store";
-import { usePreviewStore, type Device } from "@/modules/preview/store";
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ChangesBranchPicker from "@/modules/changes/ChangesBranchPicker.vue";
+import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
-const props = defineProps<{ projectId: string; tab: WorkspaceTab }>();
+const props = defineProps<{ projectId: string }>();
 
-const emit = defineEmits<{
-  "update:tab": [tab: WorkspaceTab];
-}>();
+const route = useRoute();
+const router = useRouter();
 
-const preview = usePreviewStore();
-const changes = useChangesStore();
-const github = useGithubStore();
-const showNewChange = ref(false);
-
-async function onShare() {
-  if (!changes.active) return;
-  try {
-    await changes.share(props.projectId, changes.active.branch);
-  } catch {
-    // error / needsSignIn set on the store
-  }
-}
-
-const tabs: { id: WorkspaceTab; label: string }[] = [
+const tabs: { id: ProjectTab; label: string }[] = [
   { id: "preview", label: "Preview" },
-  { id: "files", label: "Code" },
+  { id: "code", label: "Code" },
   { id: "history", label: "History" },
 ];
 
-const devices: { id: Device; label: string }[] = [
-  { id: "desktop", label: "Desktop" },
-  { id: "tablet", label: "Tablet" },
-  { id: "mobile", label: "Mobile" },
-];
+const tab = computed(() => projectTabFromRoute(route.name));
+
+function onTab(value: string | number) {
+  void router.push(projectPath(props.projectId, value as ProjectTab));
+}
 </script>
 
 <template>
-  <div class="flex min-w-0 items-center gap-2">
-    <Menubar class="h-8 border-none bg-transparent p-0 shadow-none" data-testid="editor-menubar">
-      <MenubarMenu>
-        <MenubarTrigger>View</MenubarTrigger>
-        <MenubarContent>
-          <MenubarRadioGroup
-            :model-value="tab"
-            @update:model-value="emit('update:tab', $event as WorkspaceTab)"
-          >
-            <MenubarRadioItem v-for="t in tabs" :key="t.id" :value="t.id">
-              {{ t.label }}
-            </MenubarRadioItem>
-          </MenubarRadioGroup>
-        </MenubarContent>
-      </MenubarMenu>
+  <div class="flex min-w-0 items-center gap-3">
+    <Tabs :model-value="tab" data-testid="workspace-tabs" @update:model-value="onTab">
+      <TabsList class="h-7">
+        <TabsTrigger
+          v-for="t in tabs"
+          :key="t.id"
+          :value="t.id"
+          class="h-6 px-2.5 text-xs"
+          :data-testid="`workspace-tab-${t.id}`"
+        >
+          {{ t.label }}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
 
-      <MenubarMenu>
-        <MenubarTrigger>Preview</MenubarTrigger>
-        <MenubarContent>
-          <MenubarRadioGroup
-            :model-value="preview.device"
-            @update:model-value="preview.setDevice($event as Device)"
-          >
-            <MenubarRadioItem v-for="d in devices" :key="d.id" :value="d.id">
-              {{ d.label }}
-            </MenubarRadioItem>
-          </MenubarRadioGroup>
-          <MenubarSeparator />
-          <MenubarItem @select="preview.reload()">
-            <RefreshCw />
-            Reload preview
-          </MenubarItem>
-          <MenubarItem :disabled="preview.restarting" @select="preview.restart(projectId)">
-            <RotateCcw />
-            Restart dev server
-          </MenubarItem>
-        </MenubarContent>
-      </MenubarMenu>
-    </Menubar>
-
-    <ChangesMenu :project-id="projectId" />
-
-    <Button
-      variant="ghost"
-      size="sm"
-      class="h-7 px-2 text-xs"
-      data-testid="new-change"
-      @click="showNewChange = true"
-    >
-      New change
-    </Button>
-
-    <Button
-      v-if="changes.active"
-      variant="ghost"
-      size="sm"
-      class="h-7 px-2 text-xs"
-      data-testid="share-preview"
-      :disabled="changes.sharing"
-      @click="onShare"
-    >
-      Share preview
-    </Button>
-
-    <a
-      v-if="changes.prUrl"
-      class="text-muted-foreground hover:text-foreground truncate text-xs underline-offset-2 hover:underline"
-      data-testid="pr-link"
-      :href="changes.prUrl"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      Open PR
-    </a>
-
-    <Button
-      v-if="changes.needsSignIn"
-      variant="outline"
-      size="sm"
-      class="h-7 px-2 text-xs"
-      data-testid="share-sign-in"
-      @click="github.signIn()"
-    >
-      Sign in with GitHub
-    </Button>
-
-    <span
-      v-if="changes.error"
-      class="text-destructive truncate text-xs"
-      data-testid="changes-error"
-      role="alert"
-    >
-      {{ changes.error }}
-    </span>
-    <span
-      v-else-if="changes.active"
-      class="text-muted-foreground truncate text-xs"
-      data-testid="active-change"
-    >
-      {{ changes.active.title }}
-    </span>
-
-    <NewChangeDialog v-model:open="showNewChange" :project-id="projectId" />
+    <div class="bg-border h-4 w-px shrink-0" aria-hidden="true" />
+    <ChangesBranchPicker :project-id="projectId" />
   </div>
 </template>

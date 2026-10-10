@@ -12,12 +12,12 @@ export const useChangesStore = defineStore("changes", () => {
 
   const projectId = ref<string | null>(null);
   const active = ref<Change | null>(null);
-  const prUrl = ref<string | null>(null);
   const items = ref<Change[]>([]);
+  const prUrl = ref<string | null>(null);
   const creating = ref(false);
+  const sharing = ref(false);
   const switching = ref(false);
   const listing = ref(false);
-  const sharing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
   /** Share failed with expired/missing auth — show a sign-in prompt. */
@@ -29,7 +29,6 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   async function load(id: string) {
-    // Invalidate immediately so a previous project's title cannot linger.
     if (projectId.value !== id) {
       active.value = null;
       prUrl.value = null;
@@ -42,11 +41,11 @@ export const useChangesStore = defineStore("changes", () => {
     error.value = null;
     try {
       const change = await daemon.api.activeChange(id);
-      if (projectId.value !== id) return; // stale response
+      if (projectId.value !== id) return;
       active.value = change;
       if (change.prUrl) prUrl.value = change.prUrl;
     } catch (e) {
-      if (projectId.value !== id) return; // stale response
+      if (projectId.value !== id) return;
       active.value = null;
       prUrl.value = null;
       if (e instanceof ApiError && e.code === "ENOENT") {
@@ -85,7 +84,6 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       active.value = change;
       prUrl.value = null;
-      // Checkout may change the tree (newer origin/main) — refresh UI.
       await refreshTreeAndPreview();
       return change;
     } catch (e) {
@@ -145,12 +143,12 @@ export const useChangesStore = defineStore("changes", () => {
   return {
     projectId,
     active,
-    prUrl,
     items,
+    prUrl,
     creating,
+    sharing,
     switching,
     listing,
-    sharing,
     loading,
     error,
     needsSignIn,

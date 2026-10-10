@@ -32,6 +32,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // First change + distinct file edit.
+  await page.getByTestId("changes-menu").click();
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill("New post: First change");
   await page.getByRole("button", { name: "Create change" }).click();
@@ -40,6 +41,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   commitDistinctEdit(projectDir, "content-from-first-change\n");
 
   // Second (newer) change + different edit.
+  await page.getByTestId("changes-menu").click();
   await page.getByTestId("new-change").click();
   await page.getByLabel("Change title").fill("New post: Second change");
   await page.getByRole("button", { name: "Create change" }).click();
@@ -62,12 +64,8 @@ test("lists open changes newest first and switches working tree", async ({ page,
   expect(git(projectDir, ["branch", "--show-current"])).toBe("content/first-change");
 
   // File tree + viewer reflect the switched branch content.
-  await page
-    .getByTestId("editor-menubar")
-    .getByRole("menuitem", { name: "View", exact: true })
-    .click();
-  await page.getByRole("menuitemradio", { name: "Code" }).click();
+  await page.getByTestId("workspace-tab-code").click();
   await expect(page.getByTestId("files-panel")).toBeVisible();
-  await page.getByTestId("tree-notes.txt").click();
+  await page.locator('[data-item-path="notes.txt"]').click();
   await expect(page.getByTestId("file-content")).toContainText("content-from-first-change");
 });

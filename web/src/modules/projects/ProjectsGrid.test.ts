@@ -31,7 +31,7 @@ function mountGrid() {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div />" } },
-      { path: "/p/:id", component: { template: "<div />" } },
+      { path: "/p/:id/:tab?", component: { template: "<div />" } },
     ],
   });
   return mount(ProjectsGrid, { attachTo: document.body, global: { plugins: [router] } });
@@ -78,14 +78,14 @@ describe("ProjectsGrid", () => {
     await flushPromises();
     const row = w.find("[data-testid='project-a']");
     expect(row.element.tagName).toBe("A");
-    expect(row.attributes("href")).toBe("/p/a");
+    expect(row.attributes("href")).toBe("/p/a/preview");
     expect(row.text()).toContain("localhost:4000");
     await w.find("[aria-label='Actions for Site a']").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/");
     await row.trigger("click");
     await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/p/a");
+    expect(router.currentRoute.value.path).toBe("/p/a/preview");
     w.unmount();
   });
 
@@ -101,7 +101,7 @@ describe("ProjectsGrid", () => {
     document.body.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
     await flushPromises();
     expect(api.createProject).toHaveBeenCalledWith("Landing");
-    expect(router.currentRoute.value.path).toBe("/p/new");
+    expect(router.currentRoute.value.path).toBe("/p/new/preview");
     w.unmount();
   });
 

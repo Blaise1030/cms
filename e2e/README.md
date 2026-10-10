@@ -27,8 +27,8 @@ Fixture helpers create temp dirs under the OS temp directory and remove them in 
 Prefer stable `data-testid` attributes (`files-panel`, `preview-panel`, `project-grid`,
 `project-${id}`, …). Avoid CSS classes or DOM structure.
 
-The default editor layout may hide the file tree; smoke (and later specs) open **View → Code**
-before asserting `files-panel`.
+The default workspace tab is Preview (`/p/:id/preview`); smoke (and later specs) click the
+**Code** tab before asserting `files-panel`.
 
 ## Unit tests
 

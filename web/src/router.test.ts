@@ -1,19 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { projectPath, routes } from "./router";
+import { projectPath, projectTabFromRoute, routes } from "./router";
 
 const router = () => createRouter({ history: createMemoryHistory(), routes });
 
 describe("router", () => {
-  it("builds project paths with the id encoded", () => {
-    expect(projectPath("my-site")).toBe("/p/my-site");
-    expect(projectPath("a b/c")).toBe("/p/a%20b%2Fc");
+  it("builds project paths with the id encoded and a tab segment", () => {
+    expect(projectPath("my-site")).toBe("/p/my-site/preview");
+    expect(projectPath("my-site", "code")).toBe("/p/my-site/code");
+    expect(projectPath("a b/c", "history")).toBe("/p/a%20b%2Fc/history");
   });
 
-  it("resolves a project path back to its id", () => {
-    const r = router().resolve(projectPath("a b/c"));
-    expect(r.name).toBe("project");
+  it("resolves a project path back to its id and tab", () => {
+    const r = router().resolve(projectPath("a b/c", "code"));
+    expect(r.name).toBe("project-code");
     expect(r.params.id).toBe("a b/c");
+  });
+
+  it("redirects /p/:id to the preview tab", async () => {
+    const r = router();
+    await r.push("/p/site");
+    expect(r.currentRoute.value.name).toBe("project-preview");
+    expect(r.currentRoute.value.path).toBe("/p/site/preview");
+  });
+
+  it("maps route names to tabs", () => {
+    expect(projectTabFromRoute("project-preview")).toBe("preview");
+    expect(projectTabFromRoute("project-code")).toBe("code");
+    expect(projectTabFromRoute("project-history")).toBe("history");
+    expect(projectTabFromRoute("home")).toBe("preview");
   });
 
   it("redirects unknown paths home", async () => {
