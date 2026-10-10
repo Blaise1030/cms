@@ -94,6 +94,18 @@ export interface ProtectionHint {
   docsUrl: string;
 }
 
+/** Result of `POST /api/changes/update` (Get latest). */
+export interface ChangesUpdate {
+  /** Local `main` moved forward from GitHub. */
+  mainUpdated: boolean;
+  /** Local `main` has commits not on GitHub; it was left as is. */
+  mainDiverged: boolean;
+  /** Changes that now include latest `main`. */
+  updated: Change[];
+  /** Changes whose merge conflicts; left untouched. */
+  conflicts: Change[];
+}
+
 /** Result of `POST /api/changes/{branch}/share`. */
 export interface SharedChange {
   branch: string;

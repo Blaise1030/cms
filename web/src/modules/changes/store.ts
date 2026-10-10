@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change, ProtectionHint } from "@/core/types";
+import type { Change, ChangesUpdate, ProtectionHint } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -19,6 +19,7 @@ export const useChangesStore = defineStore("changes", () => {
   const creating = ref(false);
   const sharing = ref(false);
   const switching = ref(false);
+  const updating = ref(false);
   const listing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -117,6 +118,24 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /** Get latest: pull `main` and merge it into every open change, then refresh every view. */
+  async function getLatest(id: string): Promise<ChangesUpdate> {
+    updating.value = true;
+    error.value = null;
+    try {
+      const result = await daemon.api.updateChanges(id);
+      await refreshTreeAndPreview();
+      // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
+      await Promise.all([load(id), list(id).catch(() => undefined)]);
+      return result;
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    } finally {
+      updating.value = false;
+    }
+  }
+
   async function share(id: string, branch: string): Promise<string> {
     sharing.value = true;
     error.value = null;
@@ -162,6 +181,7 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     switching,
+    updating,
     listing,
     loading,
     error,
@@ -170,6 +190,7 @@ export const useChangesStore = defineStore("changes", () => {
     list,
     create,
     switchTo,
+    getLatest,
     share,
     dismissProtectionHint,
   };

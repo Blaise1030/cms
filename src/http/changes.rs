@@ -1,6 +1,6 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/docs/branch-protection`.
+//! `GET /api/docs/branch-protection`, `POST /api/changes/update`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -179,6 +179,43 @@ pub async fn share(
         "prUrl": pr.html_url,
         "protectionHint": hint,
     })))
+}
+
+#[derive(Deserialize)]
+struct UpdateRequest {
+    project: String,
+}
+
+/// `POST /api/changes/update` `{ project }` →
+/// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
+/// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
+/// Refused (409) while an agent turn is editing the project.
+pub async fn update(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<changes::Update>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    if state.agents.turn_in_progress(&req.project) {
+        return Err(ApiError::conflict(
+            "The agent is still working — wait for it to finish, then get the latest",
+        ));
+    }
+    // GitHub projects fetch with the signed-in user's credentials (private repos).
+    let env = if project.repo.is_some() {
+        state.github.git_env().await?
+    } else {
+        Vec::new()
+    };
+    Ok(Json(changes::get_latest(&project.dir, &env).await?))
 }
 
 #[cfg(test)]

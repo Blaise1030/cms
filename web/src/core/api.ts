@@ -2,6 +2,7 @@ import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
   type Change,
+  type ChangesUpdate,
   type SharedChange,
   type Checkpoint,
   type ErrorCode,
@@ -186,6 +187,8 @@ export function createApi(
       json<Change>("GET", "/api/changes/active", { query: { project } }),
     switchChange: (project: string, branch: string) =>
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    updateChanges: (project: string) =>
+      json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },

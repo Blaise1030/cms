@@ -312,4 +312,50 @@ describe("changes store", () => {
     await expect(sharing).rejects.toBeInstanceOf(ApiError);
     expect(store.protectionHint).toBeNull();
   });
+
+  it("getLatest updates changes, refreshes files, preview, list and active", async () => {
+    const result = {
+      mainUpdated: true,
+      mainDiverged: false,
+      updated: [
+        { branch: "content/a", title: "A" },
+        { branch: "content/b", title: "B" },
+      ],
+      conflicts: [],
+    };
+    const updateChanges = vi.fn(async () => result);
+    const listChanges = vi.fn(async () => [{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
+    const store = setup({
+      updateChanges,
+      listChanges,
+      activeChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await expect(store.getLatest("site")).resolves.toEqual(result);
+    expect(updateChanges).toHaveBeenCalledWith("site");
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+    expect(listChanges).toHaveBeenCalledWith("site");
+    expect(activeChange).toHaveBeenCalledWith("site");
+    expect(store.items).toEqual([{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    expect(store.active).toEqual({ branch: "content/a", title: "A" });
+    expect(store.updating).toBe(false);
+  });
+
+  it("getLatest surfaces errors (e.g. uncommitted changes)", async () => {
+    const store = setup({
+      updateChanges: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "Uncommitted changes — checkpoint first", 409);
+      }),
+    });
+    await expect(store.getLatest("site")).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toMatch(/checkpoint/i);
+    expect(store.updating).toBe(false);
+  });
 });
