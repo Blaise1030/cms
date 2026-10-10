@@ -41,6 +41,10 @@ pub fn router(state: AppState) -> Router {
             delete(projects::remove).patch(projects::update),
         )
         .route(
+            "/api/projects/{id}/protection-hint/dismiss",
+            post(projects::dismiss_protection_hint),
+        )
+        .route(
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
         )

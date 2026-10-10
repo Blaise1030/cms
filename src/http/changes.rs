@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::{project_dir, query_or_badreq};
 use crate::changes;
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title};
+use crate::github::{pr_body, pr_title, BranchProtection};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -102,8 +102,20 @@ struct ShareRequest {
     project: String,
 }
 
-/// `POST /api/changes/{branch}/share` `{ project }` → `{ branch, title, prUrl }`.
+/// The "protect main" hint for a share response: only when `main` is known to be
+/// unprotected and the admin has not dismissed it for this project.
+fn protection_hint(dismissed: bool, protection: BranchProtection, settings_url: String) -> Value {
+    if !dismissed && protection == BranchProtection::Unprotected {
+        json!({ "settingsUrl": settings_url })
+    } else {
+        Value::Null
+    }
+}
+
+/// `POST /api/changes/{branch}/share` `{ project }` → `{ branch, title, prUrl, protectionHint }`.
 /// Pushes the branch and opens (or reuses) a draft PR titled after the change.
+/// `protectionHint` is `{ settingsUrl }` when `main` is unprotected (see
+/// `docs/branch-protection.md`), else null.
 pub async fn share(
     State(state): State<AppState>,
     Path(branch): Path<String>,
@@ -123,6 +135,7 @@ pub async fn share(
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
     let dir = project.dir;
+    let hint_dismissed = project.protection_hint_dismissed;
     let change = changes::get(&dir, &branch).await?;
     let env = state.github.git_env().await?;
     changes::push(&dir, &branch, &env).await?;
@@ -139,9 +152,48 @@ pub async fn share(
         }
     };
 
+    let protection = if hint_dismissed {
+        BranchProtection::Unknown
+    } else {
+        state.github.main_protection(&repo).await
+    };
+    let hint = protection_hint(
+        hint_dismissed,
+        protection,
+        state.github.branch_settings_url(&repo),
+    );
+
     Ok(Json(json!({
         "branch": change.branch,
         "title": change.title,
         "prUrl": pr.html_url,
+        "protectionHint": hint,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protection_hint_only_for_unprotected_main_until_dismissed() {
+        let url = || "https://github.com/acme/site/settings/branches".to_string();
+        assert_eq!(
+            protection_hint(false, BranchProtection::Unprotected, url()),
+            json!({ "settingsUrl": "https://github.com/acme/site/settings/branches" })
+        );
+        assert_eq!(
+            protection_hint(false, BranchProtection::Protected, url()),
+            Value::Null
+        );
+        // 403 (no admin rights) → unknown → don't show.
+        assert_eq!(
+            protection_hint(false, BranchProtection::Unknown, url()),
+            Value::Null
+        );
+        assert_eq!(
+            protection_hint(true, BranchProtection::Unprotected, url()),
+            Value::Null
+        );
+    }
 }

@@ -113,6 +113,15 @@ pub struct PullRequest {
     pub draft: bool,
 }
 
+/// Whether `main` has a branch protection rule, from [`GithubAuth::main_protection`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchProtection {
+    Protected,
+    Unprotected,
+    /// The check failed or we lack admin rights to read it (403): say nothing.
+    Unknown,
+}
+
 /// Draft PR title is the change's display title.
 pub fn pr_title(change_title: &str) -> String {
     change_title.trim().to_string()
@@ -778,6 +787,34 @@ impl GithubAuth {
             .map_err(unreachable)?;
         let pull: ApiPull = parse_github(res, self, &token).await?;
         Ok(PullRequest::from(pull))
+    }
+
+    /// Branch protection of `main` on `owner/name`: 200 → protected, 404 → unprotected,
+    /// anything else (403 without admin rights, network errors) → unknown. Never fails.
+    pub async fn main_protection(&self, repo: &str) -> BranchProtection {
+        let Some(token) = self.token().await else {
+            return BranchProtection::Unknown;
+        };
+        let res = self
+            .http
+            .get(format!(
+                "{}/repos/{repo}/branches/main/protection",
+                self.api()
+            ))
+            .bearer_auth(&token)
+            .header(ACCEPT, GITHUB_JSON)
+            .send()
+            .await;
+        match res.map(|r| r.status()) {
+            Ok(s) if s.is_success() => BranchProtection::Protected,
+            Ok(reqwest::StatusCode::NOT_FOUND) => BranchProtection::Unprotected,
+            _ => BranchProtection::Unknown,
+        }
+    }
+
+    /// The repo's branch protection settings page on the GitHub web UI.
+    pub fn branch_settings_url(&self, repo: &str) -> String {
+        format!("{}/{repo}/settings/branches", self.web())
     }
 
     fn client_id(&self) -> Result<&str, ApiError> {
@@ -1481,5 +1518,64 @@ mod tests {
             }
             stop();
         }
+    }
+
+    #[tokio::test]
+    async fn main_protection_maps_200_404_and_403() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        for (status, want) in [
+            (axum::http::StatusCode::OK, BranchProtection::Protected),
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                BranchProtection::Unprotected,
+            ),
+            // No admin rights: GitHub refuses to say, so we must not nag.
+            (axum::http::StatusCode::FORBIDDEN, BranchProtection::Unknown),
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                BranchProtection::Unknown,
+            ),
+        ] {
+            let routes = Router::new().route(
+                "/repos/acme/site/branches/main/protection",
+                get(move || async move { (status, Json(serde_json::json!({ "message": "x" }))) }),
+            );
+            let (base, stop) = mock_api(routes).await;
+            let dir = tmp_dir(&format!("protection-{}", status.as_u16()));
+            write_session(&dir, "tok");
+            let auth = GithubAuth::open(
+                GithubConfig {
+                    api_url: base.clone(),
+                    web_url: base,
+                    gh_path: PathBuf::new(),
+                    ..GithubConfig::default()
+                },
+                &dir,
+            );
+            assert_eq!(
+                auth.main_protection("acme/site").await,
+                want,
+                "status {status}"
+            );
+            stop();
+        }
+    }
+
+    #[test]
+    fn branch_settings_url_points_at_the_repo_settings_page() {
+        let auth = GithubAuth::open(
+            GithubConfig {
+                web_url: "https://github.com/".into(),
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &tmp_dir("settings-url"),
+        );
+        assert_eq!(
+            auth.branch_settings_url("acme/site"),
+            "https://github.com/acme/site/settings/branches"
+        );
     }
 }
