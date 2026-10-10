@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
@@ -7,7 +7,7 @@ import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
-import { useChangesStore } from "./store";
+import { STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 
@@ -216,6 +216,140 @@ describe("changes store", () => {
     expect(store.error).toBeNull();
   });
 
+  describe("PR status", () => {
+    const draft = {
+      number: 1,
+      url: "https://github.com/acme/site/pull/1",
+      state: "draft" as const,
+      checks: "pending" as const,
+      previewUrl: null,
+    };
+
+    async function withActive(changeStatus: ReturnType<typeof vi.fn>) {
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus,
+      });
+      await store.load("site");
+      return store;
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("load fetches the active change's PR status and its link", async () => {
+      const changeStatus = vi.fn(async () => draft);
+      const store = await withActive(changeStatus);
+      expect(changeStatus).toHaveBeenCalledWith("site", "content/lw");
+      expect(store.status).toEqual(draft);
+      expect(store.prUrl).toBe(draft.url);
+      store.stopStatusPolling();
+    });
+
+    it("polls while a PR exists", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi
+        .fn()
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce({ ...draft, state: "open", checks: "passing" });
+      const store = await withActive(changeStatus);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS);
+      expect(changeStatus).toHaveBeenCalledTimes(2);
+      expect(store.status?.state).toBe("open");
+      store.stopStatusPolling();
+    });
+
+    it("does not poll without a PR", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => null);
+      const store = await withActive(changeStatus);
+      expect(store.status).toBeNull();
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 3);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops polling when the PR goes away or the change is left", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn().mockResolvedValueOnce(draft).mockResolvedValue(null);
+      const store = await withActive(changeStatus);
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 3);
+      expect(changeStatus).toHaveBeenCalledTimes(2);
+      expect(store.status).toBeNull();
+    });
+
+    it("share starts polling the new PR", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(draft);
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        shareChange: vi.fn(async () => ({
+          branch: "content/lw",
+          title: "LW",
+          prUrl: draft.url,
+        })),
+        changeStatus,
+      });
+      await store.load("site");
+      expect(store.status).toBeNull();
+      await store.share("site", "content/lw");
+      expect(store.status).toEqual(draft);
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS);
+      expect(changeStatus).toHaveBeenCalledTimes(3);
+      store.stopStatusPolling();
+    });
+
+    it("overlapping refreshes keep a single poll timer", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      const store = await withActive(changeStatus);
+      await Promise.all([store.refreshStatus(), store.refreshStatus()]);
+      const before = changeStatus.mock.calls.length;
+      // Stopping must cancel every scheduled poll: no orphaned timer keeps polling.
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 3);
+      expect(changeStatus.mock.calls.length).toBe(before);
+    });
+
+    it("switchTo stops the old change's polling before switching", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      let finishSwitch!: (c: { branch: string; title: string }) => void;
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus,
+        switchChange: vi.fn(
+          () => new Promise((resolve) => (finishSwitch = resolve)),
+        ),
+        tree: vi.fn(async () => ({ entries: [] })),
+      });
+      await store.load("site");
+      vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+      const switching = store.switchTo("site", "content/other");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      finishSwitch({ branch: "content/other", title: "Other" });
+      await switching;
+      expect(changeStatus).toHaveBeenLastCalledWith("site", "content/other");
+      store.stopStatusPolling();
+    });
+
+    it("loading another project stops the previous project's polling", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      const activeChange = vi
+        .fn()
+        .mockResolvedValueOnce({ branch: "content/lw", title: "LW" })
+        .mockReturnValueOnce(new Promise(() => {}));
+      const store = setup({ activeChange, changeStatus });
+      await store.load("site");
+      void store.load("other");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      expect(store.status).toBeNull();
+    });
+  });
   it("share exposes the protection hint for an unprotected main", async () => {
     const store = setup({
       shareChange: vi.fn(async () => ({
@@ -357,5 +491,98 @@ describe("changes store", () => {
     await expect(store.getLatest("site")).rejects.toBeInstanceOf(ApiError);
     expect(store.error).toMatch(/checkpoint/i);
     expect(store.updating).toBe(false);
+  });
+});
+
+describe("changes store cleanup", () => {
+  const merged = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged" as const,
+    checks: "none" as const,
+    previewUrl: null,
+  };
+
+  it("deletes the merged change, returns to main and drops it from the list", async () => {
+    const cleanupChange = vi.fn(async () => ({ branch: "main" }));
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => merged),
+      cleanupChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    await store.load("site");
+    store.items = [
+      { branch: "content/lw", title: "LW" },
+      { branch: "content/other", title: "Other" },
+    ];
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await store.cleanup("site", "content/lw");
+
+    expect(cleanupChange).toHaveBeenCalledWith("site", "content/lw");
+    expect(store.active).toBeNull();
+    expect(store.status).toBeNull();
+    expect(store.prUrl).toBeNull();
+    expect(store.items.map((c) => c.branch)).toEqual(["content/other"]);
+    expect(store.cleaningUp).toBe(false);
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("keeps the change and surfaces the error when cleanup is refused", async () => {
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => merged),
+      cleanupChange: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "This change has not been merged yet", 409);
+      }),
+    });
+    await store.load("site");
+    await expect(store.cleanup("site", "content/lw")).rejects.toThrow();
+    expect(store.active?.branch).toBe("content/lw");
+    expect(store.error).toContain("not been merged");
+    expect(store.cleaningUp).toBe(false);
+    store.stopStatusPolling();
+  });
+  it("stops status polling before the request and resumes it if cleanup fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const changeStatus = vi.fn(async () => merged);
+      let refuse!: (e: unknown) => void;
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus,
+        cleanupChange: vi.fn(
+          () =>
+            new Promise((_, reject) => {
+              refuse = reject;
+            }),
+        ),
+      });
+      await store.load("site");
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      const cleaning = store.cleanup("site", "content/lw");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      refuse(new ApiError("CONFLICT", "not merged", 409));
+      await expect(cleaning).rejects.toThrow();
+      expect(changeStatus).toHaveBeenCalledTimes(2);
+      store.stopStatusPolling();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns whether main was updated", async () => {
+    const store = setup({
+      cleanupChange: vi.fn(async () => ({ branch: "main", mainUpdated: false })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    await expect(store.cleanup("site", "content/lw")).resolves.toEqual({ mainUpdated: false });
   });
 });

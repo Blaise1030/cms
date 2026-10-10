@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,11 +21,14 @@ export type WorkbenchEnv = {
   github: {
     pullsPosts: () => import("./githubStub").PullsPost[];
     setPullsStatus: (status: number | null) => void;
+    setPrStatus: (patch: import("./githubStub").PrStatusPatch) => void;
     /** Stub base URL (also the daemon's GitHub web URL). */
     baseUrl: string;
     setMainProtected: (isProtected: boolean) => void;
     protectionGets: () => number;
     setMainRulesetRequiresPr: (requiresPr: boolean) => void;
+    readyForReviewCalls: () => string[];
+    setGraphqlStatus: (status: number | null) => void;
   };
   stop: () => Promise<void>;
 };
@@ -141,7 +144,19 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   const gitRoot = path.join(tmp, "git");
   fs.mkdirSync(projectsDir, { recursive: true });
   const bareRemote = createBareRemote(gitRoot);
-  const stub = await startGithubStub();
+  // PRs report the branch's real tip in the bare remote, as GitHub does.
+  const stub = await startGithubStub("cid", {
+    headSha: (ref) => {
+      try {
+        return execFileSync("git", ["rev-parse", "--verify", "-q", `refs/heads/${ref}`], {
+          cwd: bareRemote,
+          encoding: "utf8",
+        }).trim();
+      } catch {
+        return null;
+      }
+    },
+  });
   const gitUrl = fileGitUrl(gitRoot);
 
   const root = repoRoot();
@@ -214,10 +229,13 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     github: {
       pullsPosts: () => stub.pullsPosts(),
       setPullsStatus: (status) => stub.setPullsStatus(status),
+      setPrStatus: (patch) => stub.setPrStatus(patch),
       baseUrl: stub.baseUrl,
       setMainProtected: (isProtected) => stub.setMainProtected(isProtected),
       protectionGets: () => stub.protectionGets(),
       setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
+      readyForReviewCalls: () => stub.readyForReviewCalls(),
+      setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
     },
     stop: async () => {
       if (exited === null) {

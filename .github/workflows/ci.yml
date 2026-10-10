@@ -39,6 +39,10 @@ jobs:
       - run: pnpm -C web install --frozen-lockfile
       - run: pnpm -C web build
       - run: pnpm -C web test
+      - name: actionlint (CI + template deploy workflow)
+        run: >-
+          docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.7 -color
+          .github/workflows/ci.yml templates/astro-marketing/.github/workflows/deploy.yml
 
   e2e:
     runs-on: ubuntu-latest

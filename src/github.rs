@@ -35,6 +35,10 @@ const CLI_TTL: Duration = Duration::from_secs(60);
 const CLI_RETRY: Duration = Duration::from_secs(5);
 /// Retry delay while serving the last good login through a transient `gh` failure.
 const CLI_STALE_RETRY: Duration = Duration::from_secs(10);
+/// GitHub's largest page size for list endpoints.
+const PAGE_SIZE: usize = 100;
+/// Stop paginating after this many pages (10k items).
+const MAX_PAGES: usize = 100;
 const REPOS_PATH: &str = "/user/repos?per_page=100&sort=pushed";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +115,9 @@ pub struct PullRequest {
     pub html_url: String,
     pub title: String,
     pub draft: bool,
+    /// GraphQL node id, for mutations; never sent to the web UI.
+    #[serde(skip)]
+    pub node_id: String,
 }
 
 /// How long Share preview waits for the branch protection lookup before giving up.
@@ -172,10 +179,176 @@ struct ApiPermissions {
 #[derive(Deserialize)]
 struct ApiPull {
     number: u64,
+    /// GraphQL node id (for mutations such as `markPullRequestReadyForReview`).
+    #[serde(default)]
+    node_id: String,
     html_url: String,
     title: String,
     #[serde(default)]
     draft: bool,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    merged_at: Option<String>,
+    #[serde(default)]
+    head: Option<ApiPullHead>,
+}
+
+#[derive(Deserialize)]
+struct ApiPullHead {
+    #[serde(default)]
+    sha: String,
+}
+
+/// Where a pull request stands, as shown in the preview browser bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrState {
+    Draft,
+    Open,
+    Approved,
+    Merged,
+    Closed,
+}
+
+/// Check runs on the PR head, aggregated: any failing → failing, else any pending → pending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChecksState {
+    /// No check runs reported.
+    None,
+    Pending,
+    Passing,
+    Failing,
+}
+
+/// `GET /api/changes/{branch}/status` payload for a branch with a pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrStatus {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
+    pub checks: ChecksState,
+    /// `environment_url` of the latest successful deployment of the head SHA.
+    pub preview_url: Option<String>,
+    /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
+    #[serde(skip)]
+    pub head_sha: String,
+}
+
+/// A pull request's [`PrState`] and head commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrRef {
+    pub state: PrState,
+    pub head_sha: String,
+}
+
+/// The parts of a pull request that decide its [`PrState`] (besides reviews).
+struct PullFacts {
+    draft: bool,
+    closed: bool,
+    merged: bool,
+}
+
+#[derive(Deserialize)]
+struct ApiLogin {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct ApiReview {
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct ApiCheckRuns {
+    #[serde(default)]
+    check_runs: Vec<ApiCheckRun>,
+}
+
+#[derive(Deserialize)]
+struct ApiCheckRun {
+    status: String,
+    #[serde(default)]
+    conclusion: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiDeployment {
+    id: u64,
+    #[serde(default)]
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiDeploymentStatus {
+    state: String,
+    #[serde(default)]
+    environment_url: Option<String>,
+}
+
+/// Merged / closed win; then draft; then approved when every reviewer's latest decisive review
+/// (approve, request changes, dismissed) leaves at least one approval and no change request.
+fn pr_state(pull: &PullFacts, reviews: &[ApiReview]) -> PrState {
+    if pull.merged {
+        return PrState::Merged;
+    }
+    if pull.closed {
+        return PrState::Closed;
+    }
+    if pull.draft {
+        return PrState::Draft;
+    }
+    // Reviews arrive oldest first; keep each reviewer's latest decisive one.
+    let mut latest: Vec<(&str, &str)> = Vec::new();
+    for r in reviews {
+        let state = r.state.as_str();
+        if !matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") {
+            continue;
+        }
+        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
+        match latest.iter_mut().find(|(u, _)| *u == who) {
+            Some(entry) => entry.1 = state,
+            None => latest.push((who, state)),
+        }
+    }
+    let approved = latest.iter().any(|(_, s)| *s == "APPROVED")
+        && !latest.iter().any(|(_, s)| *s == "CHANGES_REQUESTED");
+    if approved {
+        PrState::Approved
+    } else {
+        PrState::Open
+    }
+}
+
+/// Only `http://` / `https://` URLs may become links (a deployment's `environment_url` is
+/// whatever the workflow wrote, e.g. `javascript:`).
+fn is_http_url(u: &str) -> bool {
+    let lower = u.get(..8).unwrap_or(u).to_ascii_lowercase();
+    (lower.starts_with("http://") && u.len() > 7) || (lower.starts_with("https://") && u.len() > 8)
+}
+
+fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
+    if runs.is_empty() {
+        return ChecksState::None;
+    }
+    let failing = runs.iter().any(|r| {
+        r.status == "completed"
+            && !matches!(
+                r.conclusion.as_deref(),
+                Some("success" | "neutral" | "skipped")
+            )
+    });
+    if failing {
+        ChecksState::Failing
+    } else if runs.iter().any(|r| r.status != "completed") {
+        ChecksState::Pending
+    } else {
+        ChecksState::Passing
+    }
 }
 
 impl From<ApiPull> for PullRequest {
@@ -185,7 +358,60 @@ impl From<ApiPull> for PullRequest {
             html_url: p.html_url,
             title: p.title,
             draft: p.draft,
+            node_id: p.node_id,
         }
+    }
+}
+
+/// A GraphQL response: `errors` may come with HTTP 200.
+#[derive(Deserialize)]
+struct ApiGraphql {
+    #[serde(default)]
+    data: Option<ApiMarkReadyData>,
+    #[serde(default)]
+    errors: Vec<ApiGraphqlError>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMarkReadyData {
+    #[serde(default)]
+    mark_pull_request_ready_for_review: Option<ApiMarkReadyPayload>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMarkReadyPayload {
+    #[serde(default)]
+    pull_request: Option<ApiDraftFlag>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiDraftFlag {
+    is_draft: bool,
+}
+
+/// GraphQL error types that mean the token may not do this (vs. a GitHub-side failure).
+const PERMISSION_ERRORS: &[&str] = &["FORBIDDEN", "INSUFFICIENT_SCOPES", "UNAUTHORIZED"];
+
+#[derive(Deserialize)]
+struct ApiGraphqlError {
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    message: String,
+}
+
+const MARK_READY_MUTATION: &str = "mutation($id: ID!) { \
+markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }";
+
+/// GraphQL endpoint for a REST API base: `https://api.github.com` → `/graphql`;
+/// GitHub Enterprise `https://host/api/v3` → `https://host/api/graphql`.
+fn graphql_url(api: &str) -> String {
+    match api.strip_suffix("/api/v3") {
+        Some(host) => format!("{host}/api/graphql"),
+        None => format!("{api}/graphql"),
     }
 }
 
@@ -790,6 +1016,266 @@ impl GithubAuth {
             .map_err(unreachable)?;
         let pull: ApiPull = parse_github(res, self, &token).await?;
         Ok(PullRequest::from(pull))
+    }
+
+    /// Mark `head_branch`'s open draft pull request ready for review (GraphQL
+    /// `markPullRequestReadyForReview` by node id; a PR that is already ready is left as is),
+    /// then its status. The mutation is authoritative: a status re-read that fails, or that
+    /// still says draft (REST can lag a GraphQL write), still yields an open PR.
+    pub async fn mark_ready_for_review(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<PrStatus, ApiError> {
+        let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
+            ApiError::enoent("this change has no open pull request — share it first")
+        })?;
+        if pull.draft {
+            self.mark_ready_mutation(&pull.node_id).await?;
+        }
+        let mut status = match self.pr_status(repo, head_branch).await {
+            Ok(Some(s)) if s.number == pull.number => s,
+            _ => PrStatus {
+                number: pull.number,
+                url: pull.html_url,
+                state: PrState::Open,
+                checks: ChecksState::None,
+                preview_url: None,
+                // Unknown without the re-read; only used server-side (cleanup), never sent.
+                head_sha: String::new(),
+            },
+        };
+        if status.state == PrState::Draft {
+            status.state = PrState::Open;
+        }
+        Ok(status)
+    }
+
+    async fn mark_ready_mutation(&self, node_id: &str) -> Result<(), ApiError> {
+        const WHAT: &str = "GitHub could not mark the pull request ready for review";
+        if node_id.is_empty() {
+            return Err(ApiError::github(format!("{WHAT}: no pull request id")));
+        }
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let res = self
+            .http
+            .post(graphql_url(self.api()))
+            .bearer_auth(&token)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&serde_json::json!({
+                "query": MARK_READY_MUTATION,
+                "variables": { "id": node_id },
+            }))
+            .send()
+            .await
+            .map_err(unreachable)?;
+        let status = res.status();
+        let body = res.bytes().await.map_err(unreachable)?;
+        let excerpt = |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let _ = self.sign_out_if_token(&token).await;
+            return Err(ApiError::unauth("your GitHub session expired — sign in again"));
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ApiError::sandbox(
+                "You don't have permission to mark this pull request ready for review",
+            ));
+        }
+        if !status.is_success() {
+            return Err(ApiError::github(format!("{WHAT}: GitHub returned {status}: {}", excerpt(300))));
+        }
+        let body: ApiGraphql = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::github(format!("{WHAT}: unexpected response from GitHub")))?;
+        if let Some(e) = body.errors.into_iter().next() {
+            let msg: String = e.message.chars().take(300).collect();
+            return Err(
+                if e.kind.as_deref().is_some_and(|k| PERMISSION_ERRORS.contains(&k)) {
+                    ApiError::sandbox(format!(
+                        "You don't have permission to mark this pull request ready for review: {msg}"
+                    ))
+                } else {
+                    ApiError::github(format!("{WHAT}: {msg}"))
+                },
+            );
+        }
+        let out_of_draft = body
+            .data
+            .and_then(|d| d.mark_pull_request_ready_for_review)
+            .and_then(|p| p.pull_request)
+            .is_some_and(|p| !p.is_draft);
+        if !out_of_draft {
+            return Err(ApiError::github(format!("{WHAT}: it is still a draft")));
+        }
+        Ok(())
+    }
+
+    /// PR state, checks and preview URL for `head_branch`; `None` when it has no pull request.
+    pub async fn pr_status(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<PrStatus>, ApiError> {
+        let Some((pull, state)) = self.pull_and_state(repo, head_branch).await? else {
+            return Ok(None);
+        };
+        let sha = pull.head.map(|h| h.sha).unwrap_or_default();
+        // Best effort past the PR itself: a failing checks or deployments call only blanks
+        // that part of the status.
+        let (checks, preview_url) = if sha.is_empty() {
+            (ChecksState::None, None)
+        } else {
+            let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+            let (runs, preview) = tokio::join!(
+                self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs),
+                self.preview_url(repo, &sha),
+            );
+            (
+                runs.map_or(ChecksState::None, |r| aggregate_checks(&r)),
+                preview.unwrap_or(None),
+            )
+        };
+        Ok(Some(PrStatus {
+            number: pull.number,
+            url: pull.html_url,
+            state,
+            checks,
+            preview_url,
+            head_sha: sha,
+        }))
+    }
+
+    /// Just the [`PrState`] and head of `head_branch`'s pull request (no checks or deployments).
+    pub async fn pr_ref(&self, repo: &str, head_branch: &str) -> Result<Option<PrRef>, ApiError> {
+        Ok(self
+            .pull_and_state(repo, head_branch)
+            .await?
+            .map(|(pull, state)| PrRef {
+                state,
+                head_sha: pull.head.map(|h| h.sha).unwrap_or_default(),
+            }))
+    }
+
+    /// Newest pull request for `head_branch` in any state, with its reviews folded into a state.
+    async fn pull_and_state(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<(ApiPull, PrState)>, ApiError> {
+        let owner = repo
+            .split_once('/')
+            .map(|(o, _)| o)
+            .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
+        // Any state: a merged or closed PR still describes the change.
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?head={}:{}&state=all&sort=created&direction=desc",
+                urlencode(owner),
+                urlencode(head_branch)
+            ))
+            .await?;
+        let Some(pull) = pulls.into_iter().next() else {
+            return Ok(None);
+        };
+        let facts = PullFacts {
+            draft: pull.draft,
+            closed: pull.state.as_deref() == Some("closed"),
+            merged: pull.merged_at.is_some(),
+        };
+        // Reviews only matter for an open, ready PR.
+        let reviews: Vec<ApiReview> = if facts.draft || facts.closed {
+            Vec::new()
+        } else {
+            self.get_all::<Vec<ApiReview>, ApiReview>(
+                &format!("/repos/{repo}/pulls/{}/reviews", pull.number),
+                |p| p,
+            )
+            .await?
+        };
+        let state = pr_state(&facts, &reviews);
+        Ok(Some((pull, state)))
+    }
+
+    /// `environment_url` of the newest deployment of `sha` whose latest status is a success.
+    pub async fn preview_url(&self, repo: &str, sha: &str) -> Result<Option<String>, ApiError> {
+        let deployments: Vec<ApiDeployment> = self
+            .get_json(&format!(
+                "/repos/{repo}/deployments?sha={}&per_page=10",
+                urlencode(sha)
+            ))
+            .await?;
+        for d in deployments.iter().filter(|d| d.sha == sha) {
+            // A deployment whose statuses can't be read is skipped, not fatal.
+            let Ok(statuses) = self
+                .get_json::<Vec<ApiDeploymentStatus>>(&format!(
+                    "/repos/{repo}/deployments/{}/statuses?per_page=1",
+                    d.id
+                ))
+                .await
+            else {
+                continue;
+            };
+            // Statuses are newest first.
+            if let Some(latest) = statuses.into_iter().next() {
+                if latest.state == "success" {
+                    if let Some(url) = latest.environment_url.filter(|u| is_http_url(u)) {
+                        return Ok(Some(url));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// [`Self::pr_ref`] of each branch, looked up concurrently. Best effort: an error, or a
+    /// lookup slower than `per_branch`, yields `None` for that branch.
+    pub async fn pr_states(
+        &self,
+        repo: &str,
+        branches: &[String],
+        per_branch: Duration,
+    ) -> Vec<Option<PrRef>> {
+        futures_util::future::join_all(branches.iter().map(|b| async move {
+            match tokio::time::timeout(per_branch, self.pr_ref(repo, b)).await {
+                Ok(Ok(state)) => state,
+                _ => None,
+            }
+        }))
+        .await
+    }
+
+    /// Every item of a paginated list endpoint (`path` has no query string): pages of
+    /// [`PAGE_SIZE`] until a short page, up to [`MAX_PAGES`].
+    async fn get_all<P: DeserializeOwned, T>(
+        &self,
+        path: &str,
+        items: impl Fn(P) -> Vec<T>,
+    ) -> Result<Vec<T>, ApiError> {
+        let mut all = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let batch = items(
+                self.get_json::<P>(&format!("{path}?per_page={PAGE_SIZE}&page={page}"))
+                    .await?,
+            );
+            let short = batch.len() < PAGE_SIZE;
+            all.extend(batch);
+            if short {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let res = self
+            .http
+            .get(format!("{}{path}", self.api()))
+            .bearer_auth(&token)
+            .header(ACCEPT, GITHUB_JSON)
+            .send()
+            .await
+            .map_err(unreachable)?;
+        parse_github(res, self, &token).await
     }
 
     /// Branch protection of `main` on `owner/name`, from the classic protection endpoint
@@ -1582,6 +2068,476 @@ mod tests {
         }
     }
 
+    fn review(login: &str, state: &str) -> ApiReview {
+        ApiReview {
+            user: Some(ApiLogin { login: login.into() }),
+            state: state.into(),
+        }
+    }
+
+    fn pull(draft: bool, state: &str, merged: bool) -> PullFacts {
+        PullFacts {
+            draft,
+            closed: state == "closed",
+            merged,
+        }
+    }
+
+    #[test]
+    fn pr_state_maps_draft_open_merged_closed() {
+        assert_eq!(pr_state(&pull(true, "open", false), &[]), PrState::Draft);
+        assert_eq!(pr_state(&pull(false, "open", false), &[]), PrState::Open);
+        assert_eq!(pr_state(&pull(false, "closed", true), &[]), PrState::Merged);
+        assert_eq!(pr_state(&pull(false, "closed", false), &[]), PrState::Closed);
+        // A merged/closed PR stays merged/closed whatever its reviews said.
+        let approvals = [review("grace", "APPROVED")];
+        assert_eq!(pr_state(&pull(false, "closed", true), &approvals), PrState::Merged);
+        assert_eq!(pr_state(&pull(false, "closed", false), &approvals), PrState::Closed);
+    }
+
+    #[test]
+    fn pr_state_is_approved_via_each_reviewers_latest_review() {
+        let open = pull(false, "open", false);
+        assert_eq!(pr_state(&open, &[review("grace", "APPROVED")]), PrState::Approved);
+        // Comments don't override an approval.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "COMMENTED")]),
+            PrState::Approved
+        );
+        // A later change request from the same reviewer withdraws it.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "CHANGES_REQUESTED")]),
+            PrState::Open
+        );
+        // Any outstanding change request blocks approval.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("alan", "CHANGES_REQUESTED")]),
+            PrState::Open
+        );
+        // Re-approval after a change request.
+        assert_eq!(
+            pr_state(&open, &[review("alan", "CHANGES_REQUESTED"), review("alan", "APPROVED")]),
+            PrState::Approved
+        );
+        // A dismissed approval no longer counts.
+        assert_eq!(pr_state(&open, &[review("grace", "DISMISSED")]), PrState::Open);
+        // Drafts stay drafts.
+        assert_eq!(
+            pr_state(&pull(true, "open", false), &[review("grace", "APPROVED")]),
+            PrState::Draft
+        );
+    }
+
+    fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
+        ApiCheckRun {
+            status: status.into(),
+            conclusion: conclusion.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn checks_aggregate_failing_over_pending_over_passing() {
+        assert_eq!(aggregate_checks(&[]), ChecksState::None);
+        assert_eq!(
+            aggregate_checks(&[run("completed", Some("success")), run("completed", Some("skipped"))]),
+            ChecksState::Passing
+        );
+        assert_eq!(
+            aggregate_checks(&[run("completed", Some("success")), run("in_progress", None)]),
+            ChecksState::Pending
+        );
+        assert_eq!(aggregate_checks(&[run("queued", None)]), ChecksState::Pending);
+        for bad in ["failure", "timed_out", "cancelled", "action_required"] {
+            assert_eq!(
+                aggregate_checks(&[run("in_progress", None), run("completed", Some(bad))]),
+                ChecksState::Failing,
+                "{bad}"
+            );
+        }
+    }
+
+    fn status_auth(base: String, tag: &str) -> GithubAuth {
+        let dir = tmp_dir(tag);
+        write_session(&dir, "tok");
+        GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        )
+    }
+
+    #[tokio::test]
+    async fn preview_url_is_the_latest_successful_deployment_for_the_head_sha() {
+        use axum::extract::{Path as AxPath, Query};
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/deployments",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("sha").map(String::as_str) != Some("abc") {
+                        return Json(serde_json::json!([]));
+                    }
+                    // Newest first, as GitHub lists them.
+                    Json(serde_json::json!([
+                        { "id": 3, "sha": "abc" },
+                        { "id": 2, "sha": "abc" },
+                        { "id": 1, "sha": "abc" },
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(id): AxPath<u64>| async move {
+                    Json(match id {
+                        3 => serde_json::json!([{ "state": "failure", "environment_url": "" }]),
+                        2 => serde_json::json!([
+                            { "state": "success", "environment_url": "https://two.pages.dev" },
+                            { "state": "in_progress" },
+                        ]),
+                        _ => serde_json::json!([
+                            { "state": "success", "environment_url": "https://one.pages.dev" },
+                        ]),
+                    })
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploys");
+        assert_eq!(
+            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            Some("https://two.pages.dev")
+        );
+        assert_eq!(auth.preview_url("acme/site", "other").await.unwrap(), None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_combines_pr_reviews_checks_and_deployment() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    Json(serde_json::json!([{
+                        "number": 4,
+                        "html_url": "https://github.com/acme/site/pull/4",
+                        "title": "Launch week",
+                        "draft": false,
+                        "state": "open",
+                        "merged_at": null,
+                        "head": { "ref": "content/launch-week", "sha": "abc" }
+                    }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async {
+                    Json(serde_json::json!([{ "user": { "login": "grace" }, "state": "APPROVED" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "total_count": 1,
+                        "check_runs": [{ "status": "completed", "conclusion": "success" }]
+                    }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([{ "id": 9, "sha": "abc" }])) }),
+            )
+            .route(
+                "/repos/acme/site/deployments/9/statuses",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "state": "success", "environment_url": "https://lw.pages.dev" }
+                    ]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "prstatus");
+        let st = auth
+            .pr_status("acme/site", "content/launch-week")
+            .await
+            .unwrap()
+            .expect("a PR");
+        assert_eq!(st.number, 4);
+        assert_eq!(st.url, "https://github.com/acme/site/pull/4");
+        assert_eq!(st.state, PrState::Approved);
+        assert_eq!(st.checks, ChecksState::Passing);
+        assert_eq!(st.preview_url.as_deref(), Some("https://lw.pages.dev"));
+        let json = serde_json::to_value(&st).unwrap();
+        assert_eq!(json["state"], "approved");
+        assert_eq!(json["checks"], "passing");
+        assert_eq!(json["previewUrl"], "https://lw.pages.dev");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_is_none_without_a_pr_for_the_branch() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async { Json(serde_json::json!([])) }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "noprstatus");
+        assert_eq!(auth.pr_status("acme/site", "content/x").await.unwrap(), None);
+        stop();
+    }
+
+    fn open_pull_json(number: u64, head: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number,
+            "html_url": format!("https://github.com/acme/site/pull/{number}"),
+            "title": head,
+            "draft": false,
+            "state": "open",
+            "merged_at": null,
+            "head": { "ref": head, "sha": "abc" }
+        })
+    }
+
+    #[tokio::test]
+    async fn pr_status_survives_failing_checks_and_deployments_calls() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { (StatusCode::BAD_GATEWAY, "boom") }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "statusfail");
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .expect("a PR");
+        assert_eq!(st.state, PrState::Open);
+        assert_eq!(st.checks, ChecksState::None);
+        assert_eq!(st.preview_url, None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn preview_url_survives_a_failing_statuses_call() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({ "check_runs": [{ "status": "queued" }] }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([{ "id": 1, "sha": "abc" }])) }),
+            )
+            .route(
+                "/repos/acme/site/deployments/1/statuses",
+                get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "statusesfail");
+        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        assert_eq!(st.checks, ChecksState::Pending);
+        assert_eq!(st.preview_url, None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn preview_url_only_accepts_http_and_https() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "id": 3, "sha": "abc" },
+                        { "id": 2, "sha": "abc" },
+                        { "id": 1, "sha": "abc" },
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(id): AxPath<u64>| async move {
+                    let url = match id {
+                        3 => "javascript:alert(document.cookie)",
+                        2 => "data:text/html,<script>1</script>",
+                        _ => "http://ok.pages.dev",
+                    };
+                    Json(serde_json::json!([{ "state": "success", "environment_url": url }]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "unsafeurl");
+        assert_eq!(
+            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            Some("http://ok.pages.dev")
+        );
+        stop();
+    }
+
+    #[test]
+    fn only_http_urls_are_safe_links() {
+        assert!(is_http_url("https://x.pages.dev/a?b"));
+        assert!(is_http_url("HTTP://x.dev"));
+        for bad in ["javascript:alert(1)", " https://x", "data:text/html,x", "//x.dev", "ftp://x", ""] {
+            assert!(!is_http_url(bad), "{bad}");
+        }
+    }
+
+    /// Serves `total` items over `per_page`-sized pages, honouring `?page=`.
+    fn paged(
+        q: &std::collections::HashMap<String, String>,
+        total: usize,
+        item: impl Fn(usize) -> serde_json::Value,
+    ) -> Vec<serde_json::Value> {
+        let per: usize = q.get("per_page").and_then(|v| v.parse().ok()).unwrap_or(30);
+        let page: usize = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1);
+        let start = (page - 1) * per;
+        (start..total.min(start + per)).map(item).collect()
+    }
+
+    #[tokio::test]
+    async fn reviews_and_check_runs_are_read_across_pages() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        // 150 reviews: alan requests changes early, approves on page 2.
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    Json(serde_json::json!(paged(&q, 150, |i| match i {
+                        0 => serde_json::json!({ "user": { "login": "alan" }, "state": "CHANGES_REQUESTED" }),
+                        149 => serde_json::json!({ "user": { "login": "alan" }, "state": "APPROVED" }),
+                        _ => serde_json::json!({ "user": { "login": "bob" }, "state": "COMMENTED" }),
+                    })))
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let runs = paged(&q, 130, |i| {
+                        if i == 129 {
+                            serde_json::json!({ "status": "completed", "conclusion": "failure" })
+                        } else {
+                            serde_json::json!({ "status": "completed", "conclusion": "success" })
+                        }
+                    });
+                    Json(serde_json::json!({ "total_count": 130, "check_runs": runs }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "paging");
+        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        assert_eq!(st.state, PrState::Approved);
+        assert_eq!(st.checks, ChecksState::Failing);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_states_run_concurrently_and_time_out_per_branch() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let head = q.get("head").cloned().unwrap_or_default();
+                    if head.ends_with("hung") {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                    }
+                    let mut pr = open_pull_json(1, &head);
+                    pr["draft"] = serde_json::json!(true);
+                    Json(serde_json::json!([pr]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "prstates");
+        let branches: Vec<String> = ["content/a", "content/b", "content/c", "content/d", "content/hung"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let started = Instant::now();
+        let states = auth
+            .pr_states("acme/site", &branches, Duration::from_millis(1000))
+            .await;
+        let took = started.elapsed();
+        let states: Vec<Option<PrState>> = states.into_iter().map(|r| r.map(|r| r.state)).collect();
+        assert_eq!(
+            states,
+            vec![
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                None
+            ]
+        );
+        // Sequential would be ≥ 1.2s before the hung one; concurrent finishes at the timeout.
+        assert!(took < Duration::from_millis(1500), "took {took:?}");
+        stop();
+    }
+
     /// `main_protection` against a mock with the given classic-protection and ruleset
     /// answers (`rules` = None → the rules endpoint fails with 500).
     async fn protection_with(
@@ -1699,5 +2655,339 @@ mod tests {
             auth.branch_settings_url("acme/site"),
             "https://github.com/acme/site/settings/branches"
         );
+    }
+
+    /// `GET /repos/acme/site/pulls` serving one open PR with node id `PR_abc`.
+    fn one_open_pull(draft: bool) -> axum::Router {
+        use axum::routing::get;
+        axum::Router::new().route(
+            "/repos/acme/site/pulls",
+            get(move || async move {
+                axum::Json(serde_json::json!([{
+                    "number": 4,
+                    "node_id": "PR_abc",
+                    "html_url": "https://github.com/acme/site/pull/4",
+                    "title": "Launch week",
+                    "draft": draft,
+                    "state": "open",
+                    "head": { "ref": "content/launch-week", "sha": "abc" }
+                }]))
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_sends_the_graphql_mutation_with_the_pr_node_id() {
+        use axum::extract::Json as AxJson;
+        use axum::routing::post;
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(move |AxJson(body): AxJson<serde_json::Value>| {
+                let seen2 = seen2.clone();
+                async move {
+                    seen2.lock().unwrap().push(body);
+                    axum::Json(serde_json::json!({
+                        "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": false } } }
+                    }))
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready");
+        auth.mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        let sent = seen.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("markPullRequestReadyForReview(input: { pullRequestId: $id })"));
+        assert_eq!(sent[0]["variables"]["id"], "PR_abc");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_skips_a_pr_that_is_not_a_draft() {
+        use axum::routing::post;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls2 = calls.clone();
+        let routes = one_open_pull(false).route(
+            "/graphql",
+            post(move || {
+                calls2.fetch_add(1, Ordering::SeqCst);
+                async { axum::Json(serde_json::json!({ "data": {} })) }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-noop");
+        auth.mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_without_an_open_pr_is_not_found() {
+        use axum::routing::get;
+        let routes = axum::Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async { axum::Json(serde_json::json!([])) }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-none");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Enoent);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_surfaces_403_and_graphql_errors() {
+        use axum::routing::post;
+
+        // HTTP 403 from the GraphQL endpoint.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                (
+                    axum::http::StatusCode::FORBIDDEN,
+                    axum::Json(serde_json::json!({ "message": "Resource not accessible by integration" })),
+                )
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-403");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Sandbox);
+        assert_eq!(err.http_status(), 403);
+        stop();
+
+        // GraphQL reports a FORBIDDEN error with HTTP 200.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                axum::Json(serde_json::json!({
+                    "data": { "markPullRequestReadyForReview": null },
+                    "errors": [{ "type": "FORBIDDEN", "message": "Ada does not have permission" }]
+                }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-gql-403");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Sandbox);
+        assert!(err.message.contains("Ada does not have permission"), "{}", err.message);
+        stop();
+
+        // Any other GraphQL error.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                axum::Json(serde_json::json!({
+                    "errors": [{ "type": "NOT_FOUND", "message": "Could not resolve" }]
+                }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-gql-err");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::GithubErr);
+        assert!(err.message.contains("Could not resolve"), "{}", err.message);
+        stop();
+    }
+
+    /// `/graphql` answering every request with `body` (HTTP 200).
+    fn graphql_answers(draft: bool, body: serde_json::Value) -> axum::Router {
+        use axum::routing::post;
+        one_open_pull(draft).route(
+            "/graphql",
+            post(move || {
+                let body = body.clone();
+                async move { axum::Json(body) }
+            }),
+        )
+    }
+
+    async fn mark_ready_err(routes: axum::Router, tag: &str) -> ApiError {
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, tag);
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+        err
+    }
+
+    #[tokio::test]
+    async fn find_pr_carries_the_pr_node_id() {
+        let (base, stop) = mock_api(one_open_pull(true)).await;
+        let auth = status_auth(base, "find-node-id");
+        let pr = auth
+            .find_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.node_id, "PR_abc");
+        // Internal: not part of any API payload.
+        assert!(serde_json::to_value(&pr).unwrap().get("nodeId").is_none());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_needs_the_mutation_to_report_the_pr_out_of_draft() {
+        for (tag, body) in [
+            ("ready-null", serde_json::json!({ "data": { "markPullRequestReadyForReview": null } })),
+            ("ready-nodata", serde_json::json!({})),
+            (
+                "ready-still-draft",
+                serde_json::json!({
+                    "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": true } } }
+                }),
+            ),
+        ] {
+            let err = mark_ready_err(graphql_answers(true, body), tag).await;
+            assert_eq!(err.code, ErrorCode::GithubErr, "{tag}");
+            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_maps_permission_error_types_to_sandbox() {
+        for kind in ["FORBIDDEN", "INSUFFICIENT_SCOPES"] {
+            let err = mark_ready_err(
+                graphql_answers(
+                    true,
+                    serde_json::json!({ "errors": [{ "type": kind, "message": "nope" }] }),
+                ),
+                &format!("ready-{kind}"),
+            )
+            .await;
+            assert_eq!(err.code, ErrorCode::Sandbox, "{kind}");
+            assert_eq!(err.http_status(), 403, "{kind}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_http_errors_say_what_failed() {
+        use axum::routing::post;
+        for (status, tag) in [
+            (axum::http::StatusCode::FORBIDDEN, "ready-msg-403"),
+            (axum::http::StatusCode::UNPROCESSABLE_ENTITY, "ready-msg-422"),
+            (axum::http::StatusCode::BAD_GATEWAY, "ready-msg-502"),
+        ] {
+            let routes = one_open_pull(true).route(
+                "/graphql",
+                post(move || async move {
+                    (status, axum::Json(serde_json::json!({ "message": "nope" })))
+                }),
+            );
+            let err = mark_ready_err(routes, tag).await;
+            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
+            assert!(!err.message.contains("push access"), "{tag}: {}", err.message);
+            assert!(!err.message.contains("open the pull request"), "{tag}: {}", err.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_returns_an_open_status_even_if_the_reread_lags_or_fails() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use std::collections::HashMap;
+
+        let ok = serde_json::json!({
+            "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": false } } }
+        });
+
+        // REST still reports the PR as a draft right after the GraphQL write.
+        let (base, stop) = mock_api(graphql_answers(true, ok.clone())).await;
+        let auth = status_auth(base, "ready-stale");
+        let st = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(st.state, PrState::Open);
+        assert_eq!(st.number, 4);
+        stop();
+
+        // The follow-up status read fails outright.
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("state").map(String::as_str) == Some("all") {
+                        return (
+                            axum::http::StatusCode::BAD_GATEWAY,
+                            axum::Json(serde_json::json!({ "message": "boom" })),
+                        );
+                    }
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(serde_json::json!([{
+                            "number": 4,
+                            "node_id": "PR_abc",
+                            "html_url": "https://github.com/acme/site/pull/4",
+                            "title": "Launch week",
+                            "draft": true,
+                            "state": "open"
+                        }])),
+                    )
+                }),
+            )
+            .route(
+                "/graphql",
+                axum::routing::post(move || {
+                    let ok = ok.clone();
+                    async move { axum::Json(ok) }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-reread-fails");
+        let st = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(
+            st,
+            PrStatus {
+                number: 4,
+                url: "https://github.com/acme/site/pull/4".into(),
+                state: PrState::Open,
+                checks: ChecksState::None,
+                preview_url: None,
+                head_sha: String::new(),
+            }
+        );
+        stop();
+    }
+
+    #[test]
+    fn graphql_endpoint_follows_the_rest_api_base() {
+        assert_eq!(graphql_url("https://api.github.com"), "https://api.github.com/graphql");
+        assert_eq!(
+            graphql_url("https://ghe.acme.dev/api/v3"),
+            "https://ghe.acme.dev/api/graphql"
+        );
+        assert_eq!(graphql_url("http://127.0.0.1:9"), "http://127.0.0.1:9/graphql");
     }
 }

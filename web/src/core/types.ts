@@ -84,6 +84,22 @@ export interface Change {
   lastEdited?: number;
   /** Set after a successful Share preview. */
   prUrl?: string;
+  /** PR state of the change's branch (list entries; only when shared and signed in). */
+  prState?: PrState;
+}
+
+export type PrState = "draft" | "open" | "approved" | "merged" | "closed";
+/** Check runs on the PR head: any failing → failing, else any pending → pending. */
+export type ChecksState = "none" | "pending" | "passing" | "failing";
+
+/** `pr` of `GET /api/changes/{branch}/status`. */
+export interface PrStatus {
+  number: number;
+  url: string;
+  state: PrState;
+  checks: ChecksState;
+  /** Deployed preview of the PR head, once the template's workflow published it. */
+  previewUrl: string | null;
 }
 
 /** Shown after sharing when the repo's `main` has no branch protection. */
