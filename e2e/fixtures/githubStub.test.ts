@@ -69,4 +69,39 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+
+  it("serves main branch protection as 200 or 404", async () => {
+    const stub = await startGithubStub();
+    try {
+      const get = () =>
+        fetch(`${stub.baseUrl}/repos/acme/site/branches/main/protection`, {
+          headers: { Authorization: `Bearer ${STUB_TOKEN}` },
+        });
+      expect((await get()).status).toBe(200);
+      stub.setMainProtected(false);
+      const res = await get();
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ message: "Branch not protected" });
+      expect(stub.protectionGets()).toBe(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("serves main branch rules, with a pull_request rule on demand", async () => {
+    const stub = await startGithubStub();
+    try {
+      const get = async () =>
+        (await (
+          await fetch(`${stub.baseUrl}/repos/acme/site/rules/branches/main`, {
+            headers: { Authorization: `Bearer ${STUB_TOKEN}` },
+          })
+        ).json()) as { type: string }[];
+      expect(await get()).toEqual([]);
+      stub.setMainRulesetRequiresPr(true);
+      expect((await get()).map((r) => r.type)).toEqual(["pull_request"]);
+    } finally {
+      await stub.close();
+    }
+  });
 });

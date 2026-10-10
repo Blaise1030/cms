@@ -21,6 +21,11 @@ export type WorkbenchEnv = {
   github: {
     pullsPosts: () => import("./githubStub").PullsPost[];
     setPullsStatus: (status: number | null) => void;
+    /** Stub base URL (also the daemon's GitHub web URL). */
+    baseUrl: string;
+    setMainProtected: (isProtected: boolean) => void;
+    protectionGets: () => number;
+    setMainRulesetRequiresPr: (requiresPr: boolean) => void;
   };
   stop: () => Promise<void>;
 };
@@ -209,6 +214,10 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     github: {
       pullsPosts: () => stub.pullsPosts(),
       setPullsStatus: (status) => stub.setPullsStatus(status),
+      baseUrl: stub.baseUrl,
+      setMainProtected: (isProtected) => stub.setMainProtected(isProtected),
+      protectionGets: () => stub.protectionGets(),
+      setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
     },
     stop: async () => {
       if (exited === null) {
