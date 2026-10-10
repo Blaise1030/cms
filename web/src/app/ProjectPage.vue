@@ -7,11 +7,11 @@ import Shell from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
 import { errorMessage } from "@/lib/errors";
-import ChatPanel from "@/modules/chat/ChatPanel.vue";
 import SharePreviewButton from "@/modules/changes/SharePreviewButton.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
+import TerminalPanel from "@/modules/terminal/TerminalPanel.vue";
 import { projectTabFromRoute } from "@/router";
 
 const props = defineProps<{ id: string }>();
@@ -71,7 +71,7 @@ async function toggleAutoApprove() {
       <Workspace v-if="project" :project="project" />
     </template>
     <template #chat>
-      <ChatPanel
+      <TerminalPanel
         v-if="project"
         :key="project.id"
         :project-id="project.id"

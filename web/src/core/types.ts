@@ -234,6 +234,18 @@ export interface FsChangeEvent {
   kind: string;
 }
 
+export interface TerminalExitedEvent {
+  type: "terminal.exited";
+  projectId: string;
+  code: number | null;
+}
+
+export interface CheckpointBlockedEvent {
+  type: "checkpoint.blocked";
+  projectId: string;
+  reason: string;
+}
+
 /** Emitted when this client's subscription fell behind and events were dropped. */
 export interface EventsLaggedEvent {
   type: "events.lagged";
@@ -250,6 +262,8 @@ export type DaemonEvent =
   | DevserverStatusEvent
   | CheckpointCreatedEvent
   | FsChangeEvent
+  | TerminalExitedEvent
+  | CheckpointBlockedEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];

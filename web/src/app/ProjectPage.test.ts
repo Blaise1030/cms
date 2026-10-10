@@ -32,7 +32,10 @@ const stubs = {
   },
   EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
-  ChatPanel: { props: ["projectId"], template: "<div data-testid='chat'>{{ projectId }}</div>" },
+  TerminalPanel: {
+    props: ["projectId", "autoApprove"],
+    template: "<div data-testid='chat'>{{ projectId }}</div>",
+  },
   GithubAccount: true,
 };
 
