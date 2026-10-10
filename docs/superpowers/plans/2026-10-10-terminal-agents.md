@@ -247,7 +247,7 @@ it("shows not-found overlay on exit code 127")
 ### Task 6: Move e2e onto the terminal
 
 **Files:**
-- Modify: `e2e/fixtures/daemon.ts` (agents.json → `{"fake": [<repo>/tests/fixtures/fake_cli.sh]}`; drop the `fake_acp_agent` lookup; replace `agentCheckpoint(env, text)` with `terminalCheckpoint(env, text)`), `e2e/specs/changes-start.spec.ts`, `changes-switch.spec.ts`, `share-preview.spec.ts` (use `terminalCheckpoint`), `changes-main-guard.spec.ts:28,85` (`chat-panel` → `terminal-panel`), `justfile` (stop building `fake_acp_agent` for e2e)
+- Modify: `e2e/fixtures/daemon.ts` (agents.json → `{"fake": [<repo>/tests/fixtures/fake_cli.sh]}`; drop the `fake_acp_agent` lookup; replace `agentCheckpoint(env, text)` with `terminalCheckpoint(env, text)`), every spec that calls `agentCheckpoint` (`rg -l agentCheckpoint e2e/specs` — on main: changes-start, changes-switch, share-preview, get-latest, merged-cleanup, pr-status, ready-for-review, branch-protection-hint; switch to `terminalCheckpoint`), every `chat-panel` test id (`rg -n chat-panel e2e/specs`) → `terminal-panel`, `justfile` (stop building `fake_acp_agent` for e2e)
 - Create: `e2e/specs/terminal.spec.ts`
 
 **Interfaces:**
