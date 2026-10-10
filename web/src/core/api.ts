@@ -169,6 +169,19 @@ export function createApi(
           body: { project, sessionId, text },
         })
       ).turnId,
+    terminalProviders: async (): Promise<{ id: string; command: string[] }[]> =>
+      (
+        await json<{ providers: { id: string; command: string[] }[] }>(
+          "GET",
+          "/api/terminal/providers",
+        )
+      ).providers,
+    startTerminal: (project: string, provider: string) =>
+      json<{ running: true }>("POST", "/api/terminal", { body: { project, provider } }),
+    stopTerminal: (project: string) =>
+      json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
+    terminalStatus: (project: string) =>
+      json<{ running: boolean; provider?: string }>("GET", `/api/terminal/${enc(project)}`),
     cancelTurn: (turnId: string) =>
       json<unknown>("POST", `/api/agent/prompt/${enc(turnId)}/cancel`),
     resolvePermission: (requestId: string, decision: PermissionDecision) =>
