@@ -127,6 +127,17 @@ export interface ConflictCandidate {
   complete: boolean;
 }
 
+export type ConflictPreviewState =
+  | { status: "ready"; url: string }
+  | { status: "unavailable"; reason: string }
+  | { status: "invalid"; errors: string };
+
+export interface ConflictPreviews {
+  yours: ConflictPreviewState;
+  latest: ConflictPreviewState;
+  result: ConflictPreviewState;
+}
+
 /** Result of `POST /api/changes/{branch}/share`. */
 export interface SharedChange {
   branch: string;

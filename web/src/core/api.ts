@@ -6,6 +6,7 @@ import {
   type ConflictCandidate,
   type ConflictChoice,
   type ConflictSession,
+  type ConflictPreviews,
   type SharedChange,
   type PrStatus,
   type Checkpoint,
@@ -181,6 +182,8 @@ export function createApi(
       (await json<{ sessions: ConflictSession[] }>("GET", "/api/changes/conflicts", { query: { project } })).sessions,
     getConflict: (project: string, id: string) =>
       json<ConflictSession>("GET", `/api/changes/conflicts/${enc(id)}`, { query: { project } }),
+    conflictPreviews: (project: string, id: string) =>
+      json<ConflictPreviews>("GET", `/api/changes/conflicts/${enc(id)}/previews`, { query: { project } }),
     chooseConflict: (project: string, id: string, path: string, choice: ConflictChoice) =>
       json<ConflictCandidate>("POST", `/api/changes/conflicts/${enc(id)}/choice`, { body: { project, path, choice } }),
     finishConflict: (project: string, id: string) =>

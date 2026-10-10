@@ -55,4 +55,27 @@ describe("ConflictView", () => {
     expect((h.daemon.api as unknown as Record<string, unknown>).abandonConflict).toHaveBeenCalledWith("site", "s1");
     expect(store.selectedConflictId).toBeNull();
   });
+
+  it("keeps preview routes and widths aligned, and blocks a confirmed invalid result", async () => {
+    const daemon = h.daemon.api as unknown as Record<string, unknown>;
+    daemon.conflictPreviews = vi.fn(async () => ({
+      yours: { status: "ready", url: "/preview/site/conflicts/s1/yours/" },
+      latest: { status: "ready", url: "/preview/site/conflicts/s1/latest/" },
+      result: { status: "invalid", errors: "Build failed" },
+    }));
+    const store = useChangesStore();
+    await store.openConflict("site", "s1");
+    store.currentConflict!.files[0]!.path = "src/content/sections/hero.mdx";
+    store.candidate = { tree: "candidate", complete: true };
+    const wrapper = mount(ConflictView, { props: { projectId: "site" } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeDefined();
+    await wrapper.get('input[aria-label="Preview page"]').setValue("/about/");
+    const frames = wrapper.findAll("iframe");
+    expect(frames).toHaveLength(2);
+    expect(frames[0]!.attributes("src")).toContain("/about/?section=hero");
+    expect(frames[1]!.attributes("src")).toContain("/about/?section=hero");
+    await wrapper.findAll("button").find((button) => button.text() === "Mobile")!.trigger("click");
+    expect(wrapper.findAll("iframe")[0]!.element.parentElement?.getAttribute("style")).toContain("390px");
+  });
 });

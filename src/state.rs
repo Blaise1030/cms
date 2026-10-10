@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::changes::conflict_sessions::ConflictSessions;
 use crate::config::Config;
+use crate::conflict_preview::ConflictPreviewManager;
 use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
 use crate::github::GithubAuth;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub preview: UpstreamClient,
     /// Proposed conflict resolutions; never mutates a branch until Finish.
     pub conflicts: Arc<ConflictSessions>,
+    pub conflict_previews: Arc<ConflictPreviewManager>,
 }
 
 impl AppState {
@@ -96,6 +98,7 @@ impl AppState {
             github,
             preview: preview::new_client(),
             conflicts: Arc::new(ConflictSessions::new()),
+            conflict_previews: Arc::new(ConflictPreviewManager::new()),
         }
     }
 }

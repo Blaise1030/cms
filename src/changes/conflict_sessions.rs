@@ -42,6 +42,12 @@ impl ConflictSessions {
         Self::default()
     }
 
+    pub async fn active_ids(&self) -> Vec<String> {
+        let mut entries = self.entries.lock().await;
+        entries.retain(|_, s| s.expires_at > Self::now());
+        entries.keys().cloned().collect()
+    }
+
     fn now() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

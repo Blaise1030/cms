@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use super::{project_dir, query_or_badreq};
 use crate::changes::conflicts::{self, Choice};
 use crate::changes::{self, PrMerge};
+use crate::conflict_preview::{PreviewState, Source};
 use crate::error::ApiError;
 use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
 use crate::state::AppState;
@@ -313,6 +314,79 @@ pub async fn get_conflict(
     Ok(Json(value))
 }
 
+pub async fn conflict_previews(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let session = project_session(&state, &q.project, &id).await?;
+    let candidate = conflicts::candidate_tree(
+        &session.dir,
+        &session.merged_tree,
+        &session.files,
+        &session.choices,
+    )
+    .await?;
+    let yours = state
+        .conflict_previews
+        .prepare(&session.dir, &q.project, &id, Source::Yours, &session.tip)
+        .await;
+    let latest = state
+        .conflict_previews
+        .prepare(
+            &session.dir,
+            &q.project,
+            &id,
+            Source::Latest,
+            &session.incoming,
+        )
+        .await;
+    let result = if candidate.complete {
+        let env = [
+            ("GIT_AUTHOR_NAME", "Workbench Preview"),
+            ("GIT_AUTHOR_EMAIL", "preview@localhost"),
+            ("GIT_COMMITTER_NAME", "Workbench Preview"),
+            ("GIT_COMMITTER_EMAIL", "preview@localhost"),
+            ("GIT_AUTHOR_DATE", "2000-01-01T00:00:00+00:00"),
+            ("GIT_COMMITTER_DATE", "2000-01-01T00:00:00+00:00"),
+        ];
+        let commit = String::from_utf8_lossy(
+            &conflicts::checked(
+                &session.dir,
+                &[
+                    "commit-tree",
+                    &candidate.tree,
+                    "-p",
+                    &session.tip,
+                    "-m",
+                    "Preview conflict result",
+                ],
+                &env,
+                None,
+            )
+            .await?,
+        )
+        .trim()
+        .to_string();
+        state
+            .conflict_previews
+            .prepare(&session.dir, &q.project, &id, Source::Result, &commit)
+            .await
+    } else {
+        state
+            .conflict_previews
+            .remove_source(&id, Source::Result)
+            .await;
+        PreviewState::Unavailable {
+            reason: "Choose a resolution for every file to preview the result".into(),
+        }
+    };
+    Ok(Json(
+        json!({ "yours": yours, "latest": latest, "result": result }),
+    ))
+}
+
 #[derive(Deserialize)]
 struct ChoiceRequest {
     project: String,
@@ -328,9 +402,12 @@ pub async fn choose_conflict(
     let req: ChoiceRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("invalid conflict choice: {e}")))?;
     project_session(&state, &req.project, &id).await?;
-    Ok(Json(
-        state.conflicts.choose(&id, &req.path, req.choice).await?,
-    ))
+    let candidate = state.conflicts.choose(&id, &req.path, req.choice).await?;
+    state
+        .conflict_previews
+        .remove_source(&id, Source::Result)
+        .await;
+    Ok(Json(candidate))
 }
 
 pub async fn finish_conflict(
@@ -342,7 +419,17 @@ pub async fn finish_conflict(
         .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
     project_session(&state, &req.project, &id).await?;
     let identity = state.github.identity().await;
+    if state
+        .conflict_previews
+        .is_invalid(&id, Source::Result)
+        .await
+    {
+        return Err(ApiError::conflict(
+            "The proposed result has a build error; review your choices before finishing",
+        ));
+    }
     let commit = state.conflicts.finish(&id, &identity).await?;
+    state.conflict_previews.remove_session(&id).await;
     Ok(Json(json!({ "commit": commit })))
 }
 
@@ -355,6 +442,7 @@ pub async fn abandon_conflict(
         .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
     project_session(&state, &req.project, &id).await?;
     state.conflicts.abandon(&id).await?;
+    state.conflict_previews.remove_session(&id).await;
     Ok(Json(json!({ "abandoned": true })))
 }
 
