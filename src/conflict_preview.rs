@@ -185,14 +185,16 @@ impl ConflictPreviewManager {
                         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
             }) {
                 let html = String::from_utf8_lossy(&bytes);
-                let script = format!(
-                    r#"<script>addEventListener('load',()=>{{let m=document.querySelectorAll('section[id="{id}"]');if(m.length!==1)return;let e=m[0];e.style.outline='3px solid #f59e0b';e.style.outlineOffset='4px';e.scrollIntoView({{block:'center'}})}})</script>"#
-                );
-                bytes = html
-                    .replace("</body>", &format!("{script}</body>"))
-                    .into_bytes();
-                if !String::from_utf8_lossy(&bytes).contains(&script) {
-                    bytes.extend_from_slice(script.as_bytes());
+                if html.matches(&format!("id=\"{id}\"")).count() == 1 {
+                    let style = format!(
+                        r#"<style data-conflict-highlight>section[id="{id}"]{{outline:3px solid #f59e0b!important;outline-offset:4px!important}}</style>"#
+                    );
+                    bytes = html
+                        .replace("</head>", &format!("{style}</head>"))
+                        .into_bytes();
+                    if !String::from_utf8_lossy(&bytes).contains(&style) {
+                        bytes.extend_from_slice(style.as_bytes());
+                    }
                 }
             }
         }
@@ -301,15 +303,22 @@ async fn build_snapshot(
             .chars()
             .rev()
             .collect();
-        if message.contains("Missing script: \"build\"")
-            || message.contains("command not found")
-            || message.contains("not found: astro")
-        {
-            return Err(BuildError::Unavailable(
-                "This project does not have a working preview build command".into(),
-            ));
-        }
-        return Err(BuildError::Invalid(message));
+        let confirmed_invalid = [
+            "SyntaxError",
+            "ParseError",
+            "Unexpected token",
+            "Could not resolve",
+            "references missing section",
+            "error during build",
+            "CompileError",
+        ]
+        .iter()
+        .any(|marker| message.contains(marker));
+        return Err(if confirmed_invalid {
+            BuildError::Invalid(message)
+        } else {
+            BuildError::Unavailable(format!("Preview build could not complete: {message}"))
+        });
     }
     if !dir.join("dist").is_dir() {
         return Err(BuildError::Unavailable(

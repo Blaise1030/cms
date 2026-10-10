@@ -9,6 +9,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 
 use super::conflicts::{self, Candidate, Choice, ConflictFile};
+use crate::conflict_preview::{ConflictPreviewManager, PreviewState, Source};
 use crate::error::ApiError;
 use crate::git::{self, Identity};
 
@@ -68,6 +69,16 @@ impl ConflictSessions {
         {
             return Err(ApiError::badreq("invalid branch or incoming commit"));
         }
+        if self
+            .list(project_id)
+            .await
+            .iter()
+            .any(|s| s.branch == branch)
+        {
+            return Err(ApiError::conflict(
+                "Finish or abandon the open conflict before running Get latest again",
+            ));
+        }
         let tip = conflicts::text(
             dir,
             &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
@@ -94,7 +105,14 @@ impl ConflictSessions {
         };
         let mut entries = self.entries.lock().await;
         entries.retain(|_, s| s.expires_at > Self::now());
-        entries.retain(|_, s| s.project_id != project_id || s.branch != branch);
+        if entries
+            .values()
+            .any(|s| s.project_id == project_id && s.branch == branch)
+        {
+            return Err(ApiError::conflict(
+                "Finish or abandon the open conflict before running Get latest again",
+            ));
+        }
         entries.insert(session.id.clone(), session.clone());
         Ok(session)
     }
@@ -151,9 +169,28 @@ impl ConflictSessions {
     }
 
     pub async fn finish(&self, id: &str, author: &Identity) -> Result<String, ApiError> {
+        self.finish_inner(id, author, None).await
+    }
+
+    pub async fn finish_validated(
+        &self,
+        id: &str,
+        author: &Identity,
+        previews: &ConflictPreviewManager,
+    ) -> Result<String, ApiError> {
+        self.finish_inner(id, author, Some(previews)).await
+    }
+
+    async fn finish_inner(
+        &self,
+        id: &str,
+        author: &Identity,
+        previews: Option<&ConflictPreviewManager>,
+    ) -> Result<String, ApiError> {
         let session = self.get(id).await?;
         let lock = git::lock_for(&session.dir);
         let _guard = lock.lock().await;
+        let session = self.get(id).await?;
         let current = conflicts::text(
             &session.dir,
             &[
@@ -177,6 +214,27 @@ impl ConflictSessions {
         .await?;
         if !candidate.complete {
             return Err(ApiError::conflict("Choose a resolution for every file"));
+        }
+        if let Some(previews) = previews {
+            let preview_commit =
+                conflicts::preview_commit(&session.dir, &candidate.tree, &session.tip).await?;
+            match previews
+                .prepare(
+                    &session.dir,
+                    &session.project_id,
+                    id,
+                    Source::Result,
+                    &preview_commit,
+                )
+                .await
+            {
+                PreviewState::Invalid { errors } => {
+                    return Err(ApiError::conflict(format!(
+                        "The proposed result has a build error: {errors}"
+                    )));
+                }
+                PreviewState::Ready { .. } | PreviewState::Unavailable { .. } => {}
+            }
         }
         let env = [
             ("GIT_AUTHOR_NAME", author.name.as_str()),

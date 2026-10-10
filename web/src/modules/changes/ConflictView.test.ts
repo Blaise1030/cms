@@ -73,8 +73,8 @@ describe("ConflictView", () => {
     await wrapper.get('input[aria-label="Preview page"]').setValue("/about/");
     const frames = wrapper.findAll("iframe");
     expect(frames).toHaveLength(2);
-    expect(frames[0]!.attributes("src")).toContain("/about/?section=hero");
-    expect(frames[1]!.attributes("src")).toContain("/about/?section=hero");
+    expect(frames[0]!.attributes("src")).toContain("/about/?section=hero#hero");
+    expect(frames[1]!.attributes("src")).toContain("/about/?section=hero#hero");
     await wrapper.findAll("button").find((button) => button.text() === "Mobile")!.trigger("click");
     expect(wrapper.findAll("iframe")[0]!.element.parentElement?.getAttribute("style")).toContain("390px");
   });

@@ -26,7 +26,9 @@ pub struct ConflictFile {
     pub theirs_oid: String,
     pub base_oid: Option<String>,
     #[serde(skip)]
-    pub mode: String,
+    pub ours_mode: String,
+    #[serde(skip)]
+    pub theirs_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +107,35 @@ pub async fn text(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
     )
 }
 
+pub async fn preview_commit(dir: &Path, tree: &str, parent: &str) -> Result<String, ApiError> {
+    let env = [
+        ("GIT_AUTHOR_NAME", "Workbench Preview"),
+        ("GIT_AUTHOR_EMAIL", "preview@localhost"),
+        ("GIT_COMMITTER_NAME", "Workbench Preview"),
+        ("GIT_COMMITTER_EMAIL", "preview@localhost"),
+        ("GIT_AUTHOR_DATE", "2000-01-01T00:00:00+00:00"),
+        ("GIT_COMMITTER_DATE", "2000-01-01T00:00:00+00:00"),
+    ];
+    Ok(String::from_utf8_lossy(
+        &checked(
+            dir,
+            &[
+                "commit-tree",
+                tree,
+                "-p",
+                parent,
+                "-m",
+                "Preview conflict result",
+            ],
+            &env,
+            None,
+        )
+        .await?,
+    )
+    .trim()
+    .to_string())
+}
+
 pub(crate) async fn blob(dir: &Path, oid: &str) -> Result<Vec<u8>, ApiError> {
     checked(dir, &["cat-file", "blob", oid], &[], None).await
 }
@@ -178,7 +209,8 @@ pub(crate) async fn discover(
         files.push(ConflictFile {
             path,
             binary,
-            mode: ours.0,
+            ours_mode: ours.0,
+            theirs_mode: theirs.0,
             ours_oid: ours.1,
             theirs_oid: theirs.1,
             base_oid: base.map(|(_, oid)| oid),
@@ -249,6 +281,10 @@ pub(crate) async fn candidate_tree(
             let Some(choice) = choices.get(&file.path) else {
                 continue;
             };
+            let mode = match choice {
+                Choice::Latest => &file.theirs_mode,
+                Choice::Yours | Choice::Both => &file.ours_mode,
+            };
             let oid = match choice {
                 Choice::Yours => file.ours_oid.clone(),
                 Choice::Latest => file.theirs_oid.clone(),
@@ -267,7 +303,7 @@ pub(crate) async fn candidate_tree(
                     "update-index",
                     "--add",
                     "--cacheinfo",
-                    &file.mode,
+                    mode,
                     &oid,
                     &file.path,
                 ],

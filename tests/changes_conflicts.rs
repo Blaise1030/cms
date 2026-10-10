@@ -9,6 +9,7 @@ use tower::ServiceExt;
 use workbench::changes::conflict_sessions::ConflictSessions;
 use workbench::changes::conflicts::Choice;
 use workbench::config::Config;
+use workbench::conflict_preview::ConflictPreviewManager;
 use workbench::git::Identity;
 use workbench::{http, state::AppState};
 
@@ -209,6 +210,24 @@ async fn binary_choice_preserves_exact_bytes() {
     assert_eq!(output.stdout, b"\0latest");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn latest_choice_uses_latest_file_mode() {
+    let (_tmp, dir, _tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
+    git(&dir, &["update-index", "--chmod=+x", "page.md"]);
+    git(&dir, &["commit", "-m", "make executable"]);
+    let sessions = ConflictSessions::new();
+    let session = sessions
+        .start(&dir, "site", "content/page", &incoming)
+        .await
+        .unwrap();
+    let candidate = sessions
+        .choose(&session.id, "page.md", Choice::Latest)
+        .await
+        .unwrap();
+    assert!(git(&dir, &["ls-tree", &candidate.tree, "page.md"]).starts_with("100644 "));
+}
+
 #[tokio::test]
 async fn sessions_on_different_branches_coexist() {
     let (_tmp, dir, tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
@@ -224,6 +243,45 @@ async fn sessions_on_different_branches_coexist() {
         .unwrap();
     assert_ne!(first.id, second.id);
     assert_eq!(sessions.list("site").await.len(), 2);
+    assert!(sessions
+        .start(&dir, "site", "content/page", &incoming)
+        .await
+        .is_err());
+    assert_eq!(sessions.get(&first.id).await.unwrap().tip, tip);
+}
+
+#[tokio::test]
+async fn finish_checks_result_build_even_when_preview_was_never_opened() {
+    let (_tmp, dir, _tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
+    std::fs::write(
+        dir.join("package.json"),
+        r#"{"scripts":{"build":"node -e \"throw new SyntaxError('broken page')\""}}"#,
+    )
+    .unwrap();
+    git(&dir, &["add", "package.json"]);
+    git(&dir, &["commit", "-m", "broken build"]);
+    let tip = git(&dir, &["rev-parse", "HEAD"]);
+    let sessions = ConflictSessions::new();
+    let session = sessions
+        .start(&dir, "site", "content/page", &incoming)
+        .await
+        .unwrap();
+    sessions
+        .choose(&session.id, "page.md", Choice::Yours)
+        .await
+        .unwrap();
+    let previews = ConflictPreviewManager::new();
+    let result = sessions
+        .finish_validated(&session.id, &Identity::workbench(), &previews)
+        .await;
+    assert!(result.is_err(), "invalid result must prevent a merge");
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), tip);
+    assert!(
+        previews
+            .is_invalid(&session.id, workbench::conflict_preview::Source::Result)
+            .await
+    );
+    previews.remove_session(&session.id).await;
 }
 
 async fn call(
@@ -299,6 +357,14 @@ async fn conflict_api_lists_choices_and_finishes_only_its_project() {
     .await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["sessions"][0]["id"], session.id);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/changes/update",
+        Some(json!({"project": info.id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
     let detail_url = format!("/api/changes/conflicts/{}?project={}", session.id, info.id);
     let (status, detail) = call(&app, "GET", &detail_url, None).await;
     assert_eq!(status, StatusCode::OK, "{detail}");

@@ -86,7 +86,7 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
         .await
         .unwrap();
     let highlighted = to_bytes(highlighted.into_body(), 4096).await.unwrap();
-    assert!(String::from_utf8_lossy(&highlighted).contains("section[id=\"hero\"]"));
+    assert!(!String::from_utf8_lossy(&highlighted).contains("data-conflict-highlight"));
     let unsafe_highlight = manager
         .serve(
             "session",
@@ -109,7 +109,7 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
 
     fs::write(
         repo.join("package.json"),
-        r#"{"scripts":{"build":"exit 1"}}"#,
+        r#"{"scripts":{"build":"node -e \"throw new SyntaxError('broken page')\""}}"#,
     )
     .unwrap();
     let broken = commit(&repo, "<h1>Broken</h1>\n");

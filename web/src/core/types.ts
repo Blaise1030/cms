@@ -96,6 +96,8 @@ export interface ChangesUpdate {
   conflicts: Change[];
   /** Branch → resolution session. Older daemons may omit this field. */
   conflictSessions?: Record<string, string>;
+  /** Conflicts the visual resolver cannot safely open. */
+  conflictErrors?: Record<string, string>;
 }
 
 export type ConflictChoice = "yours" | "latest" | "both";

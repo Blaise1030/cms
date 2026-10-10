@@ -50,7 +50,7 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   await expect(page.getByTestId("conflict-file")).toContainText("hero.mdx");
   await expect(page.frameLocator('iframe[title="yours preview"]').locator("h1")).toHaveText("Your headline");
   await expect(page.frameLocator('iframe[title="latest preview"]').locator("h1")).toHaveText("Latest headline");
-  await expect(page.frameLocator('iframe[title="yours preview"]').locator("section#hero")).toHaveAttribute("style", /outline/);
+  await expect(page.frameLocator('iframe[title="yours preview"]').locator("section#hero")).toHaveCSS("outline-style", "solid");
   await expect(page.getByTestId("finish-conflict")).toBeDisabled();
   await page.reload();
   await expect(page.getByTestId("conflict-view")).toBeVisible();

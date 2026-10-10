@@ -40,7 +40,7 @@ function frameUrl(state: ConflictPreviewState): string {
   const cleanRoute = route.value.trim().replace(/^\/+/, "");
   url.pathname = `${url.pathname}${cleanRoute}`;
   const section = file.value && sectionIdForFile(file.value.path);
-  if (section) url.searchParams.set("section", section);
+  if (section) { url.searchParams.set("section", section); url.hash = section; }
   return url.toString();
 }
 
@@ -79,7 +79,7 @@ async function abandon() {
           <Button v-if="!confirmAbandon" variant="outline" size="sm" data-testid="abandon-conflict" @click="confirmAbandon = true">Abandon</Button>
           <Button v-else variant="destructive" size="sm" data-testid="confirm-abandon" :disabled="busy" @click="abandon">Confirm abandon</Button>
           <Button v-if="confirmAbandon" variant="ghost" size="sm" @click="confirmAbandon = false">Cancel</Button>
-          <Button size="sm" data-testid="finish-conflict" :disabled="busy || !store.candidate?.complete || previews?.result.status === 'invalid'" @click="finish">Finish update</Button>
+          <Button size="sm" data-testid="finish-conflict" :disabled="busy || previewLoading || !store.candidate?.complete || previews?.result.status === 'invalid'" @click="finish">Finish update</Button>
         </div>
       </div>
       <p v-if="store.conflictError" class="text-destructive mt-2 text-sm" role="alert">{{ store.conflictError }}</p>
@@ -109,7 +109,7 @@ async function abandon() {
             <div v-for="source in (['yours', 'latest', 'result'] as const)" :key="source" class="min-w-0">
               <h4 class="mb-1 text-sm font-medium">{{ source === 'yours' ? 'Your version' : source === 'latest' ? 'Latest from main' : 'Result' }}</h4>
               <div v-if="previews[source].status === 'ready'" class="mx-auto h-96 max-w-full overflow-hidden rounded border" :style="{ width: viewport === 'mobile' ? '390px' : '100%' }">
-                <iframe :src="frameUrl(previews[source])" :title="`${source} preview`" class="h-full w-full border-0" loading="lazy" />
+                <iframe :src="frameUrl(previews[source])" :title="`${source} preview`" class="h-full w-full border-0" loading="lazy" sandbox="allow-same-origin" referrerpolicy="no-referrer" />
               </div>
               <p v-else class="text-muted-foreground rounded border p-3 text-sm" :class="previews[source].status === 'invalid' ? 'text-destructive' : ''">{{ previews[source].status === 'invalid' ? previews[source].errors : previews[source].reason }}</p>
             </div>

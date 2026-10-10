@@ -223,6 +223,11 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    if !state.conflicts.list(&req.project).await.is_empty() {
+        return Err(ApiError::conflict(
+            "Finish or abandon the open conflict before running Get latest again",
+        ));
+    }
     // GitHub projects fetch with the signed-in user's credentials (private repos).
     let env = if project.repo.is_some() {
         state.github.git_env().await?
@@ -238,14 +243,23 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
     };
     let incoming = conflicts::text(&project.dir, &["rev-parse", "--verify", incoming_ref]).await?;
     let mut sessions = serde_json::Map::new();
+    let mut errors = serde_json::Map::new();
     for change in &result.conflicts {
-        let session = state
+        match state
             .conflicts
             .start(&project.dir, &req.project, &change.branch, &incoming)
-            .await?;
-        sessions.insert(change.branch.clone(), json!(session.id));
+            .await
+        {
+            Ok(session) => {
+                sessions.insert(change.branch.clone(), json!(session.id));
+            }
+            Err(error) => {
+                errors.insert(change.branch.clone(), json!(error.to_string()));
+            }
+        }
     }
     value["conflictSessions"] = Value::Object(sessions);
+    value["conflictErrors"] = Value::Object(errors);
     Ok(Json(value))
 }
 
@@ -343,32 +357,7 @@ pub async fn conflict_previews(
         )
         .await;
     let result = if candidate.complete {
-        let env = [
-            ("GIT_AUTHOR_NAME", "Workbench Preview"),
-            ("GIT_AUTHOR_EMAIL", "preview@localhost"),
-            ("GIT_COMMITTER_NAME", "Workbench Preview"),
-            ("GIT_COMMITTER_EMAIL", "preview@localhost"),
-            ("GIT_AUTHOR_DATE", "2000-01-01T00:00:00+00:00"),
-            ("GIT_COMMITTER_DATE", "2000-01-01T00:00:00+00:00"),
-        ];
-        let commit = String::from_utf8_lossy(
-            &conflicts::checked(
-                &session.dir,
-                &[
-                    "commit-tree",
-                    &candidate.tree,
-                    "-p",
-                    &session.tip,
-                    "-m",
-                    "Preview conflict result",
-                ],
-                &env,
-                None,
-            )
-            .await?,
-        )
-        .trim()
-        .to_string();
+        let commit = conflicts::preview_commit(&session.dir, &candidate.tree, &session.tip).await?;
         state
             .conflict_previews
             .prepare(&session.dir, &q.project, &id, Source::Result, &commit)
@@ -419,16 +408,10 @@ pub async fn finish_conflict(
         .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
     project_session(&state, &req.project, &id).await?;
     let identity = state.github.identity().await;
-    if state
-        .conflict_previews
-        .is_invalid(&id, Source::Result)
-        .await
-    {
-        return Err(ApiError::conflict(
-            "The proposed result has a build error; review your choices before finishing",
-        ));
-    }
-    let commit = state.conflicts.finish(&id, &identity).await?;
+    let commit = state
+        .conflicts
+        .finish_validated(&id, &identity, &state.conflict_previews)
+        .await?;
     state.conflict_previews.remove_session(&id).await;
     Ok(Json(json!({ "commit": commit })))
 }
