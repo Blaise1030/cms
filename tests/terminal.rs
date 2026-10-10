@@ -313,3 +313,517 @@ async fn shutdown_kills_all() {
     assert_eq!(m.status("p1"), None);
     assert_eq!(m.status("p2"), None);
 }
+
+// ---------------------------------------------------------------------------
+// HTTP / WebSocket (daemon routes)
+
+mod http {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::Instant;
+
+    use axum::body::Body;
+    use axum::http::{header, Request, StatusCode};
+    use futures_util::{SinkExt, StreamExt};
+    use http_body_util::BodyExt;
+    use serde_json::{json, Value};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tower::ServiceExt;
+    use workbench::config::Config;
+    use workbench::events::EventBus;
+    use workbench::http;
+    use workbench::http::terminal::commit_message;
+    use workbench::projects::Source;
+    use workbench::state::AppState;
+    use workbench::git;
+
+    use super::{fake_cli, TERMINAL_TEST_LOCK, TIMEOUT, word_after};
+
+    const AUTH_TOKEN: &str = "abc123def4567890abcdef1234567890ab";
+
+    fn git_cli(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn seed_bare(tmp: &Path) -> PathBuf {
+        let src = tmp.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        git_cli(&src, &["init", "-b", "main"]);
+        git_cli(&src, &["config", "user.name", "Ada"]);
+        git_cli(&src, &["config", "user.email", "ada@example.com"]);
+        std::fs::write(src.join("package.json"), "{}\n").unwrap();
+        git_cli(&src, &["add", "-A"]);
+        git_cli(&src, &["commit", "-m", "init"]);
+        let bare = tmp.join("remote.git");
+        git_cli(
+            tmp,
+            &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+        );
+        bare
+    }
+
+    struct HttpEnv {
+        _pty_lock: std::sync::MutexGuard<'static, ()>,
+        _tmp: tempfile::TempDir,
+        root: PathBuf,
+        addr: std::net::SocketAddr,
+        state: AppState,
+        events: EventBus,
+        project: String,
+        dir: PathBuf,
+        server: tokio::task::JoinHandle<()>,
+    }
+
+    async fn http_env(token_echo: bool) -> HttpEnv {
+        let pty_lock = TERMINAL_TEST_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let agents = root.join("agents.json");
+        let cli = fake_cli();
+        let agents_json = if token_echo {
+            let script = format!("echo TOKEN=$WORKBENCH_HOOK_TOKEN; exec {cli}");
+            json!({ "fake": ["sh", "-c", script] })
+        } else {
+            json!({ "fake": [cli] })
+        };
+        std::fs::write(&agents, agents_json.to_string()).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let config = Config {
+            port: addr.port(),
+            projects_dir: root.clone(),
+            no_auth: false,
+            token: Some(AUTH_TOKEN.into()),
+            agents_config: Some(agents),
+            hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
+            ..Default::default()
+        };
+        let state = AppState::with_scaffold_install(config, false);
+        let events = state.events.clone();
+        let info = state.projects.create("Site").await.unwrap();
+        let dir = root.join(&info.id);
+        let state2 = state.clone();
+        let server = tokio::spawn(async move {
+            workbench::serve_on(listener, state2).await.unwrap();
+        });
+        HttpEnv {
+            _pty_lock: pty_lock,
+            _tmp: tmp,
+            root,
+            addr,
+            state,
+            events,
+            project: info.id,
+            dir,
+            server,
+        }
+    }
+
+    fn http_req(method: &str, path: &str, body: Option<Value>) -> Request<Body> {
+        let mut b = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "localhost")
+            .header(header::AUTHORIZATION, format!("Bearer {AUTH_TOKEN}"));
+        let body = match body {
+            Some(v) => {
+                b = b.header(header::CONTENT_TYPE, "application/json");
+                Body::from(v.to_string())
+            }
+            None => Body::empty(),
+        };
+        b.body(body).unwrap()
+    }
+
+    async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
+        let res = app.clone().oneshot(r).await.unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    fn app(env: &HttpEnv) -> axum::Router {
+        http::router(env.state.clone())
+    }
+
+    async fn call_http(env: &HttpEnv, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+        call(&app(env), http_req(method, path, body)).await
+    }
+
+    async fn post_turn_end(env: &HttpEnv, body: Value) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/terminal/turn-end")
+            .header(header::HOST, "localhost")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        call(&app(env), req).await
+    }
+
+    async fn start_terminal(env: &HttpEnv) {
+        let (s, v) = call_http(
+            env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": env.project, "provider": "fake" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["running"], true);
+    }
+
+    async fn ws_connect(env: &HttpEnv) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+        let url = format!(
+            "ws://{}/api/terminal/{}/ws?t={}",
+            env.addr,
+            env.project,
+            AUTH_TOKEN
+        );
+        let (ws, _) = connect_async(url).await.unwrap();
+        ws
+    }
+
+    async fn hook_token_from_ws(env: &HttpEnv) -> String {
+        let mut ws = ws_connect(env).await;
+        hook_token_from_ws_stream(&mut ws).await
+    }
+
+    #[tokio::test]
+    async fn start_refused_on_main_with_remote() {
+        let env = http_env(false).await;
+        let bare = seed_bare(&env.root.join("git"));
+        let gh = env
+            .state
+            .projects
+            .create_from(
+                "gh-site",
+                Source::Clone {
+                    repo: "acme/site".into(),
+                    url: format!("file://{}", bare.display()),
+                    env: vec![],
+                },
+                &git::Identity::workbench(),
+            )
+            .await
+            .unwrap();
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": gh.id, "provider": "fake" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        assert_eq!(v["error"]["code"], "CHANGE_REQUIRED");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_first_frame_is_replay() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let mut ws = ws_connect(&env).await;
+        let msg = tokio::time::timeout(TIMEOUT, ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let bytes = match msg {
+            WsMessage::Binary(b) => b,
+            other => panic!("expected binary replay, got {other:?}"),
+        };
+        assert!(
+            String::from_utf8_lossy(&bytes).contains("FAKE-CLI READY"),
+            "{bytes:?}"
+        );
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn ws_resize_and_input() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let mut ws = ws_connect(&env).await;
+        let _ = tokio::time::timeout(TIMEOUT, ws.next()).await;
+        ws.send(WsMessage::Text(r#"{"cols":100,"rows":30}"#.into()))
+            .await
+            .unwrap();
+        ws.send(WsMessage::Binary(b"size\r".to_vec().into()))
+            .await
+            .unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        let mut acc = String::new();
+        while Instant::now() < deadline {
+            if acc.contains("30 100") {
+                break;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Some(Ok(WsMessage::Binary(b)))) =
+                tokio::time::timeout(left, ws.next()).await
+            {
+                acc.push_str(&String::from_utf8_lossy(&b));
+            }
+        }
+        assert!(acc.contains("30 100"), "got {acc:?}");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn two_clients_both_receive_output() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let mut a = ws_connect(&env).await;
+        let mut b = ws_connect(&env).await;
+        let _ = tokio::time::timeout(TIMEOUT, a.next()).await;
+        let _ = tokio::time::timeout(TIMEOUT, b.next()).await;
+        a.send(WsMessage::Binary(b"hello\r".to_vec().into()))
+            .await
+            .unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        let mut saw_a = false;
+        let mut saw_b = false;
+        while Instant::now() < deadline && (!saw_a || !saw_b) {
+            tokio::select! {
+                m = a.next() => if let Some(Ok(WsMessage::Binary(bin))) = m {
+                    if String::from_utf8_lossy(&bin).contains("ECHO hello") { saw_a = true; }
+                },
+                m = b.next() => if let Some(Ok(WsMessage::Binary(bin))) = m {
+                    if String::from_utf8_lossy(&bin).contains("ECHO hello") { saw_b = true; }
+                },
+            }
+        }
+        assert!(saw_a && saw_b);
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn edit_turn_creates_checkpoint() {
+        let env = http_env(false).await;
+        let mut ev = env.events.subscribe();
+        start_terminal(&env).await;
+        let mut ws = ws_connect(&env).await;
+        let _ = tokio::time::timeout(TIMEOUT, ws.next()).await;
+        ws.send(WsMessage::Binary(b"edit hello\r".to_vec().into()))
+            .await
+            .unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        let mut got_cp = false;
+        while Instant::now() < deadline && !got_cp {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Ok(text)) = tokio::time::timeout(left, ev.recv()).await {
+                let v: Value = serde_json::from_str(&text).unwrap();
+                if v["type"] == "checkpoint.created" && v["projectId"] == env.project {
+                    assert_eq!(v["summary"], "hello");
+                    got_cp = true;
+                }
+            }
+        }
+        assert!(got_cp, "checkpoint.created not seen");
+        let subject = git_cli(&env.dir, &["log", "-1", "--format=%s"]);
+        assert_eq!(subject, "checkpoint: hello");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn turn_end_without_changes_makes_no_commit() {
+        let env = http_env(true).await;
+        start_terminal(&env).await;
+        let token = hook_token_from_ws(&env).await;
+        let before = git_cli(&env.dir, &["rev-parse", "HEAD"]);
+        let (s, v) = post_turn_end(
+            &env,
+            json!({ "project": env.project, "token": token }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v["committed"], false);
+        assert_eq!(git_cli(&env.dir, &["rev-parse", "HEAD"]), before);
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn turn_end_bad_token_is_403() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let (s, v) = post_turn_end(
+            &env,
+            json!({
+                "project": env.project,
+                "token": "0".repeat(32),
+            }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+        assert_eq!(v["error"]["code"], "UNAUTH");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn turn_end_blocked_on_main_emits_event() {
+        let env = http_env(true).await;
+        let bare = seed_bare(&env.root.join("gh"));
+        let gh = env
+            .state
+            .projects
+            .create_from(
+                "gh-site",
+                Source::Clone {
+                    repo: "acme/site".into(),
+                    url: format!("file://{}", bare.display()),
+                    env: vec![],
+                },
+                &git::Identity::workbench(),
+            )
+            .await
+            .unwrap();
+        let gh_dir = env.root.join(&gh.id);
+        workbench::changes::create(&gh_dir, "New post: Launch week")
+            .await
+            .unwrap();
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": gh.id, "provider": "fake" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        git_cli(&gh_dir, &["checkout", "main"]);
+        let mut ws = ws_connect_for_project(&env, &gh.id).await;
+        let token = hook_token_from_ws_stream(&mut ws).await;
+        let mut ev = env.events.subscribe();
+        let (s, v) = post_turn_end(
+            &env,
+            json!({ "project": gh.id, "token": token }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v["committed"], false);
+        let deadline = Instant::now() + TIMEOUT;
+        let mut blocked = false;
+        while Instant::now() < deadline && !blocked {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Ok(text)) = tokio::time::timeout(left, ev.recv()).await {
+                let v: Value = serde_json::from_str(&text).unwrap();
+                if v["type"] == "checkpoint.blocked" && v["projectId"] == gh.id {
+                    blocked = true;
+                }
+            }
+        }
+        assert!(blocked);
+        env.server.abort();
+    }
+
+    async fn ws_connect_for_project(
+        env: &HttpEnv,
+        project: &str,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+        let url = format!("ws://{}/api/terminal/{}/ws?t={}", env.addr, project, AUTH_TOKEN);
+        let (ws, _) = connect_async(url).await.unwrap();
+        ws
+    }
+
+    async fn hook_token_from_ws_stream(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> String {
+        let deadline = Instant::now() + TIMEOUT;
+        let first = tokio::time::timeout(TIMEOUT, ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let mut acc = match first {
+            WsMessage::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
+            _ => String::new(),
+        };
+        while Instant::now() < deadline {
+            if let Some(tok) = word_after(&acc, "TOKEN=", |c| c.is_ascii_hexdigit()) {
+                return tok;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Some(Ok(WsMessage::Binary(b)))) =
+                tokio::time::timeout(left, ws.next()).await
+            {
+                acc.push_str(&String::from_utf8_lossy(&b));
+            }
+        }
+        panic!("no TOKEN= in replay: {acc:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_project_kills_terminal() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let (s, v) = call_http(
+            &env,
+            "DELETE",
+            &format!("/api/terminal/{}", env.project),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let (s, v) = call_http(
+            &env,
+            "GET",
+            &format!("/api/terminal/{}", env.project),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["running"], false);
+
+        start_terminal(&env).await;
+        let (s, v) = call(
+            &app(&env),
+            http_req(
+                "DELETE",
+                &format!("/api/projects/{}?confirm=true", env.project),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let (s, v) = call_http(
+            &env,
+            "GET",
+            &format!("/api/terminal/{}", env.project),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["running"], false);
+        env.server.abort();
+    }
+
+    #[test]
+    fn commit_message_is_one_line_and_char_safe() {
+        assert_eq!(commit_message(Some("a\nb"), &[]), "a");
+        let long = "é".repeat(500);
+        let msg = commit_message(Some(&long), &[]);
+        assert!(msg.chars().count() <= 72);
+        assert!(msg.is_char_boundary(msg.len()));
+        assert_eq!(
+            commit_message(None, &["x".into(), "y".into()]),
+            "Update 2 files: x, y"
+        );
+        assert_eq!(commit_message(Some(""), &["x".into()]), "Update 1 files: x");
+    }
+}

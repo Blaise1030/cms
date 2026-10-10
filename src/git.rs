@@ -108,6 +108,22 @@ fn clean_summary(summary: &str) -> String {
     }
 }
 
+/// Paths with local modifications (`git status --porcelain`), destination path for renames.
+pub async fn changed_paths(dir: &Path) -> Result<Vec<String>, ApiError> {
+    let out = run(dir, &["status", "--porcelain"]).await?;
+    Ok(out
+        .lines()
+        .filter_map(|line| {
+            if line.len() < 4 {
+                return None;
+            }
+            let path = line[3..].trim();
+            let path = path.rsplit(" -> ").next().unwrap_or(path);
+            Some(path.to_string())
+        })
+        .collect())
+}
+
 /// Commit everything in the working tree as `checkpoint: <summary>`.
 ///
 /// Returns `Ok(None)` (and creates no commit) when the tree is clean.

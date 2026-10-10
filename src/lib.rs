@@ -36,6 +36,7 @@ pub fn version() -> &'static str {
 /// Serve the HTTP API on an already-bound listener until Ctrl-C.
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     let agents = state.agents.clone();
+    let terminals = state.terminals.clone();
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
     let identity = state.github.identity().await;
@@ -52,6 +53,7 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
         .await;
     // Don't leave agent subprocesses behind.
     agents.shutdown().await;
+    terminals.shutdown().await;
     devservers.shutdown().await;
     watchers.shutdown();
     served

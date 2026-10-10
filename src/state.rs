@@ -9,6 +9,7 @@ use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::ProjectRegistry;
+use crate::terminal::TerminalManager;
 use crate::watch::WatchManager;
 
 #[derive(Clone)]
@@ -19,6 +20,8 @@ pub struct AppState {
     pub events: EventBus,
     /// ACP agent sessions (one per project).
     pub agents: Arc<AgentManager>,
+    /// PTY terminal sessions (one per project).
+    pub terminals: Arc<TerminalManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
     /// `fs.change` watcher per project.
@@ -81,6 +84,7 @@ impl AppState {
             projects.clone(),
             events.clone(),
         ));
+        let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
@@ -92,6 +96,7 @@ impl AppState {
             projects,
             events,
             agents,
+            terminals,
             devservers,
             watchers,
             github,
