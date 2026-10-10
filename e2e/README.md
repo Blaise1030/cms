@@ -15,7 +15,7 @@ just e2e
 
 | File | Role |
 |------|------|
-| `fixtures/githubStub.ts` | HTTP stub for device flow, `/user`, `/user/repos` |
+| `fixtures/githubStub.ts` | HTTP stub for device flow, `/user`, `/user/repos`, pulls / PR status, GraphQL `markPullRequestReadyForReview` |
 | `fixtures/bareRemote.ts` | Seeds `acme/site.git` with a `main` branch |
 | `fixtures/daemon.ts` | Starts stub + bare remote + release `workbench serve` (+ fake ACP agent), clones via API |
 | `fixtures/workbench.ts` | Playwright fixture wiring cleanup |

@@ -111,4 +111,50 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+  it("marks a PR ready via the GraphQL markPullRequestReadyForReview mutation", async () => {
+    const stub = await startGithubStub();
+    const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };
+    const gql = (variables: unknown, headers: Record<string, string> = auth) =>
+      fetch(`${stub.baseUrl}/graphql`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query:
+            "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
+          variables,
+        }),
+      });
+    try {
+      await fetch(`${stub.baseUrl}/repos/acme/site/pulls`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ title: "T", head: "content/t", base: "main", draft: true }),
+      });
+      const listed = (await (
+        await fetch(`${stub.baseUrl}/repos/acme/site/pulls?head=acme:content/t`, { headers: auth })
+      ).json()) as { node_id: string; draft: boolean }[];
+      expect(listed[0]).toMatchObject({ node_id: "PR_kwStub1", draft: true });
+
+      expect((await gql({ id: "PR_kwStub1" }, {})).status).toBe(401);
+
+      const res = await gql({ id: "PR_kwStub1" });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } },
+      });
+      expect(stub.readyForReviewCalls()).toEqual(["PR_kwStub1"]);
+      const after = (await (
+        await fetch(`${stub.baseUrl}/repos/acme/site/pulls?head=acme:content/t`, { headers: auth })
+      ).json()) as { draft: boolean }[];
+      expect(after[0]!.draft).toBe(false);
+
+      const unknown = (await (await gql({ id: "PR_nope" })).json()) as { errors?: unknown[] };
+      expect(unknown.errors).toHaveLength(1);
+
+      stub.setGraphqlStatus(403);
+      expect((await gql({ id: "PR_kwStub1" })).status).toBe(403);
+    } finally {
+      await stub.close();
+    }
+  });
 });
