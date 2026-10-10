@@ -1071,10 +1071,13 @@ impl GithubAuth {
             .map_err(unreachable)?;
         let status = res.status();
         let body = res.bytes().await.map_err(unreachable)?;
-        let excerpt = |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
+        let excerpt =
+            |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
         if status == reqwest::StatusCode::UNAUTHORIZED {
             let _ = self.sign_out_if_token(&token).await;
-            return Err(ApiError::unauth("your GitHub session expired — sign in again"));
+            return Err(ApiError::unauth(
+                "your GitHub session expired — sign in again",
+            ));
         }
         if status == reqwest::StatusCode::FORBIDDEN {
             return Err(ApiError::sandbox(
@@ -1082,14 +1085,20 @@ impl GithubAuth {
             ));
         }
         if !status.is_success() {
-            return Err(ApiError::github(format!("{WHAT}: GitHub returned {status}: {}", excerpt(300))));
+            return Err(ApiError::github(format!(
+                "{WHAT}: GitHub returned {status}: {}",
+                excerpt(300)
+            )));
         }
         let body: ApiGraphql = serde_json::from_slice(&body)
             .map_err(|_| ApiError::github(format!("{WHAT}: unexpected response from GitHub")))?;
         if let Some(e) = body.errors.into_iter().next() {
             let msg: String = e.message.chars().take(300).collect();
             return Err(
-                if e.kind.as_deref().is_some_and(|k| PERMISSION_ERRORS.contains(&k)) {
+                if e.kind
+                    .as_deref()
+                    .is_some_and(|k| PERMISSION_ERRORS.contains(&k))
+                {
                     ApiError::sandbox(format!(
                         "You don't have permission to mark this pull request ready for review: {msg}"
                     ))
@@ -1899,12 +1908,9 @@ mod tests {
         let handle = tokio::spawn(async move {
             axum::serve(listener, routes).await.ok();
         });
-        (
-            format!("http://{addr}"),
-            move || {
-                handle.abort();
-            },
-        )
+        (format!("http://{addr}"), move || {
+            handle.abort();
+        })
     }
 
     #[tokio::test]
@@ -2037,12 +2043,9 @@ mod tests {
         ] {
             let routes = Router::new().route(
                 "/repos/acme/site/pulls",
-                get(move || async move {
-                    (
-                        status,
-                        Json(serde_json::json!({ "message": "nope" })),
-                    )
-                }),
+                get(
+                    move || async move { (status, Json(serde_json::json!({ "message": "nope" }))) },
+                ),
             );
             let (base, stop) = mock_api(routes).await;
             let dir = tmp_dir(&format!("err-{}", status.as_u16()));
@@ -2056,10 +2059,7 @@ mod tests {
                 },
                 &dir,
             );
-            let err = auth
-                .find_pr("acme/site", "content/x")
-                .await
-                .unwrap_err();
+            let err = auth.find_pr("acme/site", "content/x").await.unwrap_err();
             assert_eq!(err.code, want_code, "status {status}");
             if want_code == ErrorCode::Sandbox {
                 assert!(err.message.contains("push access"));
@@ -2070,7 +2070,9 @@ mod tests {
 
     fn review(login: &str, state: &str) -> ApiReview {
         ApiReview {
-            user: Some(ApiLogin { login: login.into() }),
+            user: Some(ApiLogin {
+                login: login.into(),
+            }),
             state: state.into(),
         }
     }
@@ -2088,39 +2090,75 @@ mod tests {
         assert_eq!(pr_state(&pull(true, "open", false), &[]), PrState::Draft);
         assert_eq!(pr_state(&pull(false, "open", false), &[]), PrState::Open);
         assert_eq!(pr_state(&pull(false, "closed", true), &[]), PrState::Merged);
-        assert_eq!(pr_state(&pull(false, "closed", false), &[]), PrState::Closed);
+        assert_eq!(
+            pr_state(&pull(false, "closed", false), &[]),
+            PrState::Closed
+        );
         // A merged/closed PR stays merged/closed whatever its reviews said.
         let approvals = [review("grace", "APPROVED")];
-        assert_eq!(pr_state(&pull(false, "closed", true), &approvals), PrState::Merged);
-        assert_eq!(pr_state(&pull(false, "closed", false), &approvals), PrState::Closed);
+        assert_eq!(
+            pr_state(&pull(false, "closed", true), &approvals),
+            PrState::Merged
+        );
+        assert_eq!(
+            pr_state(&pull(false, "closed", false), &approvals),
+            PrState::Closed
+        );
     }
 
     #[test]
     fn pr_state_is_approved_via_each_reviewers_latest_review() {
         let open = pull(false, "open", false);
-        assert_eq!(pr_state(&open, &[review("grace", "APPROVED")]), PrState::Approved);
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED")]),
+            PrState::Approved
+        );
         // Comments don't override an approval.
         assert_eq!(
-            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "COMMENTED")]),
+            pr_state(
+                &open,
+                &[review("grace", "APPROVED"), review("grace", "COMMENTED")]
+            ),
             PrState::Approved
         );
         // A later change request from the same reviewer withdraws it.
         assert_eq!(
-            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "CHANGES_REQUESTED")]),
+            pr_state(
+                &open,
+                &[
+                    review("grace", "APPROVED"),
+                    review("grace", "CHANGES_REQUESTED")
+                ]
+            ),
             PrState::Open
         );
         // Any outstanding change request blocks approval.
         assert_eq!(
-            pr_state(&open, &[review("grace", "APPROVED"), review("alan", "CHANGES_REQUESTED")]),
+            pr_state(
+                &open,
+                &[
+                    review("grace", "APPROVED"),
+                    review("alan", "CHANGES_REQUESTED")
+                ]
+            ),
             PrState::Open
         );
         // Re-approval after a change request.
         assert_eq!(
-            pr_state(&open, &[review("alan", "CHANGES_REQUESTED"), review("alan", "APPROVED")]),
+            pr_state(
+                &open,
+                &[
+                    review("alan", "CHANGES_REQUESTED"),
+                    review("alan", "APPROVED")
+                ]
+            ),
             PrState::Approved
         );
         // A dismissed approval no longer counts.
-        assert_eq!(pr_state(&open, &[review("grace", "DISMISSED")]), PrState::Open);
+        assert_eq!(
+            pr_state(&open, &[review("grace", "DISMISSED")]),
+            PrState::Open
+        );
         // Drafts stay drafts.
         assert_eq!(
             pr_state(&pull(true, "open", false), &[review("grace", "APPROVED")]),
@@ -2139,14 +2177,20 @@ mod tests {
     fn checks_aggregate_failing_over_pending_over_passing() {
         assert_eq!(aggregate_checks(&[]), ChecksState::None);
         assert_eq!(
-            aggregate_checks(&[run("completed", Some("success")), run("completed", Some("skipped"))]),
+            aggregate_checks(&[
+                run("completed", Some("success")),
+                run("completed", Some("skipped"))
+            ]),
             ChecksState::Passing
         );
         assert_eq!(
             aggregate_checks(&[run("completed", Some("success")), run("in_progress", None)]),
             ChecksState::Pending
         );
-        assert_eq!(aggregate_checks(&[run("queued", None)]), ChecksState::Pending);
+        assert_eq!(
+            aggregate_checks(&[run("queued", None)]),
+            ChecksState::Pending
+        );
         for bad in ["failure", "timed_out", "cancelled", "action_required"] {
             assert_eq!(
                 aggregate_checks(&[run("in_progress", None), run("completed", Some(bad))]),
@@ -2210,7 +2254,10 @@ mod tests {
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "deploys");
         assert_eq!(
-            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            auth.preview_url("acme/site", "abc")
+                .await
+                .unwrap()
+                .as_deref(),
             Some("https://two.pages.dev")
         );
         assert_eq!(auth.preview_url("acme/site", "other").await.unwrap(), None);
@@ -2294,7 +2341,10 @@ mod tests {
         );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "noprstatus");
-        assert_eq!(auth.pr_status("acme/site", "content/x").await.unwrap(), None);
+        assert_eq!(
+            auth.pr_status("acme/site", "content/x").await.unwrap(),
+            None
+        );
         stop();
     }
 
@@ -2377,7 +2427,11 @@ mod tests {
             );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "statusesfail");
-        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(st.checks, ChecksState::Pending);
         assert_eq!(st.preview_url, None);
         stop();
@@ -2414,7 +2468,10 @@ mod tests {
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "unsafeurl");
         assert_eq!(
-            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            auth.preview_url("acme/site", "abc")
+                .await
+                .unwrap()
+                .as_deref(),
             Some("http://ok.pages.dev")
         );
         stop();
@@ -2424,7 +2481,14 @@ mod tests {
     fn only_http_urls_are_safe_links() {
         assert!(is_http_url("https://x.pages.dev/a?b"));
         assert!(is_http_url("HTTP://x.dev"));
-        for bad in ["javascript:alert(1)", " https://x", "data:text/html,x", "//x.dev", "ftp://x", ""] {
+        for bad in [
+            "javascript:alert(1)",
+            " https://x",
+            "data:text/html,x",
+            "//x.dev",
+            "ftp://x",
+            "",
+        ] {
             assert!(!is_http_url(bad), "{bad}");
         }
     }
@@ -2483,7 +2547,11 @@ mod tests {
             );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "paging");
-        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(st.state, PrState::Approved);
         assert_eq!(st.checks, ChecksState::Failing);
         stop();
@@ -2496,27 +2564,32 @@ mod tests {
         use axum::{Json, Router};
         use std::collections::HashMap;
 
-        let routes = Router::new()
-            .route(
-                "/repos/acme/site/pulls",
-                get(|Query(q): Query<HashMap<String, String>>| async move {
-                    let head = q.get("head").cloned().unwrap_or_default();
-                    if head.ends_with("hung") {
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                    } else {
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                    }
-                    let mut pr = open_pull_json(1, &head);
-                    pr["draft"] = serde_json::json!(true);
-                    Json(serde_json::json!([pr]))
-                }),
-            );
+        let routes = Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|Query(q): Query<HashMap<String, String>>| async move {
+                let head = q.get("head").cloned().unwrap_or_default();
+                if head.ends_with("hung") {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
+                let mut pr = open_pull_json(1, &head);
+                pr["draft"] = serde_json::json!(true);
+                Json(serde_json::json!([pr]))
+            }),
+        );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "prstates");
-        let branches: Vec<String> = ["content/a", "content/b", "content/c", "content/d", "content/hung"]
-            .into_iter()
-            .map(String::from)
-            .collect();
+        let branches: Vec<String> = [
+            "content/a",
+            "content/b",
+            "content/c",
+            "content/d",
+            "content/hung",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
         let started = Instant::now();
         let states = auth
             .pr_states("acme/site", &branches, Duration::from_millis(1000))
@@ -2595,8 +2668,18 @@ mod tests {
         let unprotected = || (404, json!({ "message": "Branch not protected" }));
         let none = || Some(json!([]));
         let cases = [
-            ("classic 200", (200, json!({})), none(), BranchProtection::Protected),
-            ("classic 404 unprotected", unprotected(), none(), BranchProtection::Unprotected),
+            (
+                "classic 200",
+                (200, json!({})),
+                none(),
+                BranchProtection::Protected,
+            ),
+            (
+                "classic 404 unprotected",
+                unprotected(),
+                none(),
+                BranchProtection::Unprotected,
+            ),
             // Repo hidden from the caller: GitHub says "Not Found", not "Branch not protected".
             (
                 "404 Not Found",
@@ -2605,8 +2688,18 @@ mod tests {
                 BranchProtection::Unknown,
             ),
             // No admin rights: GitHub refuses to say, so we must not nag.
-            ("403", (403, json!({ "message": "x" })), none(), BranchProtection::Unknown),
-            ("500", (500, json!({ "message": "x" })), none(), BranchProtection::Unknown),
+            (
+                "403",
+                (403, json!({ "message": "x" })),
+                none(),
+                BranchProtection::Unknown,
+            ),
+            (
+                "500",
+                (500, json!({ "message": "x" })),
+                none(),
+                BranchProtection::Unknown,
+            ),
             (
                 "ruleset requires a pull request",
                 unprotected(),
@@ -2619,7 +2712,12 @@ mod tests {
                 Some(json!([{ "type": "deletion" }])),
                 BranchProtection::Unprotected,
             ),
-            ("rules endpoint fails", unprotected(), None, BranchProtection::Unknown),
+            (
+                "rules endpoint fails",
+                unprotected(),
+                None,
+                BranchProtection::Unknown,
+            ),
         ];
         for (i, (name, classic, rules, want)) in cases.into_iter().enumerate() {
             let got = protection_with(&format!("case{i}"), classic, rules, now).await;
@@ -2762,7 +2860,9 @@ mod tests {
             post(|| async {
                 (
                     axum::http::StatusCode::FORBIDDEN,
-                    axum::Json(serde_json::json!({ "message": "Resource not accessible by integration" })),
+                    axum::Json(
+                        serde_json::json!({ "message": "Resource not accessible by integration" }),
+                    ),
                 )
             }),
         );
@@ -2793,7 +2893,11 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::Sandbox);
-        assert!(err.message.contains("Ada does not have permission"), "{}", err.message);
+        assert!(
+            err.message.contains("Ada does not have permission"),
+            "{}",
+            err.message
+        );
         stop();
 
         // Any other GraphQL error.
@@ -2857,7 +2961,10 @@ mod tests {
     #[tokio::test]
     async fn mark_ready_for_review_needs_the_mutation_to_report_the_pr_out_of_draft() {
         for (tag, body) in [
-            ("ready-null", serde_json::json!({ "data": { "markPullRequestReadyForReview": null } })),
+            (
+                "ready-null",
+                serde_json::json!({ "data": { "markPullRequestReadyForReview": null } }),
+            ),
             ("ready-nodata", serde_json::json!({})),
             (
                 "ready-still-draft",
@@ -2868,7 +2975,11 @@ mod tests {
         ] {
             let err = mark_ready_err(graphql_answers(true, body), tag).await;
             assert_eq!(err.code, ErrorCode::GithubErr, "{tag}");
-            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
+            assert!(
+                err.message.contains("ready for review"),
+                "{tag}: {}",
+                err.message
+            );
         }
     }
 
@@ -2893,7 +3004,10 @@ mod tests {
         use axum::routing::post;
         for (status, tag) in [
             (axum::http::StatusCode::FORBIDDEN, "ready-msg-403"),
-            (axum::http::StatusCode::UNPROCESSABLE_ENTITY, "ready-msg-422"),
+            (
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "ready-msg-422",
+            ),
             (axum::http::StatusCode::BAD_GATEWAY, "ready-msg-502"),
         ] {
             let routes = one_open_pull(true).route(
@@ -2903,9 +3017,21 @@ mod tests {
                 }),
             );
             let err = mark_ready_err(routes, tag).await;
-            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
-            assert!(!err.message.contains("push access"), "{tag}: {}", err.message);
-            assert!(!err.message.contains("open the pull request"), "{tag}: {}", err.message);
+            assert!(
+                err.message.contains("ready for review"),
+                "{tag}: {}",
+                err.message
+            );
+            assert!(
+                !err.message.contains("push access"),
+                "{tag}: {}",
+                err.message
+            );
+            assert!(
+                !err.message.contains("open the pull request"),
+                "{tag}: {}",
+                err.message
+            );
         }
     }
 
@@ -2983,11 +3109,17 @@ mod tests {
 
     #[test]
     fn graphql_endpoint_follows_the_rest_api_base() {
-        assert_eq!(graphql_url("https://api.github.com"), "https://api.github.com/graphql");
+        assert_eq!(
+            graphql_url("https://api.github.com"),
+            "https://api.github.com/graphql"
+        );
         assert_eq!(
             graphql_url("https://ghe.acme.dev/api/v3"),
             "https://ghe.acme.dev/api/graphql"
         );
-        assert_eq!(graphql_url("http://127.0.0.1:9"), "http://127.0.0.1:9/graphql");
+        assert_eq!(
+            graphql_url("http://127.0.0.1:9"),
+            "http://127.0.0.1:9/graphql"
+        );
     }
 }

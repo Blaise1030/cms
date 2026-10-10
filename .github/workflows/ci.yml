@@ -1,71 +1,121 @@
 name: CI
 
+# Every push and pull request checks the daemon, the web app and the template,
+# then runs the Playwright smoke e2e against a real daemon.
 on:
+  push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    runs-on: ubuntu-latest
+  daemon:
+    name: Daemon (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The daemon spawns agents, dev servers and git; test on both platforms.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --check
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: Web build (embedded in daemon)
+      # The daemon embeds web/dist, so it must exist before Rust compiles.
+      - name: Build the web app
         run: |
           pnpm -C web install --frozen-lockfile
           pnpm -C web build
-      - run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --locked
 
   web:
+    name: Web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm -C web install --frozen-lockfile
+      # vue-tsc type check, Vite build and the PWA check.
       - run: pnpm -C web build
       - run: pnpm -C web test
-      - name: actionlint (CI + template deploy workflow)
-        run: >-
-          docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.7 -color
-          .github/workflows/ci.yml templates/astro-marketing/.github/workflows/deploy.yml
+
+  template:
+    name: Template (astro-marketing)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: templates/astro-marketing
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: templates/astro-marketing/package-lock.json
+      - run: npm ci
+      - run: npm run build
 
   e2e:
+    name: e2e
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: 24
           cache: pnpm
           cache-dependency-path: |
             web/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
+      # Same as `just e2e`: the release daemon embeds the freshly built web/dist.
       - run: pnpm -C web install --frozen-lockfile && pnpm -C web build
-      - run: cargo build --release
-      - run: cargo build --release --example fake_acp_agent
-      # Same as `just e2e` after the web/release rebuild (already done above).
-      - run: |
-          pnpm -C e2e install --frozen-lockfile
-          pnpm -C e2e exec playwright install --with-deps chromium
-          pnpm -C e2e test
-          pnpm -C e2e e2e
+      - run: cargo build --release --locked
+      - run: cargo build --release --locked --example fake_acp_agent
+      - run: pnpm -C e2e install --frozen-lockfile
+      - run: pnpm -C e2e exec playwright install --with-deps chromium
+      - run: pnpm -C e2e test
+      - run: pnpm -C e2e e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results
+          path: e2e/test-results
+          retention-days: 7

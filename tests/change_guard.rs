@@ -40,7 +40,10 @@ fn seed_bare(tmp: &Path) -> PathBuf {
     git_cli(&src, &["add", "-A"]);
     git_cli(&src, &["commit", "-m", "init"]);
     let bare = tmp.join("remote.git");
-    git_cli(tmp, &["clone", "--bare", src.to_str().unwrap(), "remote.git"]);
+    git_cli(
+        tmp,
+        &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+    );
     bare
 }
 
@@ -75,7 +78,10 @@ async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
     let res = app.clone().oneshot(r).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn fake_agent() -> PathBuf {
@@ -113,8 +119,12 @@ async fn require_change_blocks_github_on_main_allows_local_and_branches() {
 
     changes::require_change(&work, None).await.unwrap();
 
-    changes::create(&work, "New post: Launch week").await.unwrap();
-    changes::require_change(&work, Some("acme/site")).await.unwrap();
+    changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+    changes::require_change(&work, Some("acme/site"))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -197,7 +207,9 @@ async fn agent_prompt_rejects_main_for_github_allows_local() {
     assert_eq!(v["error"]["code"], "CHANGE_REQUIRED");
 
     // After starting a change, prompt (and thus checkpoint) is allowed.
-    changes::create(&dir, "New post: Launch week").await.unwrap();
+    changes::create(&dir, "New post: Launch week")
+        .await
+        .unwrap();
     let (s, v) = call(
         &app,
         req(

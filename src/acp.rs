@@ -200,7 +200,8 @@ impl ToolRec {
 /// markdown paragraph when text resumes after a tool call. The separator is part of the
 /// streamed delta so live chat and reloaded history render the same.
 fn text_delta(assistant: &str, text_break: bool, text: &str) -> String {
-    if text_break && !assistant.is_empty() && !assistant.ends_with('\n') && !text.starts_with('\n') {
+    if text_break && !assistant.is_empty() && !assistant.ends_with('\n') && !text.starts_with('\n')
+    {
         format!("\n\n{text}")
     } else {
         text.to_string()
@@ -1009,8 +1010,7 @@ async fn run_turn(
             .get(&session.project_id)
             .await
             .and_then(|p| p.repo);
-        if let Err(e) = crate::changes::require_change(&session.dir, github_repo.as_deref()).await
-        {
+        if let Err(e) = crate::changes::require_change(&session.dir, github_repo.as_deref()).await {
             eprintln!(
                 "workbench: checkpoint blocked for {}: {e}",
                 session.project_id
@@ -1136,9 +1136,8 @@ impl AgentManager {
 
     /// Whether an agent turn is running for the project, including its settle and checkpoint.
     pub fn turn_in_progress(&self, project_id: &str) -> bool {
-        self.live_session(project_id).is_some_and(|s| {
-            s.awaiting.load(Ordering::SeqCst) || s.turn_lock.try_lock().is_err()
-        })
+        self.live_session(project_id)
+            .is_some_and(|s| s.awaiting.load(Ordering::SeqCst) || s.turn_lock.try_lock().is_err())
     }
 
     fn live_session(&self, project_id: &str) -> Option<Arc<Session>> {

@@ -83,7 +83,12 @@ async fn name_taken(dir: &Path, name: &str) -> Result<bool, ApiError> {
     Ok(branch_exists(dir, name).await?
         || run(
             dir,
-            &["rev-parse", "--verify", "--quiet", &format!("refs/remotes/origin/{name}")],
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/origin/{name}"),
+            ],
         )
         .await
         .is_ok())
@@ -91,9 +96,17 @@ async fn name_taken(dir: &Path, name: &str) -> Result<bool, ApiError> {
 
 async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
     // `rev-parse --verify` exits 0 when the ref exists.
-    Ok(run(dir, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{name}")])
-        .await
-        .is_ok())
+    Ok(run(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ],
+    )
+    .await
+    .is_ok())
 }
 
 /// Fetch `origin/main` when a remote exists, create a unique `content/<slug>` branch
@@ -115,11 +128,7 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     run(dir, &["checkout", "-b", &branch, start]).await?;
     run(
         dir,
-        &[
-            "config",
-            &format!("branch.{branch}.description"),
-            &title,
-        ],
+        &["config", &format!("branch.{branch}.description"), &title],
     )
     .await?;
     Ok(Change {
@@ -184,7 +193,11 @@ pub async fn get(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     if !branch_exists(dir, branch).await? {
         return Err(ApiError::enoent(format!("no such branch: {branch}")));
     }
-    let title = match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await
+    let title = match run(
+        dir,
+        &["config", "--get", &format!("branch.{branch}.description")],
+    )
+    .await
     {
         Ok(t) => {
             let t = t.trim();
@@ -317,7 +330,11 @@ pub fn check_git_version(version: &str) -> Result<(), ApiError> {
         (Some(major), Some(minor)) if (major, minor) >= (2, 38) => Ok(()),
         _ => Err(ApiError::git(format!(
             "Get latest needs git 2.38 or newer (found {}) — update git and try again",
-            if found.is_empty() { version.trim() } else { found }
+            if found.is_empty() {
+                version.trim()
+            } else {
+                found
+            }
         ))),
     }
 }
@@ -391,7 +408,11 @@ pub async fn get_latest(dir: &Path, env: &[(String, String)]) -> Result<Update, 
 async fn change_branches(dir: &Path) -> Result<Vec<String>, ApiError> {
     let out = run(
         dir,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads/content/"],
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads/content/",
+        ],
     )
     .await?;
     Ok(out
@@ -471,10 +492,18 @@ async fn apply(dir: &Path, current: &str, plan: &[RefMove]) -> Result<(), ApiErr
     if let Some(m) = active.first() {
         ensure_no_untracked_in_the_way(dir, &m.new).await?;
     }
-    update_refs(dir, others.iter().map(|m| (m.branch.as_str(), &m.new, &m.old))).await?;
+    update_refs(
+        dir,
+        others.iter().map(|m| (m.branch.as_str(), &m.new, &m.old)),
+    )
+    .await?;
     if let Some(m) = active.first() {
         if let Err(e) = run(dir, &["merge", "--ff-only", &m.new]).await {
-            let _ = update_refs(dir, others.iter().map(|m| (m.branch.as_str(), &m.old, &m.new))).await;
+            let _ = update_refs(
+                dir,
+                others.iter().map(|m| (m.branch.as_str(), &m.old, &m.new)),
+            )
+            .await;
             return Err(e);
         }
     }
@@ -488,7 +517,11 @@ async fn ensure_no_untracked_in_the_way(dir: &Path, target: &str) -> Result<(), 
     if untracked.trim().is_empty() {
         return Ok(());
     }
-    let incoming = run(dir, &["diff", "--name-only", "--diff-filter=A", "HEAD", target]).await?;
+    let incoming = run(
+        dir,
+        &["diff", "--name-only", "--diff-filter=A", "HEAD", target],
+    )
+    .await?;
     let incoming: std::collections::HashSet<&str> = incoming.lines().map(str::trim).collect();
     let blocking: Vec<&str> = untracked
         .lines()
@@ -571,9 +604,11 @@ async fn merge_tree(dir: &Path, ours: &str, theirs: &str) -> Result<Option<Strin
 }
 
 async fn rev_parse(dir: &Path, rev: &str) -> Result<String, ApiError> {
-    Ok(run(dir, &["rev-parse", "--verify", rev]).await?.trim().to_string())
+    Ok(run(dir, &["rev-parse", "--verify", rev])
+        .await?
+        .trim()
+        .to_string())
 }
-
 
 /// What GitHub says about a change's pull request, for [`cleanup`].
 #[derive(Debug)]
@@ -608,8 +643,7 @@ pub async fn check_cleanup(dir: &Path, branch: &str) -> Result<(), ApiError> {
 /// Whether a pull request whose head is `head_sha` is about `branch`'s work: the head is the
 /// branch tip or one of its ancestors. A PR for an earlier change that had the same name is not.
 pub async fn pr_matches(dir: &Path, branch: &str, head_sha: &str) -> bool {
-    !head_sha.is_empty()
-        && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
+    !head_sha.is_empty() && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
 }
 
 async fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
@@ -651,7 +685,10 @@ pub async fn cleanup(
             Err(e) => {
                 return Err(ApiError::new(
                     e.code,
-                    format!("Couldn't get the latest main to check this change: {}", e.message),
+                    format!(
+                        "Couldn't get the latest main to check this change: {}",
+                        e.message
+                    ),
                 ))
             }
         }
@@ -712,7 +749,12 @@ async fn merged_into(dir: &Path, tip: &str, main_ref: &str) -> Result<bool, ApiE
 }
 
 async fn branch_title(dir: &Path, branch: &str) -> String {
-    match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await {
+    match run(
+        dir,
+        &["config", "--get", &format!("branch.{branch}.description")],
+    )
+    .await
+    {
         Ok(t) => {
             let t = t.trim();
             if t.is_empty() {
@@ -761,7 +803,9 @@ async fn run_env(dir: &Path, args: &[&str], env: &[(String, String)]) -> Result<
         if lower.contains("permission") || lower.contains("denied") || lower.contains("403") {
             return Err(ApiError::sandbox("You don't have push access"));
         }
-        if lower.contains("authentication") || lower.contains("401") || lower.contains("credentials")
+        if lower.contains("authentication")
+            || lower.contains("401")
+            || lower.contains("credentials")
         {
             return Err(ApiError::unauth(
                 "your GitHub session expired — sign in again",

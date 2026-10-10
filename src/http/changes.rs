@@ -117,9 +117,7 @@ pub async fn switch(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string}}: {e}"
-        ))
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let dir = project_dir(&state, &req.project).await?;
     let change = changes::switch(&dir, &branch).await?;
@@ -169,9 +167,7 @@ pub async fn share(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string}}: {e}"
-        ))
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let project = state
         .projects
@@ -222,9 +218,7 @@ pub async fn update(
     body: Bytes,
 ) -> Result<Json<changes::Update>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string}}: {e}"
-        ))
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let project = state
         .projects
@@ -255,9 +249,7 @@ pub async fn cleanup(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string}}: {e}"
-        ))
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let project = state
         .projects
@@ -268,22 +260,20 @@ pub async fn cleanup(
     changes::check_cleanup(&project.dir, &branch).await?;
     let (pr, env) = match project.repo.as_deref() {
         Some(repo) if state.github.token().await.is_some() => {
-            let pr = match tokio::time::timeout(
-                PR_STATE_TIMEOUT,
-                state.github.pr_ref(repo, &branch),
-            )
-            .await
-            {
-                Ok(Ok(Some(PrRef {
-                    state: PrState::Merged,
-                    head_sha,
-                }))) => PrMerge::Merged { head_sha },
-                Ok(Ok(_)) => PrMerge::NotMerged,
-                Ok(Err(e)) => PrMerge::Unknown(e),
-                Err(_) => PrMerge::Unknown(ApiError::github(
-                    "GitHub didn't answer in time to confirm the merge — try again",
-                )),
-            };
+            let pr =
+                match tokio::time::timeout(PR_STATE_TIMEOUT, state.github.pr_ref(repo, &branch))
+                    .await
+                {
+                    Ok(Ok(Some(PrRef {
+                        state: PrState::Merged,
+                        head_sha,
+                    }))) => PrMerge::Merged { head_sha },
+                    Ok(Ok(_)) => PrMerge::NotMerged,
+                    Ok(Err(e)) => PrMerge::Unknown(e),
+                    Err(_) => PrMerge::Unknown(ApiError::github(
+                        "GitHub didn't answer in time to confirm the merge — try again",
+                    )),
+                };
             (pr, state.github.git_env().await.unwrap_or_default())
         }
         Some(_) => (
@@ -293,7 +283,9 @@ pub async fn cleanup(
         None => (PrMerge::NotMerged, Vec::new()),
     };
     let done = changes::cleanup(&project.dir, &branch, pr, &env).await?;
-    Ok(Json(json!({ "branch": "main", "mainUpdated": done.main_updated })))
+    Ok(Json(
+        json!({ "branch": "main", "mainUpdated": done.main_updated }),
+    ))
 }
 
 /// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,
@@ -330,9 +322,7 @@ pub async fn ready(
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string}}: {e}"
-        ))
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let project = state
         .projects
@@ -437,7 +427,10 @@ mod tests {
         assert!(!snapshot.protection_hint_dismissed);
         state.projects.dismiss_protection_hint(&p.id).await.unwrap();
 
-        assert_eq!(protection_hint_for(&state, &p.id, "acme/site").await, Value::Null);
+        assert_eq!(
+            protection_hint_for(&state, &p.id, "acme/site").await,
+            Value::Null
+        );
         assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
 }

@@ -340,10 +340,7 @@ async fn run_once(
         // Own group, so terminating also reaches npm's node grandchild.
         .process_group(0);
     if shared.opts.proxy_port > 0 {
-        cmd.env(
-            "WORKBENCH_PROXY_PORT",
-            shared.opts.proxy_port.to_string(),
-        );
+        cmd.env("WORKBENCH_PROXY_PORT", shared.opts.proxy_port.to_string());
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -530,7 +527,9 @@ mod tests {
         );
         // Astro's `--json` logging (used when it detects an agent) keeps the URL in the message.
         assert_eq!(
-            ready_port(r#"{"message":" astro  v7.3.5 ready in 657 ms\n┃ Local    http://127.0.0.1:4999/","label":"SKIP_FORMAT","level":"info"}"#),
+            ready_port(
+                r#"{"message":" astro  v7.3.5 ready in 657 ms\n┃ Local    http://127.0.0.1:4999/","label":"SKIP_FORMAT","level":"info"}"#
+            ),
             Some(4999)
         );
         assert_eq!(ready_port(" ┃ Network  use --host to expose"), None);
@@ -556,7 +555,16 @@ mod tests {
             .collect();
         assert_eq!(
             args,
-            ["run", "dev", "--", "--port", "4567", "--host", "127.0.0.1", "--ignore-lock"]
+            [
+                "run",
+                "dev",
+                "--",
+                "--port",
+                "4567",
+                "--host",
+                "127.0.0.1",
+                "--ignore-lock"
+            ]
         );
     }
 
