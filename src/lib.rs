@@ -14,6 +14,7 @@ pub mod github;
 pub mod http;
 pub mod preview;
 pub mod projects;
+pub mod providers;
 pub mod state;
 pub mod watch;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
