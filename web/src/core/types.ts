@@ -241,6 +241,25 @@ export interface ContentCollection {
   singleton?: string | null;
   editable: boolean;
   reason: string | null;
+  /** Field descriptors projected from the template schema. */
+  fields?: FieldDescriptor;
+}
+/** Limited projection of a template schema node; `type` may also be an editor type such as image. */
+export interface FieldDescriptor {
+  type: "string" | "boolean" | "number" | "date" | "literal" | "enum" | "array" | "object" | "union" | "reference" | "image" | "unsupported";
+  required: boolean;
+  default?: unknown;
+  values?: unknown[];
+  items?: FieldDescriptor;
+  properties?: Record<string, FieldDescriptor>;
+  discriminator?: string;
+  variants?: FieldDescriptor[];
+  collection?: string;
+  reason?: string;
+}
+export interface ContentEntryUpdate {
+  project: string; collection: string; id: string; branch: string; hash: string;
+  fields: Record<string, unknown>; body?: string; unset?: string[];
 }
 export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
 export interface ContentEntry extends ContentEntrySummary {

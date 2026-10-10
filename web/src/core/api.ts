@@ -4,6 +4,7 @@ import {
   type ContentCollection,
   type ContentEntrySummary,
   type ContentEntry,
+  type ContentEntryUpdate,
   type Change,
   type ChangesUpdate,
   type SharedChange,
@@ -20,13 +21,26 @@ import {
   type Tree,
 } from "./types";
 
+export interface ApiErrorDetail { path: (string | number)[]; message: string }
+
 /** The daemon answered with an error (or something unparseable). */
 export class ApiError extends Error {
   readonly code: ErrorCode | "UNKNOWN";
   readonly status: number;
+  /** Machine-readable sub-code (e.g. `stale_content`), when the daemon gave one. */
+  readonly reason?: string;
+  /** Per-field validation problems, when the daemon gave them. */
+  readonly details?: ApiErrorDetail[];
 
-  constructor(code: ErrorCode | "UNKNOWN", message: string, status: number) {
+  constructor(
+    code: ErrorCode | "UNKNOWN",
+    message: string,
+    status: number,
+    extra: { reason?: string; details?: ApiErrorDetail[] } = {},
+  ) {
     super(message);
+    this.reason = extra.reason;
+    this.details = extra.details;
     this.name = "ApiError";
     this.code = code;
     this.status = status;
@@ -60,9 +74,14 @@ export function mapErrorResponse(status: number, statusText: string, body: strin
     if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
       const err = (parsed as { error: unknown }).error;
       if (typeof err === "object" && err !== null) {
-        const { code, message } = err as { code?: unknown; message?: unknown };
+        const { code, message, reason, details } = err as {
+          code?: unknown; message?: unknown; reason?: unknown; details?: unknown;
+        };
         const text = typeof message === "string" && message ? message : statusText;
-        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status);
+        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status, {
+          reason: typeof reason === "string" ? reason : undefined,
+          details: Array.isArray(details) ? (details as ApiErrorDetail[]) : undefined,
+        });
       }
     }
   } catch {
@@ -136,6 +155,7 @@ export function createApi(
       (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    updateContentEntry: (body: ContentEntryUpdate) => json<ContentEntry>("PUT", "/api/content/entry", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>
