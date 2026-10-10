@@ -28,4 +28,4 @@ Static Astro site. All copy and structure live in content files; components only
 
 ## Deployment
 
-Push-and-live on Cloudflare Pages. `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`; `wrangler.toml` names the Pages project (`pages_build_output_dir = ./dist`). Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`.
+Push-and-live on Cloudflare Pages. `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`, and deploys a preview of every pull request branch (published as a GitHub deployment + sticky PR comment, see `README.md`); `wrangler.toml` names the Pages project (`pages_build_output_dir = ./dist`). Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`.
