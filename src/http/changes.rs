@@ -191,8 +191,8 @@ pub async fn status(
 }
 
 /// `POST /api/changes/{branch}/ready` `{ project }` → `{ pr: { number, url, state, checks,
-/// previewUrl } | null }`. Marks the branch's draft pull request ready for review, then
-/// returns its fresh status.
+/// previewUrl } }`. Marks the change's draft pull request ready for review, then returns its
+/// status (open, even if GitHub's re-read still lags).
 pub async fn ready(
     State(state): State<AppState>,
     Path(branch): Path<String>,
@@ -208,10 +208,11 @@ pub async fn ready(
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
+    changes::get(&project.dir, &branch).await?;
     let repo = project.repo.ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
-    state.github.mark_ready_for_review(&repo, &branch).await?;
-    let pr = state.github.pr_status(&repo, &branch).await?;
+    let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
     Ok(Json(json!({ "pr": pr })))
 }

@@ -115,6 +115,9 @@ pub struct PullRequest {
     pub html_url: String,
     pub title: String,
     pub draft: bool,
+    /// GraphQL node id, for mutations; never sent to the web UI.
+    #[serde(skip)]
+    pub node_id: String,
 }
 
 /// Draft PR title is the change's display title.
@@ -333,6 +336,7 @@ impl From<ApiPull> for PullRequest {
             html_url: p.html_url,
             title: p.title,
             draft: p.draft,
+            node_id: p.node_id,
         }
     }
 }
@@ -341,8 +345,33 @@ impl From<ApiPull> for PullRequest {
 #[derive(Deserialize)]
 struct ApiGraphql {
     #[serde(default)]
+    data: Option<ApiMarkReadyData>,
+    #[serde(default)]
     errors: Vec<ApiGraphqlError>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMarkReadyData {
+    #[serde(default)]
+    mark_pull_request_ready_for_review: Option<ApiMarkReadyPayload>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMarkReadyPayload {
+    #[serde(default)]
+    pull_request: Option<ApiDraftFlag>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiDraftFlag {
+    is_draft: bool,
+}
+
+/// GraphQL error types that mean the token may not do this (vs. a GitHub-side failure).
+const PERMISSION_ERRORS: &[&str] = &["FORBIDDEN", "INSUFFICIENT_SCOPES", "UNAUTHORIZED"];
 
 #[derive(Deserialize)]
 struct ApiGraphqlError {
@@ -968,27 +997,40 @@ impl GithubAuth {
     }
 
     /// Mark `head_branch`'s open draft pull request ready for review (GraphQL
-    /// `markPullRequestReadyForReview` by node id). A PR that is already ready is left as is.
-    pub async fn mark_ready_for_review(&self, repo: &str, head_branch: &str) -> Result<(), ApiError> {
-        let owner = repo
-            .split_once('/')
-            .map(|(o, _)| o)
-            .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
-        let pulls: Vec<ApiPull> = self
-            .get_json(&format!(
-                "/repos/{repo}/pulls?head={}:{}&state=open",
-                urlencode(owner),
-                urlencode(head_branch)
-            ))
-            .await?;
-        let pull = pulls.into_iter().next().ok_or_else(|| {
+    /// `markPullRequestReadyForReview` by node id; a PR that is already ready is left as is),
+    /// then its status. The mutation is authoritative: a status re-read that fails, or that
+    /// still says draft (REST can lag a GraphQL write), still yields an open PR.
+    pub async fn mark_ready_for_review(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<PrStatus, ApiError> {
+        let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
             ApiError::enoent("this change has no open pull request — share it first")
         })?;
-        if !pull.draft {
-            return Ok(());
+        if pull.draft {
+            self.mark_ready_mutation(&pull.node_id).await?;
         }
-        if pull.node_id.is_empty() {
-            return Err(ApiError::github("unexpected response from GitHub"));
+        let mut status = match self.pr_status(repo, head_branch).await {
+            Ok(Some(s)) if s.number == pull.number => s,
+            _ => PrStatus {
+                number: pull.number,
+                url: pull.html_url,
+                state: PrState::Open,
+                checks: ChecksState::None,
+                preview_url: None,
+            },
+        };
+        if status.state == PrState::Draft {
+            status.state = PrState::Open;
+        }
+        Ok(status)
+    }
+
+    async fn mark_ready_mutation(&self, node_id: &str) -> Result<(), ApiError> {
+        const WHAT: &str = "GitHub could not mark the pull request ready for review";
+        if node_id.is_empty() {
+            return Err(ApiError::github(format!("{WHAT}: no pull request id")));
         }
         let token = self.token().await.ok_or_else(not_signed_in)?;
         let res = self
@@ -998,19 +1040,47 @@ impl GithubAuth {
             .header(CONTENT_TYPE, "application/json")
             .json(&serde_json::json!({
                 "query": MARK_READY_MUTATION,
-                "variables": { "id": pull.node_id },
+                "variables": { "id": node_id },
             }))
             .send()
             .await
             .map_err(unreachable)?;
-        let body: ApiGraphql = parse_github(res, self, &token).await?;
+        let status = res.status();
+        let body = res.bytes().await.map_err(unreachable)?;
+        let excerpt = |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let _ = self.sign_out_if_token(&token).await;
+            return Err(ApiError::unauth("your GitHub session expired — sign in again"));
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ApiError::sandbox(
+                "You don't have permission to mark this pull request ready for review",
+            ));
+        }
+        if !status.is_success() {
+            return Err(ApiError::github(format!("{WHAT}: GitHub returned {status}: {}", excerpt(300))));
+        }
+        let body: ApiGraphql = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::github(format!("{WHAT}: unexpected response from GitHub")))?;
         if let Some(e) = body.errors.into_iter().next() {
             let msg: String = e.message.chars().take(300).collect();
-            return Err(if e.kind.as_deref() == Some("FORBIDDEN") {
-                ApiError::sandbox(format!("GitHub refused to mark the pull request ready: {msg}"))
-            } else {
-                ApiError::github(format!("GitHub could not mark the pull request ready: {msg}"))
-            });
+            return Err(
+                if e.kind.as_deref().is_some_and(|k| PERMISSION_ERRORS.contains(&k)) {
+                    ApiError::sandbox(format!(
+                        "You don't have permission to mark this pull request ready for review: {msg}"
+                    ))
+                } else {
+                    ApiError::github(format!("{WHAT}: {msg}"))
+                },
+            );
+        }
+        let out_of_draft = body
+            .data
+            .and_then(|d| d.mark_pull_request_ready_for_review)
+            .and_then(|p| p.pull_request)
+            .is_some_and(|p| !p.is_draft);
+        if !out_of_draft {
+            return Err(ApiError::github(format!("{WHAT}: it is still a draft")));
         }
         Ok(())
     }
@@ -2507,6 +2577,170 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::GithubErr);
         assert!(err.message.contains("Could not resolve"), "{}", err.message);
+        stop();
+    }
+
+    /// `/graphql` answering every request with `body` (HTTP 200).
+    fn graphql_answers(draft: bool, body: serde_json::Value) -> axum::Router {
+        use axum::routing::post;
+        one_open_pull(draft).route(
+            "/graphql",
+            post(move || {
+                let body = body.clone();
+                async move { axum::Json(body) }
+            }),
+        )
+    }
+
+    async fn mark_ready_err(routes: axum::Router, tag: &str) -> ApiError {
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, tag);
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+        err
+    }
+
+    #[tokio::test]
+    async fn find_pr_carries_the_pr_node_id() {
+        let (base, stop) = mock_api(one_open_pull(true)).await;
+        let auth = status_auth(base, "find-node-id");
+        let pr = auth
+            .find_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pr.node_id, "PR_abc");
+        // Internal: not part of any API payload.
+        assert!(serde_json::to_value(&pr).unwrap().get("nodeId").is_none());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_needs_the_mutation_to_report_the_pr_out_of_draft() {
+        for (tag, body) in [
+            ("ready-null", serde_json::json!({ "data": { "markPullRequestReadyForReview": null } })),
+            ("ready-nodata", serde_json::json!({})),
+            (
+                "ready-still-draft",
+                serde_json::json!({
+                    "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": true } } }
+                }),
+            ),
+        ] {
+            let err = mark_ready_err(graphql_answers(true, body), tag).await;
+            assert_eq!(err.code, ErrorCode::GithubErr, "{tag}");
+            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_maps_permission_error_types_to_sandbox() {
+        for kind in ["FORBIDDEN", "INSUFFICIENT_SCOPES"] {
+            let err = mark_ready_err(
+                graphql_answers(
+                    true,
+                    serde_json::json!({ "errors": [{ "type": kind, "message": "nope" }] }),
+                ),
+                &format!("ready-{kind}"),
+            )
+            .await;
+            assert_eq!(err.code, ErrorCode::Sandbox, "{kind}");
+            assert_eq!(err.http_status(), 403, "{kind}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_http_errors_say_what_failed() {
+        use axum::routing::post;
+        for (status, tag) in [
+            (axum::http::StatusCode::FORBIDDEN, "ready-msg-403"),
+            (axum::http::StatusCode::UNPROCESSABLE_ENTITY, "ready-msg-422"),
+            (axum::http::StatusCode::BAD_GATEWAY, "ready-msg-502"),
+        ] {
+            let routes = one_open_pull(true).route(
+                "/graphql",
+                post(move || async move {
+                    (status, axum::Json(serde_json::json!({ "message": "nope" })))
+                }),
+            );
+            let err = mark_ready_err(routes, tag).await;
+            assert!(err.message.contains("ready for review"), "{tag}: {}", err.message);
+            assert!(!err.message.contains("push access"), "{tag}: {}", err.message);
+            assert!(!err.message.contains("open the pull request"), "{tag}: {}", err.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_returns_an_open_status_even_if_the_reread_lags_or_fails() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use std::collections::HashMap;
+
+        let ok = serde_json::json!({
+            "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": false } } }
+        });
+
+        // REST still reports the PR as a draft right after the GraphQL write.
+        let (base, stop) = mock_api(graphql_answers(true, ok.clone())).await;
+        let auth = status_auth(base, "ready-stale");
+        let st = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(st.state, PrState::Open);
+        assert_eq!(st.number, 4);
+        stop();
+
+        // The follow-up status read fails outright.
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("state").map(String::as_str) == Some("all") {
+                        return (
+                            axum::http::StatusCode::BAD_GATEWAY,
+                            axum::Json(serde_json::json!({ "message": "boom" })),
+                        );
+                    }
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(serde_json::json!([{
+                            "number": 4,
+                            "node_id": "PR_abc",
+                            "html_url": "https://github.com/acme/site/pull/4",
+                            "title": "Launch week",
+                            "draft": true,
+                            "state": "open"
+                        }])),
+                    )
+                }),
+            )
+            .route(
+                "/graphql",
+                axum::routing::post(move || {
+                    let ok = ok.clone();
+                    async move { axum::Json(ok) }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-reread-fails");
+        let st = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(
+            st,
+            PrStatus {
+                number: 4,
+                url: "https://github.com/acme/site/pull/4".into(),
+                state: PrState::Open,
+                checks: ChecksState::None,
+                preview_url: None,
+            }
+        );
         stop();
     }
 

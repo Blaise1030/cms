@@ -468,25 +468,41 @@ async fn http_status_is_null_without_a_github_remote() {
 }
 
 #[tokio::test]
-async fn http_ready_needs_a_github_remote_and_a_known_project() {
+async fn http_ready_only_accepts_this_projects_changes() {
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
     std::fs::create_dir_all(&projects).unwrap();
     let st = AppState::with_scaffold_install(config(&projects), false);
     let info = st.projects.create("Site").await.unwrap();
+    let dir = projects.join(&info.id);
+    git_cli(&dir, &["branch", "content/launch-week"]);
     let app = http::router(st);
-
-    let (s, body) = call(
-        &app,
+    let ready = |branch: &str| {
         req(
             "POST",
-            "/api/changes/content%2Flaunch-week/ready",
+            &format!("/api/changes/{branch}/ready"),
             Some(json!({ "project": info.id })),
-        ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+        )
+    };
 
+    // Not a change branch (e.g. a teammate's feature branch or main).
+    let (s, body) = call(&app, ready("main")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("not a change branch"), "{body}");
+    let (s, body) = call(&app, ready("feature%2Fother")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("not a change branch"), "{body}");
+
+    // A content/* branch this project doesn't have.
+    let (s, body) = call(&app, ready("content%2Fnope")).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{body}");
+
+    // The project's own change, but no GitHub remote.
+    let (s, body) = call(&app, ready("content%2Flaunch-week")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no GitHub remote"), "{body}");
+
+    // Unknown project.
     let (s, _) = call(
         &app,
         req(
