@@ -20,7 +20,8 @@ async function onReady() {
   try {
     await store.markReady(id, branch);
   } catch (e) {
-    toast.error(errorMessage(e));
+    // An expired session shows the sign-in prompt instead.
+    if (!store.needsSignIn) toast.error(errorMessage(e));
   }
 }
 </script>

@@ -194,15 +194,32 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  /** Mark the change's draft PR ready for review, then show (and keep polling) its status. */
+  /**
+   * Mark the change's draft PR ready for review and show the status it returns. No immediate
+   * re-read: GitHub's REST view can lag the GraphQL write and still say draft. Polling resumes
+   * after the usual interval.
+   */
   async function markReady(id: string, branch: string): Promise<void> {
     markingReady.value = true;
+    needsSignIn.value = false;
     try {
       const pr = await daemon.api.markChangeReady(id, branch);
       if (projectId.value === id && active.value?.branch === branch) {
+        stopStatusPolling();
         status.value = pr;
-        await refreshStatus();
+        if (pr) {
+          prUrl.value = pr.url;
+          pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+        }
       }
+    } catch (e) {
+      if (
+        e instanceof ApiError &&
+        (e.isUnauthorized || e.code === "UNAUTH" || e.status === 401)
+      ) {
+        needsSignIn.value = true;
+      }
+      throw e;
     } finally {
       markingReady.value = false;
     }

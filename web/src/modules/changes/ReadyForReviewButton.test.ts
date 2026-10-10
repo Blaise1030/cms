@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { STATUS_POLL_MS } from "./store";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 import type { PrState, PrStatus } from "@/core/types";
@@ -83,5 +84,38 @@ describe("ReadyForReviewButton", () => {
     expect(toast.error).toHaveBeenCalledWith("You don't have push access");
     expect(store.status?.state).toBe("draft");
     expect(w.find(button).attributes("disabled")).toBeUndefined();
+  });
+  it("trusts the returned state: no immediate re-read that could bring a stale draft back", async () => {
+    vi.useFakeTimers();
+    try {
+      const markChangeReady = vi.fn(async () => ({ ...draft, state: "open" as const }));
+      // REST lags the GraphQL write and still says draft.
+      const changeStatus = vi.fn(async () => draft);
+      const { w, store } = mountWith(draft, { markChangeReady, changeStatus });
+      await w.find(button).trigger("click");
+      await flushPromises();
+      expect(changeStatus).not.toHaveBeenCalled();
+      expect(store.status?.state).toBe("open");
+      expect(w.find(button).exists()).toBe(false);
+
+      // Normal polling resumes afterwards.
+      changeStatus.mockResolvedValue({ ...draft, state: "open" });
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      store.stopStatusPolling();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prompts sign-in instead of a toast when the session expired", async () => {
+    const markChangeReady = vi.fn(async () => {
+      throw new ApiError("UNAUTH", "your GitHub session expired — sign in again", 401);
+    });
+    const { w, store } = mountWith(draft, { markChangeReady });
+    await w.find(button).trigger("click");
+    await flushPromises();
+    expect(store.needsSignIn).toBe(true);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
