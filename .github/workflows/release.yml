@@ -1,0 +1,155 @@
+name: Release
+
+# Runs when a merged release PR lands on main (package.json's version changed
+# and has no tag yet). It builds the daemon, with the web app embedded, for
+# macOS and Linux, then publishes a GitHub release tagged vX.Y.Z with that
+# version's CHANGELOG.md section. Last, it points the Homebrew tap at the new
+# release.
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          before=$(git show HEAD^:package.json 2>/dev/null | node -p 'JSON.parse(require("fs").readFileSync(0)).version' 2>/dev/null || true)
+          if [ -n "$before" ] && [ "$before" != "$version" ] && [ -z "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new version to release (was ${before:-none}, now $version)."
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The binary embeds web/dist.
+      - name: Build the web app
+        run: |
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web build
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          name=workbench-v${{ needs.check.outputs.version }}-${{ matrix.target }}
+          mkdir "$name"
+          cp target/${{ matrix.target }}/release/workbench README.md CHANGELOG.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: workbench-*.tar.gz*
+
+  e2e:
+    name: Full E2E before release
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+      - run: pnpm -C web install --frozen-lockfile && pnpm -C web build
+      - run: cargo build --release --locked
+      - run: cargo build --release --locked --example fake_acp_agent
+      - run: pnpm -C e2e install --frozen-lockfile
+      - run: pnpm -C e2e exec playwright install --with-deps chromium
+      - run: pnpm -C e2e test
+      - run: pnpm -C e2e e2e
+
+  publish:
+    name: Publish v${{ needs.check.outputs.version }}
+    needs: [check, build, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          awk -v h="## v$VERSION" '$0 == h {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
+      - name: Update the Homebrew formula
+        # Blaise1030/homebrew-tap serves `brew install blaise1030/tap/workbench`;
+        # its deploy key (write access to that repo only) is this secret.
+        # Skip (with a warning) rather than fail until the secret is set.
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY is not set; skipping the Homebrew tap update."
+            exit 0
+          fi
+          install -m 600 /dev/null ~/tap_key
+          printf '%s\n' "$DEPLOY_KEY" > ~/tap_key
+          export GIT_SSH_COMMAND="ssh -i ~/tap_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 git@github.com:Blaise1030/homebrew-tap.git tap
+          .github/scripts/homebrew-formula.sh "$VERSION" dist > tap/Formula/workbench.rb
+          cd tap
+          git add Formula/workbench.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "workbench $VERSION"
+          git push
