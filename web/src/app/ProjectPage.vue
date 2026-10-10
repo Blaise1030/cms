@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, onBeforeUnmount, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import EditorMenubar from "@/app/EditorMenubar.vue";
@@ -32,6 +32,7 @@ watch(
   },
   { immediate: true },
 );
+onBeforeUnmount(() => changes.stopStatusPolling());
 
 // An unknown id (a stale link, or a project deleted elsewhere) goes back to the project list.
 watch(

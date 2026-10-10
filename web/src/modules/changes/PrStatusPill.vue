@@ -7,6 +7,11 @@ import { useChangesStore } from "./store";
 
 const store = useChangesStore();
 const status = computed(() => store.status);
+/** The deployed preview, only if it is a plain web URL (never `javascript:` and the like). */
+const previewHref = computed(() => {
+  const url = status.value?.previewUrl;
+  return url && /^https?:\/\/./i.test(url) ? url : null;
+});
 
 const DOT: Record<ChecksState, string> = {
   none: "bg-muted-foreground/50",
@@ -32,8 +37,8 @@ const DOT: Record<ChecksState, string> = {
       }}</a
     >
     <a
-      v-if="status.previewUrl"
-      :href="status.previewUrl"
+      v-if="previewHref"
+      :href="previewHref"
       target="_blank"
       rel="noopener noreferrer"
       class="text-muted-foreground hover:text-foreground flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs whitespace-nowrap underline-offset-2 hover:underline"

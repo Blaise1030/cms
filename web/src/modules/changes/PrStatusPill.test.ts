@@ -65,4 +65,11 @@ describe("PrStatusPill", () => {
     expect(a.attributes("target")).toBe("_blank");
     expect(a.attributes("rel")).toContain("noopener");
   });
+
+  it("never links a non-http preview URL", () => {
+    for (const previewUrl of ["javascript:alert(1)", "data:text/html,x", "//evil.dev"]) {
+      const w = mountWith({ ...base, previewUrl });
+      expect(w.find("[data-testid='preview-deploy-link']").exists()).toBe(false);
+    }
+  });
 });

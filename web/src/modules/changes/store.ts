@@ -28,8 +28,12 @@ export const useChangesStore = defineStore("changes", () => {
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
+   *  applies its result nor schedules a poll, so at most one timer ever exists. */
+  let statusRun = 0;
 
   function stopStatusPolling() {
+    statusRun++;
     if (pollTimer !== null) clearTimeout(pollTimer);
     pollTimer = null;
   }
@@ -40,6 +44,7 @@ export const useChangesStore = defineStore("changes", () => {
    */
   async function refreshStatus() {
     stopStatusPolling();
+    const run = statusRun;
     const id = projectId.value;
     const branch = active.value?.branch;
     if (!id || !branch) {
@@ -48,11 +53,11 @@ export const useChangesStore = defineStore("changes", () => {
     }
     try {
       const pr = await daemon.api.changeStatus(id, branch);
-      if (projectId.value !== id || active.value?.branch !== branch) return;
+      if (run !== statusRun) return;
       status.value = pr;
       if (pr) prUrl.value = pr.url;
     } catch {
-      if (projectId.value !== id || active.value?.branch !== branch) return;
+      if (run !== statusRun) return;
     }
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
@@ -66,6 +71,7 @@ export const useChangesStore = defineStore("changes", () => {
 
   async function load(id: string) {
     if (projectId.value !== id) {
+      stopStatusPolling();
       active.value = null;
       prUrl.value = null;
       status.value = null;
@@ -137,6 +143,8 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   async function switchTo(id: string, branch: string): Promise<Change> {
+    // The old change's poll must not fire mid-switch.
+    stopStatusPolling();
     switching.value = true;
     error.value = null;
     try {

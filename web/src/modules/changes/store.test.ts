@@ -294,5 +294,55 @@ describe("changes store", () => {
       expect(changeStatus).toHaveBeenCalledTimes(3);
       store.stopStatusPolling();
     });
+
+    it("overlapping refreshes keep a single poll timer", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      const store = await withActive(changeStatus);
+      await Promise.all([store.refreshStatus(), store.refreshStatus()]);
+      const before = changeStatus.mock.calls.length;
+      // Stopping must cancel every scheduled poll: no orphaned timer keeps polling.
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 3);
+      expect(changeStatus.mock.calls.length).toBe(before);
+    });
+
+    it("switchTo stops the old change's polling before switching", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      let finishSwitch!: (c: { branch: string; title: string }) => void;
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus,
+        switchChange: vi.fn(
+          () => new Promise((resolve) => (finishSwitch = resolve)),
+        ),
+        tree: vi.fn(async () => ({ entries: [] })),
+      });
+      await store.load("site");
+      vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+      const switching = store.switchTo("site", "content/other");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      finishSwitch({ branch: "content/other", title: "Other" });
+      await switching;
+      expect(changeStatus).toHaveBeenLastCalledWith("site", "content/other");
+      store.stopStatusPolling();
+    });
+
+    it("loading another project stops the previous project's polling", async () => {
+      vi.useFakeTimers();
+      const changeStatus = vi.fn(async () => draft);
+      const activeChange = vi
+        .fn()
+        .mockResolvedValueOnce({ branch: "content/lw", title: "LW" })
+        .mockReturnValueOnce(new Promise(() => {}));
+      const store = setup({ activeChange, changeStatus });
+      await store.load("site");
+      void store.load("other");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      expect(store.status).toBeNull();
+    });
   });
 });
