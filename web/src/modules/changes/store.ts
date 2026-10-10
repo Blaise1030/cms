@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change } from "@/core/types";
+import type { Change, ProtectionHint } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -14,6 +14,8 @@ export const useChangesStore = defineStore("changes", () => {
   const active = ref<Change | null>(null);
   const items = ref<Change[]>([]);
   const prUrl = ref<string | null>(null);
+  /** "Protect main" hint from the last share; null when hidden. */
+  const protectionHint = ref<ProtectionHint | null>(null);
   const creating = ref(false);
   const sharing = ref(false);
   const switching = ref(false);
@@ -32,6 +34,7 @@ export const useChangesStore = defineStore("changes", () => {
     if (projectId.value !== id) {
       active.value = null;
       prUrl.value = null;
+      protectionHint.value = null;
       items.value = [];
       error.value = null;
       needsSignIn.value = false;
@@ -120,6 +123,7 @@ export const useChangesStore = defineStore("changes", () => {
       const result = await daemon.api.shareChange(id, branch);
       projectId.value = id;
       prUrl.value = result.prUrl;
+      protectionHint.value = result.protectionHint ?? null;
       if (active.value?.branch === branch) {
         active.value = { ...active.value, title: result.title, prUrl: result.prUrl };
       }
@@ -140,11 +144,18 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /** Hide the "protect main" hint for this project from now on (persisted by the daemon). */
+  async function dismissProtectionHint(id: string) {
+    protectionHint.value = null;
+    await daemon.api.dismissProtectionHint(id);
+  }
+
   return {
     projectId,
     active,
     items,
     prUrl,
+    protectionHint,
     creating,
     sharing,
     switching,
@@ -157,5 +168,6 @@ export const useChangesStore = defineStore("changes", () => {
     create,
     switchTo,
     share,
+    dismissProtectionHint,
   };
 });

@@ -150,6 +150,8 @@ export function createApi(
     githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),
     githubRepos: async (): Promise<GithubRepo[]> =>
       (await json<{ repos: GithubRepo[] }>("GET", "/api/github/repos")).repos,
+    dismissProtectionHint: (id: string) =>
+      json<{ dismissed: true }>("POST", `/api/projects/${enc(id)}/protection-hint/dismiss`),
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 

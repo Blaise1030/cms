@@ -86,11 +86,19 @@ export interface Change {
   prUrl?: string;
 }
 
+/** Shown after sharing when the repo's `main` has no branch protection. */
+export interface ProtectionHint {
+  /** The repo's branch protection settings page on GitHub. */
+  settingsUrl: string;
+}
+
 /** Result of `POST /api/changes/{branch}/share`. */
 export interface SharedChange {
   branch: string;
   title: string;
   prUrl: string;
+  /** Null when `main` is protected, unknown (no admin rights) or the hint was dismissed. */
+  protectionHint?: ProtectionHint | null;
 }
 
 export interface TreeEntry {

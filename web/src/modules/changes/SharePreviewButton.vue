@@ -2,6 +2,7 @@
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
+import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import { useGithubStore } from "@/modules/github/store";
 
@@ -22,7 +23,7 @@ async function onShare() {
 </script>
 
 <template>
-  <div class="flex items-center gap-2">
+  <div class="relative flex items-center gap-2">
     <Button
       v-if="changes.active"
       variant="default"
@@ -56,5 +57,7 @@ async function onShare() {
     >
       Sign in with GitHub
     </Button>
+
+    <ProtectionHint :project-id="projectId" />
   </div>
 </template>

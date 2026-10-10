@@ -210,4 +210,53 @@ describe("changes store", () => {
     expect(store.needsSignIn).toBe(true);
     expect(store.error).toBeNull();
   });
+
+  it("share exposes the protection hint for an unprotected main", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => ({
+        branch: "content/x",
+        title: "X",
+        prUrl: "https://github.com/acme/site/pull/1",
+        protectionHint: { settingsUrl: "https://github.com/acme/site/settings/branches" },
+      })),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await store.share("site", "content/x");
+    expect(store.protectionHint).toEqual({
+      settingsUrl: "https://github.com/acme/site/settings/branches",
+    });
+  });
+
+  it("share without a hint (protected / unknown) leaves it hidden", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => ({
+        branch: "content/x",
+        title: "X",
+        prUrl: "https://github.com/acme/site/pull/1",
+        protectionHint: null,
+      })),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await store.share("site", "content/x");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("dismissing the protection hint persists it for that project", async () => {
+    const dismissProtectionHint = vi.fn(async () => ({ dismissed: true }));
+    const store = setup({ dismissProtectionHint });
+    store.protectionHint = { settingsUrl: "https://github.com/acme/site/settings/branches" };
+    await store.dismissProtectionHint("site");
+    expect(dismissProtectionHint).toHaveBeenCalledWith("site");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("switching project clears a shown protection hint", async () => {
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/y", title: "Y" })),
+    });
+    store.projectId = "site";
+    store.protectionHint = { settingsUrl: "https://github.com/acme/site/settings/branches" };
+    await store.load("other");
+    expect(store.protectionHint).toBeNull();
+  });
 });
