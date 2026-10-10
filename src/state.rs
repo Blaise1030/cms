@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::changes::conflict_sessions::ConflictSessions;
 use crate::config::Config;
 use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
@@ -27,6 +28,8 @@ pub struct AppState {
     pub github: Arc<GithubAuth>,
     /// HTTP client for the `/preview/{id}/*` reverse proxy.
     pub preview: UpstreamClient,
+    /// Proposed conflict resolutions; never mutates a branch until Finish.
+    pub conflicts: Arc<ConflictSessions>,
 }
 
 impl AppState {
@@ -92,6 +95,7 @@ impl AppState {
             watchers,
             github,
             preview: preview::new_client(),
+            conflicts: Arc::new(ConflictSessions::new()),
         }
     }
 }
