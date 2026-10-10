@@ -212,7 +212,6 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-/// Refused (409) while an agent turn is editing the project.
 pub async fn update(
     State(state): State<AppState>,
     body: Bytes,
@@ -225,11 +224,6 @@ pub async fn update(
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
-    if state.agents.turn_in_progress(&req.project) {
-        return Err(ApiError::conflict(
-            "The agent is still working — wait for it to finish, then get the latest",
-        ));
-    }
     // GitHub projects fetch with the signed-in user's credentials (private repos).
     let env = if project.repo.is_some() {
         state.github.git_env().await?

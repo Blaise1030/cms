@@ -13,11 +13,8 @@ import {
   type GithubRepo,
   type GithubStatus,
   type Health,
-  type PermissionDecision,
   type Project,
-  type Provider,
   type Tree,
-  type Turn,
 } from "./types";
 
 /** The daemon answered with an error (or something unparseable). */
@@ -132,9 +129,6 @@ export function createApi(
   return {
     health: () => json<Health>("GET", "/api/health"),
 
-    listAgents: async (): Promise<Provider[]> =>
-      (await json<{ providers: Provider[] }>("GET", "/api/agents")).providers,
-
     listProjects: async (): Promise<Project[]> =>
       (await json<{ projects: Project[] }>("GET", "/api/projects")).projects,
     createProject: (name: string) => json<Project>("POST", "/api/projects", { body: { name } }),
@@ -157,18 +151,6 @@ export function createApi(
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
-    startSession: async (project: string, provider: string): Promise<string> =>
-      (
-        await json<{ sessionId: string }>("POST", "/api/agent/session", {
-          body: { project, provider },
-        })
-      ).sessionId,
-    prompt: async (project: string, sessionId: string, text: string): Promise<string> =>
-      (
-        await json<{ turnId: string }>("POST", "/api/agent/prompt", {
-          body: { project, sessionId, text },
-        })
-      ).turnId,
     terminalProviders: async (): Promise<{ id: string; command: string[] }[]> =>
       (
         await json<{ providers: { id: string; command: string[] }[] }>(
@@ -182,17 +164,6 @@ export function createApi(
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
       json<{ running: boolean; provider?: string }>("GET", `/api/terminal/${enc(project)}`),
-    cancelTurn: (turnId: string) =>
-      json<unknown>("POST", `/api/agent/prompt/${enc(turnId)}/cancel`),
-    resolvePermission: (requestId: string, decision: PermissionDecision) =>
-      json<unknown>("POST", `/api/agent/permission/${enc(requestId)}`, { body: { decision } }),
-    history: async (project: string, session?: string): Promise<Turn[]> =>
-      (
-        await json<{ turns: Turn[] }>("GET", "/api/agent/history", {
-          query: { project, session },
-        })
-      ).turns,
-
     createChange: (project: string, title: string) =>
       json<Change>("POST", "/api/changes", { body: { project, title } }),
     listChanges: async (project: string): Promise<Change[]> =>

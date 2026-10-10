@@ -33,6 +33,12 @@ cargo run -- serve --ui-url http://localhost:5173
 pnpm -C web dev
 ```
 
+### Terminal providers
+
+Each project runs a coding CLI in a daemon-owned terminal (Claude Code, Codex, OpenCode, or
+your own). Provider commands come from `~/.config/workbench/agents.json` by default, or pass
+`--agents-config` to point at another file.
+
 ### Other tasks
 
 ```sh

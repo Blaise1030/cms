@@ -105,7 +105,6 @@ jobs:
             e2e/pnpm-lock.yaml
       - run: pnpm -C web install --frozen-lockfile && pnpm -C web build
       - run: cargo build --release --locked
-      - run: cargo build --release --locked --example fake_acp_agent
       - run: pnpm -C e2e install --frozen-lockfile
       - run: pnpm -C e2e exec playwright install --with-deps chromium
       - run: pnpm -C e2e test

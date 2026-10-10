@@ -1,6 +1,5 @@
 //! HTTP layer: router, middleware wiring.
 
-pub mod agent;
 pub mod changes;
 pub mod checkpoints;
 pub mod devserver;
@@ -59,7 +58,6 @@ pub fn router(state: AppState) -> Router {
         .route("/@fs/{*rest}", any(preview::handle_vite_root))
         .route("/node_modules/{*rest}", any(preview::handle_vite_root))
         .route("/src/{*rest}", any(preview::handle_vite_root))
-        .route("/api/agents", get(agent::providers))
         .route("/api/terminal/providers", get(terminal::list_providers))
         .route("/api/terminal", post(terminal::start))
         .route("/api/terminal/turn-end", post(terminal::turn_end))
@@ -68,14 +66,6 @@ pub fn router(state: AppState) -> Router {
             get(terminal::status).delete(terminal::stop),
         )
         .route("/api/terminal/{project}/ws", get(terminal::ws))
-        .route("/api/agent/session", post(agent::start_session))
-        .route("/api/agent/prompt", post(agent::prompt))
-        .route("/api/agent/prompt/{turn_id}/cancel", post(agent::cancel))
-        .route(
-            "/api/agent/permission/{request_id}",
-            post(agent::permission),
-        )
-        .route("/api/agent/history", get(agent::history))
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))

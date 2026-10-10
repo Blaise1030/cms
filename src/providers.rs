@@ -35,7 +35,7 @@ use serde::Serialize;
 
 use crate::error::ApiError;
 
-/// `{ id, command }` as exposed by `GET /api/agents`.
+/// `{ id, command }` as exposed by `GET /api/terminal/providers`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Provider {
     pub id: String,
@@ -218,9 +218,9 @@ mod tests {
 
     #[test]
     fn parses_custom_registry() {
-        let c = parse(r#"{"mine": ["/bin/agent", "--acp"]}"#).unwrap();
+        let c = parse(r#"{"mine": ["/bin/agent", "--custom"]}"#).unwrap();
         assert_eq!(c.len(), 1);
-        assert_eq!(c[0].command, ["/bin/agent", "--acp"]);
+        assert_eq!(c[0].command, ["/bin/agent", "--custom"]);
     }
 
     #[test]

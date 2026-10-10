@@ -97,32 +97,6 @@ export function elementPrompt(pick: PickedElement): string {
   return `[element ${pick.tag}${text} ${where}]`;
 }
 
-/** A message split into plain text and element references (as written by `elementPrompt`). */
-export type MessagePart = { text: string } | { element: { label: string; prompt: string } };
-
-const REF = /\[element (<[^\n]*?>)(?: "[^\n]*?")? (?:in [^\s\]]+|at `[^`\n]*`)\]/g;
-
-/** `<section class="section center" id="logos">` → `section#logos`, like `elementLabel`. */
-function labelFromTag(tag: string): string {
-  const name = /^<([a-z0-9-]+)/i.exec(tag)?.[1] ?? "element";
-  const id = /\sid="([^"]*)"/.exec(tag)?.[1];
-  if (id) return `${name}#${id}`;
-  const cls = (/\sclass="([^"]*)"/.exec(tag)?.[1] ?? "").split(/\s+/).filter(Boolean);
-  return cls.length ? `${name}.${cls.slice(0, MAX_CLASSES).join(".")}` : name;
-}
-
-export function parseElementRefs(message: string): MessagePart[] {
-  const parts: MessagePart[] = [];
-  let last = 0;
-  for (const m of message.matchAll(REF)) {
-    if (m.index > last) parts.push({ text: message.slice(last, m.index) });
-    parts.push({ element: { label: labelFromTag(m[1]!), prompt: m[0] } });
-    last = m.index + m[0].length;
-  }
-  if (last < message.length) parts.push({ text: message.slice(last) });
-  return parts;
-}
-
 const OVERLAY_ID = "__workbench-picker";
 
 /**

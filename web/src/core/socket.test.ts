@@ -22,47 +22,26 @@ describe("buildEventsUrl", () => {
 describe("decodeEvent", () => {
   it("decodes tagged events from JSON text", () => {
     const ev = decodeEvent(
-      '{"type":"chat.chunk","sessionId":"s","turnId":"t","delta":"hi","projectId":"p"}',
+      '{"type":"fs.change","projectId":"p","path":"a.md","kind":"modify"}',
     );
     expect(ev).toEqual({
-      type: "chat.chunk",
-      sessionId: "s",
-      turnId: "t",
-      delta: "hi",
+      type: "fs.change",
       projectId: "p",
+      path: "a.md",
+      kind: "modify",
     });
   });
 
   it("decodes every documented event type", () => {
     const frames: Record<string, unknown>[] = [
-      { type: "chat.tool", sessionId: "s", turnId: "t", tool: "edit", state: "done", summary: "x" },
-      { type: "chat.plan", sessionId: "s", turnId: "t", entries: [] },
-      { type: "chat.done", sessionId: "s", turnId: "t", stopReason: "end_turn" },
-      { type: "chat.error", sessionId: "s", turnId: "t", message: "boom" },
-      { type: "permission.request", sessionId: "s", requestId: "r", tool: "execute", command: "ls" },
       { type: "devserver.status", projectId: "p", state: "ready", port: 4000 },
       { type: "checkpoint.created", projectId: "p", sha: "abc", summary: "s", author: "a", ts: 1 },
       { type: "fs.change", projectId: "p", path: "a.md", kind: "modify" },
+      { type: "terminal.exited", projectId: "p", code: 0 },
+      { type: "checkpoint.blocked", projectId: "p", reason: "main" },
       { type: "events.lagged", missed: 3 },
     ];
     for (const f of frames) expect(decodeEvent(JSON.stringify(f))).toEqual(f);
-  });
-
-  it("accepts session-level chat.error frames with a null turnId", () => {
-    // Emitted by the daemon when an initialized agent process exits while idle.
-    const idle = {
-      type: "chat.error",
-      projectId: "p",
-      sessionId: "s",
-      turnId: null,
-      message: "agent process exited",
-    };
-    expect(decodeEvent(JSON.stringify(idle))).toEqual(idle);
-    const { turnId: _omit, ...missing } = idle;
-    expect(decodeEvent(missing)).toEqual(missing);
-    // still rejects a wrongly-typed turnId or missing message
-    expect(decodeEvent({ ...idle, turnId: 5 })).toBeNull();
-    expect(decodeEvent({ ...idle, message: undefined })).toBeNull();
   });
 
   it("returns null for junk, unknown types and malformed events", () => {
@@ -72,7 +51,7 @@ describe("decodeEvent", () => {
     expect(decodeEvent(new ArrayBuffer(1))).toBeNull();
     expect(decodeEvent('{"type":"future.thing"}')).toBeNull();
     expect(decodeEvent('{"type":"toString"}')).toBeNull();
-    expect(decodeEvent('{"type":"chat.chunk","sessionId":"s","turnId":"t"}')).toBeNull();
+    expect(decodeEvent('{"type":"fs.change","projectId":"p","path":"a"}')).toBeNull();
     expect(decodeEvent('{"type":"events.lagged","missed":"3"}')).toBeNull();
     expect(decodeEvent({ type: "fs.change", projectId: "p", path: "a", kind: "x" })).not.toBeNull();
   });

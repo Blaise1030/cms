@@ -1,7 +1,8 @@
 //! `GET /api/checkpoints`, `GET /api/checkpoints/{sha}/diff`, `POST /api/checkpoints/{sha}/restore`.
 //!
-//! Also hosts the "start a change first" guard used by mutating edit paths (agent prompt;
-//! ACP checkpoint). Restore on `main` is intentionally not gated (Slice 3 out of scope).
+//! Also hosts the "start a change first" guard used by mutating edit paths (terminal
+//! start and hook turn-end checkpoints). Restore on `main` is intentionally not gated
+//! (Slice 3 out of scope).
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -25,7 +26,7 @@ pub struct ProjectQuery {
 
 /// Reject edits on `main` for GitHub-remote projects. Local-only projects may edit `main`.
 ///
-/// Used by agent prompt and by the ACP settle → checkpoint path. Restore stays ungated.
+/// Used by terminal start and hook turn-end checkpoints. Restore stays ungated.
 pub(crate) async fn require_change(state: &AppState, project_id: &str) -> Result<(), ApiError> {
     let project = state
         .projects

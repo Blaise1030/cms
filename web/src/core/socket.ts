@@ -13,23 +13,10 @@ export function buildEventsUrl(config: DaemonConfig): string {
   return url.toString();
 }
 
-/** `nullable-string`: a string, `null`, or absent (e.g. session-level `chat.error.turnId`). */
 type Shape = Record<string, "string" | "number" | "nullable-string" | "nullable-number">;
 
 /** Required fields per event type (beyond `type`); enough to protect consumers from junk. */
 const SHAPES: Record<DaemonEventType, Shape> = {
-  "chat.chunk": { sessionId: "string", turnId: "string", delta: "string" },
-  "chat.tool": {
-    sessionId: "string",
-    turnId: "string",
-    tool: "string",
-    state: "string",
-    summary: "string",
-  },
-  "chat.plan": { sessionId: "string", turnId: "string" },
-  "chat.done": { sessionId: "string", turnId: "string" },
-  "chat.error": { sessionId: "string", turnId: "nullable-string", message: "string" },
-  "permission.request": { sessionId: "string", requestId: "string", tool: "string" },
   "devserver.status": { projectId: "string", state: "string" },
   "checkpoint.created": { projectId: "string", sha: "string", summary: "string" },
   "fs.change": { projectId: "string", path: "string", kind: "string" },

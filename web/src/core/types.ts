@@ -41,32 +41,6 @@ export interface Project {
   repo: string | null;
 }
 
-export interface Provider {
-  id: string;
-  command: string[];
-}
-
-export type ToolState = "running" | "done" | "failed";
-
-export interface ToolSummary {
-  tool: string;
-  summary: string;
-  state: string;
-}
-
-export interface Turn {
-  id: string;
-  sessionId: string;
-  provider: string;
-  /** Unix seconds. */
-  ts: number;
-  userText: string;
-  assistantText: string;
-  tools: ToolSummary[];
-  stopReason?: string;
-  error?: string;
-}
-
 export interface Checkpoint {
   sha: string;
   summary: string;
@@ -155,59 +129,9 @@ export interface Health {
   version: string;
 }
 
-export type PermissionDecision = "allow" | "deny";
-
 // ---------------------------------------------------------------------------
 // WebSocket events (`/ws/events`) — flat objects tagged by `type`.
 // ---------------------------------------------------------------------------
-
-interface SessionScoped {
-  projectId?: string;
-  sessionId: string;
-}
-
-export interface ChatChunkEvent extends SessionScoped {
-  type: "chat.chunk";
-  turnId: string;
-  delta: string;
-}
-
-export interface ChatToolEvent extends SessionScoped {
-  type: "chat.tool";
-  turnId: string;
-  toolCallId?: string;
-  tool: string;
-  state: ToolState;
-  summary: string;
-}
-
-export interface ChatPlanEvent extends SessionScoped {
-  type: "chat.plan";
-  turnId: string;
-  entries: unknown;
-}
-
-export interface ChatDoneEvent extends SessionScoped {
-  type: "chat.done";
-  turnId: string;
-  stopReason?: string;
-}
-
-export interface ChatErrorEvent extends SessionScoped {
-  type: "chat.error";
-  /** `null` when the agent process died while no turn was active (session-level error). */
-  turnId: string | null;
-  message: string;
-}
-
-export interface PermissionRequestEvent extends SessionScoped {
-  type: "permission.request";
-  requestId: string;
-  turnId?: string | null;
-  tool: string;
-  summary?: string;
-  command?: string;
-}
 
 export interface DevserverStatusEvent {
   type: "devserver.status";
@@ -253,12 +177,6 @@ export interface EventsLaggedEvent {
 }
 
 export type DaemonEvent =
-  | ChatChunkEvent
-  | ChatToolEvent
-  | ChatPlanEvent
-  | ChatDoneEvent
-  | ChatErrorEvent
-  | PermissionRequestEvent
   | DevserverStatusEvent
   | CheckpointCreatedEvent
   | FsChangeEvent

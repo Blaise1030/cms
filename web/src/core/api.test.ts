@@ -59,32 +59,13 @@ describe("createApi", () => {
     expect((post!.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
-  it("builds queries, skipping undefined values, and requires confirm on delete", async () => {
-    const fetchMock = vi.fn<FetchLike>(async () => json({ turns: [], deleted: "p" }));
-    await api(fetchMock).history("p1");
-    expect(fetchMock.mock.calls[0]![0]).toBe("http://127.0.0.1:7800/api/agent/history?project=p1");
-    await api(fetchMock).history("p 1", "s1");
-    expect(fetchMock.mock.calls[1]![0]).toContain("project=p+1&session=s1");
+  it("requires confirm on delete", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => json({ deleted: "p" }));
     await api(fetchMock).deleteProject("p1");
-    expect(fetchMock.mock.calls[2]![0]).toBe(
+    expect(fetchMock.mock.calls[0]![0]).toBe(
       "http://127.0.0.1:7800/api/projects/p1?confirm=true",
     );
-    expect(fetchMock.mock.calls[2]![1]!.method).toBe("DELETE");
-  });
-
-  it("returns ids for session and prompt calls", async () => {
-    const fetchMock = vi
-      .fn<FetchLike>()
-      .mockResolvedValueOnce(json({ sessionId: "s1" }))
-      .mockResolvedValueOnce(json({ turnId: "t1" }));
-    const a = api(fetchMock);
-    expect(await a.startSession("p", "claude")).toBe("s1");
-    expect(await a.prompt("p", "s1", "hi")).toBe("t1");
-    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
-      project: "p",
-      sessionId: "s1",
-      text: "hi",
-    });
+    expect(fetchMock.mock.calls[0]![1]!.method).toBe("DELETE");
   });
 
   it("reads diffs as text", async () => {
