@@ -2,10 +2,13 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change } from "@/core/types";
+import type { Change, PrStatus } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
+
+/** How often the active change's PR status is re-read while it has a PR. */
+export const STATUS_POLL_MS = 20_000;
 
 export const useChangesStore = defineStore("changes", () => {
   const daemon = useDaemon();
@@ -22,6 +25,39 @@ export const useChangesStore = defineStore("changes", () => {
   const error = ref<string | null>(null);
   /** Share failed with expired/missing auth — show a sign-in prompt. */
   const needsSignIn = ref(false);
+  /** PR state / checks / preview URL of the active change; null without a PR. */
+  const status = ref<PrStatus | null>(null);
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function stopStatusPolling() {
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  /**
+   * Re-read the active change's PR status, then poll again only while a PR exists.
+   * Failures keep the last known status (GitHub may be briefly unreachable).
+   */
+  async function refreshStatus() {
+    stopStatusPolling();
+    const id = projectId.value;
+    const branch = active.value?.branch;
+    if (!id || !branch) {
+      status.value = null;
+      return;
+    }
+    try {
+      const pr = await daemon.api.changeStatus(id, branch);
+      if (projectId.value !== id || active.value?.branch !== branch) return;
+      status.value = pr;
+      if (pr) prUrl.value = pr.url;
+    } catch {
+      if (projectId.value !== id || active.value?.branch !== branch) return;
+    }
+    if (status.value) {
+      pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+    }
+  }
 
   async function refreshTreeAndPreview() {
     await useFilesStore().refresh();
@@ -32,6 +68,7 @@ export const useChangesStore = defineStore("changes", () => {
     if (projectId.value !== id) {
       active.value = null;
       prUrl.value = null;
+      status.value = null;
       items.value = [];
       error.value = null;
       needsSignIn.value = false;
@@ -48,6 +85,8 @@ export const useChangesStore = defineStore("changes", () => {
       if (projectId.value !== id) return;
       active.value = null;
       prUrl.value = null;
+      status.value = null;
+      stopStatusPolling();
       if (e instanceof ApiError && e.code === "ENOENT") {
         error.value = null;
       } else {
@@ -56,6 +95,7 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       if (projectId.value === id) loading.value = false;
     }
+    if (projectId.value === id && active.value) await refreshStatus();
   }
 
   async function list(id: string) {
@@ -84,6 +124,8 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       active.value = change;
       prUrl.value = null;
+      status.value = null;
+      stopStatusPolling();
       await refreshTreeAndPreview();
       return change;
     } catch (e) {
@@ -102,7 +144,9 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       active.value = change;
       prUrl.value = change.prUrl ?? null;
+      status.value = null;
       await refreshTreeAndPreview();
+      await refreshStatus();
       return change;
     } catch (e) {
       error.value = errorMessage(e);
@@ -122,6 +166,7 @@ export const useChangesStore = defineStore("changes", () => {
       prUrl.value = result.prUrl;
       if (active.value?.branch === branch) {
         active.value = { ...active.value, title: result.title, prUrl: result.prUrl };
+        await refreshStatus();
       }
       return result.prUrl;
     } catch (e) {
@@ -152,10 +197,13 @@ export const useChangesStore = defineStore("changes", () => {
     loading,
     error,
     needsSignIn,
+    status,
     load,
     list,
     create,
     switchTo,
     share,
+    refreshStatus,
+    stopStatusPolling,
   };
 });

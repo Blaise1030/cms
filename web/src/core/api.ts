@@ -3,6 +3,7 @@ import {
   ERROR_CODES,
   type Change,
   type SharedChange,
+  type PrStatus,
   type Checkpoint,
   type ErrorCode,
   type DeviceStart,
@@ -188,6 +189,13 @@ export function createApi(
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },
       }),
+    /** PR state / checks / preview URL of a change; null when it has no PR. */
+    changeStatus: async (project: string, branch: string): Promise<PrStatus | null> =>
+      (
+        await json<{ pr: PrStatus | null }>("GET", `/api/changes/${enc(branch)}/status`, {
+          query: { project },
+        })
+      ).pr,
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))

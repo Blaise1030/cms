@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@/lib/errors";
 import NewChangeDialog from "./NewChangeDialog.vue";
+import { PR_STATE_LABEL } from "./prStatus";
 import { useChangesStore } from "./store";
 
 const props = defineProps<{ projectId: string }>();
@@ -124,7 +125,16 @@ function onNewChange() {
             :class="c.branch === store.active?.branch ? 'opacity-100' : 'opacity-0'"
           />
           <span class="min-w-0 flex-1">
-            <span class="block truncate text-sm">{{ c.title }}</span>
+            <span class="flex items-center gap-1.5">
+              <span class="truncate text-sm">{{ c.title }}</span>
+              <span
+                v-if="c.prState"
+                class="text-muted-foreground ml-auto shrink-0 rounded border px-1 text-[10px] leading-4"
+                :data-state="c.prState"
+                data-testid="change-pr-state"
+                >{{ PR_STATE_LABEL[c.prState] }}</span
+              >
+            </span>
             <span class="text-muted-foreground block truncate text-xs">
               {{ c.branch }}{{ c.lastEdited != null ? ` · ${formatEdited(c.lastEdited)}` : "" }}
             </span>
