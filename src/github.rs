@@ -220,6 +220,16 @@ pub struct PrStatus {
     pub checks: ChecksState,
     /// `environment_url` of the latest successful deployment of the head SHA.
     pub preview_url: Option<String>,
+    /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
+    #[serde(skip)]
+    pub head_sha: String,
+}
+
+/// A pull request's [`PrState`] and head commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrRef {
+    pub state: PrState,
+    pub head_sha: String,
 }
 
 /// The parts of a pull request that decide its [`PrState`] (besides reviews).
@@ -1019,6 +1029,7 @@ impl GithubAuth {
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                head_sha: String::new(),
             },
         };
         if status.state == PrState::Draft {
@@ -1116,15 +1127,19 @@ impl GithubAuth {
             state,
             checks,
             preview_url,
+            head_sha: sha,
         }))
     }
 
-    /// Just the [`PrState`] of `head_branch`'s pull request (no checks or deployments).
-    pub async fn pr_state(&self, repo: &str, head_branch: &str) -> Result<Option<PrState>, ApiError> {
+    /// Just the [`PrState`] and head of `head_branch`'s pull request (no checks or deployments).
+    pub async fn pr_ref(&self, repo: &str, head_branch: &str) -> Result<Option<PrRef>, ApiError> {
         Ok(self
             .pull_and_state(repo, head_branch)
             .await?
-            .map(|(_, state)| state))
+            .map(|(pull, state)| PrRef {
+                state,
+                head_sha: pull.head.map(|h| h.sha).unwrap_or_default(),
+            }))
     }
 
     /// Newest pull request for `head_branch` in any state, with its reviews folded into a state.
@@ -1198,16 +1213,16 @@ impl GithubAuth {
         Ok(None)
     }
 
-    /// [`Self::pr_state`] of each branch, looked up concurrently. Best effort: an error, or a
+    /// [`Self::pr_ref`] of each branch, looked up concurrently. Best effort: an error, or a
     /// lookup slower than `per_branch`, yields `None` for that branch.
     pub async fn pr_states(
         &self,
         repo: &str,
         branches: &[String],
         per_branch: Duration,
-    ) -> Vec<Option<PrState>> {
+    ) -> Vec<Option<PrRef>> {
         futures_util::future::join_all(branches.iter().map(|b| async move {
-            match tokio::time::timeout(per_branch, self.pr_state(repo, b)).await {
+            match tokio::time::timeout(per_branch, self.pr_ref(repo, b)).await {
                 Ok(Ok(state)) => state,
                 _ => None,
             }
@@ -2407,6 +2422,7 @@ mod tests {
             .pr_states("acme/site", &branches, Duration::from_millis(1000))
             .await;
         let took = started.elapsed();
+        let states: Vec<Option<PrState>> = states.into_iter().map(|r| r.map(|r| r.state)).collect();
         assert_eq!(
             states,
             vec![
@@ -2739,6 +2755,7 @@ mod tests {
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                head_sha: String::new(),
             }
         );
         stop();

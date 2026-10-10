@@ -189,6 +189,11 @@ export function createApi(
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },
       }),
+    /** Delete a merged change's local branch and return to an up-to-date `main`. */
+    cleanupChange: (project: string, branch: string) =>
+      json<{ branch: string; mainUpdated?: boolean }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
+        body: { project },
+      }),
     /** PR state / checks / preview URL of a change; null when it has no PR. */
     changeStatus: async (project: string, branch: string): Promise<PrStatus | null> =>
       (

@@ -21,6 +21,7 @@ export const useChangesStore = defineStore("changes", () => {
   const sharing = ref(false);
   const markingReady = ref(false);
   const switching = ref(false);
+  const cleaningUp = ref(false);
   const listing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -165,6 +166,37 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /**
+   * Clean up a merged change: back on updated `main`, the change gone from the list.
+   * `mainUpdated` is false when GitHub couldn't be reached to update `main`.
+   */
+  async function cleanup(id: string, branch: string): Promise<{ mainUpdated: boolean }> {
+    // The change's poll must not fire mid-cleanup.
+    stopStatusPolling();
+    cleaningUp.value = true;
+    error.value = null;
+    try {
+      const result = await daemon.api.cleanupChange(id, branch);
+      projectId.value = id;
+      items.value = items.value.filter((c) => c.branch !== branch);
+      if (active.value?.branch === branch) {
+        stopStatusPolling();
+        active.value = null;
+        prUrl.value = null;
+        status.value = null;
+      }
+      await refreshTreeAndPreview();
+      return { mainUpdated: result.mainUpdated !== false };
+    } catch (e) {
+      error.value = errorMessage(e);
+      // Still on the change: keep its status fresh.
+      void refreshStatus();
+      throw e;
+    } finally {
+      cleaningUp.value = false;
+    }
+  }
+
   async function share(id: string, branch: string): Promise<string> {
     sharing.value = true;
     error.value = null;
@@ -234,6 +266,7 @@ export const useChangesStore = defineStore("changes", () => {
     sharing,
     markingReady,
     switching,
+    cleaningUp,
     listing,
     loading,
     error,
@@ -244,6 +277,7 @@ export const useChangesStore = defineStore("changes", () => {
     create,
     switchTo,
     share,
+    cleanup,
     markReady,
     refreshStatus,
     stopStatusPolling,

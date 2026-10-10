@@ -20,7 +20,7 @@ export type PullsPost = {
   };
 };
 
-/** Head SHA every stub PR reports (deployments are recorded against it). */
+/** Head SHA a stub PR reports when `headSha` can't resolve its branch. */
 export const STUB_HEAD_SHA = "5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e";
 
 export type CheckRun = { status: string; conclusion: string | null };
@@ -60,12 +60,20 @@ type StoredPr = {
   draft: boolean;
 };
 
+export type GithubStubOptions = {
+  /** Real head commit of a PR's branch (e.g. read from the bare remote); null = unknown. */
+  headSha?: (ref: string) => string | null;
+};
+
 /** GraphQL node id GitHub would give PR `number`. */
 const nodeId = (number: number) => `PR_kwStub${number}`;
 
 /** Minimal GitHub API stub: device flow + `/user` + repos + draft pulls + GraphQL
  *  `markPullRequestReadyForReview`. */
-export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
+export function startGithubStub(
+  clientId = "cid",
+  opts: GithubStubOptions = {},
+): Promise<GithubStub> {
   let pollCount = 0;
   let pullsStatus: number | null = null;
   let graphqlStatus: number | null = null;
@@ -91,7 +99,7 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       draft: status.draft ?? p.draft,
       state: status.state,
       merged_at: status.merged ? "2026-10-04T00:00:00Z" : null,
-      head: { ref: headRef, sha: STUB_HEAD_SHA },
+      head: { ref: headRef, sha: opts.headSha?.(headRef) ?? STUB_HEAD_SHA },
     };
   };
   const sendJson = (res: http.ServerResponse, code: number, body: unknown) => {
@@ -302,16 +310,16 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
         sendJson(res, 200, status.reviews);
         return;
       }
-      if (rest === `/commits/${STUB_HEAD_SHA}/check-runs`) {
+      // Checks and deployments are served for whatever head SHA is asked about.
+      if (/^\/commits\/[0-9a-f]{40}\/check-runs$/.test(rest)) {
         sendJson(res, 200, { total_count: status.checkRuns.length, check_runs: status.checkRuns });
         return;
       }
       if (rest === "/deployments") {
         const sha = url.searchParams.get("sha");
-        const list =
-          status.deployment && (sha === null || sha === STUB_HEAD_SHA)
-            ? [{ id: 1, sha: STUB_HEAD_SHA, environment: "preview" }]
-            : [];
+        const list = status.deployment
+          ? [{ id: 1, sha: sha ?? STUB_HEAD_SHA, environment: "preview" }]
+          : [];
         sendJson(res, 200, list);
         return;
       }

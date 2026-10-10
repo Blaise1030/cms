@@ -1,6 +1,7 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/ready`.
+//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/cleanup`,
+//! `POST /api/changes/{branch}/ready`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -11,9 +12,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{project_dir, query_or_badreq};
-use crate::changes;
+use crate::changes::{self, PrMerge};
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title};
+use crate::github::{pr_body, pr_title, PrRef, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -81,9 +82,12 @@ pub async fn list(
                 .github
                 .pr_states(repo, &branches, PR_STATE_TIMEOUT)
                 .await;
-            for (item, pr) in items.iter_mut().zip(states) {
+            for ((item, change), pr) in items.iter_mut().zip(&changes).zip(states) {
+                // A PR for other commits belongs to an earlier change that had this name.
                 if let Some(pr) = pr {
-                    item["prState"] = json!(pr);
+                    if changes::pr_matches(&project.dir, &change.branch, &pr.head_sha).await {
+                        item["prState"] = json!(pr.state);
+                    }
                 }
             }
         }
@@ -170,6 +174,57 @@ pub async fn share(
     })))
 }
 
+/// `POST /api/changes/{branch}/cleanup` `{ project }` → `{ branch: "main", mainUpdated }`.
+/// Deletes a merged change's local branch and returns to an up-to-date `main`. Merged means
+/// its merged PR's head is the branch tip, or `main` already contains the branch's commits.
+/// `mainUpdated` is false when GitHub couldn't be reached to update `main`.
+pub async fn cleanup(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    // Fail fast on what git can tell before asking GitHub.
+    changes::check_cleanup(&project.dir, &branch).await?;
+    let (pr, env) = match project.repo.as_deref() {
+        Some(repo) if state.github.token().await.is_some() => {
+            let pr = match tokio::time::timeout(
+                PR_STATE_TIMEOUT,
+                state.github.pr_ref(repo, &branch),
+            )
+            .await
+            {
+                Ok(Ok(Some(PrRef {
+                    state: PrState::Merged,
+                    head_sha,
+                }))) => PrMerge::Merged { head_sha },
+                Ok(Ok(_)) => PrMerge::NotMerged,
+                Ok(Err(e)) => PrMerge::Unknown(e),
+                Err(_) => PrMerge::Unknown(ApiError::github(
+                    "GitHub didn't answer in time to confirm the merge — try again",
+                )),
+            };
+            (pr, state.github.git_env().await.unwrap_or_default())
+        }
+        Some(_) => (
+            PrMerge::NotMerged,
+            state.github.git_env().await.unwrap_or_default(),
+        ),
+        None => (PrMerge::NotMerged, Vec::new()),
+    };
+    let done = changes::cleanup(&project.dir, &branch, pr, &env).await?;
+    Ok(Json(json!({ "branch": "main", "mainUpdated": done.main_updated })))
+}
+
 /// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,
 /// previewUrl } | null }`. `null` when the project has no GitHub remote or the branch no PR.
 pub async fn status(
@@ -187,6 +242,11 @@ pub async fn status(
         return Ok(Json(json!({ "pr": null })));
     };
     let pr = state.github.pr_status(&repo, &branch).await?;
+    // A PR for other commits belongs to an earlier change that had this name.
+    let pr = match pr {
+        Some(pr) if changes::pr_matches(&project.dir, &branch, &pr.head_sha).await => Some(pr),
+        _ => None,
+    };
     Ok(Json(json!({ "pr": pr })))
 }
 
