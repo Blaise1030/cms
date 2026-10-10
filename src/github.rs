@@ -35,6 +35,10 @@ const CLI_TTL: Duration = Duration::from_secs(60);
 const CLI_RETRY: Duration = Duration::from_secs(5);
 /// Retry delay while serving the last good login through a transient `gh` failure.
 const CLI_STALE_RETRY: Duration = Duration::from_secs(10);
+/// GitHub's largest page size for list endpoints.
+const PAGE_SIZE: usize = 100;
+/// Stop paginating after this many pages (10k items).
+const MAX_PAGES: usize = 100;
 const REPOS_PATH: &str = "/user/repos?per_page=100&sort=pushed";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +294,13 @@ fn pr_state(pull: &PullFacts, reviews: &[ApiReview]) -> PrState {
     } else {
         PrState::Open
     }
+}
+
+/// Only `http://` / `https://` URLs may become links (a deployment's `environment_url` is
+/// whatever the workflow wrote, e.g. `javascript:`).
+fn is_http_url(u: &str) -> bool {
+    let lower = u.get(..8).unwrap_or(u).to_ascii_lowercase();
+    (lower.starts_with("http://") && u.len() > 7) || (lower.starts_with("https://") && u.len() > 8)
 }
 
 fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
@@ -936,15 +947,19 @@ impl GithubAuth {
             return Ok(None);
         };
         let sha = pull.head.map(|h| h.sha).unwrap_or_default();
+        // Best effort past the PR itself: a failing checks or deployments call only blanks
+        // that part of the status.
         let (checks, preview_url) = if sha.is_empty() {
             (ChecksState::None, None)
         } else {
-            let runs: ApiCheckRuns = self
-                .get_json(&format!("/repos/{repo}/commits/{sha}/check-runs?per_page=100"))
-                .await?;
+            let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+            let (runs, preview) = tokio::join!(
+                self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs),
+                self.preview_url(repo, &sha),
+            );
             (
-                aggregate_checks(&runs.check_runs),
-                self.preview_url(repo, &sha).await?,
+                runs.map_or(ChecksState::None, |r| aggregate_checks(&r)),
+                preview.unwrap_or(None),
             )
         };
         Ok(Some(PrStatus {
@@ -994,10 +1009,10 @@ impl GithubAuth {
         let reviews: Vec<ApiReview> = if facts.draft || facts.closed {
             Vec::new()
         } else {
-            self.get_json(&format!(
-                "/repos/{repo}/pulls/{}/reviews?per_page=100",
-                pull.number
-            ))
+            self.get_all::<Vec<ApiReview>, ApiReview>(
+                &format!("/repos/{repo}/pulls/{}/reviews", pull.number),
+                |p| p,
+            )
             .await?
         };
         let state = pr_state(&facts, &reviews);
@@ -1013,19 +1028,65 @@ impl GithubAuth {
             ))
             .await?;
         for d in deployments.iter().filter(|d| d.sha == sha) {
-            let statuses: Vec<ApiDeploymentStatus> = self
-                .get_json(&format!("/repos/{repo}/deployments/{}/statuses?per_page=1", d.id))
-                .await?;
+            // A deployment whose statuses can't be read is skipped, not fatal.
+            let Ok(statuses) = self
+                .get_json::<Vec<ApiDeploymentStatus>>(&format!(
+                    "/repos/{repo}/deployments/{}/statuses?per_page=1",
+                    d.id
+                ))
+                .await
+            else {
+                continue;
+            };
             // Statuses are newest first.
             if let Some(latest) = statuses.into_iter().next() {
                 if latest.state == "success" {
-                    if let Some(url) = latest.environment_url.filter(|u| !u.is_empty()) {
+                    if let Some(url) = latest.environment_url.filter(|u| is_http_url(u)) {
                         return Ok(Some(url));
                     }
                 }
             }
         }
         Ok(None)
+    }
+
+    /// [`Self::pr_state`] of each branch, looked up concurrently. Best effort: an error, or a
+    /// lookup slower than `per_branch`, yields `None` for that branch.
+    pub async fn pr_states(
+        &self,
+        repo: &str,
+        branches: &[String],
+        per_branch: Duration,
+    ) -> Vec<Option<PrState>> {
+        futures_util::future::join_all(branches.iter().map(|b| async move {
+            match tokio::time::timeout(per_branch, self.pr_state(repo, b)).await {
+                Ok(Ok(state)) => state,
+                _ => None,
+            }
+        }))
+        .await
+    }
+
+    /// Every item of a paginated list endpoint (`path` has no query string): pages of
+    /// [`PAGE_SIZE`] until a short page, up to [`MAX_PAGES`].
+    async fn get_all<P: DeserializeOwned, T>(
+        &self,
+        path: &str,
+        items: impl Fn(P) -> Vec<T>,
+    ) -> Result<Vec<T>, ApiError> {
+        let mut all = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let batch = items(
+                self.get_json::<P>(&format!("{path}?per_page={PAGE_SIZE}&page={page}"))
+                    .await?,
+            );
+            let short = batch.len() < PAGE_SIZE;
+            all.extend(batch);
+            if short {
+                break;
+            }
+        }
+        Ok(all)
     }
 
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
@@ -1971,6 +2032,245 @@ mod tests {
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "noprstatus");
         assert_eq!(auth.pr_status("acme/site", "content/x").await.unwrap(), None);
+        stop();
+    }
+
+    fn open_pull_json(number: u64, head: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number,
+            "html_url": format!("https://github.com/acme/site/pull/{number}"),
+            "title": head,
+            "draft": false,
+            "state": "open",
+            "merged_at": null,
+            "head": { "ref": head, "sha": "abc" }
+        })
+    }
+
+    #[tokio::test]
+    async fn pr_status_survives_failing_checks_and_deployments_calls() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { (StatusCode::BAD_GATEWAY, "boom") }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "statusfail");
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .expect("a PR");
+        assert_eq!(st.state, PrState::Open);
+        assert_eq!(st.checks, ChecksState::None);
+        assert_eq!(st.preview_url, None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn preview_url_survives_a_failing_statuses_call() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({ "check_runs": [{ "status": "queued" }] }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([{ "id": 1, "sha": "abc" }])) }),
+            )
+            .route(
+                "/repos/acme/site/deployments/1/statuses",
+                get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "statusesfail");
+        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        assert_eq!(st.checks, ChecksState::Pending);
+        assert_eq!(st.preview_url, None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn preview_url_only_accepts_http_and_https() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "id": 3, "sha": "abc" },
+                        { "id": 2, "sha": "abc" },
+                        { "id": 1, "sha": "abc" },
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(id): AxPath<u64>| async move {
+                    let url = match id {
+                        3 => "javascript:alert(document.cookie)",
+                        2 => "data:text/html,<script>1</script>",
+                        _ => "http://ok.pages.dev",
+                    };
+                    Json(serde_json::json!([{ "state": "success", "environment_url": url }]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "unsafeurl");
+        assert_eq!(
+            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            Some("http://ok.pages.dev")
+        );
+        stop();
+    }
+
+    #[test]
+    fn only_http_urls_are_safe_links() {
+        assert!(is_http_url("https://x.pages.dev/a?b"));
+        assert!(is_http_url("HTTP://x.dev"));
+        for bad in ["javascript:alert(1)", " https://x", "data:text/html,x", "//x.dev", "ftp://x", ""] {
+            assert!(!is_http_url(bad), "{bad}");
+        }
+    }
+
+    /// Serves `total` items over `per_page`-sized pages, honouring `?page=`.
+    fn paged(
+        q: &std::collections::HashMap<String, String>,
+        total: usize,
+        item: impl Fn(usize) -> serde_json::Value,
+    ) -> Vec<serde_json::Value> {
+        let per: usize = q.get("per_page").and_then(|v| v.parse().ok()).unwrap_or(30);
+        let page: usize = q.get("page").and_then(|v| v.parse().ok()).unwrap_or(1);
+        let start = (page - 1) * per;
+        (start..total.min(start + per)).map(item).collect()
+    }
+
+    #[tokio::test]
+    async fn reviews_and_check_runs_are_read_across_pages() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        // 150 reviews: alan requests changes early, approves on page 2.
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async { Json(serde_json::json!([open_pull_json(4, "content/x")])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    Json(serde_json::json!(paged(&q, 150, |i| match i {
+                        0 => serde_json::json!({ "user": { "login": "alan" }, "state": "CHANGES_REQUESTED" }),
+                        149 => serde_json::json!({ "user": { "login": "alan" }, "state": "APPROVED" }),
+                        _ => serde_json::json!({ "user": { "login": "bob" }, "state": "COMMENTED" }),
+                    })))
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let runs = paged(&q, 130, |i| {
+                        if i == 129 {
+                            serde_json::json!({ "status": "completed", "conclusion": "failure" })
+                        } else {
+                            serde_json::json!({ "status": "completed", "conclusion": "success" })
+                        }
+                    });
+                    Json(serde_json::json!({ "total_count": 130, "check_runs": runs }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "paging");
+        let st = auth.pr_status("acme/site", "content/x").await.unwrap().unwrap();
+        assert_eq!(st.state, PrState::Approved);
+        assert_eq!(st.checks, ChecksState::Failing);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_states_run_concurrently_and_time_out_per_branch() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    let head = q.get("head").cloned().unwrap_or_default();
+                    if head.ends_with("hung") {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                    }
+                    let mut pr = open_pull_json(1, &head);
+                    pr["draft"] = serde_json::json!(true);
+                    Json(serde_json::json!([pr]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "prstates");
+        let branches: Vec<String> = ["content/a", "content/b", "content/c", "content/d", "content/hung"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let started = Instant::now();
+        let states = auth
+            .pr_states("acme/site", &branches, Duration::from_millis(1000))
+            .await;
+        let took = started.elapsed();
+        assert_eq!(
+            states,
+            vec![
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                Some(PrState::Draft),
+                None
+            ]
+        );
+        // Sequential would be ≥ 1.2s before the hung one; concurrent finishes at the timeout.
+        assert!(took < Duration::from_millis(1500), "took {took:?}");
         stop();
     }
 }

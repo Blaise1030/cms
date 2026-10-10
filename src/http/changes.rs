@@ -16,6 +16,10 @@ use crate::error::ApiError;
 use crate::github::{pr_body, pr_title};
 use crate::state::AppState;
 
+/// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
+/// so a slow GitHub can't hold up the changes menu.
+const PR_STATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
 #[derive(Deserialize)]
 struct CreateRequest {
     project: String,
@@ -72,8 +76,13 @@ pub async fn list(
     let mut items: Vec<Value> = changes.iter().map(change_json).collect();
     if let Some(repo) = project.repo.as_deref() {
         if state.github.token().await.is_some() {
-            for (item, c) in items.iter_mut().zip(&changes) {
-                if let Ok(Some(pr)) = state.github.pr_state(repo, &c.branch).await {
+            let branches: Vec<String> = changes.iter().map(|c| c.branch.clone()).collect();
+            let states = state
+                .github
+                .pr_states(repo, &branches, PR_STATE_TIMEOUT)
+                .await;
+            for (item, pr) in items.iter_mut().zip(states) {
+                if let Some(pr) = pr {
                     item["prState"] = json!(pr);
                 }
             }
