@@ -119,3 +119,24 @@ for (const [name, frontmatter, fields] of [
     assert.equal(run.stdout,'');
   });
 }
+test('patch unset removes optional top-level fields while preserving surrounding source', () => {
+  const source="---\r\ntitle: 'Post' # keep\r\ndescription: Kept\r\npubDate: 2026-10-11\r\ncoverImage: ./cover.png\r\ncoverAlt: Cover\r\ntags: [one] # tags\r\n---\r\nBody\r\n";
+  assert.equal(helper({op:'patch',collection:'blog',source,fields:{},unset:['coverImage','coverAlt']}).source,source.replace('coverImage: ./cover.png\r\ncoverAlt: Cover\r\n',''));
+  assert.equal(helper({op:'patch',collection:'blog',source,fields:{},unset:['missing']}).source,source);
+  const json='{\n  "name": "Acme",\n  "description": "Kept",\n  "nav" : [],\n  "footer": { "text": "F" },\n  "socials": []\n}\n';
+  assert.equal(helper({op:'patch',collection:'site',source:json,fields:{},unset:['socials']}).source,'{\n  "name": "Acme",\n  "description": "Kept",\n  "nav" : [],\n  "footer": { "text": "F" }\n}\n');
+});
+test('patch unset validates the candidate and rejects malformed or overlapping names', () => {
+  const source='---\ntitle: Post\ndescription: Kept\npubDate: 2026-10-11\n---\nBody';
+  for (const [request, pattern] of [
+    [{unset:['title']}, /title/],
+    [{unset:'title'}, /unset/],
+    [{unset:[['title']]}, /unset/],
+    [{unset:['title'],fields:{title:'New'}}, /unset/],
+  ]) {
+    const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{},...request}),encoding:'utf8'});
+    assert.notEqual(run.status,0);
+    assert.match(run.stderr,pattern);
+    assert.equal(run.stdout,'');
+  }
+});

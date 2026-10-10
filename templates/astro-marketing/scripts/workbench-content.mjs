@@ -46,12 +46,19 @@ function validateCandidate(collection, fields) {
   const result=schemas[collection].safeParse(fields);
   if (!result.success) throw new Error(JSON.stringify(result.error.issues.map(({path,message})=>({path,message}))));
 }
-function patchJson(source, fields, collection) {
+/** Merge a partial top-level update; `unset` names top-level keys to remove. */
+function candidate(previous, fields, unset) {
+  const next={...previous,...fields};
+  for (const key of unset) delete next[key];
+  return next;
+}
+function patchJson(source, fields, unset, collection) {
   const previous = JSON.parse(source);
   if (!previous || Array.isArray(previous) || typeof previous !== 'object') throw new Error('Expected JSON object');
-  validateCandidate(collection, {...previous,...fields});
+  const next=candidate(previous,fields,unset);
+  validateCandidate(collection, next);
   let result = source;
-  for (const {path,value} of changes(previous, {...previous,...fields})) {
+  for (const {path,value} of changes(previous, next)) {
     const node = findNodeAtLocation(parseTree(result),path);
     if (node && value !== undefined) result = result.slice(0,node.offset)+JSON.stringify(value)+result.slice(node.offset+node.length);
     else result = applyEdits(result,modify(result,path,value,{}));
@@ -68,15 +75,16 @@ function yamlComments(token, ranges = []) {
   }
   return ranges;
 }
-function patchYaml(source, fields, collection) {
+function patchYaml(source, fields, unset, collection) {
   const document = parseDocument(source, { keepSourceTokens: true, uniqueKeys: true });
   if (document.errors.length) throw new Error(document.errors[0].message);
   if (!isMap(document.contents)) throw new Error('Expected frontmatter mapping');
   const previous = document.toJS({maxAliasCount:100});
-  validateCandidate(collection, {...previous,...fields});
+  const next=candidate(previous,fields,unset);
+  validateCandidate(collection, next);
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
   const edits = [];
-  for (const {path,value} of changes(previous,{...previous,...fields})) {
+  for (const {path,value} of changes(previous,next)) {
     const node = document.getIn(path,true);
     if (node && node.range && value !== undefined) {
       let text;
@@ -106,18 +114,20 @@ function patchYaml(source, fields, collection) {
   }
   const result=edits.sort((a,b)=>b.start-a.start).reduce((text,edit)=>text.slice(0,edit.start)+edit.text+text.slice(edit.end),source);
   const checked=parseDocument(result);
-  if (checked.errors.length || !isDeepStrictEqual(checked.toJS(),{...previous,...fields})) throw new Error('Patch could not preserve YAML structure');
+  if (checked.errors.length || !isDeepStrictEqual(checked.toJS(),next)) throw new Error('Patch could not preserve YAML structure');
   return result;
 }
 /** fields is a partial top-level update; omitted body and fields retain original bytes. */
 function patch(request, definition) {
   if (!request.fields || typeof request.fields !== 'object' || Array.isArray(request.fields)) throw new Error('fields must be an object');
-  if (definition.kind === 'json') return {source:patchJson(request.source,request.fields,request.collection)};
+  const unset=request.unset ?? [];
+  if (!Array.isArray(unset) || unset.some(key=>typeof key !== 'string' || Object.hasOwn(request.fields,key))) throw new Error('unset must be top-level field names absent from fields');
+  if (definition.kind === 'json') return {source:patchJson(request.source,request.fields,unset,request.collection)};
   const match=/^(---\r?\n)([\s\S]*?)(^---(?:\r?\n|$))/m.exec(request.source);
   if (!match || match.index !== 0) throw new Error('Missing YAML frontmatter');
   const body=request.body === undefined ? request.source.slice(match[0].length) : request.body;
   if (typeof body !== 'string') throw new Error('body must be a string');
-  return {source:match[1]+patchYaml(match[2],request.fields,request.collection)+match[3]+body};
+  return {source:match[1]+patchYaml(match[2],request.fields,unset,request.collection)+match[3]+body};
 }
 export function handleRequest(request) {
   if (request.op === 'list') return {collections:list()};

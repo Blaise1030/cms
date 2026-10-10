@@ -60,6 +60,10 @@ pub struct ApiError {
     pub message: String,
     /// Overrides `code.status()` when set.
     pub status: Option<u16>,
+    /// Machine-readable refinement of `code` (e.g. `stale_content`).
+    pub reason: Option<&'static str>,
+    /// Structured detail, e.g. validation issues `[{path, message}]`.
+    pub details: Option<serde_json::Value>,
 }
 
 impl ApiError {
@@ -68,11 +72,23 @@ impl ApiError {
             code,
             message: message.into(),
             status: None,
+            reason: None,
+            details: None,
         }
     }
 
     pub fn with_status(mut self, status: u16) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    pub fn with_reason(mut self, reason: &'static str) -> Self {
+        self.reason = Some(reason);
+        self
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
         self
     }
 
@@ -139,6 +155,10 @@ pub struct ErrorBody<'a> {
 pub struct ErrorDetail<'a> {
     pub code: &'a str,
     pub message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<&'a serde_json::Value>,
 }
 
 impl ApiError {
@@ -147,6 +167,8 @@ impl ApiError {
             error: ErrorDetail {
                 code: self.code.as_str(),
                 message: &self.message,
+                reason: self.reason,
+                details: self.details.as_ref(),
             },
         }
     }
@@ -162,6 +184,17 @@ mod tests {
         assert_eq!(
             v,
             serde_json::json!({"error": {"code": "CONFLICT", "message": "x"}})
+        );
+        let v = serde_json::to_value(
+            ApiError::conflict("x")
+                .with_reason("stale_content")
+                .with_details(serde_json::json!([]))
+                .body(),
+        )
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"error": {"code": "CONFLICT", "message": "x", "reason": "stale_content", "details": []}})
         );
     }
 

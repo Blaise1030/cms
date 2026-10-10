@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::process::Stdio;
-use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentCollection {
@@ -44,41 +42,18 @@ pub struct ContentEntry {
     pub hash: String,
 }
 async fn helper(root: &Path, op: &str) -> Result<Vec<ContentCollection>, ApiError> {
-    // Verify helper containment before executing project code.
-    fs::read_file(root, "scripts/workbench-content.mjs").await?;
-    let mut child = tokio::process::Command::new("node")
-        .arg("scripts/workbench-content.mjs")
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
+    let response = super::helper::run(root, &serde_json::json!({ "op": op }))
+        .await?
         .map_err(|e| ApiError::io(format!("content helper: {e}")))?;
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(format!("{{\"op\":\"{op}\"}}\n").as_bytes())
-        .await?;
-    let output = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait_with_output())
-        .await
-        .map_err(|_| ApiError::io("content helper timed out"))??;
-    if !output.status.success() {
-        return Err(ApiError::io(format!(
-            "content helper: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
     #[derive(Deserialize)]
     struct Response {
         collections: Vec<ContentCollection>,
     }
-    serde_json::from_slice::<Response>(&output.stdout)
+    serde_json::from_value::<Response>(response)
         .map(|r| r.collections)
         .map_err(|e| ApiError::io(format!("content helper invalid response: {e}")))
 }
-fn supported(c: &ContentCollection) -> bool {
+pub(crate) fn supported(c: &ContentCollection) -> bool {
     let Some(base) = c.loader.get("base").and_then(Value::as_str) else {
         return false;
     };
@@ -172,7 +147,7 @@ pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollecti
         Err(e) => Ok(fallback(format!("Content helper unavailable: {e}"))),
     }
 }
-async fn collection(root: &Path, name: &str) -> Result<ContentCollection, ApiError> {
+pub(crate) async fn collection(root: &Path, name: &str) -> Result<ContentCollection, ApiError> {
     list_collections(root)
         .await?
         .into_iter()
@@ -230,7 +205,37 @@ pub async fn read_entry(
         .await?
         .content
         .ok_or_else(|| ApiError::badreq("content entry is not UTF-8"))?;
-    let (fields, body) = if c.kind == "json" {
+    let branch = current_branch(project_root).await?;
+    Ok(build_entry(
+        e.collection,
+        e.id,
+        e.path,
+        &c.kind,
+        source,
+        branch,
+    ))
+}
+/// The checked-out branch name (empty when detached).
+async fn current_branch(project_root: &Path) -> Result<String, ApiError> {
+    let output = tokio::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(project_root)
+        .output()
+        .await?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+pub(crate) fn hash(source: &str) -> String {
+    format!("{:x}", Sha256::digest(source.as_bytes()))
+}
+pub(crate) fn build_entry(
+    collection: String,
+    id: String,
+    path: String,
+    kind: &str,
+    source: String,
+    branch: String,
+) -> ContentEntry {
+    let (fields, body) = if kind == "json" {
         (
             serde_json::from_str(&source).unwrap_or(Value::Null),
             String::new(),
@@ -238,26 +243,17 @@ pub async fn read_entry(
     } else {
         parse_frontmatter(&source)
     };
-    let branch_output = tokio::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(project_root)
-        .output()
-        .await?;
-    let branch = String::from_utf8_lossy(&branch_output.stdout)
-        .trim()
-        .to_string();
-    let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
-    Ok(ContentEntry {
-        collection: e.collection,
-        id: e.id,
-        path: e.path,
-        kind: e.kind,
+    ContentEntry {
+        collection,
+        id,
+        path,
+        kind: kind.to_string(),
+        hash: hash(&source),
         source,
         fields,
         body,
         branch,
-        hash,
-    })
+    }
 }
 fn parse_frontmatter(source: &str) -> (Value, String) {
     let mut offset = 0;
