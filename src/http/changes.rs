@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{project_dir, query_or_badreq};
+use crate::changes::conflicts::{self, Choice};
 use crate::changes::{self, PrMerge};
 use crate::error::ApiError;
 use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
@@ -212,10 +213,7 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-pub async fn update(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<Json<changes::Update>, ApiError> {
+pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
@@ -230,7 +228,134 @@ pub async fn update(
     } else {
         Vec::new()
     };
-    Ok(Json(changes::get_latest(&project.dir, &env).await?))
+    let result = changes::get_latest(&project.dir, &env).await?;
+    let mut value = serde_json::to_value(&result).map_err(|e| ApiError::io(e.to_string()))?;
+    let incoming_ref = if result.main_diverged {
+        "refs/remotes/origin/main"
+    } else {
+        "refs/heads/main"
+    };
+    let incoming = conflicts::text(&project.dir, &["rev-parse", "--verify", incoming_ref]).await?;
+    let mut sessions = serde_json::Map::new();
+    for change in &result.conflicts {
+        let session = state
+            .conflicts
+            .start(&project.dir, &req.project, &change.branch, &incoming)
+            .await?;
+        sessions.insert(change.branch.clone(), json!(session.id));
+    }
+    value["conflictSessions"] = Value::Object(sessions);
+    Ok(Json(value))
+}
+
+async fn project_session(
+    state: &AppState,
+    project: &str,
+    id: &str,
+) -> Result<changes::conflict_sessions::ConflictSession, ApiError> {
+    let session = state.conflicts.get(id).await?;
+    let dir = project_dir(state, project).await?;
+    if session.project_id != project || session.dir != dir {
+        return Err(ApiError::enoent("conflict session not found"));
+    }
+    Ok(session)
+}
+
+/// Active conflict sessions survive page reloads while the daemon is running.
+pub async fn list_conflicts(
+    State(state): State<AppState>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    project_dir(&state, &q.project).await?;
+    Ok(Json(
+        json!({ "sessions": state.conflicts.list(&q.project).await }),
+    ))
+}
+
+pub async fn get_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let session = project_session(&state, &q.project, &id).await?;
+    let mut value = serde_json::to_value(&session).map_err(|e| ApiError::io(e.to_string()))?;
+    let mut files = Vec::new();
+    for file in &session.files {
+        let patch = conflicts::text(
+            &session.dir,
+            &[
+                "diff",
+                "--no-ext-diff",
+                &session.tip,
+                &session.incoming,
+                "--",
+                &file.path,
+            ],
+        )
+        .await?;
+        let mut f = serde_json::to_value(file).map_err(|e| ApiError::io(e.to_string()))?;
+        f["patch"] = json!(patch);
+        files.push(f);
+    }
+    value["files"] = json!(files);
+    value["candidate"] = serde_json::to_value(
+        conflicts::candidate_tree(
+            &session.dir,
+            &session.merged_tree,
+            &session.files,
+            &session.choices,
+        )
+        .await?,
+    )
+    .map_err(|e| ApiError::io(e.to_string()))?;
+    Ok(Json(value))
+}
+
+#[derive(Deserialize)]
+struct ChoiceRequest {
+    project: String,
+    path: String,
+    choice: Choice,
+}
+
+pub async fn choose_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<conflicts::Candidate>, ApiError> {
+    let req: ChoiceRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid conflict choice: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    Ok(Json(
+        state.conflicts.choose(&id, &req.path, req.choice).await?,
+    ))
+}
+
+pub async fn finish_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    let identity = state.github.identity().await;
+    let commit = state.conflicts.finish(&id, &identity).await?;
+    Ok(Json(json!({ "commit": commit })))
+}
+
+pub async fn abandon_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    state.conflicts.abandon(&id).await?;
+    Ok(Json(json!({ "abandoned": true })))
 }
 
 /// `POST /api/changes/{branch}/cleanup` `{ project }` → `{ branch: "main", mainUpdated }`.

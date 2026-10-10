@@ -94,6 +94,37 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
+  /** Branch → resolution session. Older daemons may omit this field. */
+  conflictSessions?: Record<string, string>;
+}
+
+export type ConflictChoice = "yours" | "latest" | "both";
+
+export interface ConflictFile {
+  path: string;
+  binary: boolean;
+  oursOid: string;
+  theirsOid: string;
+  baseOid: string | null;
+  patch?: string;
+}
+
+export interface ConflictSession {
+  id: string;
+  projectId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  base: string;
+  expiresAt: number;
+  choices: Record<string, ConflictChoice>;
+  files: ConflictFile[];
+  candidate?: ConflictCandidate;
+}
+
+export interface ConflictCandidate {
+  tree: string;
+  complete: boolean;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */

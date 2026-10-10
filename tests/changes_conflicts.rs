@@ -1,9 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 use workbench::changes::conflict_sessions::ConflictSessions;
 use workbench::changes::conflicts::Choice;
+use workbench::config::Config;
 use workbench::git::Identity;
+use workbench::{http, state::AppState};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -217,4 +224,125 @@ async fn sessions_on_different_branches_coexist() {
         .unwrap();
     assert_ne!(first.id, second.id);
     assert_eq!(sessions.list("site").await.len(), 2);
+}
+
+async fn call(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "localhost");
+    let body = if let Some(v) = body {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(v.to_string())
+    } else {
+        Body::empty()
+    };
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn conflict_api_lists_choices_and_finishes_only_its_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    std::fs::create_dir(&projects).unwrap();
+    let state = AppState::with_scaffold_install(
+        Config {
+            port: 0,
+            projects_dir: projects.clone(),
+            no_auth: true,
+            ..Default::default()
+        },
+        false,
+    );
+    let info = state.projects.create("Site").await.unwrap();
+    let dir = projects.join(&info.id);
+    git(&dir, &["config", "user.name", "Ada"]);
+    git(&dir, &["config", "user.email", "ada@example.com"]);
+    std::fs::write(dir.join("page.md"), "old\n").unwrap();
+    git(&dir, &["add", "page.md"]);
+    git(&dir, &["commit", "-m", "base"]);
+    git(&dir, &["checkout", "-b", "content/page"]);
+    std::fs::write(dir.join("page.md"), "mine\n").unwrap();
+    git(&dir, &["commit", "-am", "mine"]);
+    git(&dir, &["checkout", "main"]);
+    std::fs::write(dir.join("page.md"), "latest\n").unwrap();
+    git(&dir, &["commit", "-am", "latest"]);
+    let incoming = git(&dir, &["rev-parse", "HEAD"]);
+    git(&dir, &["checkout", "content/page"]);
+    let session = state
+        .conflicts
+        .start(&dir, &info.id, "content/page", &incoming)
+        .await
+        .unwrap();
+    let app = http::router(state);
+    let (status, list) = call(
+        &app,
+        "GET",
+        &format!("/api/changes/conflicts?project={}", info.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["sessions"][0]["id"], session.id);
+    let detail_url = format!("/api/changes/conflicts/{}?project={}", session.id, info.id);
+    let (status, detail) = call(&app, "GET", &detail_url, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["files"][0]["path"], "page.md");
+    assert!(detail["files"][0]["patch"]
+        .as_str()
+        .unwrap()
+        .contains("+latest"));
+    let (status, wrong) = call(
+        &app,
+        "GET",
+        &format!("/api/changes/conflicts/{}?project=other", session.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{wrong}");
+    let (status, invalid) = call(
+        &app,
+        "POST",
+        &format!("/api/changes/conflicts/{}/choice", session.id),
+        Some(json!({"project": info.id, "path": "../other.md", "choice": "yours"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+    let (status, choice) = call(
+        &app,
+        "POST",
+        &format!("/api/changes/conflicts/{}/choice", session.id),
+        Some(json!({"project": info.id, "path": "page.md", "choice": "yours"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{choice}");
+    assert_eq!(choice["complete"], true);
+    let (status, reloaded) = call(&app, "GET", &detail_url, None).await;
+    assert_eq!(status, StatusCode::OK, "{reloaded}");
+    assert_eq!(reloaded["choices"]["page.md"], "yours");
+    assert_eq!(reloaded["candidate"]["complete"], true);
+    let (status, finished) = call(
+        &app,
+        "POST",
+        &format!("/api/changes/conflicts/{}/finish", session.id),
+        Some(json!({"project": info.id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{finished}");
+    assert_eq!(git(&dir, &["show", "HEAD:page.md"]), "mine");
 }

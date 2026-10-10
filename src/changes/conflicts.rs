@@ -97,7 +97,7 @@ pub(crate) async fn checked(
     Ok(stdout)
 }
 
-pub(crate) async fn text(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
+pub async fn text(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
     Ok(
         String::from_utf8_lossy(&checked(dir, args, &[], None).await?)
             .trim()

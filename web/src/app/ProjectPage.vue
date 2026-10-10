@@ -28,7 +28,7 @@ const showChat = computed(() => projectTabFromRoute(route.name) === "preview");
 watch(
   () => props.id,
   (id) => {
-    void changes.load(id);
+    void changes.load(id).then(() => changes.loadConflicts(id)).catch(() => undefined);
   },
   { immediate: true },
 );
