@@ -6,7 +6,7 @@ import type { ContentCollection, ContentEntry, ContentEntrySummary, FieldDescrip
 import { errorMessage } from "@/lib/errors";
 import { diffDraft, cloneValue } from "./draft";
 
-export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string }
+export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
 
 export const useContentStore = defineStore("content", () => {
   const daemon = useDaemon();
@@ -111,18 +111,23 @@ export const useContentStore = defineStore("content", () => {
     if (!e) throw new Error("No entry is open");
     if (!change?.changed) return e;
     const saved = { id: projectId.value, entryId: e.id };
+    const submitted = { fields: JSON.stringify(draftFields.value), body: draftBody.value };
     saving.value = true; clearSaveState();
     try {
       const next = await daemon.api.updateContentEntry({
         project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash,
         fields: change.fields, ...(change.body !== undefined ? { body: change.body } : {}), ...(change.unset.length ? { unset: change.unset } : {}),
       });
-      if (projectId.value === saved.id && entry.value?.id === saved.entryId) loadEntry(next);
+      if (projectId.value === saved.id && entry.value?.id === saved.entryId) {
+        // Edits typed while the request was in flight stay in the draft, rebased on the saved entry.
+        if (JSON.stringify(draftFields.value) === submitted.fields && draftBody.value === submitted.body) loadEntry(next);
+        else { entry.value = next; draftSource.value = next.source; changedOnDisk.value = false; clearSaveState(); }
+      }
       return next;
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === "CHANGE_REQUIRED") needsChange.value = true;
-        else if (err.reason === "branch_changed" || err.reason === "stale_content") conflict.value = { reason: err.reason, message: err.message };
+        else if (err.reason === "branch_changed" || err.reason === "stale_content") conflict.value = { reason: err.reason, message: err.message, ...(branch ? { branch } : {}) };
         else if (err.details?.length) {
           fieldErrors.value = Object.fromEntries(err.details.map(d => [d.path.join("."), d.message]));
           saveError.value = err.message;

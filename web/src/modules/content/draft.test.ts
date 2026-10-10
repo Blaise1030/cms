@@ -118,3 +118,40 @@ it("offers Create Change on main and resumes the pending save on the new branch"
   expect(useContentStore().dirty).toBe(false);
   expect(w.find('[data-testid="content-needs-change"]').exists()).toBe(false);
 });
+
+it("keeps edits typed while a save is in flight", async () => {
+  let release!: (v: unknown) => void;
+  const hold = new Promise(r => { release = r; });
+  await setup({ updateContentEntry: vi.fn(async () => { await hold; return entry({ hash: "h2", fields: { title: "Hello", subtitle: "Sub" } }); }) });
+  await w.get('[data-testid="field-title"]').setValue("Hello");
+  await w.get('[data-testid="content-save"]').trigger("submit");
+  await w.get('[data-testid="field-subtitle"]').setValue("Typed during save");
+  release(null); await flushPromises();
+  const store = useContentStore();
+  expect(store.entry?.hash).toBe("h2");
+  expect(store.draftFields.subtitle).toBe("Typed during save");
+  expect(store.dirty).toBe(true);
+  expect(update()).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the draft and reports the new branch when the resumed save conflicts", async () => {
+  const stale = new ApiError("CONFLICT", "The entry changed since it was opened; reload to compare", 409, { reason: "stale_content" });
+  const saved = vi.fn().mockRejectedValueOnce(new ApiError("CHANGE_REQUIRED", "Start a change first", 409)).mockRejectedValueOnce(stale);
+  const createChange = vi.fn(async (_p: string, title: string) => ({ branch: "content/new", title }));
+  const disk = entry({ branch: "content/new", hash: "h9", fields: { title: "Disk", subtitle: "Sub" } });
+  let reads = 0;
+  await setup({ updateContentEntry: saved, createChange, contentEntry: async () => (reads++ ? disk : entry({ branch: "main" })) }, entry({ branch: "main" }));
+  await w.get('[data-testid="field-title"]').setValue("Mine");
+  await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises();
+  await w.get('[data-testid="content-create-change"]').trigger("click"); await flushPromises();
+  const input = document.body.querySelector("[role=dialog] input") as HTMLInputElement;
+  input.value = "C"; input.dispatchEvent(new Event("input", { bubbles: true })); await flushPromises();
+  (document.body.querySelector("[role=dialog] button[type=submit]") as HTMLButtonElement).click(); await flushPromises();
+  expect(w.find('[data-testid="content-needs-change"]').exists()).toBe(false);
+  expect(w.get('[data-testid="content-conflict"]').text()).toContain("content/new");
+  expect(useContentStore().draftFields.title).toBe("Mine");
+  await w.get('[data-testid="content-compare"]').trigger("click"); await flushPromises();
+  expect(w.get('[data-testid="content-compare-table"]').text()).toMatch(/title\s*Mine\s*Disk/);
+  await w.get('[data-testid="content-reload"]').trigger("click"); await flushPromises();
+  expect(useContentStore().entry?.branch).toBe("content/new");
+});
