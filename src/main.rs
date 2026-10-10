@@ -53,6 +53,21 @@ enum Command {
         #[arg(long, env = "WORKBENCH_UI_URL")]
         ui_url: Option<String>,
     },
+    /// Called by coding-CLI hooks (internal).
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        event: HookEvent,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookEvent {
+    /// A coding-CLI turn ended.
+    TurnEnd {
+        /// Hook payload JSON (default: read from stdin).
+        payload: Option<String>,
+    },
 }
 
 fn home() -> PathBuf {
@@ -63,6 +78,7 @@ fn home() -> PathBuf {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let command = Cli::parse().command;
     let Command::Serve {
         port,
         origin,
@@ -75,7 +91,16 @@ async fn main() -> ExitCode {
         github_web_url,
         github_git_url,
         ui_url,
-    } = Cli::parse().command;
+    } = command
+    else {
+        let Command::Hook {
+            event: HookEvent::TurnEnd { payload },
+        } = command
+        else {
+            unreachable!()
+        };
+        return workbench::hook::turn_end(payload).await;
+    };
     let github_defaults = workbench::config::GithubConfig::default();
     let api_url = github_api_url.unwrap_or_else(|| github_defaults.api_url.clone());
     let web_url = github_web_url.unwrap_or_else(|| api_url.clone());

@@ -11,6 +11,7 @@ pub mod events;
 pub mod fs;
 pub mod git;
 pub mod github;
+pub mod hook;
 pub mod http;
 pub mod preview;
 pub mod projects;
