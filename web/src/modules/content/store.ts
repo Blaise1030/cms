@@ -16,7 +16,9 @@ export const useContentStore = defineStore("content", () => {
   const changedOnDisk = ref(false);
   const error = ref<string | null>(null);
   const loading = ref(false);
-  let request = 0;
+  let selectionRequest = 0;
+  let refreshRequest = 0;
+  let selectionPending = false;
   function canLeave() {
     if (!dirty.value) return true;
     if (!window.confirm("Discard unsaved content changes?")) return false;
@@ -26,46 +28,56 @@ export const useContentStore = defineStore("content", () => {
   async function open(id: string) {
     if (id === projectId.value) return;
     if (!canLeave()) return;
-    ++request;
-    projectId.value = id; selectedCollection.value = null; entry.value = null; entries.value = [];
+    ++selectionRequest;
+    ++refreshRequest;
+    selectionPending = false;
+    projectId.value = id; selectedCollection.value = null; entry.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; changedOnDisk.value = false;
     await refresh();
   }
   async function refresh() {
     const id = projectId.value;
     if (!id) return;
-    const version = ++request;
+    const version = ++refreshRequest;
+    const selectionVersion = selectionRequest;
+    const name = selectedCollection.value;
+    const openedEntry = entry.value;
+    const canRefreshEntry = !selectionPending;
     loading.value = true; error.value = null;
     try {
       const nextCollections = await daemon.api.listContentCollections(id);
-      const name = selectedCollection.value;
       const nextEntries = name ? await daemon.api.listContentEntries(id, name) : [];
-      if (version !== request) return;
-      collections.value = nextCollections; entries.value = nextEntries;
-      if (entry.value) {
+      if (version !== refreshRequest) return;
+      collections.value = nextCollections;
+      // A refresh owns catalog loading; a user selection owns the detail view.
+      if (selectionVersion !== selectionRequest) return;
+      entries.value = nextEntries;
+      if (openedEntry && canRefreshEntry && !selectionPending) {
         if (dirty.value) { changedOnDisk.value = true; return; }
-        const next = await daemon.api.contentEntry(id, entry.value.collection, entry.value.id);
-        if (version !== request || dirty.value) return;
+        const next = await daemon.api.contentEntry(id, openedEntry.collection, openedEntry.id);
+        if (version !== refreshRequest || selectionVersion !== selectionRequest || dirty.value) return;
         entry.value = next; draftSource.value = next.source;
       }
-    } catch (e) { if (version === request) error.value = errorMessage(e); }
-    finally { if (version === request) loading.value = false; }
+    } catch (e) { if (version === refreshRequest && selectionVersion === selectionRequest) error.value = errorMessage(e); }
+    finally { if (version === refreshRequest) loading.value = false; }
   }
   async function selectCollection(name: string) {
     if (!canLeave()) return;
-    const version = ++request;
+    const version = ++selectionRequest; selectionPending = true;
     selectedCollection.value = name; entry.value = null; draftSource.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null;
-    try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === request) entries.value = next; }
-    catch(e) { if (version === request) error.value = errorMessage(e); }
+    try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === selectionRequest) entries.value = next; }
+    catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
+    finally { if (version === selectionRequest) selectionPending = false; }
   }
   async function selectEntry(id: string) {
     if (!selectedCollection.value || !canLeave()) return;
-    const version = ++request; error.value = null;
+    const version = ++selectionRequest; selectionPending = true; error.value = null;
     try {
       const next = await daemon.api.contentEntry(projectId.value, selectedCollection.value, id);
-      if (version !== request) return;
+      if (version !== selectionRequest) return;
       entry.value = next; draftSource.value = next.source; changedOnDisk.value = false;
-    } catch(e) { if (version === request) error.value = errorMessage(e); }
+    } catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
+    finally { if (version === selectionRequest) selectionPending = false; }
   }
   const offs = [
     daemon.on("fs.change", (e) => { if(e.projectId === projectId.value) void refresh(); }),

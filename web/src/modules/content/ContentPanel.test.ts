@@ -9,8 +9,8 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import ContentPanel from "./ContentPanel.vue";
 import { useContentStore } from "./store";
 const entry = { collection: "blog", id: "welcome", path: "src/content/blog/en/welcome.md", kind: "markdown", source: "Original", fields: {title: "Welcome"}, body: "Original", branch: "main", hash: "abc" };
-async function setup() {
- h.daemon = createFakeDaemon({ listContentCollections: async () => [{name:"blog",kind:"markdown",editable:true,reason:null}], listContentEntries: async () => [entry], contentEntry: async () => entry });
+async function setup(api: Record<string, unknown> = {}) {
+ h.daemon = createFakeDaemon({ listContentCollections: async () => [{name:"blog",kind:"markdown",editable:true,reason:null}], listContentEntries: async () => [entry], contentEntry: async () => entry, ...api });
  setActivePinia(createPinia());
  const router = createRouter({history:createMemoryHistory(),routes:[{path:"/",component:ContentPanel,props:{projectId:"p"}},{path:"/other",component:{template:"<p>Other</p>"}}]});
  await router.push("/"); await router.isReady();
@@ -41,4 +41,45 @@ it("blocks leaving the Content tab until a dirty draft is discarded", async () =
  await w.vm.$router.push("/other"); expect(w.vm.$route.path).toBe("/other");
  expect(store.dirty).toBe(false); expect(store.draftSource).toBe("Original");
  vi.unstubAllGlobals(); w.unmount();
+});
+
+function deferred<T>() {
+ let resolve!: (value: T) => void;
+ const promise = new Promise<T>(done => { resolve = done; });
+ return {promise, resolve};
+}
+it.each(["selection-first", "refresh-first"])("keeps the user's entry selection and clears loading during %s overlap", async (ordering) => {
+ const second = {...entry, id:"second", source:"Second source", hash:"second"};
+ const selection = deferred<typeof entry>();
+ const catalog = deferred<{name:string;kind:string;editable:boolean;reason:null}[]>();
+ let holdCatalog = false;
+ const w = await setup({
+  listContentCollections: async () => holdCatalog ? catalog.promise : [{name:"blog",kind:"markdown",editable:true,reason:null}],
+  contentEntry: async (_project: string, _collection: string, id: string) => id === "second" ? selection.promise : entry,
+ });
+ await flushPromises(); const store = useContentStore();
+ await store.selectCollection("blog"); await store.selectEntry("welcome");
+ holdCatalog = true;
+ let chosen: Promise<void>;
+ if (ordering === "selection-first") {
+  chosen = store.selectEntry("second");
+  h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"});
+ } else {
+  h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"});
+  chosen = store.selectEntry("second");
+ }
+ await flushPromises(); expect(store.loading).toBe(true);
+ selection.resolve(second); await chosen;
+ catalog.resolve([{name:"blog",kind:"markdown",editable:true,reason:null}]); await flushPromises();
+ expect(store.entry?.id).toBe("second");
+ expect(store.draftSource).toBe("Second source");
+ expect(store.loading).toBe(false);
+ expect(w.text()).not.toContain("Loading content…");
+ w.unmount();
+});
+it("clears the previous project's catalog while the next project loads", async () => {
+ const w = await setup(); await flushPromises(); const store = useContentStore();
+ const opening = store.open("other");
+ expect(store.collections).toEqual([]);
+ await opening; w.unmount();
 });
