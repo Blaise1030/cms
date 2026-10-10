@@ -91,9 +91,7 @@ function connect() {
     },
     onData: queue,
     onExit(code) {
-      ended.value = { code };
-      conn?.close();
-      conn = null;
+      endSession(code);
     },
     onClose() {
       conn = null;
@@ -145,6 +143,15 @@ function disposeTerminal() {
   fit = null;
 }
 
+/** Exit frame and `terminal.exited` share this: stop reconnecting and show Restart. */
+function endSession(code: number | null) {
+  ended.value = { code };
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  conn?.close();
+  conn = null;
+}
+
 function teardown() {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
@@ -184,7 +191,13 @@ onMounted(async () => {
   state.value = "idle";
 });
 
+const offExited = daemon.on("terminal.exited", (e) => {
+  if (e.projectId !== props.projectId || ended.value) return;
+  endSession(e.code);
+});
+
 onBeforeUnmount(() => {
+  offExited();
   disposed = true;
   teardown();
 });

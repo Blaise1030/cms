@@ -32,7 +32,14 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => changes.stopStatusPolling());
+const offBlocked = daemon.on("checkpoint.blocked", (e) => {
+  if (e.projectId !== props.id) return;
+  toast.error(e.reason);
+});
+onBeforeUnmount(() => {
+  offBlocked();
+  changes.stopStatusPolling();
+});
 
 // An unknown id (a stale link, or a project deleted elsewhere) goes back to the project list.
 watch(

@@ -23,8 +23,10 @@
 //!   Hook trust applies to hooks.json hooks, not `notify`. Open question: hooks.json trust
 //!   was not exercised, so the bypass flag is not appended.
 //! - OpenCode: the installed binary reads `OPENCODE_CONFIG_DIR` (replaces the global config
-//!   dir, so `plugins/*.ts` there load per tabsh's setup.md, 2.x plugin shape
-//!   `{ id, setup(ctx) }`). Idle event: `session.execution.succeeded|failed|interrupted`
+//!   dir; this daemon never reads or writes `~/.config/opencode`). Each project gets its own
+//!   directory `{state_dir}/{project_id}/opencode`, so one project's `auto_approve` cannot
+//!   rewrite another's. `plugins/*.ts` there load per tabsh's setup.md, 2.x plugin shape
+//!   `{ id, setup(ctx) }`. Idle event: `session.execution.succeeded|failed|interrupted`
 //!   (`ctx.event.subscribe`). All-permissions: `{"permission":"allow"}` in `opencode.json` in
 //!   that dir (not exercised at runtime; the CLI also has an `--auto` flag). Concern: if the CLI
 //!   attaches to an already-running background service, that server does not see this env var.
@@ -143,12 +145,13 @@ export default {{
 
 /// Resolve the argv/env for launching `provider`, injecting its turn-end hook.
 /// `hook_exe` is the daemon executable (`<exe> hook turn-end`). For OpenCode this writes
-/// the plugin (and permission config) under `{state_dir}/opencode` on every call.
+/// the plugin (and permission config) under `{state_dir}/{project_id}/opencode` on every call.
 pub fn launch_spec(
     provider: &Provider,
     hook_exe: &Path,
     auto_approve: bool,
     state_dir: &Path,
+    project_id: &str,
 ) -> LaunchSpec {
     let exe = hook_exe.to_string_lossy();
     let mut argv = provider.command.clone();
@@ -174,7 +177,7 @@ pub fn launch_spec(
             }
         }
         "opencode" => {
-            let dir = state_dir.join("opencode");
+            let dir = state_dir.join(project_id).join("opencode");
             match write_opencode_config(&dir, &exe, auto_approve) {
                 Ok(()) => env.push((
                     "OPENCODE_CONFIG_DIR".to_string(),
@@ -256,7 +259,7 @@ mod tests {
         }
     }
     fn spec(id: &str, exe: &str, auto: bool, dir: &Path) -> LaunchSpec {
-        launch_spec(&p(id), Path::new(exe), auto, dir)
+        launch_spec(&p(id), Path::new(exe), auto, dir, "p")
     }
 
     #[test]
@@ -307,9 +310,10 @@ mod tests {
     #[test]
     fn opencode_writes_plugin_and_sets_config_env() {
         let dir = tempfile::tempdir().unwrap();
-        let s = spec("opencode", "/x/wb", true, dir.path());
+        let s = launch_spec(&p("opencode"), Path::new("/x/wb"), true, dir.path(), "alpha");
         assert_eq!(s.argv, ["opencode"]);
-        let cfg = dir.path().join("opencode");
+        let cfg = dir.path().join("alpha").join("opencode");
+        assert_ne!(cfg, dir.path().join("opencode"));
         assert_eq!(
             s.env,
             [(
@@ -317,14 +321,22 @@ mod tests {
                 cfg.to_string_lossy().into_owned()
             )]
         );
+        assert!(!s.env.iter().any(|(_, v)| v.contains(".config/opencode")));
         let plugin = std::fs::read_to_string(cfg.join("plugins/workbench.ts")).unwrap();
         assert!(plugin.contains(r#""/x/wb""#) && plugin.contains("turn-end"));
         assert_eq!(
             std::fs::read_to_string(cfg.join("opencode.json")).unwrap(),
             r#"{"permission":"allow"}"#
         );
-        spec("opencode", "/x/wb", false, dir.path());
+        // A second project without auto-approve must not delete the first project's file.
+        let other = launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "beta");
+        let beta = dir.path().join("beta").join("opencode");
+        assert_eq!(other.env[0].1, beta.to_string_lossy().into_owned());
+        assert!(cfg.join("opencode.json").exists());
+        assert!(!beta.join("opencode.json").exists());
+        launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "alpha");
         assert!(!cfg.join("opencode.json").exists());
+        assert!(!dir.path().join("opencode").join("opencode.json").exists());
     }
 
     #[test]
@@ -337,6 +349,7 @@ mod tests {
             Path::new("/x"),
             true,
             Path::new("/nope"),
+            "p",
         );
         assert_eq!(s.argv, ["/bin/a", "-v"]);
         assert!(s.env.is_empty());
@@ -348,7 +361,7 @@ mod tests {
         let f = dir.path().join("agents.json");
         std::fs::write(&f, r#"{"claude":["npx","claude"]}"#).unwrap();
         let provs = load(Some(&f)).unwrap();
-        let s = launch_spec(&provs[0], Path::new("/x"), false, dir.path());
+        let s = launch_spec(&provs[0], Path::new("/x"), false, dir.path(), "p");
         assert_eq!(&s.argv[..3], ["npx", "claude", "--settings"]);
     }
 }

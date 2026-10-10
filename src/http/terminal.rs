@@ -99,7 +99,13 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
         .ok_or_else(|| ApiError::badreq(format!("unknown provider: {}", req.provider)))?;
     let hook_exe = state.config.hook_exe_path();
     let state_dir = state.config.projects_dir.join(STATE_DIR);
-    let launch = providers::launch_spec(provider, &hook_exe, project.auto_approve, &state_dir);
+    let launch = providers::launch_spec(
+        provider,
+        &hook_exe,
+        project.auto_approve,
+        &state_dir,
+        &req.project,
+    );
     state
         .terminals
         .start(&req.project, &req.provider, &project.dir, launch)

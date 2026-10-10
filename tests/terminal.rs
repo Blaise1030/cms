@@ -245,6 +245,70 @@ async fn kill_reaps_process_group() {
     m.kill("nope").await;
 }
 
+/// After the leader is reaped, the waiter must `killpg` the group recorded at spawn.
+/// A HUP-ignoring grandchild stays in that group; `kill` of the reaped pid would leave it
+/// alive (and could hit a recycled pid). A bystander outside the group must survive.
+#[tokio::test]
+async fn leader_exit_signals_recorded_group_only() {
+    let (_lock, m, events) = manager();
+    let mut ev = events.subscribe();
+    let dir = tempfile::tempdir().unwrap();
+    let mut bystander = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .unwrap();
+    let bystander_pid = bystander.id();
+    let kill_bystander = KillPid(bystander_pid);
+
+    m.start(
+        "p1",
+        "fake",
+        dir.path(),
+        launch(&[
+            "sh",
+            "-c",
+            r#"(trap "" HUP; exec sleep 300) & echo $! > child.pid; exit 0"#,
+        ]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(exited_event(&mut ev, "p1").await, 0);
+    assert_eq!(m.status("p1"), None);
+
+    let grand: u32 = std::fs::read_to_string(dir.path().join("child.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut grand_dead = false;
+    while Instant::now() < deadline {
+        let rc = unsafe { libc::kill(grand as libc::pid_t, 0) };
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        if rc == -1 && errno == Some(libc::ESRCH) {
+            grand_dead = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    unsafe { libc::kill(grand as libc::pid_t, libc::SIGKILL) };
+    let bystander_alive = unsafe { libc::kill(bystander_pid as libc::pid_t, 0) } == 0;
+    let _ = bystander.kill();
+    let _ = bystander.wait();
+    drop(kill_bystander);
+    assert!(grand_dead, "grandchild {grand} survived leader exit");
+    assert!(bystander_alive, "bystander {bystander_pid} was signaled");
+}
+
+struct KillPid(u32);
+impl Drop for KillPid {
+    fn drop(&mut self) {
+        if let Ok(pid) = libc::pid_t::try_from(self.0) {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
 #[tokio::test]
 async fn argv_with_spaces_and_quotes_reaches_child() {
     let (_lock, m, _) = manager();
@@ -531,6 +595,44 @@ mod http {
         .await;
         assert_eq!(s, StatusCode::CONFLICT, "{v}");
         assert_eq!(v["error"]["code"], "CHANGE_REQUIRED");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn get_latest_refused_while_terminal_is_live() {
+        let env = http_env(false).await;
+        start_terminal(&env).await;
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/changes/update",
+            Some(json!({ "project": env.project })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        assert_eq!(v["error"]["code"], "CONFLICT");
+        assert_eq!(
+            v["error"]["message"],
+            "A terminal is running — stop it before getting the latest"
+        );
+
+        let (s, v) = call_http(
+            &env,
+            "DELETE",
+            &format!("/api/terminal/{}", env.project),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/changes/update",
+            Some(json!({ "project": env.project })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
         env.server.abort();
     }
 

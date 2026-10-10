@@ -212,6 +212,7 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
+/// `conflict` while that project's terminal is live — git must not run under the CLI.
 pub async fn update(
     State(state): State<AppState>,
     body: Bytes,
@@ -224,6 +225,11 @@ pub async fn update(
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    if state.terminals.status(&req.project).is_some() {
+        return Err(ApiError::conflict(
+            "A terminal is running — stop it before getting the latest",
+        ));
+    }
     // GitHub projects fetch with the signed-in user's credentials (private repos).
     let env = if project.repo.is_some() {
         state.github.git_env().await?

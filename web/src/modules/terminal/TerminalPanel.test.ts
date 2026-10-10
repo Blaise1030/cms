@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { ApiError } from "@/core/api";
@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   term: null as any,
   conn: null as any,
   opts: null as any,
+  connects: 0,
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
@@ -47,6 +48,7 @@ vi.mock("@xterm/addon-fit", () => ({
 vi.mock("./socket", () => ({
   buildTerminalUrl: () => "ws://x",
   connectTerminal: (opts: unknown) => {
+    h.connects += 1;
     h.opts = opts;
     h.conn = { send: vi.fn(), resize: vi.fn(), close: vi.fn() };
     return h.conn;
@@ -89,6 +91,11 @@ async function startRunning() {
 beforeEach(() => {
   localStorage.clear();
   h.term = h.conn = h.opts = null;
+  h.connects = 0;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("TerminalPanel", () => {
@@ -138,5 +145,37 @@ describe("TerminalPanel", () => {
     h.opts.onExit(127);
     await flushPromises();
     expect(w.find("[data-testid='terminal-ended']").text()).toContain("`claude` not found on PATH");
+  });
+
+  it("reconnects when the socket closes without an exit", async () => {
+    await startRunning();
+    vi.useFakeTimers();
+    expect(h.connects).toBe(1);
+    h.opts.onClose();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(h.connects).toBe(2);
+  });
+
+  it("stops reconnecting and shows Restart when terminal.exited arrives", async () => {
+    const w = await startRunning();
+    vi.useFakeTimers();
+    h.opts.onClose();
+    h.daemon.emit({ type: "terminal.exited", projectId: "p", code: 1 });
+    await flushPromises();
+    expect(w.find("[data-testid='terminal-ended']").text()).toContain("Session ended (code 1)");
+    expect(w.find("[data-testid='terminal-restart']").exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.connects).toBe(1);
+  });
+
+  it("ignores terminal.exited for another project and still reconnects", async () => {
+    const w = await startRunning();
+    vi.useFakeTimers();
+    h.opts.onClose();
+    h.daemon.emit({ type: "terminal.exited", projectId: "other", code: 9 });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(w.find("[data-testid='terminal-ended']").exists()).toBe(false);
+    expect(h.connects).toBe(2);
   });
 });

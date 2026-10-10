@@ -73,6 +73,15 @@ test("get latest merges new main into every open change without force-pushing", 
 
   const remoteMain = pushToRemoteMain(workbench);
 
+  // Get latest is refused while this project's terminal session is still live.
+  const stop = await fetch(`${origin}/api/terminal/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!stop.ok) {
+    throw new Error(`stop terminal before get latest failed: ${stop.status} ${await stop.text()}`);
+  }
+
   await page.getByTestId("get-latest").click();
   await expect(page.locator("[data-sonner-toast]")).toContainText("Up to date");
 

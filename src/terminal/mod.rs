@@ -14,8 +14,10 @@
 //!
 //! Terminal modes set by bytes trimmed off the ring's front are tracked ([`modes`]) and
 //! prefixed to the replay. `portable-pty` makes the child a session (and process-group)
-//! leader, so [`TerminalManager::kill`] signals the whole group: `SIGTERM`, then `SIGKILL`
-//! after 2 s.
+//! leader. That process-group id is recorded at spawn. [`TerminalManager::kill`] and the
+//! waiter's post-exit sweep `killpg` only that id (`SIGTERM`, then `SIGKILL` after 2 s on
+//! an explicit kill). They never `kill` the pid: after `wait` it may already belong to
+//! another process.
 
 mod modes;
 
@@ -101,7 +103,8 @@ impl Ring {
 struct Session {
     provider: String,
     token: String,
-    pid: Option<u32>,
+    /// Process-group id captured at spawn, while the leader was still alive.
+    pgid: Option<libc::pid_t>,
     input: mpsc::Sender<Vec<u8>>,
     /// Dropped by the waiter after `child.wait()` so the reader thread unblocks.
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
@@ -206,21 +209,21 @@ impl TerminalManager {
         self.get(project_id).is_some_and(|s| ct_eq(&s.token, token))
     }
 
-    /// `SIGTERM` the child's process group, `SIGKILL` after 2 s, then wait for the reap.
+    /// `SIGTERM` the recorded process group, `SIGKILL` after 2 s, then wait for the reap.
     /// No-op if no terminal is live.
     pub async fn kill(&self, project_id: &str) {
         let Some(session) = self.get(project_id) else {
             return;
         };
         let mut done = session.done.clone();
-        signal_group(session.pid, libc::SIGTERM);
+        signal_group(session.pgid, libc::SIGTERM);
         if tokio::time::timeout(KILL_GRACE, done.wait_for(|d| *d))
             .await
             .is_ok()
         {
             return;
         }
-        signal_group(session.pid, libc::SIGKILL);
+        signal_group(session.pgid, libc::SIGKILL);
         if tokio::time::timeout(KILL_GRACE, done.wait_for(|d| *d))
             .await
             .is_err()
@@ -276,6 +279,9 @@ impl TerminalManager {
             cmd.env(k, v);
         }
         let mut child = pair.slave.spawn_command(cmd)?;
+        // Record the group while the leader is alive. `getpgid` after `wait` fails, and
+        // signaling the pid then can hit whatever process reused it.
+        let pgid = process_group_id(child.process_id());
         // The reader sees EOF only once every slave handle is closed.
         drop(pair.slave);
         drop(spawn_guard);
@@ -300,7 +306,7 @@ impl TerminalManager {
         let session = Arc::new(Session {
             provider: provider.to_string(),
             token,
-            pid: child.process_id(),
+            pgid,
             input,
             master: Mutex::new(Some(pair.master)),
             ring: Mutex::new(Ring {
@@ -331,9 +337,10 @@ impl TerminalManager {
                 Ok(status) if status.signal().is_none() => Some(status.exit_code() as i32),
                 _ => None,
             };
-            // A grandchild can keep the slave open after the session leader exits; signal the
-            // group and drop our master so the reader unblocks before we forget the session.
-            signal_group(s.pid, libc::SIGTERM);
+            // A grandchild can keep the slave open after the session leader exits. Signal the
+            // group recorded at spawn — not the reaped pid — then drop our master so the
+            // reader unblocks before we forget the session.
+            signal_group(s.pgid, libc::SIGTERM);
             drop_master(&s);
             let _ = drained.recv_timeout(DRAIN_WAIT);
             {
@@ -371,18 +378,44 @@ fn no_terminal(project_id: &str) -> ApiError {
     ApiError::enoent(format!("no terminal is running for project {project_id}"))
 }
 
-/// Signal the child's process group. The child is a session leader (`portable-pty` calls
-/// `setsid`), so its pgid is its pid; if that ever stops holding, signal just the child.
-fn signal_group(pid: Option<u32>, signal: libc::c_int) {
-    let Some(pid) = pid.and_then(|p| libc::pid_t::try_from(p).ok()) else {
+/// The child's process-group id, recorded at spawn.
+///
+/// `portable-pty` calls `setsid` in the child after fork, so `getpgid` can still return
+/// our group for a moment. Wait until the child has left it. Never record our own group:
+/// `killpg` of that would signal the daemon. `None` if the child is already gone.
+fn process_group_id(pid: Option<u32>) -> Option<libc::pid_t> {
+    let pid = pid.and_then(|p| libc::pid_t::try_from(p).ok())?;
+    let ours = unsafe { libc::getpgrp() };
+    let deadline = std::time::Instant::now() + Duration::from_millis(50);
+    loop {
+        let pgid = unsafe { libc::getpgid(pid) };
+        if let Some(pgid) = group_target(Some(pgid)) {
+            if pgid != ours {
+                return Some(pgid);
+            }
+        } else {
+            return None;
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// A positive process-group id is the only signal target. `0` would signal our own group;
+/// a failed `getpgid` is `-1`. Never a raw pid.
+fn group_target(pgid: Option<libc::pid_t>) -> Option<libc::pid_t> {
+    pgid.filter(|p| *p > 0)
+}
+
+/// `killpg` the group recorded at spawn. Does not `kill` a pid.
+fn signal_group(pgid: Option<libc::pid_t>, signal: libc::c_int) {
+    let Some(pgid) = group_target(pgid) else {
         return;
     };
     unsafe {
-        if libc::getpgid(pid) == pid {
-            libc::killpg(pid, signal);
-        } else {
-            libc::kill(pid, signal);
-        }
+        libc::killpg(pgid, signal);
     }
 }
 
@@ -434,6 +467,14 @@ fn login_shell() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_target_is_only_a_positive_recorded_pgid() {
+        assert_eq!(group_target(None), None);
+        assert_eq!(group_target(Some(0)), None);
+        assert_eq!(group_target(Some(-1)), None);
+        assert_eq!(group_target(Some(42)), Some(42));
+    }
 
     #[test]
     fn exec_line_quotes_every_argument() {
