@@ -26,6 +26,10 @@ export type GithubStub = {
   pullsPosts: () => PullsPost[];
   /** Force pulls endpoints to return this HTTP status (null = normal). */
   setPullsStatus: (status: number | null) => void;
+  /** `GET /repos/{o}/{r}/branches/main/protection`: 200 when true (default), 404 when false. */
+  setMainProtected: (isProtected: boolean) => void;
+  /** Number of branch-protection lookups the daemon made. */
+  protectionGets: () => number;
   close: () => Promise<void>;
 };
 
@@ -41,6 +45,8 @@ type StoredPr = {
 export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
   let pollCount = 0;
   let pullsStatus: number | null = null;
+  let mainProtected = true;
+  let protectionGetCount = 0;
   const pullsPosts: PullsPost[] = [];
   const prs: StoredPr[] = [];
   let nextPr = 1;
@@ -125,6 +131,27 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       return;
     }
 
+    if (
+      req.method === "GET" &&
+      /^\/repos\/[^/]+\/[^/]+\/branches\/main\/protection$/.test(url.pathname)
+    ) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Bad credentials" }));
+        return;
+      }
+      protectionGetCount += 1;
+      res.writeHead(mainProtected ? 200 : 404, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify(
+          mainProtected
+            ? { required_pull_request_reviews: { required_approving_review_count: 1 } }
+            : { message: "Branch not protected" },
+        ),
+      );
+      return;
+    }
+
     const pullsMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/);
     if (pullsMatch) {
       if (auth !== `Bearer ${STUB_TOKEN}`) {
@@ -199,6 +226,10 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
         setPullsStatus: (status) => {
           pullsStatus = status;
         },
+        setMainProtected: (isProtected) => {
+          mainProtected = isProtected;
+        },
+        protectionGets: () => protectionGetCount,
         close: () =>
           new Promise((done, err) => {
             server.close((e) => (e ? err(e) : done()));
