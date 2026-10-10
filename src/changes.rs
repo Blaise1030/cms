@@ -64,18 +64,29 @@ pub fn branch_name(raw_title: &str) -> Result<String, ApiError> {
     Ok(format!("content/{slug}"))
 }
 
-/// Pick `base`, or `base-2`, `base-3`, … until no local branch exists.
+/// Pick `base`, or `base-2`, `base-3`, … until neither a local branch nor `origin`'s copy of
+/// one has that name (a cleaned-up change keeps its remote branch and its PR).
 pub async fn unique_branch(dir: &Path, base: &str) -> Result<String, ApiError> {
-    if !branch_exists(dir, base).await? {
+    if !name_taken(dir, base).await? {
         return Ok(base.to_string());
     }
     for n in 2..1000 {
         let candidate = format!("{base}-{n}");
-        if !branch_exists(dir, &candidate).await? {
+        if !name_taken(dir, &candidate).await? {
             return Ok(candidate);
         }
     }
     Err(ApiError::conflict("too many branches with this title"))
+}
+
+async fn name_taken(dir: &Path, name: &str) -> Result<bool, ApiError> {
+    Ok(branch_exists(dir, name).await?
+        || run(
+            dir,
+            &["rev-parse", "--verify", "--quiet", &format!("refs/remotes/origin/{name}")],
+        )
+        .await
+        .is_ok())
 }
 
 async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
@@ -277,46 +288,140 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     })
 }
 
-/// Clean up a merged change: bring local `main` up to date, check it out, then delete the
-/// local `branch` (the remote branch is left alone).
-///
-/// `branch` counts as merged when `pr_merged` (its pull request says so, which covers squash
-/// merges) or when its tip is already in the latest `main`. Anything else is refused, and
-/// nothing is deleted unless `main` fast-forwarded first.
-pub async fn cleanup(
-    dir: &Path,
-    branch: &str,
-    pr_merged: bool,
-    env: &[(String, String)],
-) -> Result<(), ApiError> {
+/// What GitHub says about a change's pull request, for [`cleanup`].
+#[derive(Debug)]
+pub enum PrMerge {
+    /// The PR is merged; `head_sha` is the commit it merged.
+    Merged { head_sha: String },
+    /// No PR, or one that isn't merged.
+    NotMerged,
+    /// GitHub couldn't be asked; the error is returned if git alone can't decide.
+    Unknown(ApiError),
+}
+
+/// Result of a [`cleanup`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cleaned {
+    /// `false` when `origin` couldn't be reached, so `main` is as it was locally (always
+    /// `true` for a local-only project, whose `main` is already the latest).
+    pub main_updated: bool,
+}
+
+/// The cheap local checks of [`cleanup`]: a `content/*` branch that exists, and a clean tree.
+pub async fn check_cleanup(dir: &Path, branch: &str) -> Result<(), ApiError> {
     if !branch.starts_with("content/") {
         return Err(ApiError::badreq("branch must be a content/* change"));
     }
     if !branch_exists(dir, branch).await? {
         return Err(ApiError::enoent(format!("no such change: {branch}")));
     }
-    ensure_clean(dir, "cleaning up").await?;
-    let latest = if has_remote(dir, "origin").await? {
-        run_env(dir, &["fetch", "origin", "main"], env).await?;
-        "origin/main"
-    } else {
-        "main"
-    };
-    let in_main = run(dir, &["merge-base", "--is-ancestor", branch, latest])
+    ensure_clean(dir, "cleaning up").await
+}
+
+/// Whether a pull request whose head is `head_sha` is about `branch`'s work: the head is the
+/// branch tip or one of its ancestors. A PR for an earlier change that had the same name is not.
+pub async fn pr_matches(dir: &Path, branch: &str, head_sha: &str) -> bool {
+    !head_sha.is_empty()
+        && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
+}
+
+async fn is_ancestor(dir: &Path, commit: &str, of: &str) -> bool {
+    run(dir, &["merge-base", "--is-ancestor", commit, of])
         .await
-        .is_ok();
-    if !pr_merged && !in_main {
+        .is_ok()
+}
+
+/// Clean up a merged change: bring local `main` up to date, check it out, then delete the
+/// local `branch` (the remote branch is left alone).
+///
+/// The branch counts as merged when its tip is exactly the head its merged PR merged (covers
+/// squash merges), or when it has commits of its own and the latest `main` contains them.
+/// Anything else is refused — including edits checkpointed after the merge — and nothing is
+/// deleted unless `main` fast-forwarded first. If `origin` can't be reached, cleanup still
+/// goes ahead when the PR proves the merge, leaving `main` as it was ([`Cleaned::main_updated`]).
+pub async fn cleanup(
+    dir: &Path,
+    branch: &str,
+    pr: PrMerge,
+    env: &[(String, String)],
+) -> Result<Cleaned, ApiError> {
+    check_cleanup(dir, branch).await?;
+    let tip = run(dir, &["rev-parse", &format!("refs/heads/{branch}")])
+        .await?
+        .trim()
+        .to_string();
+    let merged_head = match &pr {
+        PrMerge::Merged { head_sha } => Some(head_sha.as_str()),
+        _ => None,
+    };
+    let merged_by_pr = merged_head == Some(tip.as_str());
+
+    let remote = has_remote(dir, "origin").await?;
+    let fetched = if remote {
+        match run_env(dir, &["fetch", "origin", "main"], env).await {
+            Ok(_) => true,
+            Err(_) if merged_by_pr => false,
+            Err(e) => {
+                return Err(ApiError::new(
+                    e.code,
+                    format!("Couldn't get the latest main to check this change: {}", e.message),
+                ))
+            }
+        }
+    } else {
+        false
+    };
+    let latest = if fetched { "origin/main" } else { "main" };
+
+    if !merged_by_pr && !merged_into(dir, &tip, latest).await? {
+        return Err(match pr {
+            PrMerge::Unknown(e) => e,
+            PrMerge::Merged { head_sha } if pr_matches(dir, branch, &head_sha).await => {
+                ApiError::conflict(
+                    "This change has edits made after its pull request was merged — \
+                     share them before cleaning up",
+                )
+            }
+            _ => ApiError::conflict(
+                "This change has not been merged yet — merge its pull request first",
+            ),
+        });
+    }
+
+    // Make sure main can fast-forward before touching the working tree.
+    if fetched && !is_ancestor(dir, "refs/heads/main", latest).await {
         return Err(ApiError::conflict(
-            "This change has not been merged yet — merge its pull request first",
+            "Local main has commits that aren't on GitHub, so it can't be updated",
         ));
     }
+    let original = run(dir, &["branch", "--show-current"])
+        .await?
+        .trim()
+        .to_string();
     run(dir, &["checkout", "main"]).await?;
-    if latest != "main" {
-        run(dir, &["merge", "--ff-only", latest]).await?;
+    if fetched {
+        if let Err(e) = run(dir, &["merge", "--ff-only", latest]).await {
+            if !original.is_empty() && original != "main" {
+                let _ = run(dir, &["checkout", &original]).await;
+            }
+            return Err(e);
+        }
     }
     // `-D`: a squash-merged tip is never an ancestor of `main`.
     run(dir, &["branch", "-D", branch]).await?;
-    Ok(())
+    Ok(Cleaned {
+        main_updated: fetched || !remote,
+    })
+}
+
+/// `tip` is in `main_ref` and is not on its first-parent line — i.e. the branch had commits of
+/// its own that were merged, rather than being a branch that never moved off `main`.
+async fn merged_into(dir: &Path, tip: &str, main_ref: &str) -> Result<bool, ApiError> {
+    if !is_ancestor(dir, tip, main_ref).await {
+        return Ok(false);
+    }
+    let line = run(dir, &["rev-list", "--first-parent", main_ref]).await?;
+    Ok(!line.lines().any(|c| c.trim() == tip))
 }
 
 async fn branch_title(dir: &Path, branch: &str) -> String {
