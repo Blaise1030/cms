@@ -102,11 +102,33 @@ export interface PrStatus {
   previewUrl: string | null;
 }
 
+/** Shown after sharing when the repo's `main` has no branch protection. */
+export interface ProtectionHint {
+  /** The repo's branch protection settings page on GitHub. */
+  settingsUrl: string;
+  /** The branch protection guide, served by the daemon. */
+  docsUrl: string;
+}
+
+/** Result of `POST /api/changes/update` (Get latest). */
+export interface ChangesUpdate {
+  /** Local `main` moved forward from GitHub. */
+  mainUpdated: boolean;
+  /** Local `main` has commits not on GitHub; it was left as is. */
+  mainDiverged: boolean;
+  /** Changes that now include latest `main`. */
+  updated: Change[];
+  /** Changes whose merge conflicts; left untouched. */
+  conflicts: Change[];
+}
+
 /** Result of `POST /api/changes/{branch}/share`. */
 export interface SharedChange {
   branch: string;
   title: string;
   prUrl: string;
+  /** Null when `main` is protected, unknown (no admin rights) or the hint was dismissed. */
+  protectionHint?: ProtectionHint | null;
 }
 
 export interface TreeEntry {

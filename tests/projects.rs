@@ -682,3 +682,58 @@ async fn failed_clone_leaves_nothing_behind() {
     let info = state.projects.create("site").await.unwrap();
     assert_eq!(info.id, "site");
 }
+
+#[tokio::test]
+async fn protection_hint_dismissal_is_persisted_per_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = AppState::with_scaffold_install(config(tmp.path(), true), false);
+    let first = http::router(state.clone());
+    let a = create(&first, "Site A").await;
+    let b = create(&first, "Site B").await;
+    let (a, b) = (a["id"].as_str().unwrap(), b["id"].as_str().unwrap());
+    assert!(!state.projects.protection_hint_dismissed(a).await);
+
+    let (status, body) = call(
+        &first,
+        req(
+            "POST",
+            &format!("/api/projects/{a}/protection-hint/dismiss"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "dismissed": true }));
+    assert!(state.projects.protection_hint_dismissed(a).await);
+    assert!(!state.projects.protection_hint_dismissed(b).await);
+    drop(first);
+    drop(state);
+
+    let restarted = AppState::with_scaffold_install(config(tmp.path(), true), false);
+    assert!(restarted.projects.protection_hint_dismissed(a).await);
+    assert!(!restarted.projects.protection_hint_dismissed(b).await);
+
+    let (status, _) = call(
+        &http::router(restarted),
+        req("POST", "/api/projects/nope/protection-hint/dismiss", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn branch_protection_doc_ships_with_the_daemon() {
+    let tmp = tempfile::tempdir().unwrap();
+    let res = app(tmp.path())
+        .oneshot(req("GET", "/api/docs/branch-protection", None))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()[header::CONTENT_TYPE],
+        "text/plain; charset=utf-8"
+    );
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.starts_with("# Protect `main` so merges need review"), "{text}");
+}

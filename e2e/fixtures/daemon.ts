@@ -22,6 +22,11 @@ export type WorkbenchEnv = {
     pullsPosts: () => import("./githubStub").PullsPost[];
     setPullsStatus: (status: number | null) => void;
     setPrStatus: (patch: import("./githubStub").PrStatusPatch) => void;
+    /** Stub base URL (also the daemon's GitHub web URL). */
+    baseUrl: string;
+    setMainProtected: (isProtected: boolean) => void;
+    protectionGets: () => number;
+    setMainRulesetRequiresPr: (requiresPr: boolean) => void;
     readyForReviewCalls: () => string[];
     setGraphqlStatus: (status: number | null) => void;
   };
@@ -225,6 +230,10 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
       pullsPosts: () => stub.pullsPosts(),
       setPullsStatus: (status) => stub.setPullsStatus(status),
       setPrStatus: (patch) => stub.setPrStatus(patch),
+      baseUrl: stub.baseUrl,
+      setMainProtected: (isProtected) => stub.setMainProtected(isProtected),
+      protectionGets: () => stub.protectionGets(),
+      setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
       readyForReviewCalls: () => stub.readyForReviewCalls(),
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
     },

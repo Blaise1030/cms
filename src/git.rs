@@ -60,7 +60,7 @@ pub struct Checkpoint {
     pub ts: i64,
 }
 
-fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
+pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
     let mut map = LOCKS
         .get_or_init(Default::default)

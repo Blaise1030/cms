@@ -17,6 +17,11 @@ function setup(api: Record<string, unknown> = {}) {
   return useChangesStore();
 }
 
+const HINT = {
+  settingsUrl: "https://github.com/acme/site/settings/branches",
+  docsUrl: "/api/docs/branch-protection",
+};
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -344,6 +349,148 @@ describe("changes store", () => {
       expect(changeStatus).toHaveBeenCalledTimes(1);
       expect(store.status).toBeNull();
     });
+  });
+  it("share exposes the protection hint for an unprotected main", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => ({
+        branch: "content/x",
+        title: "X",
+        prUrl: "https://github.com/acme/site/pull/1",
+        protectionHint: {
+          settingsUrl: "https://github.com/acme/site/settings/branches",
+          docsUrl: "/api/docs/branch-protection",
+        },
+      })),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await store.share("site", "content/x");
+    expect(store.protectionHint).toEqual({
+      settingsUrl: "https://github.com/acme/site/settings/branches",
+      docsUrl: "/api/docs/branch-protection",
+    });
+  });
+
+  it("share without a hint (protected / unknown) leaves it hidden", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => ({
+        branch: "content/x",
+        title: "X",
+        prUrl: "https://github.com/acme/site/pull/1",
+        protectionHint: null,
+      })),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await store.share("site", "content/x");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("dismissing the protection hint persists it for that project", async () => {
+    const dismissProtectionHint = vi.fn(async () => ({ dismissed: true }));
+    const store = setup({ dismissProtectionHint });
+    store.protectionHint = HINT;
+    await store.dismissProtectionHint("site");
+    expect(dismissProtectionHint).toHaveBeenCalledWith("site");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("switching project clears a shown protection hint", async () => {
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/y", title: "Y" })),
+    });
+    store.projectId = "site";
+    store.protectionHint = HINT;
+    await store.load("other");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("a failed dismissal keeps the protection hint", async () => {
+    const store = setup({
+      dismissProtectionHint: vi.fn(async () => {
+        throw new ApiError("IO", "disk full", 500);
+      }),
+    });
+    store.protectionHint = HINT;
+    await expect(store.dismissProtectionHint("site")).rejects.toBeInstanceOf(ApiError);
+    expect(store.protectionHint).toEqual(HINT);
+  });
+
+  it("create and switch clear a shown protection hint", async () => {
+    const store = setup({
+      createChange: vi.fn(async () => ({ branch: "content/x", title: "X" })),
+      switchChange: vi.fn(async () => ({ branch: "content/y", title: "Y" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    store.protectionHint = HINT;
+    await store.create("site", "X");
+    expect(store.protectionHint).toBeNull();
+    store.protectionHint = HINT;
+    await store.switchTo("site", "content/y");
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("a new share hides the previous hint, and a failed share leaves it hidden", async () => {
+    let fail!: (e: unknown) => void;
+    const store = setup({
+      shareChange: vi.fn(
+        () =>
+          new Promise((_, reject) => {
+            fail = reject;
+          }),
+      ),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    store.protectionHint = HINT;
+    const sharing = store.share("site", "content/x");
+    expect(store.protectionHint).toBeNull();
+    fail(new ApiError("SANDBOX", "You don't have push access", 403));
+    await expect(sharing).rejects.toBeInstanceOf(ApiError);
+    expect(store.protectionHint).toBeNull();
+  });
+
+  it("getLatest updates changes, refreshes files, preview, list and active", async () => {
+    const result = {
+      mainUpdated: true,
+      mainDiverged: false,
+      updated: [
+        { branch: "content/a", title: "A" },
+        { branch: "content/b", title: "B" },
+      ],
+      conflicts: [],
+    };
+    const updateChanges = vi.fn(async () => result);
+    const listChanges = vi.fn(async () => [{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
+    const store = setup({
+      updateChanges,
+      listChanges,
+      activeChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await expect(store.getLatest("site")).resolves.toEqual(result);
+    expect(updateChanges).toHaveBeenCalledWith("site");
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+    expect(listChanges).toHaveBeenCalledWith("site");
+    expect(activeChange).toHaveBeenCalledWith("site");
+    expect(store.items).toEqual([{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    expect(store.active).toEqual({ branch: "content/a", title: "A" });
+    expect(store.updating).toBe(false);
+  });
+
+  it("getLatest surfaces errors (e.g. uncommitted changes)", async () => {
+    const store = setup({
+      updateChanges: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "Uncommitted changes — checkpoint first", 409);
+      }),
+    });
+    await expect(store.getLatest("site")).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toMatch(/checkpoint/i);
+    expect(store.updating).toBe(false);
   });
 });
 

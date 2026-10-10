@@ -1134,6 +1134,13 @@ impl AgentManager {
             .clone()
     }
 
+    /// Whether an agent turn is running for the project, including its settle and checkpoint.
+    pub fn turn_in_progress(&self, project_id: &str) -> bool {
+        self.live_session(project_id).is_some_and(|s| {
+            s.awaiting.load(Ordering::SeqCst) || s.turn_lock.try_lock().is_err()
+        })
+    }
+
     fn live_session(&self, project_id: &str) -> Option<Arc<Session>> {
         lock(&self.live).get(project_id).cloned()
     }

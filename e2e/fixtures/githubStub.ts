@@ -45,6 +45,12 @@ export type GithubStub = {
   setPullsStatus: (status: number | null) => void;
   /** Change PR state / checks / reviews / deployment served by the status endpoints. */
   setPrStatus: (patch: PrStatusPatch) => void;
+  /** `GET /repos/{o}/{r}/branches/main/protection`: 200 when true (default), 404 when false. */
+  setMainProtected: (isProtected: boolean) => void;
+  /** Number of branch-protection lookups the daemon made. */
+  protectionGets: () => number;
+  /** `GET /repos/{o}/{r}/rules/branches/main`: a `pull_request` rule when true, else `[]`. */
+  setMainRulesetRequiresPr: (requiresPr: boolean) => void;
   /** PR node ids of every GraphQL `markPullRequestReadyForReview` mutation received. */
   readyForReviewCalls: () => string[];
   /** Force `POST /graphql` to return this HTTP status (null = normal). */
@@ -60,13 +66,13 @@ type StoredPr = {
   draft: boolean;
 };
 
+/** GraphQL node id GitHub would give PR `number`. */
+const nodeId = (number: number) => `PR_kwStub${number}`;
+
 export type GithubStubOptions = {
   /** Real head commit of a PR's branch (e.g. read from the bare remote); null = unknown. */
   headSha?: (ref: string) => string | null;
 };
-
-/** GraphQL node id GitHub would give PR `number`. */
-const nodeId = (number: number) => `PR_kwStub${number}`;
 
 /** Minimal GitHub API stub: device flow + `/user` + repos + draft pulls + GraphQL
  *  `markPullRequestReadyForReview`. */
@@ -76,6 +82,9 @@ export function startGithubStub(
 ): Promise<GithubStub> {
   let pollCount = 0;
   let pullsStatus: number | null = null;
+  let mainProtected = true;
+  let protectionGetCount = 0;
+  let rulesetRequiresPr = false;
   let graphqlStatus: number | null = null;
   const readyCalls: string[] = [];
   const pullsPosts: PullsPost[] = [];
@@ -183,6 +192,42 @@ export function startGithubStub(
             permissions: { push: true },
           },
         ]),
+      );
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      /^\/repos\/[^/]+\/[^/]+\/branches\/main\/protection$/.test(url.pathname)
+    ) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Bad credentials" }));
+        return;
+      }
+      protectionGetCount += 1;
+      res.writeHead(mainProtected ? 200 : 404, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify(
+          mainProtected
+            ? { required_pull_request_reviews: { required_approving_review_count: 1 } }
+            : { message: "Branch not protected" },
+        ),
+      );
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      /^\/repos\/[^/]+\/[^/]+\/rules\/branches\/main$/.test(url.pathname)
+    ) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify(
+          rulesetRequiresPr
+            ? [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }]
+            : [],
+        ),
       );
       return;
     }
@@ -349,6 +394,13 @@ export function startGithubStub(
         },
         setPrStatus: (patch) => {
           Object.assign(status, patch);
+        },
+        setMainProtected: (isProtected) => {
+          mainProtected = isProtected;
+        },
+        protectionGets: () => protectionGetCount,
+        setMainRulesetRequiresPr: (requiresPr) => {
+          rulesetRequiresPr = requiresPr;
         },
         readyForReviewCalls: () => readyCalls.slice(),
         setGraphqlStatus: (code) => {

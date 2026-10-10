@@ -41,6 +41,10 @@ pub fn router(state: AppState) -> Router {
             delete(projects::remove).patch(projects::update),
         )
         .route(
+            "/api/projects/{id}/protection-hint/dismiss",
+            post(projects::dismiss_protection_hint),
+        )
+        .route(
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
         )
@@ -69,9 +73,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
+        .route("/api/changes/update", post(changes::update))
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
+        .route("/api/docs/branch-protection", get(changes::branch_protection_doc))
         .route("/api/changes/{branch}/cleanup", post(changes::cleanup))
         .route("/api/changes/{branch}/ready", post(changes::ready))
         .route("/api/tree", get(files::tree))

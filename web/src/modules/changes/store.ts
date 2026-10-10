@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change, PrStatus } from "@/core/types";
+import type { Change, ChangesUpdate, PrStatus, ProtectionHint } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -17,10 +17,13 @@ export const useChangesStore = defineStore("changes", () => {
   const active = ref<Change | null>(null);
   const items = ref<Change[]>([]);
   const prUrl = ref<string | null>(null);
+  /** "Protect main" hint from the last share; null when hidden. */
+  const protectionHint = ref<ProtectionHint | null>(null);
   const creating = ref(false);
   const sharing = ref(false);
   const markingReady = ref(false);
   const switching = ref(false);
+  const updating = ref(false);
   const cleaningUp = ref(false);
   const listing = ref(false);
   const loading = ref(false);
@@ -77,6 +80,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = null;
       prUrl.value = null;
       status.value = null;
+      protectionHint.value = null;
       items.value = [];
       error.value = null;
       needsSignIn.value = false;
@@ -134,6 +138,7 @@ export const useChangesStore = defineStore("changes", () => {
       prUrl.value = null;
       status.value = null;
       stopStatusPolling();
+      protectionHint.value = null;
       await refreshTreeAndPreview();
       return change;
     } catch (e) {
@@ -155,6 +160,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = change.prUrl ?? null;
       status.value = null;
+      protectionHint.value = null;
       await refreshTreeAndPreview();
       await refreshStatus();
       return change;
@@ -163,6 +169,24 @@ export const useChangesStore = defineStore("changes", () => {
       throw e;
     } finally {
       switching.value = false;
+    }
+  }
+
+  /** Get latest: pull `main` and merge it into every open change, then refresh every view. */
+  async function getLatest(id: string): Promise<ChangesUpdate> {
+    updating.value = true;
+    error.value = null;
+    try {
+      const result = await daemon.api.updateChanges(id);
+      await refreshTreeAndPreview();
+      // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
+      await Promise.all([load(id), list(id).catch(() => undefined)]);
+      return result;
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    } finally {
+      updating.value = false;
     }
   }
 
@@ -201,10 +225,12 @@ export const useChangesStore = defineStore("changes", () => {
     sharing.value = true;
     error.value = null;
     needsSignIn.value = false;
+    protectionHint.value = null;
     try {
       const result = await daemon.api.shareChange(id, branch);
       projectId.value = id;
       prUrl.value = result.prUrl;
+      protectionHint.value = result.protectionHint ?? null;
       if (active.value?.branch === branch) {
         active.value = { ...active.value, title: result.title, prUrl: result.prUrl };
         await refreshStatus();
@@ -224,6 +250,12 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       sharing.value = false;
     }
+  }
+
+  /** Hide the "protect main" hint for this project from now on (persisted by the daemon). */
+  async function dismissProtectionHint(id: string) {
+    await daemon.api.dismissProtectionHint(id);
+    protectionHint.value = null;
   }
 
   /**
@@ -262,10 +294,12 @@ export const useChangesStore = defineStore("changes", () => {
     active,
     items,
     prUrl,
+    protectionHint,
     creating,
     sharing,
     markingReady,
     switching,
+    updating,
     cleaningUp,
     listing,
     loading,
@@ -276,10 +310,12 @@ export const useChangesStore = defineStore("changes", () => {
     list,
     create,
     switchTo,
+    getLatest,
     share,
     cleanup,
     markReady,
     refreshStatus,
     stopStatusPolling,
+    dismissProtectionHint,
   };
 });

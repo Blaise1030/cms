@@ -2,6 +2,7 @@ import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
   type Change,
+  type ChangesUpdate,
   type SharedChange,
   type PrStatus,
   type Checkpoint,
@@ -151,6 +152,8 @@ export function createApi(
     githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),
     githubRepos: async (): Promise<GithubRepo[]> =>
       (await json<{ repos: GithubRepo[] }>("GET", "/api/github/repos")).repos,
+    dismissProtectionHint: (id: string) =>
+      json<{ dismissed: true }>("POST", `/api/projects/${enc(id)}/protection-hint/dismiss`),
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
@@ -185,6 +188,8 @@ export function createApi(
       json<Change>("GET", "/api/changes/active", { query: { project } }),
     switchChange: (project: string, branch: string) =>
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    updateChanges: (project: string) =>
+      json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },

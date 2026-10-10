@@ -1,12 +1,13 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/cleanup`,
-//! `POST /api/changes/{branch}/ready`.
+//! `GET /api/changes/{branch}/status`, `GET /api/docs/branch-protection`, `POST /api/changes/update`,
+//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -14,7 +15,7 @@ use serde_json::{json, Value};
 use super::{project_dir, query_or_badreq};
 use crate::changes::{self, PrMerge};
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title, PrRef, PrState};
+use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -130,8 +131,38 @@ struct ShareRequest {
     project: String,
 }
 
-/// `POST /api/changes/{branch}/share` `{ project }` → `{ branch, title, prUrl }`.
+/// Where the daemon serves `docs/branch-protection.md` (bundled into the binary).
+pub const PROTECTION_DOCS_PATH: &str = "/api/docs/branch-protection";
+
+/// `GET /api/docs/branch-protection` → the branch protection guide as plain text.
+pub async fn branch_protection_doc() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        include_str!("../../docs/branch-protection.md"),
+    )
+}
+
+/// The "protect main" hint for a share response: `{ settingsUrl, docsUrl }` only when
+/// `main` is known to be unprotected and the hint is not dismissed for `project`, else null.
+/// The dismissal is read now (not from a snapshot taken before the push); once dismissed,
+/// GitHub is not asked at all.
+async fn protection_hint_for(state: &AppState, project: &str, repo: &str) -> Value {
+    if state.projects.protection_hint_dismissed(project).await {
+        return Value::Null;
+    }
+    match state.github.main_protection(repo).await {
+        BranchProtection::Unprotected => json!({
+            "settingsUrl": state.github.branch_settings_url(repo),
+            "docsUrl": PROTECTION_DOCS_PATH,
+        }),
+        BranchProtection::Protected | BranchProtection::Unknown => Value::Null,
+    }
+}
+
+/// `POST /api/changes/{branch}/share` `{ project }` → `{ branch, title, prUrl, protectionHint }`.
 /// Pushes the branch and opens (or reuses) a draft PR titled after the change.
+/// `protectionHint` is `{ settingsUrl, docsUrl }` when `main` is unprotected (see
+/// `docs/branch-protection.md`), else null.
 pub async fn share(
     State(state): State<AppState>,
     Path(branch): Path<String>,
@@ -167,11 +198,51 @@ pub async fn share(
         }
     };
 
+    let hint = protection_hint_for(&state, &req.project, &repo).await;
+
     Ok(Json(json!({
         "branch": change.branch,
         "title": change.title,
         "prUrl": pr.html_url,
+        "protectionHint": hint,
     })))
+}
+
+#[derive(Deserialize)]
+struct UpdateRequest {
+    project: String,
+}
+
+/// `POST /api/changes/update` `{ project }` →
+/// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
+/// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
+/// Refused (409) while an agent turn is editing the project.
+pub async fn update(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<changes::Update>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    if state.agents.turn_in_progress(&req.project) {
+        return Err(ApiError::conflict(
+            "The agent is still working — wait for it to finish, then get the latest",
+        ));
+    }
+    // GitHub projects fetch with the signed-in user's credentials (private repos).
+    let env = if project.repo.is_some() {
+        state.github.git_env().await?
+    } else {
+        Vec::new()
+    };
+    Ok(Json(changes::get_latest(&project.dir, &env).await?))
 }
 
 /// `POST /api/changes/{branch}/cleanup` `{ project }` → `{ branch: "main", mainUpdated }`.
@@ -275,4 +346,98 @@ pub async fn ready(
     })?;
     let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
     Ok(Json(json!({ "pr": pr })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use crate::config::{Config, GithubConfig};
+
+    /// State signed in to a mock GitHub whose `main` is unprotected; counts lookups.
+    async fn state_with_unprotected_main(dir: &std::path::Path) -> (AppState, Arc<AtomicUsize>) {
+        use axum::routing::get;
+        use axum::Router;
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/branches/main/protection",
+                get(move || {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    async {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(json!({ "message": "Branch not protected" })),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/rules/branches/main",
+                get(|| async { Json(json!([])) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, routes).await.ok() });
+
+        let state_dir = dir.join(crate::projects::STATE_DIR);
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(
+            state_dir.join("github.json"),
+            json!({
+                "token": "tok",
+                "user": { "login": "ada", "id": 42, "name": null, "avatarUrl": "" }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = Config {
+            projects_dir: dir.to_path_buf(),
+            no_auth: true,
+            github: GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: std::path::PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            ..Default::default()
+        };
+        (AppState::with_scaffold_install(config, false), hits)
+    }
+
+    #[tokio::test]
+    async fn protection_hint_links_settings_and_the_bundled_docs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, hits) = state_with_unprotected_main(tmp.path()).await;
+        let p = state.projects.create("Site").await.unwrap();
+
+        let hint = protection_hint_for(&state, &p.id, "acme/site").await;
+        let base = state.config.github.web_url.clone();
+        assert_eq!(
+            hint,
+            json!({
+                "settingsUrl": format!("{base}/acme/site/settings/branches"),
+                "docsUrl": PROTECTION_DOCS_PATH,
+            })
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn protection_hint_reads_the_dismissal_at_lookup_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, hits) = state_with_unprotected_main(tmp.path()).await;
+        let p = state.projects.create("Site").await.unwrap();
+        // Dismissed after the share started (e.g. during the push): no hint, no lookup.
+        let snapshot = state.projects.get(&p.id).await.unwrap();
+        assert!(!snapshot.protection_hint_dismissed);
+        state.projects.dismiss_protection_hint(&p.id).await.unwrap();
+
+        assert_eq!(protection_hint_for(&state, &p.id, "acme/site").await, Value::Null);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
 }

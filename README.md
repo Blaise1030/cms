@@ -9,6 +9,9 @@
 - Node.js with `npm` and `pnpm`
 - GitHub CLI (`gh`), the easiest way to sign in to GitHub; see [docs/github-setup.md](docs/github-setup.md)
 
+Before sharing previews, protect `main` so merges need review; see
+[docs/branch-protection.md](docs/branch-protection.md).
+
 ### Run in dev mode
 
 ```sh
