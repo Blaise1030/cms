@@ -401,4 +401,41 @@ describe("changes store cleanup", () => {
     expect(store.cleaningUp).toBe(false);
     store.stopStatusPolling();
   });
+  it("stops status polling before the request and resumes it if cleanup fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const changeStatus = vi.fn(async () => merged);
+      let refuse!: (e: unknown) => void;
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus,
+        cleanupChange: vi.fn(
+          () =>
+            new Promise((_, reject) => {
+              refuse = reject;
+            }),
+        ),
+      });
+      await store.load("site");
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      const cleaning = store.cleanup("site", "content/lw");
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS * 2);
+      expect(changeStatus).toHaveBeenCalledTimes(1);
+      refuse(new ApiError("CONFLICT", "not merged", 409));
+      await expect(cleaning).rejects.toThrow();
+      expect(changeStatus).toHaveBeenCalledTimes(2);
+      store.stopStatusPolling();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns whether main was updated", async () => {
+    const store = setup({
+      cleanupChange: vi.fn(async () => ({ branch: "main", mainUpdated: false })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    await expect(store.cleanup("site", "content/lw")).resolves.toEqual({ mainUpdated: false });
+  });
 });

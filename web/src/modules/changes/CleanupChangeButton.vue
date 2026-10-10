@@ -15,7 +15,10 @@ async function onCleanup() {
   const branch = store.active?.branch;
   if (!branch) return;
   try {
-    await store.cleanup(props.projectId, branch);
+    const { mainUpdated } = await store.cleanup(props.projectId, branch);
+    if (!mainUpdated) {
+      toast.warning("Cleaned up, but main couldn't be updated from GitHub — it may be out of date");
+    }
   } catch (e) {
     toast.error(errorMessage(e));
   }

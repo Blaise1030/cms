@@ -191,7 +191,7 @@ export function createApi(
       }),
     /** Delete a merged change's local branch and return to an up-to-date `main`. */
     cleanupChange: (project: string, branch: string) =>
-      json<{ branch: string }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
+      json<{ branch: string; mainUpdated?: boolean }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
         body: { project },
       }),
     /** PR state / checks / preview URL of a change; null when it has no PR. */

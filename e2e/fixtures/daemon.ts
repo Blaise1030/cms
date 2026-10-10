@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -137,7 +137,19 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   const gitRoot = path.join(tmp, "git");
   fs.mkdirSync(projectsDir, { recursive: true });
   const bareRemote = createBareRemote(gitRoot);
-  const stub = await startGithubStub();
+  // PRs report the branch's real tip in the bare remote, as GitHub does.
+  const stub = await startGithubStub("cid", {
+    headSha: (ref) => {
+      try {
+        return execFileSync("git", ["rev-parse", "--verify", "-q", `refs/heads/${ref}`], {
+          cwd: bareRemote,
+          encoding: "utf8",
+        }).trim();
+      } catch {
+        return null;
+      }
+    },
+  });
   const gitUrl = fileGitUrl(gitRoot);
 
   const root = repoRoot();

@@ -111,4 +111,29 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+  it("reports the branch's real head SHA when headSha resolves it", async () => {
+    const real = "a".repeat(40);
+    const stub = await startGithubStub("cid", {
+      headSha: (ref) => (ref === "content/t" ? real : null),
+    });
+    const get = async (p: string) =>
+      (await fetch(`${stub.baseUrl}${p}`, { headers: { Authorization: `Bearer ${STUB_TOKEN}` } })).json();
+    try {
+      await fetch(`${stub.baseUrl}/repos/acme/site/pulls`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "T", head: "content/t", base: "main", draft: true }),
+      });
+      const prs = (await get("/repos/acme/site/pulls?head=acme:content/t&state=all")) as {
+        head: { sha: string };
+      }[];
+      expect(prs[0]!.head.sha).toBe(real);
+      stub.setPrStatus({ checkRuns: [{ status: "completed", conclusion: "success" }] });
+      expect(await get(`/repos/acme/site/commits/${real}/check-runs`)).toMatchObject({
+        total_count: 1,
+      });
+    } finally {
+      await stub.close();
+    }
+  });
 });

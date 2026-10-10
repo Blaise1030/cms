@@ -6,8 +6,8 @@ import type { PrStatus } from "@/core/types";
 import CleanupChangeButton from "./CleanupChangeButton.vue";
 import { useChangesStore } from "./store";
 
-const h = vi.hoisted(() => ({ toastError: vi.fn() }));
-vi.mock("vue-sonner", () => ({ toast: { error: h.toastError } }));
+const h = vi.hoisted(() => ({ toastError: vi.fn(), toastWarning: vi.fn() }));
+vi.mock("vue-sonner", () => ({ toast: { error: h.toastError, warning: h.toastWarning } }));
 
 const merged: PrStatus = {
   number: 1,
@@ -39,7 +39,7 @@ describe("CleanupChangeButton", () => {
 
   it("cleans up the active change on click", async () => {
     const { store, wrapper } = mountWith(merged);
-    const cleanup = vi.spyOn(store, "cleanup").mockResolvedValue();
+    const cleanup = vi.spyOn(store, "cleanup").mockResolvedValue({ mainUpdated: true });
     await wrapper.get('[data-testid="cleanup-change"]').trigger("click");
     expect(cleanup).toHaveBeenCalledWith("site", "content/lw");
   });
@@ -50,5 +50,12 @@ describe("CleanupChangeButton", () => {
     await wrapper.get('[data-testid="cleanup-change"]').trigger("click");
     await flushPromises();
     expect(h.toastError).toHaveBeenCalledWith("not merged yet");
+  });
+  it("warns when main couldn't be updated", async () => {
+    const { store, wrapper } = mountWith(merged);
+    vi.spyOn(store, "cleanup").mockResolvedValue({ mainUpdated: false });
+    await wrapper.get('[data-testid="cleanup-change"]').trigger("click");
+    await flushPromises();
+    expect(h.toastWarning).toHaveBeenCalledWith(expect.stringContaining("main"));
   });
 });
