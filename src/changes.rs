@@ -85,20 +85,23 @@ async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
         .is_ok())
 }
 
-/// Fetch `origin/main`, create a unique `content/<slug>` branch from it, check it out,
-/// and store `title` in the branch description.
+/// Fetch `origin/main` when a remote exists, create a unique `content/<slug>` branch
+/// from latest main, check it out, and store `title` in the branch description.
+///
+/// Local-only projects (no `origin`) branch from local `main` — scaffolded projects
+/// never get a remote until cloned from GitHub.
 pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     let title = display_title(raw_title)?;
     let base = branch_name(raw_title)?;
     ensure_clean(dir, "starting a new change").await?;
-    // Always refresh main from the remote before branching.
-    run(dir, &["fetch", "origin", "main"]).await?;
+    let start = if has_remote(dir, "origin").await? {
+        run(dir, &["fetch", "origin", "main"]).await?;
+        "origin/main"
+    } else {
+        "main"
+    };
     let branch = unique_branch(dir, &base).await?;
-    run(
-        dir,
-        &["checkout", "-b", &branch, "origin/main"],
-    )
-    .await?;
+    run(dir, &["checkout", "-b", &branch, start]).await?;
     run(
         dir,
         &[
@@ -113,6 +116,10 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
         title,
         last_edited: None,
     })
+}
+
+async fn has_remote(dir: &Path, name: &str) -> Result<bool, ApiError> {
+    Ok(run(dir, &["remote", "get-url", name]).await.is_ok())
 }
 
 /// Refuse while tracked files have uncommitted modifications.

@@ -116,6 +116,26 @@ async fn create_suffixes_on_collision() {
 }
 
 #[tokio::test]
+async fn create_works_without_origin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("local");
+    seed_repo(&work);
+
+    let change = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+    assert_eq!(change.branch, "content/launch-week");
+    assert_eq!(
+        git_cli(&work, &["branch", "--show-current"]),
+        "content/launch-week"
+    );
+    assert_eq!(
+        git_cli(&work, &["rev-parse", "HEAD"]),
+        git_cli(&work, &["rev-parse", "main"])
+    );
+}
+
+#[tokio::test]
 async fn create_refuses_dirty_tree() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
