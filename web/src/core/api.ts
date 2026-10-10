@@ -202,6 +202,14 @@ export function createApi(
         })
       ).pr,
 
+    /** Mark a change's draft PR ready for review; returns its fresh status. */
+    markChangeReady: async (project: string, branch: string): Promise<PrStatus | null> =>
+      (
+        await json<{ pr: PrStatus | null }>("POST", `/api/changes/${enc(branch)}/ready`, {
+          body: { project },
+        })
+      ).pr,
+
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))
         .checkpoints,

@@ -1,6 +1,7 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/cleanup`.
+//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/cleanup`,
+//! `POST /api/changes/{branch}/ready`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -246,5 +247,32 @@ pub async fn status(
         Some(pr) if changes::pr_matches(&project.dir, &branch, &pr.head_sha).await => Some(pr),
         _ => None,
     };
+    Ok(Json(json!({ "pr": pr })))
+}
+
+/// `POST /api/changes/{branch}/ready` `{ project }` → `{ pr: { number, url, state, checks,
+/// previewUrl } }`. Marks the change's draft pull request ready for review, then returns its
+/// status (open, even if GitHub's re-read still lags).
+pub async fn ready(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
+    changes::get(&project.dir, &branch).await?;
+    let repo = project.repo.ok_or_else(|| {
+        ApiError::badreq("this project has no GitHub remote — open a repository first")
+    })?;
+    let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
     Ok(Json(json!({ "pr": pr })))
 }
