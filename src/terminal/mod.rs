@@ -103,7 +103,8 @@ struct Session {
     token: String,
     pid: Option<u32>,
     input: mpsc::Sender<Vec<u8>>,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    /// Dropped by the waiter after `child.wait()` so the reader thread unblocks.
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     ring: Mutex<Ring>,
     /// Flips to `true` once the waiter has reaped the child and forgotten the session.
     done: watch::Receiver<bool>,
@@ -140,6 +141,12 @@ impl TerminalManager {
         cwd: &Path,
         launch: LaunchSpec,
     ) -> Result<(), ApiError> {
+        if !cwd.is_dir() {
+            return Err(ApiError::enoent(format!(
+                "project directory is not available: {}",
+                cwd.display()
+            )));
+        }
         // Spawning is quick and synchronous; holding the map lock makes check-and-insert atomic.
         let mut sessions = self.inner.sessions.lock().unwrap();
         if sessions.contains_key(project_id) {
@@ -181,6 +188,9 @@ impl TerminalManager {
     pub fn resize(&self, project_id: &str, cols: u16, rows: u16) -> Result<(), ApiError> {
         let session = self.require(project_id)?;
         let master = session.master.lock().unwrap();
+        let master = master
+            .as_ref()
+            .ok_or_else(|| ApiError::io("terminal is closed"))?;
         master
             .resize(PtySize {
                 rows,
@@ -292,7 +302,7 @@ impl TerminalManager {
             token,
             pid: child.process_id(),
             input,
-            master: Mutex::new(pair.master),
+            master: Mutex::new(Some(pair.master)),
             ring: Mutex::new(Ring {
                 scrollback: VecDeque::new(),
                 trimmed_modes: ModeTracker::default(),
@@ -321,8 +331,10 @@ impl TerminalManager {
                 Ok(status) if status.signal().is_none() => Some(status.exit_code() as i32),
                 _ => None,
             };
-            // Let the reader pass on the child's last words (a background process still
-            // holding the PTY open would keep it reading forever, hence the bound).
+            // A grandchild can keep the slave open after the session leader exits; signal the
+            // group and drop our master so the reader unblocks before we forget the session.
+            signal_group(s.pid, libc::SIGTERM);
+            drop_master(&s);
             let _ = drained.recv_timeout(DRAIN_WAIT);
             {
                 let mut ring = s.ring.lock().unwrap();
@@ -341,6 +353,10 @@ impl TerminalManager {
 }
 
 /// Forget `session` if it is still the project's live one (a new one may have replaced it).
+fn drop_master(session: &Session) {
+    let _ = session.master.lock().unwrap().take();
+}
+
 fn forget(inner: &Inner, project_id: &str, session: &Arc<Session>) {
     let mut sessions = inner.sessions.lock().unwrap();
     if sessions
