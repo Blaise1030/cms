@@ -69,6 +69,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
+        .route("/api/changes/update", post(changes::update))
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/tree", get(files::tree))
