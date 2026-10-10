@@ -58,6 +58,16 @@ function patchJson(source, fields, collection) {
   }
   return result;
 }
+// Inspect syntax tokens rather than '#' text, which may be part of a scalar value.
+function yamlComments(token, ranges = []) {
+  if (!token || typeof token !== 'object') return ranges;
+  if (token.type === 'comment') ranges.push({start:token.offset,end:token.offset+token.source.length});
+  for (const child of Object.values(token)) {
+    if (Array.isArray(child)) child.forEach(value=>yamlComments(value,ranges));
+    else if (child && typeof child === 'object') yamlComments(child,ranges);
+  }
+  return ranges;
+}
 function patchYaml(source, fields, collection) {
   const document = parseDocument(source, { keepSourceTokens: true, uniqueKeys: true });
   if (document.errors.length) throw new Error(document.errors[0].message);
@@ -89,6 +99,10 @@ function patchYaml(source, fields, collection) {
         edits.push({start:end,end,text:`${source.slice(0,end).endsWith('\n')?'':eol}${' '.repeat(indent)}${JSON.stringify(key)}: ${stringify(value,{collectionStyle:'flow',lineWidth:0}).trimEnd()}${eol}`});
       } else throw new Error('Cannot safely patch this YAML node');
     }
+  }
+  const comments=yamlComments(document.contents.srcToken);
+  if (edits.some(edit=>comments.some(comment=>edit.start < comment.end && edit.end > comment.start))) {
+    throw new Error('Cannot safely patch YAML without removing a comment; edit this field in Code');
   }
   const result=edits.sort((a,b)=>b.start-a.start).reduce((text,edit)=>text.slice(0,edit.start)+edit.text+text.slice(edit.end),source);
   const checked=parseDocument(result);

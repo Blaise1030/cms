@@ -107,3 +107,15 @@ test('Astro builds and helper validation agree for valid and invalid Blog and He
     }
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
+for (const [name, frontmatter, fields] of [
+  ['block scalar header comment', 'description: | # preserve this comment\n  Old line\n', {description:'New'}],
+  ['sequence item comments on append', 'description: Kept\ntags:\n  - one # preserve one\n  - two # preserve two\n', {tags:['one','two','three']}],
+]) {
+  test(`patch safely rejects replacing ${name}`, () => {
+    const source='---\ntitle: Post\npubDate: 2026-10-11\n'+frontmatter+'---\nBody';
+    const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields}),encoding:'utf8'});
+    assert.notEqual(run.status,0);
+    assert.match(run.stderr,/cannot safely.*comment/i);
+    assert.equal(run.stdout,'');
+  });
+}
