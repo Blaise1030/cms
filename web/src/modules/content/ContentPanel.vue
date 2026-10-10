@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { Button } from "@/components/ui/button";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change } from "@/core/types";
 import FrontmatterForm from "./FrontmatterForm.vue";
@@ -14,6 +16,23 @@ onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 const showNewChange = ref(false);
 async function save() { try { await store.saveDraft(); } catch { /* recorded on the store; the draft stays */ } }
+/** `site` is update-only and `pages/home` is required: neither can be renamed or deleted. */
+const canRemove = computed(() => {
+  const e = store.entry; if (!e || !store.descriptor) return false;
+  const c = store.collections.find(x => x.name === e.collection);
+  return !c?.singleton && !(e.collection === "pages" && e.id === "home");
+});
+const lifecycleOpen = computed({
+  // Hidden while waiting for Create Change so the form's prompt is reachable.
+  get: () => !!store.lifecycle && !store.needsChange,
+  set: open => { if (!open) store.cancelLifecycle(); },
+});
+const canConfirm = computed(() => {
+  const l = store.lifecycle;
+  if (!l?.impact || l.busy) return false;
+  return l.action === "rename" ? !!l.slug.trim() && l.slug.trim() !== l.id : !l.impact.references.length;
+});
+async function confirmLifecycle() { try { await store.confirmLifecycle(); } catch { /* recorded on the store; the draft stays */ } }
 async function resume(change: Change) { try { await store.resumeSave(change.branch); } catch { /* recorded on the store */ } }
 const differences = computed(() => {
   const now = store.current; if (!now) return [];
@@ -48,6 +67,10 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
       <template v-if="store.entry">
         <h2 class="font-medium">{{ store.entry.id }}</h2>
         <p class="mb-4 text-xs text-muted-foreground">{{ store.entry.path }} · {{ store.entry.branch || 'No branch' }}</p>
+        <div v-if="canRemove" class="mb-4 flex gap-2">
+          <Button type="button" variant="outline" size="sm" data-testid="content-rename" @click="store.startLifecycle('rename')">Rename</Button>
+          <Button type="button" variant="outline" size="sm" data-testid="content-delete" @click="store.startLifecycle('delete')">Delete</Button>
+        </div>
         <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">
           <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
@@ -81,6 +104,45 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <template v-else>
           <pre data-testid="content-source" class="whitespace-pre-wrap break-words text-sm">{{ store.draftSource }}</pre>
         </template>
+        <AlertDialog v-model:open="lifecycleOpen">
+          <AlertDialogContent v-if="store.lifecycle" data-testid="content-lifecycle">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{{ store.lifecycle.action === "rename" ? "Rename" : "Delete" }} {{ store.lifecycle.collection }}/{{ store.lifecycle.id }}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                <template v-if="store.lifecycle.action === 'rename'">The entry file, its public URL, and its asset folder move to the new slug. References below are updated too.</template>
+                <template v-else>The entry and its asset folder are removed. History can restore them.<template v-if="store.dirty"> Your unsaved edits are discarded.</template></template>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <p v-if="!store.lifecycle.impact && !store.lifecycle.error" class="text-sm text-muted-foreground">Checking references…</p>
+            <div v-if="store.lifecycle.impact" class="space-y-3 text-sm">
+              <section>
+                <h3 class="font-medium">References</h3>
+                <p v-if="store.lifecycle.action === 'delete' && store.lifecycle.impact.references.length" class="text-destructive">Remove these references before deleting.</p>
+                <ul><li v-for="r in store.lifecycle.impact.references" :key="r.path + r.field">{{ r.collection }}/{{ r.id }} · {{ r.field }}</li></ul>
+                <p v-if="!store.lifecycle.impact.references.length" class="text-muted-foreground">None</p>
+              </section>
+              <section>
+                <h3 class="font-medium">Assets</h3>
+                <ul><li v-for="a in store.lifecycle.impact.assets" :key="a" class="break-all">{{ a }}</li></ul>
+                <p v-if="!store.lifecycle.impact.assets.length" class="text-muted-foreground">None</p>
+              </section>
+              <section v-if="store.lifecycle.impact.proseLinks.length">
+                <h3 class="font-medium">Links in text (review by hand)</h3>
+                <ul><li v-for="link in store.lifecycle.impact.proseLinks" :key="link.path + link.line">{{ link.path }}:{{ link.line }} → {{ link.url }}</li></ul>
+              </section>
+              <label v-if="store.lifecycle.action === 'rename'" class="block text-xs font-medium">New slug
+                <Input v-model="store.lifecycle.slug" data-testid="content-rename-slug" class="mt-1" placeholder="new-slug" />
+              </label>
+            </div>
+            <p v-if="store.lifecycle.error" role="alert" class="text-sm text-destructive" data-testid="content-lifecycle-error">{{ store.lifecycle.error }}</p>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="content-lifecycle-cancel">Cancel</AlertDialogCancel>
+              <Button :variant="store.lifecycle.action === 'delete' ? 'destructive' : 'default'" :disabled="!canConfirm" data-testid="content-lifecycle-confirm" @click="confirmLifecycle">
+                {{ store.lifecycle.busy ? "Working…" : store.lifecycle.action === "rename" ? "Rename" : "Delete" }}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       </template>
       <p v-else-if="!store.loading" class="text-sm text-muted-foreground">Select a collection and entry to read its content.</p>

@@ -32,11 +32,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/health", get(health::health))
         .route("/api/content/collections", get(content::collections))
         .route("/api/content/entries", get(content::entries))
+        .route("/api/content/entry/rename", post(content::rename))
+        .route("/api/content/entry/impact", post(content::impact))
         .route(
             "/api/content/entry",
             get(content::entry)
                 .post(content::create)
-                .put(content::update),
+                .put(content::update)
+                .delete(content::delete),
         )
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/github/clone", post(projects::clone))

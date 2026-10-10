@@ -154,7 +154,10 @@ pub(crate) async fn collection(root: &Path, name: &str) -> Result<ContentCollect
         .find(|c| c.name == name)
         .ok_or_else(|| ApiError::enoent("no such content collection"))
 }
-async fn entries(root: &Path, c: &ContentCollection) -> Result<Vec<ContentEntrySummary>, ApiError> {
+pub(crate) async fn entries(
+    root: &Path,
+    c: &ContentCollection,
+) -> Result<Vec<ContentEntrySummary>, ApiError> {
     if !supported(c) {
         return Ok(vec![]);
     }

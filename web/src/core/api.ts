@@ -5,6 +5,9 @@ import {
   type ContentEntrySummary,
   type ContentEntry,
   type ContentEntryUpdate,
+  type ContentEntryRename,
+  type ContentEntryDelete,
+  type ContentImpact,
   type Change,
   type ChangesUpdate,
   type SharedChange,
@@ -156,6 +159,12 @@ export function createApi(
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
     updateContentEntry: (body: ContentEntryUpdate) => json<ContentEntry>("PUT", "/api/content/entry", { body }),
+    contentImpact: (project: string, collection: string, id: string) =>
+      json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
+    renameContentEntry: (body: ContentEntryRename) =>
+      json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
+    deleteContentEntry: (body: ContentEntryDelete) =>
+      json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

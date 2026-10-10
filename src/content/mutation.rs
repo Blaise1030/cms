@@ -1,4 +1,4 @@
-//! Safe structured content create/update.
+//! Safe structured content create/update; rename/delete live in `lifecycle`.
 //!
 //! Under a per-project lock: require an active change, check the opened branch and hash,
 //! resolve only catalog-declared paths without following symlinks, validate the complete
@@ -14,6 +14,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::sync::Mutex;
+
+pub use super::lifecycle::{
+    delete_entry, inspect_impact, rename_entry, ContentImpact, DeleteEntry, RenameEntry,
+};
 
 pub enum SaveTarget {
     Create { slug: String },
@@ -37,7 +41,7 @@ pub struct SaveEntry {
 /// Page slugs owned by template routes.
 const RESERVED_PAGES: &[&str] = &["blog", "help"];
 
-fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
+pub(super) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
     let mut map = LOCKS
         .get_or_init(Default::default)
@@ -46,22 +50,22 @@ fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     map.entry(dir.to_path_buf()).or_default().clone()
 }
 
-fn unsafe_path(message: &str) -> ApiError {
+pub(super) fn unsafe_path(message: &str) -> ApiError {
     ApiError::sandbox(message).with_reason("unsafe_path")
 }
 
-fn invalid_slug(message: &str) -> ApiError {
+pub(super) fn invalid_slug(message: &str) -> ApiError {
     ApiError::badreq(message).with_reason("invalid_slug")
 }
 
-fn stale() -> ApiError {
+pub(super) fn stale() -> ApiError {
     ApiError::conflict("The entry changed since it was opened; reload to compare")
         .with_reason("stale_content")
 }
 
 /// Content edits always need an active change, for GitHub and local-only projects alike.
 /// Returns the current branch, which must be the one the editor opened.
-async fn require_content_change(root: &Path, opened: &str) -> Result<String, ApiError> {
+pub(super) async fn require_content_change(root: &Path, opened: &str) -> Result<String, ApiError> {
     let Some(active) = changes::active(root).await? else {
         return Err(ApiError::change_required(
             "Start a change first — content cannot be edited on main",
@@ -77,7 +81,7 @@ async fn require_content_change(root: &Path, opened: &str) -> Result<String, Api
     Ok(active.branch)
 }
 
-fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError> {
+pub(super) fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError> {
     let valid = !slug.is_empty()
         && slug.len() <= 100
         && slug.split('-').all(|part| {
@@ -97,7 +101,7 @@ fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn validate_id(id: &str) -> Result<(), ApiError> {
+pub(super) fn validate_id(id: &str) -> Result<(), ApiError> {
     if id.is_empty() || id.starts_with('.') || id.contains(['/', '\\', '\0']) {
         return Err(invalid_slug("invalid entry id"));
     }
@@ -105,7 +109,7 @@ fn validate_id(id: &str) -> Result<(), ApiError> {
 }
 
 /// Project-relative path of `id` under the collection's declared loader.
-fn entry_path(c: &catalog::ContentCollection, id: &str) -> Result<String, ApiError> {
+pub(super) fn entry_path(c: &catalog::ContentCollection, id: &str) -> Result<String, ApiError> {
     let base = c.loader["base"].as_str().unwrap_or_default();
     let pattern = c.loader["pattern"].as_str().unwrap_or_default();
     let name = match pattern.strip_prefix('*') {
@@ -137,22 +141,42 @@ fn entry_path(c: &catalog::ContentCollection, id: &str) -> Result<String, ApiErr
     Ok(parts.join("/"))
 }
 
+/// What the final component of a resolved path must be when it exists.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Leaf {
+    File,
+    Dir,
+}
+
 /// Resolve `rel` under the canonical root, refusing any symlink or non-directory parent
-/// and a final component that is a symlink or non-file. Missing components are allowed.
-fn resolve(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
+/// and a final component that is a symlink or not a regular file. Missing components are
+/// allowed.
+pub(super) fn resolve(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
+    resolve_as(root, rel, Leaf::File)
+}
+
+/// [`resolve`] with the expected kind of the final component.
+pub(super) fn resolve_as(root: &Path, rel: &str, leaf: Leaf) -> Result<PathBuf, ApiError> {
     let mut target = std::fs::canonicalize(root)?;
     let parts: Vec<_> = Path::new(rel).components().collect();
     for (i, part) in parts.iter().enumerate() {
+        if !matches!(part, Component::Normal(_)) {
+            return Err(unsafe_path("content path escapes the project"));
+        }
         target.push(part);
+        let last = i + 1 == parts.len();
         match std::fs::symlink_metadata(&target) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err(unsafe_path("content paths cannot pass through symlinks"))
             }
-            Ok(meta) if i + 1 < parts.len() && !meta.is_dir() => {
+            Ok(meta) if !last && !meta.is_dir() => {
                 return Err(unsafe_path("content parent is not a directory"))
             }
-            Ok(meta) if i + 1 == parts.len() && !meta.is_file() => {
+            Ok(meta) if last && leaf == Leaf::File && !meta.is_file() => {
                 return Err(unsafe_path("content entry is not a regular file"))
+            }
+            Ok(meta) if last && leaf == Leaf::Dir && !meta.is_dir() => {
+                return Err(unsafe_path("content asset path is not a directory"))
             }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -184,7 +208,7 @@ fn create_parents(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
 }
 
 /// Write `bytes` through a same-directory temporary file and atomic rename.
-fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(), ApiError> {
+pub(super) fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(), ApiError> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let name = target.file_name().unwrap().to_string_lossy();
     let tmp = target.with_file_name(format!(
@@ -238,7 +262,7 @@ fn render(kind: &str, fields: &Map<String, Value>, body: &str) -> Result<String,
     Ok(format!("---\n{yaml}---\n{body}"))
 }
 
-fn read_current(target: &Path) -> Result<String, ApiError> {
+pub(super) fn read_current(target: &Path) -> Result<String, ApiError> {
     let bytes = std::fs::read(target)?;
     if bytes.len() as u64 > crate::fs::MAX_FILE_BYTES {
         return Err(ApiError::badreq("content entry is too large"));
@@ -246,32 +270,36 @@ fn read_current(target: &Path) -> Result<String, ApiError> {
     String::from_utf8(bytes).map_err(|_| ApiError::badreq("content entry is not UTF-8"))
 }
 
-pub async fn save_entry(
-    state: &AppState,
-    request: SaveEntry,
-) -> Result<catalog::ContentEntry, ApiError> {
-    let root = state
+/// The registered project's directory.
+pub(super) async fn project_root(state: &AppState, project: &str) -> Result<PathBuf, ApiError> {
+    state
         .projects
-        .get(&request.project)
+        .get(project)
         .await
         .map(|p| p.dir)
-        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", request.project)))?;
-    let lock = lock_for(&root);
-    let _guard = lock.lock().await;
-    let branch = require_content_change(&root, &request.branch).await?;
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))
+}
 
+/// A catalog collection whose loader and schema support structured editing.
+pub(super) async fn editable_collection(
+    root: &Path,
+    name: &str,
+) -> Result<catalog::ContentCollection, ApiError> {
+    editable_in(&catalog::list_collections(root).await?, name)
+}
+
+/// [`editable_collection`] from an already-listed catalog.
+pub(super) fn editable_in(
+    collections: &[catalog::ContentCollection],
+    name: &str,
+) -> Result<catalog::ContentCollection, ApiError> {
     let unsupported =
         |message: String| ApiError::badreq(message).with_reason("unsupported_collection");
-    let c = match catalog::collection(&root, &request.collection).await {
-        Ok(c) => c,
-        Err(e) if e.code == crate::error::ErrorCode::Enoent => {
-            return Err(unsupported(format!(
-                "no such content collection: {}",
-                request.collection
-            )))
-        }
-        Err(e) => return Err(e),
-    };
+    let c = collections
+        .iter()
+        .find(|c| c.name == name)
+        .cloned()
+        .ok_or_else(|| unsupported(format!("no such content collection: {name}")))?;
     if !c.editable || !catalog::supported(&c) {
         return Err(unsupported(
             c.reason
@@ -279,6 +307,44 @@ pub async fn save_entry(
                 .unwrap_or_else(|| "collection is read-only".into()),
         ));
     }
+    Ok(c)
+}
+
+pub(super) fn duplicate_slug(c: &catalog::ContentCollection, id: &str) -> ApiError {
+    ApiError::conflict(format!("{} already has an entry named {id}", c.name))
+        .with_reason("duplicate_slug")
+}
+
+/// Refusal for the singleton `site` and the required `pages/home` entry.
+pub(super) fn protected(message: String) -> ApiError {
+    ApiError::badreq(message).with_reason("protected_entry")
+}
+
+/// Announce a created checkpoint so History refreshes.
+pub(super) fn emit_checkpoint(state: &AppState, project: &str, cp: Option<git::Checkpoint>) {
+    if let Some(cp) = cp {
+        state.events.emit(
+            "checkpoint.created",
+            json!({
+                "projectId": project,
+                "sha": cp.sha,
+                "summary": cp.summary,
+                "author": cp.author,
+                "ts": cp.ts,
+            }),
+        );
+    }
+}
+
+pub async fn save_entry(
+    state: &AppState,
+    request: SaveEntry,
+) -> Result<catalog::ContentEntry, ApiError> {
+    let root = project_root(state, &request.project).await?;
+    let lock = lock_for(&root);
+    let _guard = lock.lock().await;
+    let branch = require_content_change(&root, &request.branch).await?;
+    let c = editable_collection(&root, &request.collection).await?;
     if request.body.is_some() && c.kind == "json" && request.body.as_deref() != Some("") {
         return Err(ApiError::badreq("JSON entries have no body"));
     }
@@ -286,7 +352,7 @@ pub async fn save_entry(
     let (id, created) = match &request.target {
         SaveTarget::Create { slug } => {
             if c.singleton.is_some() {
-                return Err(ApiError::badreq(format!("{} is update-only", c.name)));
+                return Err(protected(format!("{} is update-only", c.name)));
             }
             validate_slug(&c.name, slug)?;
             (slug.clone(), true)
@@ -301,10 +367,7 @@ pub async fn save_entry(
 
     let (old, mode, source) = if created {
         if std::fs::symlink_metadata(&target).is_ok() {
-            return Err(
-                ApiError::conflict(format!("{} already has an entry named {id}", c.name))
-                    .with_reason("duplicate_slug"),
-            );
+            return Err(duplicate_slug(&c, &id));
         }
         let mut fields = request.fields.clone();
         for key in &request.unset {
@@ -339,10 +402,7 @@ pub async fn save_entry(
     require_content_change(&root, &request.branch).await?;
     let target = if created {
         if std::fs::symlink_metadata(resolve(&root, &rel)?).is_ok() {
-            return Err(
-                ApiError::conflict(format!("{} already has an entry named {id}", c.name))
-                    .with_reason("duplicate_slug"),
-            );
+            return Err(duplicate_slug(&c, &id));
         }
         create_parents(&root, &rel)?
     } else {
@@ -374,18 +434,7 @@ pub async fn save_entry(
         "fs.change",
         json!({ "projectId": request.project, "path": rel, "kind": if created { "create" } else { "modify" } }),
     );
-    if let Some(cp) = checkpoint {
-        state.events.emit(
-            "checkpoint.created",
-            json!({
-                "projectId": request.project,
-                "sha": cp.sha,
-                "summary": cp.summary,
-                "author": cp.author,
-                "ts": cp.ts,
-            }),
-        );
-    }
+    emit_checkpoint(state, &request.project, checkpoint);
     Ok(catalog::build_entry(
         c.name, id, rel, &c.kind, source, branch,
     ))

@@ -2,11 +2,16 @@ import { defineStore } from "pinia";
 import { computed, onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
-import type { ContentCollection, ContentEntry, ContentEntrySummary, FieldDescriptor } from "@/core/types";
+import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, FieldDescriptor } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { diffDraft, cloneValue } from "./draft";
 
 export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
+/** A rename or delete awaiting confirmation; `impact` is the daemon's dry run. */
+export interface ContentLifecycle {
+  action: "rename" | "delete"; collection: string; id: string;
+  impact: ContentImpact | null; slug: string; busy: boolean; error: string | null;
+}
 
 export const useContentStore = defineStore("content", () => {
   const daemon = useDaemon();
@@ -27,6 +32,9 @@ export const useContentStore = defineStore("content", () => {
   const needsChange = ref(false);
   /** Current on-disk entry fetched for comparison with the draft. */
   const current = ref<ContentEntry | null>(null);
+  const lifecycle = ref<ContentLifecycle | null>(null);
+  /** Which mutation a Create Change resumes. */
+  let resumeAction: "save" | "lifecycle" = "save";
   const descriptor = computed<FieldDescriptor | null>(() => {
     const c = collections.value.find(x => x.name === entry.value?.collection);
     return c?.editable && c.fields?.type === "object" ? c.fields : null;
@@ -57,7 +65,7 @@ export const useContentStore = defineStore("content", () => {
     ++selectionRequest;
     ++refreshRequest;
     selectionPending = false;
-    projectId.value = id; selectedCollection.value = null; entry.value = null; entries.value = []; collections.value = [];
+    projectId.value = id; selectedCollection.value = null; entry.value = null; lifecycle.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
     await refresh();
   }
@@ -68,7 +76,8 @@ export const useContentStore = defineStore("content", () => {
     const selectionVersion = selectionRequest;
     const name = selectedCollection.value;
     const openedEntry = entry.value;
-    const canRefreshEntry = !selectionPending;
+    // A rename/delete in flight replaces the entry itself; do not re-read the old id.
+    const canRefreshEntry = !selectionPending && !lifecycle.value?.busy;
     loading.value = true; error.value = null;
     try {
       const nextCollections = await daemon.api.listContentCollections(id);
@@ -90,7 +99,7 @@ export const useContentStore = defineStore("content", () => {
   async function selectCollection(name: string) {
     if (!canLeave()) return;
     const version = ++selectionRequest; selectionPending = true;
-    selectedCollection.value = name; entry.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
+    selectedCollection.value = name; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
     try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === selectionRequest) entries.value = next; }
     catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === selectionRequest) selectionPending = false; }
@@ -101,7 +110,7 @@ export const useContentStore = defineStore("content", () => {
     try {
       const next = await daemon.api.contentEntry(projectId.value, selectedCollection.value, id);
       if (version !== selectionRequest) return;
-      loadEntry(next);
+      lifecycle.value = null; loadEntry(next);
     } catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === selectionRequest) selectionPending = false; }
   }
@@ -112,7 +121,7 @@ export const useContentStore = defineStore("content", () => {
     if (!change?.changed) return e;
     const saved = { id: projectId.value, entryId: e.id };
     const submitted = { fields: JSON.stringify(draftFields.value), body: draftBody.value };
-    saving.value = true; clearSaveState();
+    saving.value = true; clearSaveState(); resumeAction = "save";
     try {
       const next = await daemon.api.updateContentEntry({
         project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash,
@@ -125,19 +134,68 @@ export const useContentStore = defineStore("content", () => {
       }
       return next;
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.code === "CHANGE_REQUIRED") needsChange.value = true;
-        else if (err.reason === "branch_changed" || err.reason === "stale_content") conflict.value = { reason: err.reason, message: err.message, ...(branch ? { branch } : {}) };
-        else if (err.details?.length) {
-          fieldErrors.value = Object.fromEntries(err.details.map(d => [d.path.join("."), d.message]));
-          saveError.value = err.message;
-        } else saveError.value = err.message;
-      } else saveError.value = errorMessage(err);
+      recordFailure(err, branch);
       throw err;
     } finally { saving.value = false; }
   }
+  /** Map a refused mutation onto Create Change, conflict, or field errors; the draft stays. */
+  function recordFailure(err: unknown, branch?: string) {
+    if (err instanceof ApiError) {
+      if (err.code === "CHANGE_REQUIRED") needsChange.value = true;
+      else if (err.reason === "branch_changed" || err.reason === "stale_content") conflict.value = { reason: err.reason, message: err.message, ...(branch ? { branch } : {}) };
+      else if (err.details?.some(d => Array.isArray(d.path))) {
+        fieldErrors.value = Object.fromEntries(err.details.filter(d => Array.isArray(d.path)).map(d => [d.path.join("."), d.message]));
+        saveError.value = err.message;
+      } else saveError.value = err.message;
+    } else saveError.value = errorMessage(err);
+  }
+  /** Open the rename/delete confirmation and load its dry-run impact. */
+  async function startLifecycle(action: ContentLifecycle["action"]) {
+    const e = entry.value; if (!e) return;
+    const opened = { action, collection: e.collection, id: e.id, impact: null, slug: "", busy: false, error: null };
+    lifecycle.value = opened;
+    try {
+      const impact = await daemon.api.contentImpact(projectId.value, e.collection, e.id);
+      if (lifecycle.value?.action === action && lifecycle.value.id === e.id) lifecycle.value.impact = impact;
+    } catch (err) { if (lifecycle.value?.id === e.id) lifecycle.value.error = errorMessage(err); }
+  }
+  function cancelLifecycle() { lifecycle.value = null; }
+  /** Rename or delete the opened entry with its opened branch and hash. Throws after recording the failure. */
+  async function confirmLifecycle(branch?: string) {
+    const l = lifecycle.value; const e = entry.value;
+    if (!l || !e || !l.impact) return;
+    const saved = { id: projectId.value, entryId: e.id };
+    const target = { project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash };
+    resumeAction = "lifecycle";
+    l.busy = true; l.error = null; clearSaveState();
+    const stillOpen = () => projectId.value === saved.id && entry.value?.id === saved.entryId;
+    try {
+      if (l.action === "rename") {
+        const res = await daemon.api.renameContentEntry({ ...target, slug: l.slug.trim() });
+        if (stillOpen()) {
+          entries.value = res.entries;
+          // Unsaved edits stay in the draft, rebased on the renamed entry.
+          if (dirty.value) { entry.value = res.entry; draftSource.value = res.entry.source; } else loadEntry(res.entry);
+        }
+      } else {
+        const res = await daemon.api.deleteContentEntry(target);
+        if (stillOpen()) {
+          entries.value = res.entries; entry.value = null;
+          draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false;
+        }
+      }
+      lifecycle.value = null; resumeAction = "save";
+    } catch (err) {
+      recordFailure(err, branch);
+      if (!needsChange.value) l.error = errorMessage(err);
+      throw err;
+    } finally { l.busy = false; }
+  }
   /** After Create Change from a main-branch save: retry the same draft on the new branch. */
-  async function resumeSave(branch: string) { needsChange.value = false; return saveDraft(branch); }
+  async function resumeSave(branch: string): Promise<unknown> {
+    needsChange.value = false;
+    return resumeAction === "lifecycle" && lifecycle.value ? confirmLifecycle(branch) : saveDraft(branch);
+  }
   async function compare() {
     const e = entry.value; if (!e) return;
     try { current.value = await daemon.api.contentEntry(projectId.value, e.collection, e.id); }
@@ -155,5 +213,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(() => void refresh()),
   ];
   onScopeDispose(() => offs.forEach(off => off()));
-  return { projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload };
+  return { projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
 });

@@ -1,6 +1,6 @@
 use super::{project_dir, query_or_badreq};
 use crate::content::catalog;
-use crate::content::mutation::{self, SaveEntry, SaveTarget};
+use crate::content::mutation::{self, DeleteEntry, RenameEntry, SaveEntry, SaveTarget};
 use crate::{error::ApiError, state::AppState};
 use axum::body::Bytes;
 use axum::extract::{rejection::QueryRejection, Query, State};
@@ -120,4 +120,72 @@ pub async fn update(
         unset: b.unset,
     };
     Ok(Json(mutation::save_entry(&state, request).await?))
+}
+
+#[derive(Deserialize)]
+struct EntryRef {
+    project: String,
+    collection: String,
+    id: String,
+}
+#[derive(Deserialize)]
+struct RenameBody {
+    project: String,
+    collection: String,
+    id: String,
+    slug: String,
+    branch: String,
+    hash: String,
+}
+#[derive(Deserialize)]
+struct DeleteBody {
+    project: String,
+    collection: String,
+    id: String,
+    branch: String,
+    hash: String,
+}
+/// `POST /api/content/entry/impact` is the dry run for a rename or delete confirmation.
+pub async fn impact(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<mutation::ContentImpact>, ApiError> {
+    let b: EntryRef = parse(&body, "project, collection, id")?;
+    let root = project_dir(&state, &b.project).await?;
+    Ok(Json(
+        mutation::inspect_impact(&root, &b.collection, &b.id).await?,
+    ))
+}
+/// `POST /api/content/entry/rename` → `{entry, entries}` for the renamed collection.
+pub async fn rename(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let b: RenameBody = parse(&body, "project, collection, id, slug, branch, hash")?;
+    let root = project_dir(&state, &b.project).await?;
+    let collection = b.collection.clone();
+    let request = RenameEntry {
+        project: b.project,
+        collection: b.collection,
+        id: b.id,
+        slug: b.slug,
+        branch: b.branch,
+        hash: b.hash,
+    };
+    let entry = mutation::rename_entry(&state, request).await?;
+    let entries = catalog::list_entries(&root, &collection).await?;
+    Ok(Json(json!({ "entry": entry, "entries": entries })))
+}
+/// `DELETE /api/content/entry` → `{entries}` for the collection.
+pub async fn delete(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let b: DeleteBody = parse(&body, "project, collection, id, branch, hash")?;
+    let root = project_dir(&state, &b.project).await?;
+    let collection = b.collection.clone();
+    let request = DeleteEntry {
+        project: b.project,
+        collection: b.collection,
+        id: b.id,
+        branch: b.branch,
+        hash: b.hash,
+    };
+    mutation::delete_entry(&state, request).await?;
+    let entries = catalog::list_entries(&root, &collection).await?;
+    Ok(Json(json!({ "entries": entries })))
 }
