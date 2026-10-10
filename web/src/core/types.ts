@@ -233,3 +233,16 @@ export interface GithubRepo {
   defaultBranch: string;
   canPush: boolean;
 }
+
+export interface ContentCollection {
+  name: string;
+  loader: { base?: string; pattern?: string };
+  kind: "json" | "markdown" | "mdx";
+  singleton?: string | null;
+  editable: boolean;
+  reason: string | null;
+}
+export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
+export interface ContentEntry extends ContentEntrySummary {
+  source: string; fields: Record<string, unknown> | null; body: string; branch: string; hash: string;
+}

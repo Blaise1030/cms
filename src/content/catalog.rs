@@ -1,0 +1,248 @@
+//! Project-scoped read-only content inventory. Editable paths come from the project helper.
+use crate::{error::ApiError, fs};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::path::Path;
+use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentCollection {
+    pub name: String,
+    #[serde(default)]
+    pub loader: Value,
+    pub kind: String,
+    #[serde(default)]
+    pub singleton: Option<String>,
+    #[serde(default)]
+    pub editable: bool,
+    #[serde(default, rename = "supportedForEditing")]
+    pub supported_for_editing: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentEntrySummary {
+    pub collection: String,
+    pub id: String,
+    pub path: String,
+    pub kind: String,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentEntry {
+    pub collection: String,
+    pub id: String,
+    pub path: String,
+    pub kind: String,
+    pub source: String,
+    pub fields: Value,
+    pub body: String,
+    pub branch: String,
+    pub hash: String,
+}
+async fn helper(root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
+    // Verify helper containment before executing project code.
+    fs::read_file(root, "scripts/workbench-content.mjs").await?;
+    let mut child = tokio::process::Command::new("node")
+        .arg("scripts/workbench-content.mjs")
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| ApiError::io(format!("content helper: {e}")))?;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"op\":\"list\"}\n")
+        .await?;
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait_with_output())
+        .await
+        .map_err(|_| ApiError::io("content helper timed out"))??;
+    if !output.status.success() {
+        return Err(ApiError::io(format!(
+            "content helper: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    #[derive(Deserialize)]
+    struct Response {
+        collections: Vec<ContentCollection>,
+    }
+    serde_json::from_slice::<Response>(&output.stdout)
+        .map(|r| r.collections)
+        .map_err(|e| ApiError::io(format!("content helper invalid response: {e}")))
+}
+fn supported(c: &ContentCollection) -> bool {
+    let Some(base) = c.loader.get("base").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(pattern) = c.loader.get("pattern").and_then(Value::as_str) else {
+        return false;
+    };
+    let path = Path::new(base);
+    !base.contains('\0')
+        && !path.is_absolute()
+        && !path
+            .components()
+            .any(|v| matches!(v, std::path::Component::ParentDir))
+        && matches!(
+            (c.kind.as_str(), pattern),
+            ("json", "*.json" | "site.json") | ("markdown", "*.md") | ("mdx", "*.mdx")
+        )
+}
+/// Known bundled paths are used only to expose raw, read-only files after helper failure.
+fn fallback(reason: String) -> Vec<ContentCollection> {
+    [
+        ("site", "src/content", "site.json", "json", Some("site")),
+        ("pages", "src/content/pages", "*.json", "json", None),
+        ("sections", "src/content/sections", "*.mdx", "mdx", None),
+        ("blog", "src/content/blog/en", "*.md", "markdown", None),
+        (
+            "helpDocs",
+            "src/content/helpDocs/en",
+            "*.md",
+            "markdown",
+            None,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, base, pattern, kind, singleton)| ContentCollection {
+        name: name.into(),
+        loader: serde_json::json!({"base":base,"pattern":pattern}),
+        kind: kind.into(),
+        singleton: singleton.map(str::to_string),
+        editable: false,
+        supported_for_editing: false,
+        reason: Some(reason.clone()),
+    })
+    .collect()
+}
+pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
+    match helper(project_root).await {
+        Ok(mut collections) => {
+            for c in &mut collections {
+                c.editable = c.supported_for_editing && supported(c);
+                c.reason = if c.editable {
+                    None
+                } else {
+                    Some("Unsupported collection loader; content is read-only".into())
+                };
+            }
+            Ok(collections)
+        }
+        Err(e) => Ok(fallback(format!("Content helper unavailable: {e}"))),
+    }
+}
+async fn collection(root: &Path, name: &str) -> Result<ContentCollection, ApiError> {
+    list_collections(root)
+        .await?
+        .into_iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| ApiError::enoent("no such content collection"))
+}
+async fn entries(root: &Path, c: &ContentCollection) -> Result<Vec<ContentEntrySummary>, ApiError> {
+    if !supported(c) {
+        return Ok(vec![]);
+    }
+    let base = c.loader["base"].as_str().unwrap();
+    let pattern = c.loader["pattern"].as_str().unwrap();
+    let tree = match fs::tree(root, base).await {
+        Ok(v) => v,
+        Err(e) if e.code == crate::error::ErrorCode::Enoent => return Ok(vec![]),
+        Err(e) => return Err(e),
+    };
+    Ok(tree
+        .into_iter()
+        .filter(|e| {
+            e.kind == fs::EntryKind::File
+                && if let Some(suffix) = pattern.strip_prefix('*') {
+                    e.name.ends_with(suffix)
+                } else {
+                    e.name == pattern
+                }
+        })
+        .map(|e| ContentEntrySummary {
+            collection: c.name.clone(),
+            id: Path::new(&e.name)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            path: e.path,
+            kind: c.kind.clone(),
+        })
+        .collect())
+}
+pub async fn list_entries(root: &Path, name: &str) -> Result<Vec<ContentEntrySummary>, ApiError> {
+    entries(root, &collection(root, name).await?).await
+}
+pub async fn read_entry(
+    project_root: &Path,
+    collection_name: &str,
+    id: &str,
+) -> Result<ContentEntry, ApiError> {
+    let c = collection(project_root, collection_name).await?;
+    let e = entries(project_root, &c)
+        .await?
+        .into_iter()
+        .find(|e| e.id == id)
+        .ok_or_else(|| ApiError::enoent("no such content entry"))?;
+    let source = fs::read_file(project_root, &e.path)
+        .await?
+        .content
+        .ok_or_else(|| ApiError::badreq("content entry is not UTF-8"))?;
+    let (fields, body) = if c.kind == "json" {
+        (
+            serde_json::from_str(&source).unwrap_or(Value::Null),
+            String::new(),
+        )
+    } else {
+        parse_frontmatter(&source)
+    };
+    let branch_output = tokio::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(project_root)
+        .output()
+        .await?;
+    let branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+    let hash = format!("{:x}", Sha256::digest(source.as_bytes()));
+    Ok(ContentEntry {
+        collection: e.collection,
+        id: e.id,
+        path: e.path,
+        kind: e.kind,
+        source,
+        fields,
+        body,
+        branch,
+        hash,
+    })
+}
+fn parse_frontmatter(source: &str) -> (Value, String) {
+    let mut offset = 0;
+    let mut lines = source.split_inclusive('\n');
+    let Some(first) = lines.next() else {
+        return (Value::Null, source.into());
+    };
+    if first.trim_end() != "---" {
+        return (Value::Null, source.into());
+    }
+    offset += first.len();
+    let start = offset;
+    for line in lines {
+        if line.trim_end() == "---" {
+            return (
+                serde_yaml::from_str::<Value>(&source[start..offset]).unwrap_or(Value::Null),
+                source[offset + line.len()..].into(),
+            );
+        }
+        offset += line.len();
+    }
+    (Value::Null, source.into())
+}

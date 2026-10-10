@@ -2,6 +2,7 @@
 
 pub mod changes;
 pub mod checkpoints;
+pub mod content;
 pub mod devserver;
 pub mod error;
 pub mod events;
@@ -29,6 +30,9 @@ use crate::static_files;
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
+        .route("/api/content/collections", get(content::collections))
+        .route("/api/content/entries", get(content::entries))
+        .route("/api/content/entry", get(content::entry))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/github/clone", post(projects::clone))
         .route("/api/github/status", get(github::status))

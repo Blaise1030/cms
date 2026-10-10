@@ -1,6 +1,9 @@
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type ContentCollection,
+  type ContentEntrySummary,
+  type ContentEntry,
   type Change,
   type ChangesUpdate,
   type SharedChange,
@@ -127,6 +130,12 @@ export function createApi(
   const enc = encodeURIComponent;
 
   return {
+    listContentCollections: async (project: string): Promise<ContentCollection[]> =>
+      (await json<{collections: ContentCollection[]}>("GET", "/api/content/collections", {query:{project}})).collections,
+    listContentEntries: async (project: string, collection: string): Promise<ContentEntrySummary[]> =>
+      (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
+    contentEntry: (project: string, collection: string, id: string) =>
+      json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

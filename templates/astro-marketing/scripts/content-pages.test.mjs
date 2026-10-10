@@ -32,7 +32,7 @@ test("list reports the five collection loaders and content kinds", () => {
     { name: "sections", loader: { base: "./src/content/sections", pattern: "*.mdx" }, kind: "mdx" },
     { name: "blog", loader: { base: "./src/content/blog/en", pattern: "*.md" }, kind: "markdown" },
     { name: "helpDocs", loader: { base: "./src/content/helpDocs/en", pattern: "*.md" }, kind: "markdown" },
-  ]);
+  ].map(collection => ({...collection, supportedForEditing: true})));
 });
 
 test("built sample Blog and Help articles render Markdown and navigation", () => {
