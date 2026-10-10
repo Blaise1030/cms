@@ -1,6 +1,6 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`.
+//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/cleanup`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::{project_dir, query_or_badreq};
 use crate::changes;
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title};
+use crate::github::{pr_body, pr_title, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -168,6 +168,39 @@ pub async fn share(
         "title": change.title,
         "prUrl": pr.html_url,
     })))
+}
+
+/// `POST /api/changes/{branch}/cleanup` `{ project }` → `{ branch: "main" }`.
+/// Deletes a merged change's local branch and returns to an up-to-date `main`. Merged means
+/// its PR is merged on GitHub (when reachable) or `main` already contains the branch.
+pub async fn cleanup(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    let (pr_merged, env) = match project.repo.as_deref() {
+        Some(repo) if state.github.token().await.is_some() => {
+            let merged = matches!(
+                state.github.pr_state(repo, &branch).await,
+                Ok(Some(PrState::Merged))
+            );
+            (merged, state.github.git_env().await.unwrap_or_default())
+        }
+        Some(_) => (false, state.github.git_env().await.unwrap_or_default()),
+        None => (false, Vec::new()),
+    };
+    changes::cleanup(&project.dir, &branch, pr_merged, &env).await?;
+    Ok(Json(json!({ "branch": "main" })))
 }
 
 /// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,

@@ -277,6 +277,48 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     })
 }
 
+/// Clean up a merged change: bring local `main` up to date, check it out, then delete the
+/// local `branch` (the remote branch is left alone).
+///
+/// `branch` counts as merged when `pr_merged` (its pull request says so, which covers squash
+/// merges) or when its tip is already in the latest `main`. Anything else is refused, and
+/// nothing is deleted unless `main` fast-forwarded first.
+pub async fn cleanup(
+    dir: &Path,
+    branch: &str,
+    pr_merged: bool,
+    env: &[(String, String)],
+) -> Result<(), ApiError> {
+    if !branch.starts_with("content/") {
+        return Err(ApiError::badreq("branch must be a content/* change"));
+    }
+    if !branch_exists(dir, branch).await? {
+        return Err(ApiError::enoent(format!("no such change: {branch}")));
+    }
+    ensure_clean(dir, "cleaning up").await?;
+    let latest = if has_remote(dir, "origin").await? {
+        run_env(dir, &["fetch", "origin", "main"], env).await?;
+        "origin/main"
+    } else {
+        "main"
+    };
+    let in_main = run(dir, &["merge-base", "--is-ancestor", branch, latest])
+        .await
+        .is_ok();
+    if !pr_merged && !in_main {
+        return Err(ApiError::conflict(
+            "This change has not been merged yet — merge its pull request first",
+        ));
+    }
+    run(dir, &["checkout", "main"]).await?;
+    if latest != "main" {
+        run(dir, &["merge", "--ff-only", latest]).await?;
+    }
+    // `-D`: a squash-merged tip is never an ancestor of `main`.
+    run(dir, &["branch", "-D", branch]).await?;
+    Ok(())
+}
+
 async fn branch_title(dir: &Path, branch: &str) -> String {
     match run(dir, &["config", "--get", &format!("branch.{branch}.description")]).await {
         Ok(t) => {
