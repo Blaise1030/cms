@@ -54,6 +54,8 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
   await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
+  // Dismissed: the daemon no longer asks GitHub at all.
+  expect(github.protectionGets()).toBe(1);
 });
 
 test("protected main: no hint after share", async ({ page, workbench }) => {
