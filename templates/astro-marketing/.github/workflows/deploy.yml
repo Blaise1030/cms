@@ -1,8 +1,9 @@
 # Build the static Astro site and deploy it to Cloudflare Pages.
 #
 #   push to main          -> production deploy.
-#   pull request (opened, -> preview deploy of the PR branch (`--branch=<head_ref>`), recorded as a
-#   updated, reopened)       GitHub deployment of the PR head SHA whose status carries the preview
+#   pull request (opened, -> preview deploy of the PR head commit (`--branch=<head_ref>`, the name
+#   updated, reopened)       sanitised by .github/scripts/pages-branch.sh), recorded as a
+#                            GitHub deployment of the PR head SHA whose status carries the preview
 #                            URL (`environment_url`), plus one sticky PR comment with the link.
 #                            The CMS workbench reads that deployment to show "Preview" next to the
 #                            PR status in its browser bar.
@@ -36,10 +37,20 @@ jobs:
       pull-requests: write
     env:
       PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'astro-marketing' }}
-      # Pages branch: the PR head branch for previews, the pushed branch otherwise.
-      PAGES_BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
+      # On a PR, build the head commit (not the merge commit): that is the SHA the deployment
+      # is recorded for.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Pages branch: the PR head branch for previews, the pushed branch otherwise. Branch names
+      # are untrusted, so only the sanitised name is used below (never the raw ref).
+      - name: Pages branch name
+        id: branch
+        env:
+          RAW_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: echo "name=$(bash .github/scripts/pages-branch.sh "$RAW_BRANCH")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -55,6 +66,8 @@ jobs:
         id: deployment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          PAGES_BRANCH: ${{ steps.branch.outputs.name }}
         with:
           script: |
             const { data } = await github.rest.repos.createDeployment({
@@ -76,7 +89,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=${{ env.PAGES_PROJECT }} --branch=${{ env.PAGES_BRANCH }}
+          command: pages deploy dist --project-name="${{ env.PAGES_PROJECT }}" --branch="${{ steps.branch.outputs.name }}"
 
       - name: Publish preview URL (deployment status + sticky PR comment)
         if: always() && steps.deployment.outputs.id

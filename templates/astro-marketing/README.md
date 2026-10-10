@@ -13,8 +13,9 @@ npm run build   # static build into ./dist
 `.github/workflows/deploy.yml` builds the site and deploys `dist/` to Cloudflare Pages:
 
 - **Push to `main`** → production deploy.
-- **Pull request** (opened, updated, reopened, marked ready) → preview deploy of the PR branch
-  (`wrangler pages deploy --branch=<head branch>`). The workflow then:
+- **Pull request** (opened, updated, reopened, marked ready) → preview deploy of the PR head
+  commit (`wrangler pages deploy --branch=<head branch>`; the name is sanitised by
+  `.github/scripts/pages-branch.sh` so it can't inject into the deploy command). The workflow then:
   - records a GitHub **deployment** for the PR head commit and sets its status to `success`
     with `environment_url` = the preview URL (or `failure` if the deploy failed);
   - posts one **sticky PR comment** with the preview link, updated on every push.
