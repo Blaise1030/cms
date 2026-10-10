@@ -17,6 +17,10 @@ const previews = ref<ConflictPreviews | null>(null);
 const previewLoading = ref(false);
 const previewError = ref<string | null>(null);
 const frameErrors = ref<Partial<Record<"yours" | "latest" | "result", string>>>({});
+const resultFrameReady = ref(false);
+const resultFrameSettled = ref(false);
+const textFallbackAvailable = ref(false);
+const textOnly = ref(false);
 const viewport = ref<"desktop" | "mobile">("desktop");
 const route = ref("/");
 let previewRun = 0;
@@ -24,7 +28,22 @@ const session = computed(() => store.currentConflict);
 const file = computed(() => session.value?.files.find((f) => f.path === selectedPath.value) ?? session.value?.files[0]);
 
 watch(session, (value) => { selectedPath.value = value?.files[0]?.path ?? null; confirmAbandon.value = false; }, { immediate: true });
-watch([route, selectedPath, previews], () => { frameErrors.value = {}; });
+watch([route, selectedPath, previews], (_value, _old, onCleanup) => {
+  frameErrors.value = {};
+  resultFrameReady.value = false;
+  resultFrameSettled.value = false;
+  textFallbackAvailable.value = false;
+  textOnly.value = false;
+  if (previews.value?.result.status === "ready") {
+    const timeout = setTimeout(() => {
+      if (!resultFrameSettled.value) {
+        frameErrors.value = { ...frameErrors.value, result: "The visual result did not load. You can continue using the text comparison." };
+        textFallbackAvailable.value = true;
+      }
+    }, 8_000);
+    onCleanup(() => clearTimeout(timeout));
+  }
+});
 watch(() => [session.value?.id, store.candidate?.tree] as const, async ([id]) => {
   const run = ++previewRun;
   previews.value = null;
@@ -48,11 +67,17 @@ function frameUrl(state: ConflictPreviewState): string {
 
 function frameLoaded(event: Event, source: "yours" | "latest" | "result") {
   const doc = (event.target as HTMLIFrameElement).contentDocument;
+  const missing = doc?.contentType === "application/json" || doc?.body?.textContent?.includes('"code":"ENOENT"');
+  if (source === "result") {
+    resultFrameSettled.value = true;
+    resultFrameReady.value = !!doc && !missing;
+    textFallbackAvailable.value = !doc;
+    if (missing) textOnly.value = false;
+  }
   frameErrors.value = {
     ...frameErrors.value,
-    [source]: doc?.contentType === "application/json" || doc?.body?.textContent?.includes('"code":"ENOENT"')
-      ? "This page is missing from the preview. Choose another page above."
-      : undefined,
+    [source]: missing ? "This page is missing from the preview. Choose another page above."
+      : !doc ? "The visual page did not load. You can continue using the text comparison." : undefined,
   };
 }
 
@@ -91,7 +116,7 @@ async function abandon() {
           <Button v-if="!confirmAbandon" variant="outline" size="sm" data-testid="abandon-conflict" @click="confirmAbandon = true">Abandon</Button>
           <Button v-else variant="destructive" size="sm" data-testid="confirm-abandon" :disabled="busy" @click="abandon">Confirm abandon</Button>
           <Button v-if="confirmAbandon" variant="ghost" size="sm" @click="confirmAbandon = false">Cancel</Button>
-          <Button size="sm" data-testid="finish-conflict" :disabled="busy || previewLoading || !store.candidate?.complete || previews?.result.status === 'invalid' || !!frameErrors.result" @click="finish">Finish update</Button>
+          <Button size="sm" data-testid="finish-conflict" :disabled="busy || previewLoading || !store.candidate?.complete || previews?.result.status === 'invalid' || (previews?.result.status === 'ready' && !resultFrameReady && !textOnly)" @click="finish">Finish update</Button>
         </div>
       </div>
       <p v-if="store.conflictError" class="text-destructive mt-2 text-sm" role="alert">{{ store.conflictError }}</p>
@@ -121,10 +146,11 @@ async function abandon() {
             <div v-for="source in (['yours', 'latest', 'result'] as const)" :key="source" class="min-w-0">
               <h4 class="mb-1 text-sm font-medium">{{ source === 'yours' ? 'Your version' : source === 'latest' ? 'Latest from main' : 'Result' }}</h4>
               <div v-if="previews[source].status === 'ready'" class="mx-auto h-96 max-w-full overflow-hidden rounded border" :style="{ width: viewport === 'mobile' ? '390px' : '100%' }">
-                <iframe :src="frameUrl(previews[source])" :title="`${source} preview`" class="h-full w-full border-0" loading="lazy" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded($event, source)" />
+                <iframe :key="frameUrl(previews[source])" :src="frameUrl(previews[source])" :title="`${source} preview`" class="h-full w-full border-0" :loading="source === 'result' ? 'eager' : 'lazy'" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded($event, source)" />
               </div>
               <p v-else class="text-muted-foreground rounded border p-3 text-sm" :class="previews[source].status === 'invalid' ? 'text-destructive' : ''">{{ previews[source].status === 'invalid' ? previews[source].errors : previews[source].reason }}</p>
               <p v-if="frameErrors[source]" class="text-destructive mt-1 text-sm" role="status">{{ frameErrors[source] }}</p>
+              <Button v-if="source === 'result' && textFallbackAvailable" size="sm" variant="outline" class="mt-2" @click="textOnly = true">Continue with text comparison</Button>
             </div>
           </div>
         </section>
