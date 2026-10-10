@@ -1,5 +1,6 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
-//! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`.
+//! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
+//! `GET /api/changes/{branch}/status`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -54,17 +55,31 @@ pub struct ProjectQuery {
     project: String,
 }
 
-/// `GET /api/changes?project=` → `{ changes: [{ branch, title, lastEdited }, ...] }`.
+/// `GET /api/changes?project=` → `{ changes: [{ branch, title, lastEdited, prState? }, ...] }`.
+/// `prState` (draft/open/approved/merged/closed) is best effort: only for a GitHub project
+/// while signed in, and left out when GitHub can't be reached.
 pub async fn list(
     State(state): State<AppState>,
     q: Result<Query<ProjectQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let q = query_or_badreq(q)?;
-    let dir = project_dir(&state, &q.project).await?;
-    let changes = changes::list(&dir).await?;
-    Ok(Json(json!({
-        "changes": changes.iter().map(change_json).collect::<Vec<_>>(),
-    })))
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    let changes = changes::list(&project.dir).await?;
+    let mut items: Vec<Value> = changes.iter().map(change_json).collect();
+    if let Some(repo) = project.repo.as_deref() {
+        if state.github.token().await.is_some() {
+            for (item, c) in items.iter_mut().zip(&changes) {
+                if let Ok(Some(pr)) = state.github.pr_state(repo, &c.branch).await {
+                    item["prState"] = json!(pr);
+                }
+            }
+        }
+    }
+    Ok(Json(json!({ "changes": items })))
 }
 
 /// `GET /api/changes/active?project=` → `{ branch, title }` or 404 when on `main`.
@@ -144,4 +159,24 @@ pub async fn share(
         "title": change.title,
         "prUrl": pr.html_url,
     })))
+}
+
+/// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,
+/// previewUrl } | null }`. `null` when the project has no GitHub remote or the branch no PR.
+pub async fn status(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    let Some(repo) = project.repo else {
+        return Ok(Json(json!({ "pr": null })));
+    };
+    let pr = state.github.pr_status(&repo, &branch).await?;
+    Ok(Json(json!({ "pr": pr })))
 }

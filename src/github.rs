@@ -164,6 +164,152 @@ struct ApiPull {
     title: String,
     #[serde(default)]
     draft: bool,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    merged_at: Option<String>,
+    #[serde(default)]
+    head: Option<ApiPullHead>,
+}
+
+#[derive(Deserialize)]
+struct ApiPullHead {
+    #[serde(default)]
+    sha: String,
+}
+
+/// Where a pull request stands, as shown in the preview browser bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrState {
+    Draft,
+    Open,
+    Approved,
+    Merged,
+    Closed,
+}
+
+/// Check runs on the PR head, aggregated: any failing → failing, else any pending → pending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChecksState {
+    /// No check runs reported.
+    None,
+    Pending,
+    Passing,
+    Failing,
+}
+
+/// `GET /api/changes/{branch}/status` payload for a branch with a pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrStatus {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
+    pub checks: ChecksState,
+    /// `environment_url` of the latest successful deployment of the head SHA.
+    pub preview_url: Option<String>,
+}
+
+/// The parts of a pull request that decide its [`PrState`] (besides reviews).
+struct PullFacts {
+    draft: bool,
+    closed: bool,
+    merged: bool,
+}
+
+#[derive(Deserialize)]
+struct ApiLogin {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct ApiReview {
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct ApiCheckRuns {
+    #[serde(default)]
+    check_runs: Vec<ApiCheckRun>,
+}
+
+#[derive(Deserialize)]
+struct ApiCheckRun {
+    status: String,
+    #[serde(default)]
+    conclusion: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiDeployment {
+    id: u64,
+    #[serde(default)]
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiDeploymentStatus {
+    state: String,
+    #[serde(default)]
+    environment_url: Option<String>,
+}
+
+/// Merged / closed win; then draft; then approved when every reviewer's latest decisive review
+/// (approve, request changes, dismissed) leaves at least one approval and no change request.
+fn pr_state(pull: &PullFacts, reviews: &[ApiReview]) -> PrState {
+    if pull.merged {
+        return PrState::Merged;
+    }
+    if pull.closed {
+        return PrState::Closed;
+    }
+    if pull.draft {
+        return PrState::Draft;
+    }
+    // Reviews arrive oldest first; keep each reviewer's latest decisive one.
+    let mut latest: Vec<(&str, &str)> = Vec::new();
+    for r in reviews {
+        let state = r.state.as_str();
+        if !matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") {
+            continue;
+        }
+        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
+        match latest.iter_mut().find(|(u, _)| *u == who) {
+            Some(entry) => entry.1 = state,
+            None => latest.push((who, state)),
+        }
+    }
+    let approved = latest.iter().any(|(_, s)| *s == "APPROVED")
+        && !latest.iter().any(|(_, s)| *s == "CHANGES_REQUESTED");
+    if approved {
+        PrState::Approved
+    } else {
+        PrState::Open
+    }
+}
+
+fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
+    if runs.is_empty() {
+        return ChecksState::None;
+    }
+    let failing = runs.iter().any(|r| {
+        r.status == "completed"
+            && !matches!(
+                r.conclusion.as_deref(),
+                Some("success" | "neutral" | "skipped")
+            )
+    });
+    if failing {
+        ChecksState::Failing
+    } else if runs.iter().any(|r| r.status != "completed") {
+        ChecksState::Pending
+    } else {
+        ChecksState::Passing
+    }
 }
 
 impl From<ApiPull> for PullRequest {
@@ -778,6 +924,121 @@ impl GithubAuth {
             .map_err(unreachable)?;
         let pull: ApiPull = parse_github(res, self, &token).await?;
         Ok(PullRequest::from(pull))
+    }
+
+    /// PR state, checks and preview URL for `head_branch`; `None` when it has no pull request.
+    pub async fn pr_status(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<PrStatus>, ApiError> {
+        let Some((pull, state)) = self.pull_and_state(repo, head_branch).await? else {
+            return Ok(None);
+        };
+        let sha = pull.head.map(|h| h.sha).unwrap_or_default();
+        let (checks, preview_url) = if sha.is_empty() {
+            (ChecksState::None, None)
+        } else {
+            let runs: ApiCheckRuns = self
+                .get_json(&format!("/repos/{repo}/commits/{sha}/check-runs?per_page=100"))
+                .await?;
+            (
+                aggregate_checks(&runs.check_runs),
+                self.preview_url(repo, &sha).await?,
+            )
+        };
+        Ok(Some(PrStatus {
+            number: pull.number,
+            url: pull.html_url,
+            state,
+            checks,
+            preview_url,
+        }))
+    }
+
+    /// Just the [`PrState`] of `head_branch`'s pull request (no checks or deployments).
+    pub async fn pr_state(&self, repo: &str, head_branch: &str) -> Result<Option<PrState>, ApiError> {
+        Ok(self
+            .pull_and_state(repo, head_branch)
+            .await?
+            .map(|(_, state)| state))
+    }
+
+    /// Newest pull request for `head_branch` in any state, with its reviews folded into a state.
+    async fn pull_and_state(
+        &self,
+        repo: &str,
+        head_branch: &str,
+    ) -> Result<Option<(ApiPull, PrState)>, ApiError> {
+        let owner = repo
+            .split_once('/')
+            .map(|(o, _)| o)
+            .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
+        // Any state: a merged or closed PR still describes the change.
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?head={}:{}&state=all&sort=created&direction=desc",
+                urlencode(owner),
+                urlencode(head_branch)
+            ))
+            .await?;
+        let Some(pull) = pulls.into_iter().next() else {
+            return Ok(None);
+        };
+        let facts = PullFacts {
+            draft: pull.draft,
+            closed: pull.state.as_deref() == Some("closed"),
+            merged: pull.merged_at.is_some(),
+        };
+        // Reviews only matter for an open, ready PR.
+        let reviews: Vec<ApiReview> = if facts.draft || facts.closed {
+            Vec::new()
+        } else {
+            self.get_json(&format!(
+                "/repos/{repo}/pulls/{}/reviews?per_page=100",
+                pull.number
+            ))
+            .await?
+        };
+        let state = pr_state(&facts, &reviews);
+        Ok(Some((pull, state)))
+    }
+
+    /// `environment_url` of the newest deployment of `sha` whose latest status is a success.
+    pub async fn preview_url(&self, repo: &str, sha: &str) -> Result<Option<String>, ApiError> {
+        let deployments: Vec<ApiDeployment> = self
+            .get_json(&format!(
+                "/repos/{repo}/deployments?sha={}&per_page=10",
+                urlencode(sha)
+            ))
+            .await?;
+        for d in deployments.iter().filter(|d| d.sha == sha) {
+            let statuses: Vec<ApiDeploymentStatus> = self
+                .get_json(&format!("/repos/{repo}/deployments/{}/statuses?per_page=1", d.id))
+                .await?;
+            // Statuses are newest first.
+            if let Some(latest) = statuses.into_iter().next() {
+                if latest.state == "success" {
+                    if let Some(url) = latest.environment_url.filter(|u| !u.is_empty()) {
+                        return Ok(Some(url));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let res = self
+            .http
+            .get(format!("{}{path}", self.api()))
+            .bearer_auth(&token)
+            .header(ACCEPT, GITHUB_JSON)
+            .send()
+            .await
+            .map_err(unreachable)?;
+        parse_github(res, self, &token).await
     }
 
     fn client_id(&self) -> Result<&str, ApiError> {
@@ -1481,5 +1742,235 @@ mod tests {
             }
             stop();
         }
+    }
+
+    fn review(login: &str, state: &str) -> ApiReview {
+        ApiReview {
+            user: Some(ApiLogin { login: login.into() }),
+            state: state.into(),
+        }
+    }
+
+    fn pull(draft: bool, state: &str, merged: bool) -> PullFacts {
+        PullFacts {
+            draft,
+            closed: state == "closed",
+            merged,
+        }
+    }
+
+    #[test]
+    fn pr_state_maps_draft_open_merged_closed() {
+        assert_eq!(pr_state(&pull(true, "open", false), &[]), PrState::Draft);
+        assert_eq!(pr_state(&pull(false, "open", false), &[]), PrState::Open);
+        assert_eq!(pr_state(&pull(false, "closed", true), &[]), PrState::Merged);
+        assert_eq!(pr_state(&pull(false, "closed", false), &[]), PrState::Closed);
+        // A merged/closed PR stays merged/closed whatever its reviews said.
+        let approvals = [review("grace", "APPROVED")];
+        assert_eq!(pr_state(&pull(false, "closed", true), &approvals), PrState::Merged);
+        assert_eq!(pr_state(&pull(false, "closed", false), &approvals), PrState::Closed);
+    }
+
+    #[test]
+    fn pr_state_is_approved_via_each_reviewers_latest_review() {
+        let open = pull(false, "open", false);
+        assert_eq!(pr_state(&open, &[review("grace", "APPROVED")]), PrState::Approved);
+        // Comments don't override an approval.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "COMMENTED")]),
+            PrState::Approved
+        );
+        // A later change request from the same reviewer withdraws it.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("grace", "CHANGES_REQUESTED")]),
+            PrState::Open
+        );
+        // Any outstanding change request blocks approval.
+        assert_eq!(
+            pr_state(&open, &[review("grace", "APPROVED"), review("alan", "CHANGES_REQUESTED")]),
+            PrState::Open
+        );
+        // Re-approval after a change request.
+        assert_eq!(
+            pr_state(&open, &[review("alan", "CHANGES_REQUESTED"), review("alan", "APPROVED")]),
+            PrState::Approved
+        );
+        // A dismissed approval no longer counts.
+        assert_eq!(pr_state(&open, &[review("grace", "DISMISSED")]), PrState::Open);
+        // Drafts stay drafts.
+        assert_eq!(
+            pr_state(&pull(true, "open", false), &[review("grace", "APPROVED")]),
+            PrState::Draft
+        );
+    }
+
+    fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
+        ApiCheckRun {
+            status: status.into(),
+            conclusion: conclusion.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn checks_aggregate_failing_over_pending_over_passing() {
+        assert_eq!(aggregate_checks(&[]), ChecksState::None);
+        assert_eq!(
+            aggregate_checks(&[run("completed", Some("success")), run("completed", Some("skipped"))]),
+            ChecksState::Passing
+        );
+        assert_eq!(
+            aggregate_checks(&[run("completed", Some("success")), run("in_progress", None)]),
+            ChecksState::Pending
+        );
+        assert_eq!(aggregate_checks(&[run("queued", None)]), ChecksState::Pending);
+        for bad in ["failure", "timed_out", "cancelled", "action_required"] {
+            assert_eq!(
+                aggregate_checks(&[run("in_progress", None), run("completed", Some(bad))]),
+                ChecksState::Failing,
+                "{bad}"
+            );
+        }
+    }
+
+    fn status_auth(base: String, tag: &str) -> GithubAuth {
+        let dir = tmp_dir(tag);
+        write_session(&dir, "tok");
+        GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        )
+    }
+
+    #[tokio::test]
+    async fn preview_url_is_the_latest_successful_deployment_for_the_head_sha() {
+        use axum::extract::{Path as AxPath, Query};
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/deployments",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("sha").map(String::as_str) != Some("abc") {
+                        return Json(serde_json::json!([]));
+                    }
+                    // Newest first, as GitHub lists them.
+                    Json(serde_json::json!([
+                        { "id": 3, "sha": "abc" },
+                        { "id": 2, "sha": "abc" },
+                        { "id": 1, "sha": "abc" },
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(id): AxPath<u64>| async move {
+                    Json(match id {
+                        3 => serde_json::json!([{ "state": "failure", "environment_url": "" }]),
+                        2 => serde_json::json!([
+                            { "state": "success", "environment_url": "https://two.pages.dev" },
+                            { "state": "in_progress" },
+                        ]),
+                        _ => serde_json::json!([
+                            { "state": "success", "environment_url": "https://one.pages.dev" },
+                        ]),
+                    })
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploys");
+        assert_eq!(
+            auth.preview_url("acme/site", "abc").await.unwrap().as_deref(),
+            Some("https://two.pages.dev")
+        );
+        assert_eq!(auth.preview_url("acme/site", "other").await.unwrap(), None);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_combines_pr_reviews_checks_and_deployment() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    Json(serde_json::json!([{
+                        "number": 4,
+                        "html_url": "https://github.com/acme/site/pull/4",
+                        "title": "Launch week",
+                        "draft": false,
+                        "state": "open",
+                        "merged_at": null,
+                        "head": { "ref": "content/launch-week", "sha": "abc" }
+                    }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async {
+                    Json(serde_json::json!([{ "user": { "login": "grace" }, "state": "APPROVED" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/abc/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "total_count": 1,
+                        "check_runs": [{ "status": "completed", "conclusion": "success" }]
+                    }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([{ "id": 9, "sha": "abc" }])) }),
+            )
+            .route(
+                "/repos/acme/site/deployments/9/statuses",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "state": "success", "environment_url": "https://lw.pages.dev" }
+                    ]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "prstatus");
+        let st = auth
+            .pr_status("acme/site", "content/launch-week")
+            .await
+            .unwrap()
+            .expect("a PR");
+        assert_eq!(st.number, 4);
+        assert_eq!(st.url, "https://github.com/acme/site/pull/4");
+        assert_eq!(st.state, PrState::Approved);
+        assert_eq!(st.checks, ChecksState::Passing);
+        assert_eq!(st.preview_url.as_deref(), Some("https://lw.pages.dev"));
+        let json = serde_json::to_value(&st).unwrap();
+        assert_eq!(json["state"], "approved");
+        assert_eq!(json["checks"], "passing");
+        assert_eq!(json["previewUrl"], "https://lw.pages.dev");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_is_none_without_a_pr_for_the_branch() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async { Json(serde_json::json!([])) }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "noprstatus");
+        assert_eq!(auth.pr_status("acme/site", "content/x").await.unwrap(), None);
+        stop();
     }
 }

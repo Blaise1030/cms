@@ -437,3 +437,32 @@ async fn http_create_and_active() {
         "content/launch-week"
     );
 }
+
+#[tokio::test]
+async fn http_status_is_null_without_a_github_remote() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+    let st = AppState::with_scaffold_install(config(&projects), false);
+    let info = st.projects.create("Site").await.unwrap();
+    let app = http::router(st);
+
+    let (s, body) = call(
+        &app,
+        req(
+            "GET",
+            &format!("/api/changes/content%2Flaunch-week/status?project={}", info.id),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "pr": null }));
+
+    let (s, _) = call(
+        &app,
+        req("GET", "/api/changes/content%2Fx/status?project=nope", None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
