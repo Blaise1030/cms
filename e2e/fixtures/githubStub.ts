@@ -20,12 +20,31 @@ export type PullsPost = {
   };
 };
 
+/** Head SHA every stub PR reports (deployments are recorded against it). */
+export const STUB_HEAD_SHA = "5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e";
+
+export type CheckRun = { status: string; conclusion: string | null };
+export type Review = { user: { login: string }; state: string };
+
+/** Overrides applied to every stub PR (status endpoints read them). */
+export type PrStatusPatch = {
+  draft?: boolean;
+  state?: "open" | "closed";
+  merged?: boolean;
+  checkRuns?: CheckRun[];
+  reviews?: Review[];
+  /** A successful deployment for the head SHA (null = none). */
+  deployment?: { environment_url: string } | null;
+};
+
 export type GithubStub = {
   baseUrl: string;
   /** Bodies of every `POST /repos/{o}/{r}/pulls` the daemon sent. */
   pullsPosts: () => PullsPost[];
   /** Force pulls endpoints to return this HTTP status (null = normal). */
   setPullsStatus: (status: number | null) => void;
+  /** Change PR state / checks / reviews / deployment served by the status endpoints. */
+  setPrStatus: (patch: PrStatusPatch) => void;
   close: () => Promise<void>;
 };
 
@@ -44,6 +63,30 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
   const pullsPosts: PullsPost[] = [];
   const prs: StoredPr[] = [];
   let nextPr = 1;
+  const status: Required<Omit<PrStatusPatch, "draft">> & { draft: boolean | null } = {
+    draft: null,
+    state: "open",
+    merged: false,
+    checkRuns: [],
+    reviews: [],
+    deployment: null,
+  };
+  const pullJson = (p: StoredPr) => {
+    const headRef = p.head.split(":").slice(1).join(":");
+    return {
+      number: p.number,
+      title: p.title,
+      html_url: p.html_url,
+      draft: status.draft ?? p.draft,
+      state: status.state,
+      merged_at: status.merged ? "2026-10-04T00:00:00Z" : null,
+      head: { ref: headRef, sha: STUB_HEAD_SHA },
+    };
+  };
+  const sendJson = (res: http.ServerResponse, code: number, body: unknown) => {
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -140,9 +183,11 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
 
       if (req.method === "GET") {
         const head = url.searchParams.get("head");
-        const matching = head ? prs.filter((p) => p.head === head) : prs;
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(matching));
+        const want = url.searchParams.get("state") ?? "open";
+        const matching = (head ? prs.filter((p) => p.head === head) : prs).filter(
+          () => want === "all" || want === status.state,
+        );
+        sendJson(res, 200, matching.map(pullJson));
         return;
       }
 
@@ -187,6 +232,43 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       }
     }
 
+    const repoGet =
+      req.method === "GET" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+(\/.*)$/);
+    if (repoGet) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      const rest = repoGet[1]!;
+      if (/^\/pulls\/\d+\/reviews$/.test(rest)) {
+        sendJson(res, 200, status.reviews);
+        return;
+      }
+      if (rest === `/commits/${STUB_HEAD_SHA}/check-runs`) {
+        sendJson(res, 200, { total_count: status.checkRuns.length, check_runs: status.checkRuns });
+        return;
+      }
+      if (rest === "/deployments") {
+        const sha = url.searchParams.get("sha");
+        const list =
+          status.deployment && (sha === null || sha === STUB_HEAD_SHA)
+            ? [{ id: 1, sha: STUB_HEAD_SHA, environment: "preview" }]
+            : [];
+        sendJson(res, 200, list);
+        return;
+      }
+      if (rest === "/deployments/1/statuses") {
+        sendJson(
+          res,
+          200,
+          status.deployment
+            ? [{ state: "success", environment_url: status.deployment.environment_url }]
+            : [],
+        );
+        return;
+      }
+    }
+
     res.writeHead(404).end();
   });
 
@@ -196,8 +278,11 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       resolve({
         baseUrl: `http://127.0.0.1:${port}`,
         pullsPosts: () => pullsPosts.slice(),
-        setPullsStatus: (status) => {
-          pullsStatus = status;
+        setPullsStatus: (code) => {
+          pullsStatus = code;
+        },
+        setPrStatus: (patch) => {
+          Object.assign(status, patch);
         },
         close: () =>
           new Promise((done, err) => {

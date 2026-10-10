@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { startGithubStub, STUB_TOKEN, STUB_USER } from "./githubStub";
+import { startGithubStub, STUB_HEAD_SHA, STUB_TOKEN, STUB_USER } from "./githubStub";
 
 describe("githubStub", () => {
   it("serves /user and device-flow with a signed-in identity", async () => {
@@ -65,6 +65,48 @@ describe("githubStub", () => {
       const prs = (await list.json()) as { number: number }[];
       expect(prs).toHaveLength(1);
       expect(prs[0]!.number).toBe(1);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("serves PR state, check-runs, reviews and deployments set via setPrStatus", async () => {
+    const stub = await startGithubStub();
+    const get = async (p: string) =>
+      (await fetch(`${stub.baseUrl}${p}`, { headers: { Authorization: `Bearer ${STUB_TOKEN}` } })).json();
+    try {
+      await fetch(`${stub.baseUrl}/repos/acme/site/pulls`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "T", head: "content/t", base: "main", draft: true }),
+      });
+      expect(await get("/repos/acme/site/deployments?sha=" + STUB_HEAD_SHA)).toEqual([]);
+
+      stub.setPrStatus({
+        draft: false,
+        merged: true,
+        state: "closed",
+        checkRuns: [{ status: "completed", conclusion: "success" }],
+        reviews: [{ user: { login: "g" }, state: "APPROVED" }],
+        deployment: { environment_url: "https://x.pages.dev" },
+      });
+      const prs = (await get("/repos/acme/site/pulls?head=acme:content/t&state=all")) as {
+        draft: boolean;
+        state: string;
+        merged_at: string | null;
+        head: { sha: string };
+      }[];
+      expect(prs[0]).toMatchObject({ draft: false, state: "closed", head: { sha: STUB_HEAD_SHA } });
+      expect(prs[0]!.merged_at).not.toBeNull();
+      expect(await get("/repos/acme/site/pulls?head=acme:content/t&state=open")).toEqual([]);
+      expect(await get("/repos/acme/site/pulls/1/reviews")).toHaveLength(1);
+      expect(await get(`/repos/acme/site/commits/${STUB_HEAD_SHA}/check-runs`)).toMatchObject({
+        total_count: 1,
+      });
+      const deps = (await get("/repos/acme/site/deployments?sha=" + STUB_HEAD_SHA)) as { id: number }[];
+      expect(await get(`/repos/acme/site/deployments/${deps[0]!.id}/statuses`)).toEqual([
+        { state: "success", environment_url: "https://x.pages.dev" },
+      ]);
     } finally {
       await stub.close();
     }
