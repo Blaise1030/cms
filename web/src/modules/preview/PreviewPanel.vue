@@ -6,18 +6,31 @@ import {
   ExternalLink,
   Maximize2,
   Minimize2,
+  Monitor,
   MousePointerClick,
   RotateCw,
+  Smartphone,
+  Tablet,
 } from "@lucide/vue";
 import { useEventListener } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
+import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
+import PrStatusPill from "@/modules/changes/PrStatusPill.vue";
+import ReadyForReviewButton from "@/modules/changes/ReadyForReviewButton.vue";
 import { attachPicker, describeElement } from "./elementPicker";
 import { frameHref, framePath, useFrameHistory } from "./frameHistory";
-import { DEVICE_WIDTH, usePreviewStore } from "./store";
+import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 
 const props = defineProps<{ projectId: string; devserver?: DevserverState }>();
 
@@ -46,6 +59,13 @@ const crossSite = computed(
   () => !forceFrame.value && isCrossSite(window.location.origin, daemonOrigin.value),
 );
 const width = computed(() => DEVICE_WIDTH[store.device]);
+
+const DEVICES: { id: Device; label: string; icon: typeof Monitor }[] = [
+  { id: "desktop", label: "Desktop", icon: Monitor },
+  { id: "tablet", label: "Tablet", icon: Tablet },
+  { id: "mobile", label: "Mobile", icon: Smartphone },
+];
+const device = computed(() => DEVICES.find((d) => d.id === store.device) ?? DEVICES[0]!);
 
 const DOT: Record<DevserverState, string> = {
   starting: "bg-amber-500 animate-pulse",
@@ -247,6 +267,37 @@ function toggleFullscreen() {
             </div>
           </form>
 
+          <PrStatusPill />
+          <CleanupChangeButton :project-id="projectId" />
+          <ReadyForReviewButton />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="`Viewport: ${device.label}`"
+                data-testid="viewport-size"
+              >
+                <component :is="device.icon" />
+              </Button>
+            </DropdownMenuTrigger>
+            <!-- Portal into the shell while it is fullscreen; `body` is not rendered then. -->
+            <DropdownMenuContent align="end" side="bottom" :to="isFullscreen ? shell ?? undefined : undefined">
+              <DropdownMenuRadioGroup
+                :model-value="store.device"
+                @update:model-value="store.setDevice($event as Device)"
+              >
+                <DropdownMenuRadioItem v-for="d in DEVICES" :key="d.id" :value="d.id">
+                  <component :is="d.icon" />
+                  {{ d.label }}
+                  <span v-if="DEVICE_WIDTH[d.id]" class="text-muted-foreground ml-auto pl-3 text-xs">
+                    {{ DEVICE_WIDTH[d.id] }}px
+                  </span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Tooltip>
             <TooltipTrigger as-child>
               <Button

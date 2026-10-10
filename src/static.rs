@@ -179,6 +179,7 @@ mod tests {
             "package.json",
             "package-lock.json",
             "AGENTS.md",
+            "README.md",
             ".gitignore",
             ".github/workflows/deploy.yml",
             "wrangler.toml",

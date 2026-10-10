@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { Checkpoint } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
-import { parseUnifiedDiff, type ParsedDiff } from "./diff";
+import type { ParsedDiff } from "./diff";
 
 export const useCheckpointsStore = defineStore("checkpoints", () => {
   const daemon = useDaemon();
@@ -43,7 +43,12 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
     const request = ++diffRequest;
     diffLoading.value = true;
     try {
-      const parsed = parseUnifiedDiff(await daemon.api.checkpointDiff(projectId, sha));
+      // Lazy: the parser lives in `@pierre/diffs`, kept out of the app shell with the renderer.
+      const [{ parseUnifiedDiff }, text] = await Promise.all([
+        import("./diff"),
+        daemon.api.checkpointDiff(projectId, sha),
+      ]);
+      const parsed = parseUnifiedDiff(text);
       if (request === diffRequest) diff.value = parsed;
     } catch (e) {
       if (request === diffRequest) diffError.value = errorMessage(e);

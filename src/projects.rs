@@ -73,6 +73,8 @@ pub struct Project {
     pub auto_approve: bool,
     /// `owner/name` when the project was opened from GitHub.
     pub repo: Option<String>,
+    /// The admin dismissed the "protect main" hint for this project.
+    pub protection_hint_dismissed: bool,
 }
 
 /// API view of a project: `{ id, name, port, devserver, autoApprove, repo }`.
@@ -112,6 +114,12 @@ struct StoredProject {
     auto_approve: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     repo: Option<String>,
+    #[serde(
+        default,
+        rename = "protectionHintDismissed",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    protection_hint_dismissed: bool,
 }
 
 #[derive(Default)]
@@ -188,6 +196,7 @@ impl ProjectRegistry {
                 devserver: DevserverStatus::Starting,
                 auto_approve: s.auto_approve,
                 repo: s.repo,
+                protection_hint_dismissed: s.protection_hint_dismissed,
             })
             .filter(|p| p.dir.is_dir())
             .collect();
@@ -330,6 +339,36 @@ impl ProjectRegistry {
         Ok(ProjectInfo::from(&inner.projects[idx]))
     }
 
+    /// Whether the "protect main" hint was dismissed for `id` (false for unknown ids).
+    pub async fn protection_hint_dismissed(&self, id: &str) -> bool {
+        let inner = self.inner.lock().await;
+        inner
+            .projects
+            .iter()
+            .any(|p| p.id == id && p.protection_hint_dismissed)
+    }
+
+    /// Hide the "protect main" hint for `id` from now on. Persisted; on failure the
+    /// in-memory project is left unchanged.
+    pub async fn dismiss_protection_hint(&self, id: &str) -> Result<(), ApiError> {
+        self.check_writable()?;
+        let mut inner = self.inner.lock().await;
+        let idx = inner
+            .projects
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+        if inner.projects[idx].protection_hint_dismissed {
+            return Ok(());
+        }
+        inner.projects[idx].protection_hint_dismissed = true;
+        if let Err(e) = self.persist(&inner.projects).await {
+            inner.projects[idx].protection_hint_dismissed = false;
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// New project from the template, authored as [`Identity::workbench`] (tests, defaults).
     pub async fn create(&self, name: &str) -> Result<ProjectInfo, ApiError> {
         self.create_from(name, Source::Template, &Identity::workbench())
@@ -400,6 +439,7 @@ impl ProjectRegistry {
             devserver: DevserverStatus::Starting,
             auto_approve: false,
             repo,
+            protection_hint_dismissed: false,
         };
         let info = ProjectInfo::from(&project);
         inner.projects.push(project);
@@ -569,6 +609,7 @@ impl ProjectRegistry {
                 port: p.port,
                 auto_approve: p.auto_approve,
                 repo: p.repo.clone(),
+                protection_hint_dismissed: p.protection_hint_dismissed,
             })
             .collect();
         let state_dir = self.projects_dir.join(STATE_DIR);

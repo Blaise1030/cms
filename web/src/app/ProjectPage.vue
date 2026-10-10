@@ -1,31 +1,38 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onBeforeUnmount, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import EditorMenubar from "@/app/EditorMenubar.vue";
-import Shell, { type WorkspaceTab } from "@/app/Shell.vue";
+import Shell from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
 import { errorMessage } from "@/lib/errors";
 import ChatPanel from "@/modules/chat/ChatPanel.vue";
+import SharePreviewButton from "@/modules/changes/SharePreviewButton.vue";
+import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
+import { projectTabFromRoute } from "@/router";
 
 const props = defineProps<{ id: string }>();
 
 const daemon = useDaemon();
+const route = useRoute();
 const router = useRouter();
 const projects = useProjectsStore();
-const tab = ref<WorkspaceTab>("preview");
+const changes = useChangesStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === props.id) ?? null);
+const showChat = computed(() => projectTabFromRoute(route.name) === "preview");
 
 watch(
   () => props.id,
-  () => {
-    tab.value = "preview";
+  (id) => {
+    void changes.load(id);
   },
+  { immediate: true },
 );
+onBeforeUnmount(() => changes.stopStatusPolling());
 
 // An unknown id (a stale link, or a project deleted elsewhere) goes back to the project list.
 watch(
@@ -50,21 +57,18 @@ async function toggleAutoApprove() {
 </script>
 
 <template>
-  <Shell :status="daemon.status.value">
+  <Shell :status="daemon.status.value" :show-chat="showChat">
     <template #menubar>
-      <EditorMenubar
-        v-if="project"
-        class="ml-2"
-        :project-id="project.id"
-        :tab="tab"
-        @update:tab="tab = $event"
-      />
+      <EditorMenubar v-if="project" :project-id="project.id" />
+    </template>
+    <template #actions>
+      <SharePreviewButton v-if="project" :project-id="project.id" />
     </template>
     <template #account>
       <GithubAccount />
     </template>
     <template #workspace>
-      <Workspace v-if="project" :project="project" :tab="tab" />
+      <Workspace v-if="project" :project="project" />
     </template>
     <template #chat>
       <ChatPanel

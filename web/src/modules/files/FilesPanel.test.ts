@@ -3,12 +3,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import { defineComponent, h } from "vue";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
-vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./highlight", async (orig) => ({
-  ...(await orig<typeof import("./highlight")>()),
-  highlightCode: async (code: string) => `<pre class="shiki"><code>${code}</code></pre>`,
+const hDaemon = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
+vi.mock("./FileCodeMirror.vue", () => ({
+  // FileViewer loads this via defineAsyncComponent, which unwraps `default` only for ES modules.
+  __esModule: true,
+  default: defineComponent({
+    name: "FileCodeMirror",
+    props: { code: { type: String, required: true }, path: { type: String, required: true } },
+    setup: (props) => () => h("pre", { "data-testid": "file-content" }, props.code),
+  }),
+}));
+vi.mock("./ProjectFilesTree.vue", () => ({
+  default: defineComponent({
+    name: "ProjectFilesTree",
+    props: { paths: { type: Array, required: true }, selectedPath: { type: String, default: null } },
+    emits: ["select"],
+    setup(props, { emit }) {
+      return () =>
+        h(
+          "div",
+          { "data-testid": "project-files-tree", role: "tree", "aria-label": "Project files" },
+          (props.paths as string[]).map((path) =>
+            h(
+              "button",
+              {
+                type: "button",
+                "data-testid": `tree-${path}`,
+                "data-item-path": path,
+                onClick: () => emit("select", path),
+              },
+              path.split("/").at(-1),
+            ),
+          ),
+        );
+    },
+  }),
 }));
 
 import FilesPanel from "./FilesPanel.vue";
@@ -38,25 +70,26 @@ function mountPanel() {
         : { path, size: 9, content: "# Hello", binary: false },
     ),
   };
-  h.daemon = createFakeDaemon(api);
+  hDaemon.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
   return mount(FilesPanel, { props: { projectId: "p" }, attachTo: document.body });
 }
 
 beforeEach(() => localStorage.clear());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  document.body.innerHTML = "";
+  vi.useRealTimers();
+});
 
 describe("FilesPanel", () => {
-  it("lists the root with directories first and expands folders lazily", async () => {
+  it("walks the tree into flat paths for the Pierre file tree", async () => {
     const w = mountPanel();
     await flushPromises();
-    const names = w.findAll("[data-testid^='tree-']").map((n) => n.text());
-    expect(names).toEqual(["src", "index.astro"]);
-    expect(api.tree).toHaveBeenCalledTimes(1);
-    await w.find("[data-testid='tree-src']").trigger("click");
-    await flushPromises();
-    expect(api.tree).toHaveBeenLastCalledWith("p", "src");
-    expect(w.find("[data-testid='tree-src/hero.mdx']").exists()).toBe(true);
+    expect(api.tree).toHaveBeenCalledWith("p", "");
+    expect(api.tree).toHaveBeenCalledWith("p", "src");
+    expect(useFilesStore().paths).toEqual(["index.astro", "src/hero.mdx"]);
+    expect(w.find("[data-testid='tree-index.astro']").text()).toBe("index.astro");
+    expect(w.find("[data-testid='tree-src/hero.mdx']").text()).toBe("hero.mdx");
     w.unmount();
   });
 
@@ -76,7 +109,7 @@ describe("FilesPanel", () => {
   it("explains binary files instead of rendering them", async () => {
     const w = mountPanel();
     await flushPromises();
-    useFilesStore().dirs[""] = [{ name: "logo.png", path: "logo.png", kind: "file", size: 3 }];
+    useFilesStore().paths = ["logo.png"];
     await flushPromises();
     await w.find("[data-testid='tree-logo.png']").trigger("click");
     await flushPromises();
@@ -89,9 +122,10 @@ describe("FilesPanel", () => {
     await flushPromises();
     await w.find("[data-testid='tree-index.astro']").trigger("click");
     await flushPromises();
-    h.daemon.emit({ type: "events.lagged", missed: 9 });
+    const treesBefore = api.tree.mock.calls.length;
+    hDaemon.daemon.emit({ type: "events.lagged", missed: 9 });
     await flushPromises();
-    expect(api.tree).toHaveBeenCalledTimes(2);
+    expect(api.tree.mock.calls.length).toBeGreaterThan(treesBefore);
     expect(api.file).toHaveBeenCalledTimes(2);
     w.unmount();
   });
@@ -101,12 +135,13 @@ describe("FilesPanel", () => {
     await flushPromises();
     await w.find("[data-testid='tree-index.astro']").trigger("click");
     await flushPromises();
+    const treesBefore = api.tree.mock.calls.length;
     vi.useFakeTimers();
-    h.daemon.emit({ type: "fs.change", projectId: "p", path: "index.astro", kind: "modify" });
-    h.daemon.emit({ type: "fs.change", projectId: "p", path: "index.astro", kind: "modify" });
-    h.daemon.emit({ type: "fs.change", projectId: "other", path: "x", kind: "modify" });
+    hDaemon.daemon.emit({ type: "fs.change", projectId: "p", path: "index.astro", kind: "modify" });
+    hDaemon.daemon.emit({ type: "fs.change", projectId: "p", path: "index.astro", kind: "modify" });
+    hDaemon.daemon.emit({ type: "fs.change", projectId: "other", path: "x", kind: "modify" });
     await vi.advanceTimersByTimeAsync(300);
-    expect(api.tree).toHaveBeenCalledTimes(2);
+    expect(api.tree.mock.calls.length).toBeGreaterThan(treesBefore);
     expect(api.file).toHaveBeenCalledTimes(2);
     w.unmount();
   });

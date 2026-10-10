@@ -49,4 +49,6 @@ export interface ProjectChat {
   loadingHistory: boolean;
   /** A prompt request is in flight (session start + POST). */
   sending: boolean;
+  /** Prompt text waiting on "Start a change first" (GitHub project on main). */
+  changeRequiredPrompt: string | null;
 }

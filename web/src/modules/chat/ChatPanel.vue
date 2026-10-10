@@ -24,6 +24,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import ChatMessage from "./ChatMessage.vue";
 import ComposerEditor from "./ComposerEditor.vue";
 import PermissionPrompt from "./PermissionPrompt.vue";
@@ -36,6 +37,8 @@ const emit = defineEmits<{ toggleAutoApprove: [] }>();
 const store = useChatStore();
 const preview = usePreviewStore();
 const composer = ref<InstanceType<typeof ComposerEditor> | null>(null);
+const showChangeGuard = ref(false);
+const pendingPrompt = ref<string | null>(null);
 const pc = computed(() => store.byProject[props.projectId]);
 const busy = computed(() => store.isBusy(props.projectId));
 const canStop = computed(() => !!pc.value?.turns.some((t) => t.status === "streaming" && !t.pending));
@@ -78,6 +81,17 @@ async function onSubmit(message: PromptInputMessage) {
   if (!text.trim()) return;
   composer.value?.focus();
   await store.send(props.projectId, text);
+  const pending = store.takeChangeRequired(props.projectId);
+  if (pending) {
+    pendingPrompt.value = pending;
+    showChangeGuard.value = true;
+  }
+}
+
+async function onChangeCreated() {
+  const text = pendingPrompt.value;
+  pendingPrompt.value = null;
+  if (text) await store.send(props.projectId, text);
 }
 </script>
 
@@ -190,5 +204,13 @@ async function onSubmit(message: PromptInputMessage) {
         </PromptInputFooter>
       </PromptInput>
     </div>
+
+    <NewChangeDialog
+      v-model:open="showChangeGuard"
+      :project-id="projectId"
+      heading="Start a change first"
+      description="GitHub projects cannot be edited on main. Name this change to continue with your prompt."
+      @created="onChangeCreated"
+    />
   </div>
 </template>

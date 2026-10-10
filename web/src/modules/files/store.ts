@@ -1,35 +1,63 @@
 import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
-import type { FileContent, TreeEntry } from "@/core/types";
+import type { FileContent } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 
 const REFRESH_DELAY_MS = 250;
+
+/** Skip heavy / generated dirs when walking for the Pierre tree. */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  ".astro",
+  ".next",
+  ".output",
+  "coverage",
+  "target",
+  ".vite",
+]);
 
 export const useFilesStore = defineStore("files", () => {
   const daemon = useDaemon();
 
   const projectId = ref<string | null>(null);
-  /** Directory listings by path (`""` is the project root). */
-  const dirs = ref<Record<string, TreeEntry[]>>({});
-  const expanded = ref<Record<string, boolean>>({});
+  /** Flat file paths for `@pierre/trees` (directories are inferred from segments). */
+  const paths = ref<string[]>([]);
   const selectedPath = ref<string | null>(null);
   const file = ref<FileContent | null>(null);
   const fileLoading = ref(false);
   const fileError = ref<string | null>(null);
   const treeError = ref<string | null>(null);
+  const treeLoading = ref(false);
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
-  async function loadDir(id: string, path: string) {
+  async function collectFilePaths(id: string, dir: string): Promise<string[]> {
+    const tree = await daemon.api.tree(id, dir);
+    const out: string[] = [];
+    for (const entry of tree.entries) {
+      if (entry.kind === "file") {
+        out.push(entry.path);
+        continue;
+      }
+      if (SKIP_DIRS.has(entry.name)) continue;
+      out.push(...(await collectFilePaths(id, entry.path)));
+    }
+    return out;
+  }
+
+  async function loadTree(id: string) {
+    treeLoading.value = true;
     try {
-      const tree = await daemon.api.tree(id, path);
-      if (projectId.value !== id) return; // switched projects meanwhile
-      dirs.value[path] = [...tree.entries].sort(
-        (a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1),
-      );
+      paths.value = await collectFilePaths(id, "");
       treeError.value = null;
     } catch (e) {
-      if (projectId.value === id) treeError.value = errorMessage(e);
+      if (projectId.value === id) {
+        paths.value = [];
+        treeError.value = errorMessage(e);
+      }
+    } finally {
+      if (projectId.value === id) treeLoading.value = false;
     }
   }
 
@@ -49,27 +77,18 @@ export const useFilesStore = defineStore("files", () => {
     }
   }
 
-  /** Point the store at a project (resets state when it changed) and load the root. */
+  /** Point the store at a project (resets state when it changed) and load the file list. */
   async function open(id: string) {
     if (projectId.value !== id) {
       clearTimeout(refreshTimer);
       projectId.value = id;
-      dirs.value = {};
-      expanded.value = {};
+      paths.value = [];
       selectedPath.value = null;
       file.value = null;
       fileError.value = null;
       treeError.value = null;
     }
-    await loadDir(id, "");
-  }
-
-  async function toggle(path: string) {
-    const id = projectId.value;
-    if (!id) return;
-    const next = !expanded.value[path];
-    expanded.value[path] = next;
-    if (next && !dirs.value[path]) await loadDir(id, path);
+    await loadTree(id);
   }
 
   async function select(path: string) {
@@ -83,8 +102,7 @@ export const useFilesStore = defineStore("files", () => {
   async function refresh() {
     const id = projectId.value;
     if (!id) return;
-    const paths = ["", ...Object.keys(expanded.value).filter((p) => expanded.value[p])];
-    await Promise.all(paths.map((p) => loadDir(id, p)));
+    await loadTree(id);
     if (selectedPath.value) await loadFile(id, selectedPath.value);
   }
 
@@ -94,7 +112,6 @@ export const useFilesStore = defineStore("files", () => {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => void refresh(), REFRESH_DELAY_MS);
     }),
-    // Missed `fs.change` events (socket drop or `events.lagged`): re-read tree and open file.
     daemon.onReconnected(() => void refresh()),
     daemon.on("events.lagged", () => void refresh()),
   ];
@@ -105,15 +122,14 @@ export const useFilesStore = defineStore("files", () => {
 
   return {
     projectId,
-    dirs,
-    expanded,
+    paths,
     selectedPath,
     file,
     fileLoading,
     fileError,
     treeError,
+    treeLoading,
     open,
-    toggle,
     select,
     refresh,
   };

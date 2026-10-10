@@ -1,24 +1,17 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { highlightCode } from "./highlight";
+import { computed, defineAsyncComponent } from "vue";
 import { useFilesStore } from "./store";
 
-const store = useFilesStore();
-const html = ref("");
-let request = 0;
+// CodeMirror and its language packs are large; keep them out of the main bundle.
+const FileCodeMirror = defineAsyncComponent(() => import("./FileCodeMirror.vue"));
 
-watch(
-  () => store.file,
-  async (file) => {
-    const mine = ++request;
-    html.value = "";
-    if (!file || file.binary || file.content === null) return;
-    const out = await highlightCode(file.content, file.path);
-    if (mine === request) html.value = out;
-  },
-  { immediate: true },
-);
+const store = useFilesStore();
+
+const readyFile = computed(() => {
+  const file = store.file;
+  if (!file || file.binary || file.content === null) return null;
+  return file;
+});
 </script>
 
 <template>
@@ -30,7 +23,7 @@ watch(
       Select a file to view it.
     </p>
     <template v-else>
-      <div class="text-muted-foreground flex h-8 shrink-0 items-center border-b px-3 font-mono text-xs">
+      <div class="text-muted-foreground flex h-8 shrink-0 items-center px-3 font-mono text-xs">
         {{ store.selectedPath }}
       </div>
       <p v-if="store.fileError" class="text-destructive p-3 text-sm" role="alert">{{ store.fileError }}</p>
@@ -42,10 +35,9 @@ watch(
       >
         {{ store.file.binary ? "Binary file" : "File too large" }} ({{ store.file.size }} bytes) — no preview.
       </p>
-      <ScrollArea v-else class="min-h-0 flex-1">
-        <!-- eslint-disable-next-line vue/no-v-html -- shiki output is escaped -->
-        <div class="viewer text-xs [&_pre]:!bg-transparent [&_pre]:p-3" data-testid="file-content" v-html="html" />
-      </ScrollArea>
+      <div v-else-if="readyFile" class="min-h-0 flex-1 overflow-hidden">
+        <FileCodeMirror :code="readyFile.content!" :path="readyFile.path" />
+      </div>
     </template>
   </div>
 </template>

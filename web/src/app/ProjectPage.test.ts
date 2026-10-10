@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "@/modules/projects/store";
+import { useChangesStore } from "@/modules/changes/store";
 import { routes } from "@/router";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn() }));
@@ -56,12 +57,19 @@ describe("ProjectPage", () => {
     const w = await mountAt("/p/a");
     expect(w.find("[data-testid='workspace']").text()).toBe("a");
     expect(w.find("[data-testid='chat']").text()).toBe("a");
-    expect(router.currentRoute.value.path).toBe("/p/a");
+    expect(router.currentRoute.value.path).toBe("/p/a/preview");
   });
 
   it("sends an unknown project id home with a toast", async () => {
     await mountAt("/p/gone");
     expect(router.currentRoute.value.path).toBe("/");
     expect(h.toastError).toHaveBeenCalledWith('Project "gone" was not found');
+  });
+
+  it("stops PR status polling when the page unmounts", async () => {
+    const w = await mountAt("/p/a");
+    const stop = vi.spyOn(useChangesStore(), "stopStatusPolling");
+    w.unmount();
+    expect(stop).toHaveBeenCalled();
   });
 });

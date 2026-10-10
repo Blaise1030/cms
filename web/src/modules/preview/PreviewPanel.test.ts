@@ -9,6 +9,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
 
 import PreviewPanel from "./PreviewPanel.vue";
 import { usePreviewStore } from "./store";
+import { useChangesStore } from "@/modules/changes/store";
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
@@ -20,6 +21,24 @@ function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api =
 }
 
 describe("PreviewPanel", () => {
+  it("shows the active change's PR status in the browser bar", async () => {
+    const w = mountPanel();
+    expect(w.find("[data-testid='pr-status']").exists()).toBe(false);
+    useChangesStore().status = {
+      number: 3,
+      url: "https://github.com/acme/site/pull/3",
+      state: "open",
+      checks: "passing",
+      previewUrl: "https://lw.pages.dev",
+    };
+    await flushPromises();
+    expect(w.find("[data-testid='pr-status']").text()).toBe("Open · Checks passing");
+    expect(w.find("[data-testid='preview-deploy-link']").attributes("href")).toBe(
+      "https://lw.pages.dev",
+    );
+    w.unmount();
+  });
+
   it("embeds the proxied preview URL", () => {
     const w = mountPanel();
     expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:7800/preview/site-1/");

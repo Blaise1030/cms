@@ -3,6 +3,7 @@
 pub mod acp;
 pub mod agents_config;
 pub mod auth;
+pub mod changes;
 pub mod config;
 pub mod devserver;
 pub mod error;

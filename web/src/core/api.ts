@@ -1,6 +1,10 @@
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type Change,
+  type ChangesUpdate,
+  type SharedChange,
+  type PrStatus,
   type Checkpoint,
   type ErrorCode,
   type DeviceStart,
@@ -148,6 +152,8 @@ export function createApi(
     githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),
     githubRepos: async (): Promise<GithubRepo[]> =>
       (await json<{ repos: GithubRepo[] }>("GET", "/api/github/repos")).repos,
+    dismissProtectionHint: (id: string) =>
+      json<{ dismissed: true }>("POST", `/api/projects/${enc(id)}/protection-hint/dismiss`),
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
@@ -173,6 +179,41 @@ export function createApi(
           query: { project, session },
         })
       ).turns,
+
+    createChange: (project: string, title: string) =>
+      json<Change>("POST", "/api/changes", { body: { project, title } }),
+    listChanges: async (project: string): Promise<Change[]> =>
+      (await json<{ changes: Change[] }>("GET", "/api/changes", { query: { project } })).changes,
+    activeChange: async (project: string): Promise<Change> =>
+      json<Change>("GET", "/api/changes/active", { query: { project } }),
+    switchChange: (project: string, branch: string) =>
+      json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    updateChanges: (project: string) =>
+      json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
+    shareChange: (project: string, branch: string) =>
+      json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
+        body: { project },
+      }),
+    /** Delete a merged change's local branch and return to an up-to-date `main`. */
+    cleanupChange: (project: string, branch: string) =>
+      json<{ branch: string; mainUpdated?: boolean }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
+        body: { project },
+      }),
+    /** PR state / checks / preview URL of a change; null when it has no PR. */
+    changeStatus: async (project: string, branch: string): Promise<PrStatus | null> =>
+      (
+        await json<{ pr: PrStatus | null }>("GET", `/api/changes/${enc(branch)}/status`, {
+          query: { project },
+        })
+      ).pr,
+
+    /** Mark a change's draft PR ready for review; returns its fresh status. */
+    markChangeReady: async (project: string, branch: string): Promise<PrStatus | null> =>
+      (
+        await json<{ pr: PrStatus | null }>("POST", `/api/changes/${enc(branch)}/ready`, {
+          body: { project },
+        })
+      ).pr,
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))

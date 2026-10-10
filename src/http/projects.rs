@@ -140,6 +140,16 @@ pub async fn update(
     Ok(Json(info))
 }
 
+/// `POST /api/projects/{id}/protection-hint/dismiss` → `{ dismissed: true }`. Hides the
+/// "protect main" hint shown after Share preview for this project, across restarts.
+pub async fn dismiss_protection_hint(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state.projects.dismiss_protection_hint(&id).await?;
+    Ok(Json(json!({ "dismissed": true })))
+}
+
 /// `DELETE /api/projects/{id}?confirm=true` — destructive, so the flag is mandatory.
 pub async fn remove(
     State(state): State<AppState>,

@@ -38,20 +38,14 @@ describe("parseUnifiedDiff", () => {
     expect(parsed.files.map((f) => f.path)).toEqual(["src/hero.mdx", "new.txt", "logo.png"]);
   });
 
-  it("builds before/after text with hunk markers on both sides", () => {
+  it("counts changed lines across hunks", () => {
     const f = parsed.files[0]!;
-    expect(f.added).toBe(2);
-    expect(f.removed).toBe(1);
-    expect(f.oldText).toBe(
-      ["@@ -1,3 +1,3 @@", "title: Hello", "body: old", "cta: go", "@@ -10,2 +10,3 @@ tail", "keep", "end"].join("\n"),
-    );
-    expect(f.newText).toBe(
-      ["@@ -1,3 +1,3 @@", "title: Hello", "body: new", "cta: go", "@@ -10,2 +10,3 @@ tail", "keep", "added", "end"].join("\n"),
-    );
+    expect(f).toMatchObject({ added: 2, removed: 1, status: "modified", binary: false });
+    expect(f.meta.hunks).toHaveLength(2);
   });
 
   it("handles new files and binary files", () => {
-    expect(parsed.files[1]).toMatchObject({ added: 2, removed: 0, oldText: "@@ -0,0 +1,2 @@" });
+    expect(parsed.files[1]).toMatchObject({ added: 2, removed: 0, status: "added" });
     expect(parsed.files[2]!.binary).toBe(true);
   });
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { ArrowLeft, ChevronRight, GitCommitVertical, History, RotateCcw } from "@lucide/vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { ArrowLeft, ChevronRight, GitCommitVertical, RotateCcw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -21,14 +21,19 @@ import {
   StepperItem,
   StepperSeparator,
 } from "@/components/ui/stepper";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/errors";
-import DiffView from "./DiffView.vue";
 import { useCheckpointsStore } from "./store";
+
+// Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
+const ChangedFilesTree = defineAsyncComponent(() => import("./ChangedFilesTree.vue"));
+const DiffView = defineAsyncComponent(() => import("./DiffView.vue"));
 
 const props = defineProps<{ projectId: string }>();
 const store = useCheckpointsStore();
 
 const confirming = ref(false);
+const diffs = ref<HTMLElement | null>(null);
 
 const list = computed(() => store.byProject[props.projectId] ?? []);
 const selected = computed(() => list.value.find((c) => c.sha === store.selectedSha) ?? null);
@@ -45,6 +50,14 @@ watch(
 
 const short = (sha: string) => sha.slice(0, 7);
 const when = (ts: number) => new Date(ts * 1000).toLocaleString();
+
+/** Scroll a file's diff into view when it is picked in the changed-files tree. */
+function reveal(path: string) {
+  const section = [...(diffs.value?.querySelectorAll<HTMLElement>("section[data-path]") ?? [])].find(
+    (el) => el.dataset.path === path,
+  );
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 async function restore() {
   const target = selected.value;
@@ -63,54 +76,93 @@ async function restore() {
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="checkpoints-panel">
     <template v-if="selected">
-      <div class="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
-        <Button variant="ghost" size="sm" @click="store.select(projectId, null)">
-          <ArrowLeft /> Timeline
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          :disabled="isCurrent || store.restoring"
-          data-testid="restore"
-          @click="confirming = true"
-        >
-          <RotateCcw /> {{ isCurrent ? "Current" : "Restore" }}
-        </Button>
-      </div>
-      <ScrollArea class="min-h-0 flex-1">
-        <div class="flex flex-col gap-4 p-3">
-          <div>
-            <p class="text-sm font-medium">{{ selected.summary }}</p>
-            <p class="text-muted-foreground text-xs">{{ selected.author }} · {{ short(selected.sha) }} · {{ when(selected.ts) }}</p>
+      <div class="flex min-h-10 shrink-0 items-center gap-3 px-2 py-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                class="self-start"
+                aria-label="Back to timeline"
+                @click="store.select(projectId, null)"
+              >
+                <ArrowLeft />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Back to timeline</TooltipContent>
+          </Tooltip>
+          <div class="min-w-0 flex-1 space-y-1">
+            <p class="truncate text-base font-medium">{{ selected.summary }}</p>
+            <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+              <Badge variant="secondary" class="max-w-40 truncate font-normal">
+                {{ selected.author }}
+              </Badge>
+              <Badge variant="outline" class="font-mono font-normal">
+                {{ short(selected.sha) }}
+              </Badge>
+              <Badge variant="outline" class="font-normal">
+                {{ when(selected.ts) }}
+              </Badge>
+              <Badge v-if="isCurrent" variant="secondary" class="font-normal">Current</Badge>
+            </div>
           </div>
-          <p v-if="store.diffLoading" class="text-muted-foreground text-sm">Loading diff…</p>
-          <p v-else-if="store.diffError" class="text-destructive text-sm" role="alert">
-            {{ store.diffError }}
-          </p>
-          <template v-else-if="store.diff">
-            <p v-if="store.diff.files.length === 0" class="text-muted-foreground text-sm">
-              No file changes in this checkpoint.
-            </p>
-            <section v-for="file in store.diff.files" :key="file.path" class="flex flex-col gap-1.5">
-              <div class="flex items-center justify-between gap-2 font-mono text-xs">
-                <span class="truncate">{{ file.path }}</span>
-                <span class="shrink-0">
-                  <span class="text-emerald-500">+{{ file.added }}</span>
-                  <span class="text-destructive ml-1">-{{ file.removed }}</span>
-                </span>
-              </div>
-              <p v-if="file.binary" class="text-muted-foreground text-xs">Binary file changed.</p>
-              <DiffView v-else :old-text="file.oldText" :new-text="file.newText" />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                class="shrink-0"
+                :disabled="isCurrent || store.restoring"
+                :aria-label="isCurrent ? 'Current checkpoint' : 'Restore checkpoint'"
+                data-testid="restore"
+                @click="confirming = true"
+              >
+                <RotateCcw />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ isCurrent ? "Current checkpoint" : "Restore checkpoint" }}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+      <p v-if="store.diffLoading" class="text-muted-foreground p-3 text-sm">Loading diff…</p>
+      <p v-else-if="store.diffError" class="text-destructive p-3 text-sm" role="alert">
+        {{ store.diffError }}
+      </p>
+      <p
+        v-else-if="store.diff && store.diff.files.length === 0"
+        class="text-muted-foreground p-3 text-sm"
+      >
+        No file changes in this checkpoint.
+      </p>
+      <div v-else-if="store.diff" class="flex min-h-0 flex-1">
+        <aside class="flex h-full w-60 shrink-0 flex-col overflow-hidden px-1 pt-1">
+          <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+        </aside>
+        <ScrollArea class="bg-background min-h-0 flex-1">
+          <div ref="diffs" class="flex flex-col gap-3 p-3">
+            <section
+              v-for="file in store.diff.files"
+              :key="file.path"
+              :data-path="file.path"
+              class="flex scroll-mt-3 flex-col gap-1.5"
+            >
+              <template v-if="file.binary">
+                <div class="flex items-center justify-between gap-2 font-mono text-xs">
+                  <span class="truncate">{{ file.path }}</span>
+                </div>
+                <p class="text-muted-foreground text-xs">Binary file changed.</p>
+              </template>
+              <DiffView v-else :diff="file.meta" />
             </section>
-          </template>
-        </div>
-      </ScrollArea>
+          </div>
+        </ScrollArea>
+      </div>
     </template>
 
     <template v-else>
-      <div class="flex h-10 shrink-0 items-center gap-2 px-3 text-sm font-medium">
-        <History class="size-4" /> Checkpoints
-      </div>
       <ScrollArea class="min-h-0 flex-1">
         <div class="p-3">
           <p v-if="store.loading && list.length === 0" class="text-muted-foreground text-sm">Loading…</p>
@@ -154,7 +206,7 @@ async function restore() {
                 @click="store.select(projectId, cp.sha)"
               >
                 <ItemContent class="min-w-0 gap-0.5">
-                  <ItemTitle class="w-full">
+                  <ItemTitle class="w-full text-base">
                     <span class="truncate">{{ cp.summary }}</span>
                   </ItemTitle>
                   <ItemDescription class="text-xs">
