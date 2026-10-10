@@ -346,3 +346,59 @@ describe("changes store", () => {
     });
   });
 });
+
+describe("changes store cleanup", () => {
+  const merged = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged" as const,
+    checks: "none" as const,
+    previewUrl: null,
+  };
+
+  it("deletes the merged change, returns to main and drops it from the list", async () => {
+    const cleanupChange = vi.fn(async () => ({ branch: "main" }));
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => merged),
+      cleanupChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    await store.load("site");
+    store.items = [
+      { branch: "content/lw", title: "LW" },
+      { branch: "content/other", title: "Other" },
+    ];
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await store.cleanup("site", "content/lw");
+
+    expect(cleanupChange).toHaveBeenCalledWith("site", "content/lw");
+    expect(store.active).toBeNull();
+    expect(store.status).toBeNull();
+    expect(store.prUrl).toBeNull();
+    expect(store.items.map((c) => c.branch)).toEqual(["content/other"]);
+    expect(store.cleaningUp).toBe(false);
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("keeps the change and surfaces the error when cleanup is refused", async () => {
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => merged),
+      cleanupChange: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "This change has not been merged yet", 409);
+      }),
+    });
+    await store.load("site");
+    await expect(store.cleanup("site", "content/lw")).rejects.toThrow();
+    expect(store.active?.branch).toBe("content/lw");
+    expect(store.error).toContain("not been merged");
+    expect(store.cleaningUp).toBe(false);
+    store.stopStatusPolling();
+  });
+});

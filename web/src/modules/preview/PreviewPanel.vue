@@ -25,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
+import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
 import PrStatusPill from "@/modules/changes/PrStatusPill.vue";
 import { attachPicker, describeElement } from "./elementPicker";
 import { frameHref, framePath, useFrameHistory } from "./frameHistory";
@@ -266,6 +267,7 @@ function toggleFullscreen() {
           </form>
 
           <PrStatusPill />
+          <CleanupChangeButton :project-id="projectId" />
 
           <DropdownMenu>
             <DropdownMenuTrigger as-child>

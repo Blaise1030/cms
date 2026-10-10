@@ -20,6 +20,7 @@ export const useChangesStore = defineStore("changes", () => {
   const creating = ref(false);
   const sharing = ref(false);
   const switching = ref(false);
+  const cleaningUp = ref(false);
   const listing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -164,6 +165,29 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /** Clean up a merged change: back on updated `main`, the change gone from the list. */
+  async function cleanup(id: string, branch: string): Promise<void> {
+    cleaningUp.value = true;
+    error.value = null;
+    try {
+      await daemon.api.cleanupChange(id, branch);
+      projectId.value = id;
+      items.value = items.value.filter((c) => c.branch !== branch);
+      if (active.value?.branch === branch) {
+        stopStatusPolling();
+        active.value = null;
+        prUrl.value = null;
+        status.value = null;
+      }
+      await refreshTreeAndPreview();
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    } finally {
+      cleaningUp.value = false;
+    }
+  }
+
   async function share(id: string, branch: string): Promise<string> {
     sharing.value = true;
     error.value = null;
@@ -201,6 +225,7 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     switching,
+    cleaningUp,
     listing,
     loading,
     error,
@@ -211,6 +236,7 @@ export const useChangesStore = defineStore("changes", () => {
     create,
     switchTo,
     share,
+    cleanup,
     refreshStatus,
     stopStatusPolling,
   };
