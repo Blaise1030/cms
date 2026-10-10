@@ -1,0 +1,22 @@
+---
+import { getCollection, render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { href } from "../../lib/href";
+import { Image } from "astro:assets";
+export async function getStaticPaths() {
+  return (await getCollection("blog")).map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+---
+<Base title={entry.data.title} description={entry.data.description}>
+  <article class="content-page">
+    <a href={href("/blog/")}>Back to Blog</a>
+    <h1>{entry.data.title}</h1>
+    <p>{entry.data.description}</p>
+    <time datetime={entry.data.pubDate}>{entry.data.pubDate}</time>
+    {entry.data.coverImage && <Image class="cover-image" src={entry.data.coverImage} alt={entry.data.coverAlt!} />}
+    {entry.data.tags.length > 0 && <p>{entry.data.tags.join(", ")}</p>}
+    <div class="article-body"><Content /></div>
+  </article>
+</Base>

@@ -4,7 +4,9 @@
   "nav": [
     { "label": "Features", "href": "#features" },
     { "label": "Pricing", "href": "#pricing" },
-    { "label": "FAQ", "href": "#faq" }
+    { "label": "FAQ", "href": "#faq" },
+    { "label": "Blog", "href": "/blog/" },
+    { "label": "Help", "href": "/help/" }
   ],
   "footer": {
     "text": "© 2026 Acme, Inc. All rights reserved.",

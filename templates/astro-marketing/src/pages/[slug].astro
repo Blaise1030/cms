@@ -1,0 +1,28 @@
+---
+import { getCollection, getEntry, render } from "astro:content";
+import { sectionComponents } from "../components/sections";
+import Base from "../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  return (await getCollection("pages"))
+    .filter((entry) => !["home", "blog", "help"].includes(entry.id))
+    .map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+const { entry } = Astro.props;
+const page = entry.data;
+const rendered = await Promise.all(
+  page.sections.map(async (id) => {
+    const sectionEntry = await getEntry("sections", id);
+    if (!sectionEntry) throw new Error(`pages/${entry.id}.json references missing section "${id}"`);
+    const { Content } = await render(sectionEntry);
+    return { id, data: sectionEntry.data, Content };
+  }),
+);
+---
+
+<Base title={page.title} description={page.description}>
+  {rendered.map(({ id, data, Content }) => {
+    const Section = sectionComponents[data.type] as any;
+    return <Section id={id} data={data} Content={Content} />;
+  })}
+</Base>
