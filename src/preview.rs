@@ -214,9 +214,7 @@ async fn forward(
     }
     // Pin subsequent `/@vite/…` fetches to this project (Astro hardcodes those at `/`).
     if out.status().is_success() || out.status().is_redirection() {
-        if let Ok(v) = HeaderValue::from_str(&format!(
-            "{VITE_COOKIE}={id}; Path=/; SameSite=Lax"
-        )) {
+        if let Ok(v) = HeaderValue::from_str(&format!("{VITE_COOKIE}={id}; Path=/; SameSite=Lax")) {
             out.headers_mut().append(header::SET_COOKIE, v);
         }
     }
@@ -354,7 +352,9 @@ mod tests {
     #[test]
     fn vite_dev_paths() {
         assert!(is_vite_dev_path("/@vite/client"));
-        assert!(is_vite_dev_path("/@id/astro/runtime/client/dev-toolbar/entrypoint.js"));
+        assert!(is_vite_dev_path(
+            "/@id/astro/runtime/client/dev-toolbar/entrypoint.js"
+        ));
         assert!(is_vite_dev_path("/@fs/Users/x/project/foo.ts"));
         assert!(is_vite_dev_path("/node_modules/vite/dist/client/env.mjs"));
         assert!(is_vite_dev_path("/src/layouts/Base.astro"));

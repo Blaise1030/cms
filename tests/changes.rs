@@ -41,7 +41,10 @@ fn seed_repo(dir: &Path) {
 fn clone_with_origin(tmp: &Path) -> PathBuf {
     let src = tmp.join("src");
     seed_repo(&src);
-    git_cli(tmp, &["clone", "--bare", src.to_str().unwrap(), "remote.git"]);
+    git_cli(
+        tmp,
+        &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+    );
     let work = tmp.join("work");
     git_cli(tmp, &["clone", "remote.git", "work"]);
     git_cli(&work, &["config", "user.name", "Ada"]);
@@ -80,7 +83,10 @@ async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
     let res = app.clone().oneshot(r).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -224,7 +230,15 @@ fn commit_file_at(dir: &Path, name: &str, content: &str, msg: &str, unix: i64) {
     git_cli(dir, &["add", "-A"]);
     let date = format!("@{unix}");
     let out = Command::new("git")
-        .args(["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", msg])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-m",
+            msg,
+        ])
         .env("GIT_AUTHOR_DATE", &date)
         .env("GIT_COMMITTER_DATE", &date)
         .current_dir(dir)
@@ -299,9 +313,7 @@ async fn switch_checks_out_and_refuses_dirty() {
     assert!(!work.join("beta.md").exists());
 
     std::fs::write(work.join("alpha.md"), "dirty\n").unwrap();
-    let err = changes::switch(&work, "content/beta")
-        .await
-        .unwrap_err();
+    let err = changes::switch(&work, "content/beta").await.unwrap_err();
     assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
     assert!(
         err.message.to_lowercase().contains("checkpoint"),
@@ -347,7 +359,10 @@ async fn http_create_and_active() {
 
     // Attach a bare origin so create can fetch main.
     let bare = tmp.path().join("origin.git");
-    git_cli(tmp.path(), &["clone", "--bare", dir.to_str().unwrap(), "origin.git"]);
+    git_cli(
+        tmp.path(),
+        &["clone", "--bare", dir.to_str().unwrap(), "origin.git"],
+    );
     git_cli(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git_cli(&dir, &["fetch", "origin"]);
     let _ = git::set_identity(
@@ -394,11 +409,7 @@ async fn http_create_and_active() {
 
     let (s, body) = call(
         &app,
-        req(
-            "GET",
-            &format!("/api/changes?project={}", info.id),
-            None,
-        ),
+        req("GET", &format!("/api/changes?project={}", info.id), None),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{body}");
@@ -451,7 +462,10 @@ async fn http_status_is_null_without_a_github_remote() {
         &app,
         req(
             "GET",
-            &format!("/api/changes/content%2Flaunch-week/status?project={}", info.id),
+            &format!(
+                "/api/changes/content%2Flaunch-week/status?project={}",
+                info.id
+            ),
             None,
         ),
     )

@@ -16,8 +16,15 @@ fn pages_branch(raw: &str) -> String {
         .arg(raw)
         .output()
         .expect("run pages-branch.sh");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    String::from_utf8(out.stdout).unwrap().trim_end_matches('\n').to_string()
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim_end_matches('\n')
+        .to_string()
 }
 
 #[test]
@@ -56,7 +63,10 @@ fn deploy_command_uses_the_sanitised_branch_not_the_raw_head_ref() {
         command.contains("--branch=\"${{ steps.branch.outputs.name }}\""),
         "{command}"
     );
-    assert!(!command.contains("head_ref") && !command.contains("ref_name"), "{command}");
+    assert!(
+        !command.contains("head_ref") && !command.contains("ref_name"),
+        "{command}"
+    );
     assert!(wf.contains(".github/scripts/pages-branch.sh"));
 }
 

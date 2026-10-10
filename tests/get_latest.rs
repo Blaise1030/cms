@@ -43,7 +43,10 @@ fn clone_with_origin(tmp: &Path) -> PathBuf {
     git_cli(&src, &["config", "user.name", "Grace"]);
     git_cli(&src, &["config", "user.email", "grace@example.com"]);
     commit_file(&src, "README.md", "hello\n", "init");
-    git_cli(tmp, &["clone", "--bare", src.to_str().unwrap(), "remote.git"]);
+    git_cli(
+        tmp,
+        &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+    );
     let work = tmp.join("work");
     git_cli(tmp, &["clone", "remote.git", "work"]);
     git_cli(&work, &["config", "user.name", "Ada Writer"]);
@@ -133,12 +136,21 @@ async fn merges_main_into_each_change_as_the_user() {
         assert_eq!(parents[1], before.as_str());
         assert_eq!(parents[2], remote_main.as_str());
         assert_eq!(
-            git_cli(&work, &["log", "-1", "--format=%an <%ae>|%cn <%ce>", branch]),
+            git_cli(
+                &work,
+                &["log", "-1", "--format=%an <%ae>|%cn <%ce>", branch]
+            ),
             "Ada Writer <ada@example.com>|Ada Writer <ada@example.com>"
         );
-        assert_eq!(git_cli(&work, &["show", &format!("{branch}:news.md")]), "fresh");
+        assert_eq!(
+            git_cli(&work, &["show", &format!("{branch}:news.md")]),
+            "fresh"
+        );
     }
-    assert_eq!(git_cli(&work, &["show", &format!("{first}:first.md")]), "one");
+    assert_eq!(
+        git_cli(&work, &["show", &format!("{first}:first.md")]),
+        "one"
+    );
 
     // Active change stays checked out, and its working tree has the new file.
     assert_eq!(git_cli(&work, &["branch", "--show-current"]), second);
@@ -196,7 +208,10 @@ async fn refuses_uncommitted_changes() {
     );
     assert_eq!(rev(&work, "main"), main_before);
     assert_eq!(rev(&work, &branch), tip_before);
-    assert_eq!(std::fs::read_to_string(work.join("first.md")).unwrap(), "unsaved\n");
+    assert_eq!(
+        std::fs::read_to_string(work.join("first.md")).unwrap(),
+        "unsaved\n"
+    );
 }
 
 #[tokio::test]
@@ -268,7 +283,10 @@ async fn post(app: &axum::Router, uri: &str, body: Value) -> (StatusCode, Value)
     let res = app.clone().oneshot(r).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -297,7 +315,10 @@ async fn http_update_route() {
     let (s, body) = post(&app, "/api/changes/update", json!({ "project": info.id })).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["mainUpdated"], false);
-    assert_eq!(body["updated"], json!([{ "branch": branch, "title": "First" }]));
+    assert_eq!(
+        body["updated"],
+        json!([{ "branch": branch, "title": "First" }])
+    );
     assert_eq!(body["conflicts"], json!([]));
 
     // Dirty tree → 409 with a message.
@@ -462,8 +483,5 @@ async fn http_update_refuses_during_an_agent_turn() {
 
     let (s, body) = post(&app, "/api/changes/update", json!({ "project": info.id })).await;
     assert_eq!(s, StatusCode::CONFLICT, "{body}");
-    assert!(
-        body.to_string().to_lowercase().contains("agent"),
-        "{body}"
-    );
+    assert!(body.to_string().to_lowercase().contains("agent"), "{body}");
 }

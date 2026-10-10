@@ -735,5 +735,8 @@ async fn branch_protection_doc_ships_with_the_daemon() {
     );
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.starts_with("# Protect `main` so merges need review"), "{text}");
+    assert!(
+        text.starts_with("# Protect `main` so merges need review"),
+        "{text}"
+    );
 }

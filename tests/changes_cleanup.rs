@@ -48,7 +48,10 @@ fn seed_repo(dir: &Path) {
 fn clone_with_origin(tmp: &Path) -> PathBuf {
     let src = tmp.join("src");
     seed_repo(&src);
-    git_cli(tmp, &["clone", "--bare", src.to_str().unwrap(), "remote.git"]);
+    git_cli(
+        tmp,
+        &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+    );
     git_cli(tmp, &["clone", "remote.git", "work"]);
     tmp.join("work")
 }
@@ -131,7 +134,9 @@ async fn cleanup_fast_forwards_main_and_deletes_only_the_local_branch() {
 
     merge_on_remote(tmp.path(), &merged, false);
 
-    changes::cleanup(&work, &merged, PrMerge::NotMerged, &[]).await.unwrap();
+    changes::cleanup(&work, &merged, PrMerge::NotMerged, &[])
+        .await
+        .unwrap();
 
     assert_eq!(git_cli(&work, &["branch", "--show-current"]), "main");
     assert_eq!(
@@ -172,7 +177,9 @@ async fn cleanup_trusts_a_merged_pr_for_squash_merges() {
     assert_eq!(err.code, ErrorCode::Conflict);
 
     let head = tip(&work, &branch);
-    let done = changes::cleanup(&work, &branch, merged(&head), &[]).await.unwrap();
+    let done = changes::cleanup(&work, &branch, merged(&head), &[])
+        .await
+        .unwrap();
     assert!(done.main_updated);
     assert_eq!(git_cli(&work, &["branch", "--show-current"]), "main");
     assert!(work.join("squashed.md").exists());
@@ -355,7 +362,10 @@ async fn cleanup_without_reaching_origin() {
     let head = tip(&work, &branch);
     merge_on_remote(tmp.path(), &branch, true);
     let main_before = tip(&work, "main");
-    git_cli(&work, &["remote", "set-url", "origin", "/nonexistent/remote.git"]);
+    git_cli(
+        &work,
+        &["remote", "set-url", "origin", "/nonexistent/remote.git"],
+    );
 
     // Merge unknown and the remote unreachable: refuse, keep everything.
     let err = changes::cleanup(&work, &branch, PrMerge::NotMerged, &[])
@@ -401,7 +411,10 @@ async fn post(app: &axum::Router, uri: &str, body: Value) -> (StatusCode, Value)
     let res = app.clone().oneshot(r).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -440,7 +453,10 @@ async fn http_cleanup_route() {
 #[derive(Clone)]
 enum Pulls {
     /// One PR for the queried head in this state, with this head SHA.
-    Pr { merged: bool, head_sha: String },
+    Pr {
+        merged: bool,
+        head_sha: String,
+    },
     Fail,
     Hang,
 }
@@ -597,7 +613,10 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, Value) {
     let res = app.clone().oneshot(r).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 const LAUNCH: &str = "/api/changes/content%2Flaunch/cleanup";
@@ -615,7 +634,11 @@ async fn http_cleanup_checks_locally_before_asking_github() {
     std::fs::write(p.dir.join("launch.md"), "unsaved\n").unwrap();
     let (s, v) = post(&p.app, LAUNCH, body).await;
     assert_eq!(s, StatusCode::CONFLICT, "{v}");
-    assert_eq!(p.gh.hits(), 0, "no GitHub call for a request that fails locally");
+    assert_eq!(
+        p.gh.hits(),
+        0,
+        "no GitHub call for a request that fails locally"
+    );
 }
 
 #[tokio::test]
