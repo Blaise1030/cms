@@ -123,6 +123,7 @@ async fn main() -> ExitCode {
             ..github_defaults
         },
         ui_url,
+        hook_exe: None,
     };
     match workbench::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

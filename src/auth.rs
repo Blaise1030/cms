@@ -16,7 +16,8 @@ use crate::static_files;
 pub const SESSION_COOKIE: &str = "wb_session";
 const HEALTH_PATH: &str = "/api/health";
 
-fn ct_eq(a: &str, b: &str) -> bool {
+/// Constant-time string equality (length is not hidden).
+pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
         return false;
