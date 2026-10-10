@@ -45,6 +45,10 @@ export type GithubStub = {
   setPullsStatus: (status: number | null) => void;
   /** Change PR state / checks / reviews / deployment served by the status endpoints. */
   setPrStatus: (patch: PrStatusPatch) => void;
+  /** PR node ids of every GraphQL `markPullRequestReadyForReview` mutation received. */
+  readyForReviewCalls: () => string[];
+  /** Force `POST /graphql` to return this HTTP status (null = normal). */
+  setGraphqlStatus: (status: number | null) => void;
   close: () => Promise<void>;
 };
 
@@ -56,10 +60,16 @@ type StoredPr = {
   draft: boolean;
 };
 
-/** Minimal GitHub API stub: device flow + `/user` + repos + draft pulls. */
+/** GraphQL node id GitHub would give PR `number`. */
+const nodeId = (number: number) => `PR_kwStub${number}`;
+
+/** Minimal GitHub API stub: device flow + `/user` + repos + draft pulls + GraphQL
+ *  `markPullRequestReadyForReview`. */
 export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
   let pollCount = 0;
   let pullsStatus: number | null = null;
+  let graphqlStatus: number | null = null;
+  const readyCalls: string[] = [];
   const pullsPosts: PullsPost[] = [];
   const prs: StoredPr[] = [];
   let nextPr = 1;
@@ -75,6 +85,7 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
     const headRef = p.head.split(":").slice(1).join(":");
     return {
       number: p.number,
+      node_id: nodeId(p.number),
       title: p.title,
       html_url: p.html_url,
       draft: status.draft ?? p.draft,
@@ -168,6 +179,52 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/graphql") {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      if (graphqlStatus !== null) {
+        sendJson(res, graphqlStatus, { message: graphqlStatus === 403 ? "Resource not accessible" : "error" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        let body: { query?: string; variables?: Record<string, unknown> } = {};
+        try {
+          body = JSON.parse(raw) as typeof body;
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        if (!body.query?.includes("markPullRequestReadyForReview")) {
+          sendJson(res, 200, { errors: [{ message: "unsupported query" }] });
+          return;
+        }
+        const id = Object.values(body.variables ?? {}).find((v) => typeof v === "string") as
+          | string
+          | undefined;
+        const pr = prs.find((p) => nodeId(p.number) === id);
+        if (!id || !pr) {
+          sendJson(res, 200, {
+            data: { markPullRequestReadyForReview: null },
+            errors: [{ type: "NOT_FOUND", message: `Could not resolve to a node with the global id of '${id}'` }],
+          });
+          return;
+        }
+        readyCalls.push(id);
+        pr.draft = false;
+        status.draft = null;
+        sendJson(res, 200, {
+          data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } },
+        });
+      });
+      return;
+    }
+
     const pullsMatch = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/);
     if (pullsMatch) {
       if (auth !== `Bearer ${STUB_TOKEN}`) {
@@ -221,6 +278,7 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
           res.end(
             JSON.stringify({
               number: stored.number,
+              node_id: nodeId(stored.number),
               title: stored.title,
               html_url: stored.html_url,
               draft: stored.draft,
@@ -283,6 +341,10 @@ export function startGithubStub(clientId = "cid"): Promise<GithubStub> {
         },
         setPrStatus: (patch) => {
           Object.assign(status, patch);
+        },
+        readyForReviewCalls: () => readyCalls.slice(),
+        setGraphqlStatus: (code) => {
+          graphqlStatus = code;
         },
         close: () =>
           new Promise((done, err) => {

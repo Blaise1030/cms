@@ -164,6 +164,9 @@ struct ApiPermissions {
 #[derive(Deserialize)]
 struct ApiPull {
     number: u64,
+    /// GraphQL node id (for mutations such as `markPullRequestReadyForReview`).
+    #[serde(default)]
+    node_id: String,
     html_url: String,
     title: String,
     #[serde(default)]
@@ -331,6 +334,33 @@ impl From<ApiPull> for PullRequest {
             title: p.title,
             draft: p.draft,
         }
+    }
+}
+
+/// A GraphQL response: `errors` may come with HTTP 200.
+#[derive(Deserialize)]
+struct ApiGraphql {
+    #[serde(default)]
+    errors: Vec<ApiGraphqlError>,
+}
+
+#[derive(Deserialize)]
+struct ApiGraphqlError {
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    message: String,
+}
+
+const MARK_READY_MUTATION: &str = "mutation($id: ID!) { \
+markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }";
+
+/// GraphQL endpoint for a REST API base: `https://api.github.com` → `/graphql`;
+/// GitHub Enterprise `https://host/api/v3` → `https://host/api/graphql`.
+fn graphql_url(api: &str) -> String {
+    match api.strip_suffix("/api/v3") {
+        Some(host) => format!("{host}/api/graphql"),
+        None => format!("{api}/graphql"),
     }
 }
 
@@ -935,6 +965,54 @@ impl GithubAuth {
             .map_err(unreachable)?;
         let pull: ApiPull = parse_github(res, self, &token).await?;
         Ok(PullRequest::from(pull))
+    }
+
+    /// Mark `head_branch`'s open draft pull request ready for review (GraphQL
+    /// `markPullRequestReadyForReview` by node id). A PR that is already ready is left as is.
+    pub async fn mark_ready_for_review(&self, repo: &str, head_branch: &str) -> Result<(), ApiError> {
+        let owner = repo
+            .split_once('/')
+            .map(|(o, _)| o)
+            .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?head={}:{}&state=open",
+                urlencode(owner),
+                urlencode(head_branch)
+            ))
+            .await?;
+        let pull = pulls.into_iter().next().ok_or_else(|| {
+            ApiError::enoent("this change has no open pull request — share it first")
+        })?;
+        if !pull.draft {
+            return Ok(());
+        }
+        if pull.node_id.is_empty() {
+            return Err(ApiError::github("unexpected response from GitHub"));
+        }
+        let token = self.token().await.ok_or_else(not_signed_in)?;
+        let res = self
+            .http
+            .post(graphql_url(self.api()))
+            .bearer_auth(&token)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&serde_json::json!({
+                "query": MARK_READY_MUTATION,
+                "variables": { "id": pull.node_id },
+            }))
+            .send()
+            .await
+            .map_err(unreachable)?;
+        let body: ApiGraphql = parse_github(res, self, &token).await?;
+        if let Some(e) = body.errors.into_iter().next() {
+            let msg: String = e.message.chars().take(300).collect();
+            return Err(if e.kind.as_deref() == Some("FORBIDDEN") {
+                ApiError::sandbox(format!("GitHub refused to mark the pull request ready: {msg}"))
+            } else {
+                ApiError::github(format!("GitHub could not mark the pull request ready: {msg}"))
+            });
+        }
+        Ok(())
     }
 
     /// PR state, checks and preview URL for `head_branch`; `None` when it has no pull request.
@@ -2272,5 +2350,173 @@ mod tests {
         // Sequential would be ≥ 1.2s before the hung one; concurrent finishes at the timeout.
         assert!(took < Duration::from_millis(1500), "took {took:?}");
         stop();
+    }
+    /// `GET /repos/acme/site/pulls` serving one open PR with node id `PR_abc`.
+    fn one_open_pull(draft: bool) -> axum::Router {
+        use axum::routing::get;
+        axum::Router::new().route(
+            "/repos/acme/site/pulls",
+            get(move || async move {
+                axum::Json(serde_json::json!([{
+                    "number": 4,
+                    "node_id": "PR_abc",
+                    "html_url": "https://github.com/acme/site/pull/4",
+                    "title": "Launch week",
+                    "draft": draft,
+                    "state": "open",
+                    "head": { "ref": "content/launch-week", "sha": "abc" }
+                }]))
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_sends_the_graphql_mutation_with_the_pr_node_id() {
+        use axum::extract::Json as AxJson;
+        use axum::routing::post;
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(move |AxJson(body): AxJson<serde_json::Value>| {
+                let seen2 = seen2.clone();
+                async move {
+                    seen2.lock().unwrap().push(body);
+                    axum::Json(serde_json::json!({
+                        "data": { "markPullRequestReadyForReview": { "pullRequest": { "isDraft": false } } }
+                    }))
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready");
+        auth.mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        let sent = seen.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0]["query"]
+            .as_str()
+            .unwrap()
+            .contains("markPullRequestReadyForReview(input: { pullRequestId: $id })"));
+        assert_eq!(sent[0]["variables"]["id"], "PR_abc");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_skips_a_pr_that_is_not_a_draft() {
+        use axum::routing::post;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls2 = calls.clone();
+        let routes = one_open_pull(false).route(
+            "/graphql",
+            post(move || {
+                calls2.fetch_add(1, Ordering::SeqCst);
+                async { axum::Json(serde_json::json!({ "data": {} })) }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-noop");
+        auth.mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_without_an_open_pr_is_not_found() {
+        use axum::routing::get;
+        let routes = axum::Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async { axum::Json(serde_json::json!([])) }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-none");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Enoent);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn mark_ready_for_review_surfaces_403_and_graphql_errors() {
+        use axum::routing::post;
+
+        // HTTP 403 from the GraphQL endpoint.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                (
+                    axum::http::StatusCode::FORBIDDEN,
+                    axum::Json(serde_json::json!({ "message": "Resource not accessible by integration" })),
+                )
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-403");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Sandbox);
+        assert_eq!(err.http_status(), 403);
+        stop();
+
+        // GraphQL reports a FORBIDDEN error with HTTP 200.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                axum::Json(serde_json::json!({
+                    "data": { "markPullRequestReadyForReview": null },
+                    "errors": [{ "type": "FORBIDDEN", "message": "Ada does not have permission" }]
+                }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-gql-403");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Sandbox);
+        assert!(err.message.contains("Ada does not have permission"), "{}", err.message);
+        stop();
+
+        // Any other GraphQL error.
+        let routes = one_open_pull(true).route(
+            "/graphql",
+            post(|| async {
+                axum::Json(serde_json::json!({
+                    "errors": [{ "type": "NOT_FOUND", "message": "Could not resolve" }]
+                }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "ready-gql-err");
+        let err = auth
+            .mark_ready_for_review("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::GithubErr);
+        assert!(err.message.contains("Could not resolve"), "{}", err.message);
+        stop();
+    }
+
+    #[test]
+    fn graphql_endpoint_follows_the_rest_api_base() {
+        assert_eq!(graphql_url("https://api.github.com"), "https://api.github.com/graphql");
+        assert_eq!(
+            graphql_url("https://ghe.acme.dev/api/v3"),
+            "https://ghe.acme.dev/api/graphql"
+        );
+        assert_eq!(graphql_url("http://127.0.0.1:9"), "http://127.0.0.1:9/graphql");
     }
 }

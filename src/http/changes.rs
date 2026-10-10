@@ -1,6 +1,6 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`.
+//! `GET /api/changes/{branch}/status`, `POST /api/changes/{branch}/ready`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -186,6 +186,32 @@ pub async fn status(
     let Some(repo) = project.repo else {
         return Ok(Json(json!({ "pr": null })));
     };
+    let pr = state.github.pr_status(&repo, &branch).await?;
+    Ok(Json(json!({ "pr": pr })))
+}
+
+/// `POST /api/changes/{branch}/ready` `{ project }` → `{ pr: { number, url, state, checks,
+/// previewUrl } | null }`. Marks the branch's draft pull request ready for review, then
+/// returns its fresh status.
+pub async fn ready(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    let repo = project.repo.ok_or_else(|| {
+        ApiError::badreq("this project has no GitHub remote — open a repository first")
+    })?;
+    state.github.mark_ready_for_review(&repo, &branch).await?;
     let pr = state.github.pr_status(&repo, &branch).await?;
     Ok(Json(json!({ "pr": pr })))
 }

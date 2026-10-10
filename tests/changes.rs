@@ -466,3 +466,35 @@ async fn http_status_is_null_without_a_github_remote() {
     .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn http_ready_needs_a_github_remote_and_a_known_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+    let st = AppState::with_scaffold_install(config(&projects), false);
+    let info = st.projects.create("Site").await.unwrap();
+    let app = http::router(st);
+
+    let (s, body) = call(
+        &app,
+        req(
+            "POST",
+            "/api/changes/content%2Flaunch-week/ready",
+            Some(json!({ "project": info.id })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+
+    let (s, _) = call(
+        &app,
+        req(
+            "POST",
+            "/api/changes/content%2Fx/ready",
+            Some(json!({ "project": "nope" })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
