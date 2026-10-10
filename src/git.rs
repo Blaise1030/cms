@@ -73,7 +73,21 @@ pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
 /// Hooks are disabled: the tree is agent-authored and we never want it to execute code on our
 /// behalf.
 async fn run(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
-    let out = Command::new("git")
+    run_with_index(dir, args, None).await
+}
+
+async fn run_with_index(
+    dir: &Path,
+    args: &[&str],
+    index: Option<&Path>,
+) -> Result<String, ApiError> {
+    let mut command = Command::new("git");
+    if let Some(index) = index {
+        command
+            .env("GIT_INDEX_FILE", index)
+            .env("GIT_LITERAL_PATHSPECS", "1");
+    }
+    let out = command
         .args([
             "-c",
             "commit.gpgsign=false",
@@ -166,6 +180,150 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
         author: author.to_string(),
         ts: ts.parse().unwrap_or_default(),
     }))
+}
+
+/// Commit only the selected project-relative files, preserving unrelated index entries
+/// and all working-tree bytes. Paths must identify files, never directories or symlinks.
+/// Like project checkpoints, this requires an existing HEAD.
+pub async fn checkpoint_paths(
+    dir: &Path,
+    summary: &str,
+    paths: &[PathBuf],
+) -> Result<Option<Checkpoint>, ApiError> {
+    let lock = lock_for(dir);
+    let _guard = lock.lock().await;
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let root = std::fs::canonicalize(dir)?;
+    let mut selected = Vec::new();
+    for path in paths {
+        let name = path
+            .to_str()
+            .ok_or_else(|| ApiError::badreq("invalid path"))?;
+        if name.is_empty()
+            || name.contains('\0')
+            || path.components().any(|part| {
+                !matches!(part, std::path::Component::Normal(_))
+                    || [".git", ".hg", ".svn", ".bzr", "_darcs", ".fossil", ".jj"]
+                        .iter()
+                        .any(|vcs| part.as_os_str().eq_ignore_ascii_case(vcs))
+            })
+        {
+            return Err(ApiError::sandbox(
+                "checkpoint paths must be project-relative files",
+            ));
+        }
+        let mut target = root.clone();
+        for part in path.components() {
+            target.push(part);
+            match std::fs::symlink_metadata(&target) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(ApiError::sandbox(
+                        "checkpoint paths cannot contain symlinks",
+                    ));
+                }
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        if target.is_dir() {
+            return Err(ApiError::badreq("checkpoint paths must identify files"));
+        }
+        selected.push(name);
+    }
+
+    // Hold Git's real index lock throughout preparation and publication. Git processes
+    // using our isolated index acquire their own separate locks.
+    let index = run(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+    )
+    .await?;
+    let index = PathBuf::from(index.trim());
+    let index_lock = index.with_file_name("index.lock");
+    let guard = ScopedIndexFiles::create(index_lock)?;
+    let head = run(dir, &["rev-parse", "HEAD"]).await?.trim().to_string();
+    let commit_index = guard.temporary.join("commit-index");
+    run_with_index(dir, &["read-tree", &head], Some(&commit_index)).await?;
+    for path in &selected {
+        // A path absent from HEAD and disk is already in the desired state.
+        let tracked = run_with_index(dir, &["ls-files", "--", path], Some(&commit_index)).await?;
+        if root.join(path).exists() || !tracked.is_empty() {
+            run_with_index(dir, &["add", "-A", "--", path], Some(&commit_index)).await?;
+        }
+    }
+    let tree = run_with_index(dir, &["write-tree"], Some(&commit_index)).await?;
+    if tree.trim() == run(dir, &["rev-parse", "HEAD^{tree}"]).await?.trim() {
+        return Ok(None);
+    }
+    // Prepare the new real index from the user's index, replacing only selected paths
+    // with the exact tree being committed (without rereading the working tree).
+    let prepared = guard.temporary.join("prepared-index");
+    if index.exists() {
+        std::fs::copy(&index, &prepared)?;
+    } else {
+        run_with_index(dir, &["read-tree", &head], Some(&prepared)).await?;
+    }
+    let mut reset = vec!["reset", "--quiet", tree.trim(), "--"];
+    reset.extend(selected);
+    run_with_index(dir, &reset, Some(&prepared)).await?;
+    let summary = clean_summary(summary);
+    let message = format!("{CHECKPOINT_PREFIX}{summary}");
+    let sha = run_with_index(
+        dir,
+        &["commit-tree", tree.trim(), "-p", &head, "-m", &message],
+        Some(&commit_index),
+    )
+    .await?
+    .trim()
+    .to_string();
+    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an", &sha]).await?;
+    let (ts, author) = meta
+        .trim()
+        .split_once('\u{1f}')
+        .unwrap_or((meta.trim(), ""));
+    // Compare-and-swap HEAD refuses an external branch update during preparation.
+    // Publish the prepared index through Git's lock path, on the same filesystem.
+    std::fs::copy(&prepared, &guard.lock)?;
+    run(dir, &["update-ref", "-m", &message, "HEAD", &sha, &head]).await?;
+    std::fs::rename(&guard.lock, &index)?;
+    Ok(Some(Checkpoint {
+        sha,
+        summary,
+        author: author.to_string(),
+        ts: ts.parse().unwrap_or_default(),
+    }))
+}
+
+struct ScopedIndexFiles {
+    lock: PathBuf,
+    temporary: PathBuf,
+}
+
+impl ScopedIndexFiles {
+    fn create(lock: PathBuf) -> Result<Self, ApiError> {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+            .map_err(|err| ApiError::git(format!("cannot lock project index: {err}")))?;
+        let temporary = lock
+            .parent()
+            .unwrap()
+            .join(format!("workbench-index-{:032x}", rand::random::<u128>()));
+        let guard = Self { lock, temporary };
+        std::fs::create_dir(&guard.temporary)?;
+        Ok(guard)
+    }
+}
+
+impl Drop for ScopedIndexFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock);
+        let _ = std::fs::remove_dir_all(&self.temporary);
+    }
 }
 
 /// Commits on the current branch, newest first. Includes the scaffold's initial commit so
