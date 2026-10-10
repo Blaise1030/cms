@@ -6,8 +6,6 @@ import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
 import { useChangesStore } from "@/modules/changes/store";
 
-const DOCS_URL = "https://github.com/Blaise1030/cms/blob/main/docs/branch-protection.md";
-
 const props = defineProps<{ projectId: string }>();
 const changes = useChangesStore();
 
@@ -45,7 +43,7 @@ async function onDismiss() {
         <a
           class="underline underline-offset-2"
           data-testid="protection-hint-docs"
-          :href="DOCS_URL"
+          :href="changes.protectionHint.docsUrl"
           target="_blank"
           rel="noopener noreferrer"
           >How to</a

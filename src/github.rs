@@ -113,6 +113,9 @@ pub struct PullRequest {
     pub draft: bool,
 }
 
+/// How long Share preview waits for the branch protection lookup before giving up.
+const PROTECTION_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Whether `main` has a branch protection rule, from [`GithubAuth::main_protection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchProtection {
@@ -789,27 +792,86 @@ impl GithubAuth {
         Ok(PullRequest::from(pull))
     }
 
-    /// Branch protection of `main` on `owner/name`: 200 → protected, 404 → unprotected,
-    /// anything else (403 without admin rights, network errors) → unknown. Never fails.
+    /// Branch protection of `main` on `owner/name`, from the classic protection endpoint
+    /// and repository rulesets (both read concurrently):
+    /// - protected: classic rule exists (200), or an active ruleset requires a pull request;
+    /// - unprotected: classic says 404 "Branch not protected" and no ruleset requires a PR;
+    /// - unknown: anything else (403 without admin rights, a 404 "Not Found" for a repo we
+    ///   cannot see, errors) or no answer within [`PROTECTION_TIMEOUT`]. Never fails.
     pub async fn main_protection(&self, repo: &str) -> BranchProtection {
+        tokio::time::timeout(PROTECTION_TIMEOUT, self.lookup_main_protection(repo))
+            .await
+            .unwrap_or(BranchProtection::Unknown)
+    }
+
+    async fn lookup_main_protection(&self, repo: &str) -> BranchProtection {
         let Some(token) = self.token().await else {
             return BranchProtection::Unknown;
         };
+        let (classic, rules_need_pr) = tokio::join!(
+            self.classic_main_protection(repo, &token),
+            self.rulesets_require_pr(repo, &token),
+        );
+        match (classic, rules_need_pr) {
+            (BranchProtection::Protected, _) | (_, Some(true)) => BranchProtection::Protected,
+            (BranchProtection::Unprotected, Some(false)) => BranchProtection::Unprotected,
+            _ => BranchProtection::Unknown,
+        }
+    }
+
+    /// `GET /repos/{repo}/branches/main/protection`.
+    async fn classic_main_protection(&self, repo: &str, token: &str) -> BranchProtection {
         let res = self
             .http
             .get(format!(
                 "{}/repos/{repo}/branches/main/protection",
                 self.api()
             ))
-            .bearer_auth(&token)
+            .bearer_auth(token)
             .header(ACCEPT, GITHUB_JSON)
             .send()
             .await;
-        match res.map(|r| r.status()) {
-            Ok(s) if s.is_success() => BranchProtection::Protected,
-            Ok(reqwest::StatusCode::NOT_FOUND) => BranchProtection::Unprotected,
-            _ => BranchProtection::Unknown,
+        let Ok(res) = res else {
+            return BranchProtection::Unknown;
+        };
+        let status = res.status();
+        if status.is_success() {
+            return BranchProtection::Protected;
         }
+        if status == reqwest::StatusCode::NOT_FOUND {
+            #[derive(Deserialize)]
+            struct Message {
+                message: Option<String>,
+            }
+            let msg = res.json::<Message>().await.ok().and_then(|m| m.message);
+            if msg.as_deref() == Some("Branch not protected") {
+                return BranchProtection::Unprotected;
+            }
+        }
+        BranchProtection::Unknown
+    }
+
+    /// `GET /repos/{repo}/rules/branches/main`: whether an active ruleset requires a pull
+    /// request. `None` when the rules could not be read.
+    async fn rulesets_require_pr(&self, repo: &str, token: &str) -> Option<bool> {
+        #[derive(Deserialize)]
+        struct Rule {
+            #[serde(rename = "type")]
+            kind: String,
+        }
+        let res = self
+            .http
+            .get(format!("{}/repos/{repo}/rules/branches/main", self.api()))
+            .bearer_auth(token)
+            .header(ACCEPT, GITHUB_JSON)
+            .send()
+            .await
+            .ok()?;
+        if !res.status().is_success() {
+            return None;
+        }
+        let rules: Vec<Rule> = res.json().await.ok()?;
+        Some(rules.iter().any(|r| r.kind == "pull_request"))
     }
 
     /// The repo's branch protection settings page on the GitHub web UI.
@@ -1520,47 +1582,107 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn main_protection_maps_200_404_and_403() {
+    /// `main_protection` against a mock with the given classic-protection and ruleset
+    /// answers (`rules` = None → the rules endpoint fails with 500).
+    async fn protection_with(
+        tag: &str,
+        classic: (u16, serde_json::Value),
+        rules: Option<serde_json::Value>,
+        delay: std::time::Duration,
+    ) -> BranchProtection {
+        use axum::http::StatusCode;
         use axum::routing::get;
         use axum::{Json, Router};
 
-        for (status, want) in [
-            (axum::http::StatusCode::OK, BranchProtection::Protected),
+        let (code, body) = classic;
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/branches/main/protection",
+                get(move || async move {
+                    tokio::time::sleep(delay).await;
+                    (StatusCode::from_u16(code).unwrap(), Json(body))
+                }),
+            )
+            .route(
+                "/repos/acme/site/rules/branches/main",
+                get(move || async move {
+                    match rules {
+                        Some(r) => (StatusCode::OK, Json(r)),
+                        None => (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({ "message": "boom" })),
+                        ),
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let dir = tmp_dir(&format!("protection-{tag}"));
+        write_session(&dir, "tok");
+        let auth = GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        );
+        let got = auth.main_protection("acme/site").await;
+        stop();
+        got
+    }
+
+    #[tokio::test]
+    async fn main_protection_maps_classic_protection_and_rulesets() {
+        use serde_json::json;
+        let now = std::time::Duration::ZERO;
+        let unprotected = || (404, json!({ "message": "Branch not protected" }));
+        let none = || Some(json!([]));
+        let cases = [
+            ("classic 200", (200, json!({})), none(), BranchProtection::Protected),
+            ("classic 404 unprotected", unprotected(), none(), BranchProtection::Unprotected),
+            // Repo hidden from the caller: GitHub says "Not Found", not "Branch not protected".
             (
-                axum::http::StatusCode::NOT_FOUND,
-                BranchProtection::Unprotected,
-            ),
-            // No admin rights: GitHub refuses to say, so we must not nag.
-            (axum::http::StatusCode::FORBIDDEN, BranchProtection::Unknown),
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "404 Not Found",
+                (404, json!({ "message": "Not Found" })),
+                none(),
                 BranchProtection::Unknown,
             ),
-        ] {
-            let routes = Router::new().route(
-                "/repos/acme/site/branches/main/protection",
-                get(move || async move { (status, Json(serde_json::json!({ "message": "x" }))) }),
-            );
-            let (base, stop) = mock_api(routes).await;
-            let dir = tmp_dir(&format!("protection-{}", status.as_u16()));
-            write_session(&dir, "tok");
-            let auth = GithubAuth::open(
-                GithubConfig {
-                    api_url: base.clone(),
-                    web_url: base,
-                    gh_path: PathBuf::new(),
-                    ..GithubConfig::default()
-                },
-                &dir,
-            );
-            assert_eq!(
-                auth.main_protection("acme/site").await,
-                want,
-                "status {status}"
-            );
-            stop();
+            // No admin rights: GitHub refuses to say, so we must not nag.
+            ("403", (403, json!({ "message": "x" })), none(), BranchProtection::Unknown),
+            ("500", (500, json!({ "message": "x" })), none(), BranchProtection::Unknown),
+            (
+                "ruleset requires a pull request",
+                unprotected(),
+                Some(json!([{ "type": "deletion" }, { "type": "pull_request" }])),
+                BranchProtection::Protected,
+            ),
+            (
+                "ruleset without a pull request rule",
+                unprotected(),
+                Some(json!([{ "type": "deletion" }])),
+                BranchProtection::Unprotected,
+            ),
+            ("rules endpoint fails", unprotected(), None, BranchProtection::Unknown),
+        ];
+        for (i, (name, classic, rules, want)) in cases.into_iter().enumerate() {
+            let got = protection_with(&format!("case{i}"), classic, rules, now).await;
+            assert_eq!(got, want, "{name}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_slow_protection_lookup_gives_up_as_unknown() {
+        let started = std::time::Instant::now();
+        let got = protection_with(
+            "slow",
+            (200, serde_json::json!({})),
+            Some(serde_json::json!([])),
+            std::time::Duration::from_secs(20),
+        )
+        .await;
+        assert_eq!(got, BranchProtection::Unknown);
+        assert!(started.elapsed() < std::time::Duration::from_secs(6));
     }
 
     #[test]

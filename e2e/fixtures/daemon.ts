@@ -25,6 +25,7 @@ export type WorkbenchEnv = {
     baseUrl: string;
     setMainProtected: (isProtected: boolean) => void;
     protectionGets: () => number;
+    setMainRulesetRequiresPr: (requiresPr: boolean) => void;
   };
   stop: () => Promise<void>;
 };
@@ -216,6 +217,7 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
       baseUrl: stub.baseUrl,
       setMainProtected: (isProtected) => stub.setMainProtected(isProtected),
       protectionGets: () => stub.protectionGets(),
+      setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
     },
     stop: async () => {
       if (exited === null) {

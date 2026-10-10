@@ -720,3 +720,20 @@ async fn protection_hint_dismissal_is_persisted_per_project() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn branch_protection_doc_ships_with_the_daemon() {
+    let tmp = tempfile::tempdir().unwrap();
+    let res = app(tmp.path())
+        .oneshot(req("GET", "/api/docs/branch-protection", None))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()[header::CONTENT_TYPE],
+        "text/plain; charset=utf-8"
+    );
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.starts_with("# Protect `main` so merges need review"), "{text}");
+}

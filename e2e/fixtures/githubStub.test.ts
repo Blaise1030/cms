@@ -87,4 +87,21 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+
+  it("serves main branch rules, with a pull_request rule on demand", async () => {
+    const stub = await startGithubStub();
+    try {
+      const get = async () =>
+        (await (
+          await fetch(`${stub.baseUrl}/repos/acme/site/rules/branches/main`, {
+            headers: { Authorization: `Bearer ${STUB_TOKEN}` },
+          })
+        ).json()) as { type: string }[];
+      expect(await get()).toEqual([]);
+      stub.setMainRulesetRequiresPr(true);
+      expect((await get()).map((r) => r.type)).toEqual(["pull_request"]);
+    } finally {
+      await stub.close();
+    }
+  });
 });

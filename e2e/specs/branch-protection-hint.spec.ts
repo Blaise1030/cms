@@ -37,10 +37,12 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
     "href",
     `${github.baseUrl}/acme/site/settings/branches`,
   );
-  await expect(hint.getByTestId("protection-hint-docs")).toHaveAttribute(
-    "href",
-    /docs\/branch-protection\.md$/,
-  );
+  const docs = hint.getByTestId("protection-hint-docs");
+  await expect(docs).toHaveAttribute("href", "/api/docs/branch-protection");
+  // The guide ships with the daemon, so the link works before this doc reaches main.
+  const doc = await page.request.get(`${workbench.origin}/api/docs/branch-protection`);
+  expect(doc.status()).toBe(200);
+  expect(await doc.text()).toContain("# Protect `main` so merges need review");
 
   await hint.getByTestId("protection-hint-dismiss").click();
   await expect(hint).toBeHidden();
@@ -60,6 +62,21 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
 
 test("protected main: no hint after share", async ({ page, workbench }) => {
   workbench.github.setMainProtected(true);
+  await startChangeAndCheckpoint(page, workbench);
+
+  await page.getByTestId("share-preview").click();
+  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  await expect(page.getByTestId("protection-hint")).toBeHidden();
+  expect(workbench.github.protectionGets()).toBeGreaterThan(0);
+});
+
+test("main protected by a ruleset requiring PRs: no hint after share", async ({
+  page,
+  workbench,
+}) => {
+  workbench.github.setMainProtected(false);
+  workbench.github.setMainRulesetRequiresPr(true);
   await startChangeAndCheckpoint(page, workbench);
 
   await page.getByTestId("share-preview").click();

@@ -7,14 +7,15 @@ does it once in GitHub.
 
 ## When Workbench shows the hint
 
-After **Share preview**, Workbench asks GitHub for the protection of `main`
-(`GET /repos/{owner}/{repo}/branches/main/protection`):
+After **Share preview**, Workbench asks GitHub about `main` in two ways at once: classic
+branch protection (`GET /repos/{owner}/{repo}/branches/main/protection`) and repository
+rulesets (`GET /repos/{owner}/{repo}/rules/branches/main`).
 
 | GitHub answers | Meaning | Hint |
 |----------------|---------|------|
-| 200 | `main` is protected | hidden |
-| 404 | `main` has no protection rule | shown |
-| 403 or any error | you are not an admin, so GitHub will not say | hidden |
+| classic 200, or a ruleset with a "require a pull request" rule | `main` is protected | hidden |
+| classic 404 "Branch not protected", and no ruleset requires a pull request | `main` is unprotected | shown |
+| 403, 404 "Not Found", any error, or no answer within 3 seconds | you are not an admin, or GitHub did not say | hidden |
 
 **Dismiss** hides the hint for that project for good. Workbench remembers it in the
 project registry (`{projects-dir}/.workbench/projects.json`), so it stays hidden after a

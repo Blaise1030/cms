@@ -87,6 +87,7 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       active.value = change;
       prUrl.value = null;
+      protectionHint.value = null;
       await refreshTreeAndPreview();
       return change;
     } catch (e) {
@@ -105,6 +106,7 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       active.value = change;
       prUrl.value = change.prUrl ?? null;
+      protectionHint.value = null;
       await refreshTreeAndPreview();
       return change;
     } catch (e) {
@@ -119,6 +121,7 @@ export const useChangesStore = defineStore("changes", () => {
     sharing.value = true;
     error.value = null;
     needsSignIn.value = false;
+    protectionHint.value = null;
     try {
       const result = await daemon.api.shareChange(id, branch);
       projectId.value = id;
@@ -146,8 +149,8 @@ export const useChangesStore = defineStore("changes", () => {
 
   /** Hide the "protect main" hint for this project from now on (persisted by the daemon). */
   async function dismissProtectionHint(id: string) {
-    protectionHint.value = null;
     await daemon.api.dismissProtectionHint(id);
+    protectionHint.value = null;
   }
 
   return {

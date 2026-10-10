@@ -90,6 +90,8 @@ export interface Change {
 export interface ProtectionHint {
   /** The repo's branch protection settings page on GitHub. */
   settingsUrl: string;
+  /** The branch protection guide, served by the daemon. */
+  docsUrl: string;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */
