@@ -133,3 +133,59 @@ async fn rejects_escaping_metadata_and_directory_paths_before_mutation() {
     assert_eq!(cli(dir, &["rev-parse", "HEAD"]), head);
     assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index);
 }
+
+async fn reject_directory_selection(replace_with_file: bool, committed: bool) {
+    let tmp = repo();
+    let dir = tmp.path();
+    std::fs::create_dir(dir.join("content")).unwrap();
+    for name in ["a.mdx", "b.mdx"] {
+        std::fs::write(dir.join("content").join(name), "original\n").unwrap();
+    }
+    cli(dir, &["add", "content"]);
+    if committed {
+        cli(
+            dir,
+            &["-c", "commit.gpgsign=false", "commit", "-qm", "content"],
+        );
+    }
+    std::fs::write(dir.join("content/b.mdx"), "staged unrelated\n").unwrap();
+    cli(dir, &["add", "content/b.mdx"]);
+    std::fs::remove_dir_all(dir.join("content")).unwrap();
+    if replace_with_file {
+        std::fs::write(dir.join("content"), "replacement\n").unwrap();
+    }
+    let head = cli(dir, &["rev-parse", "HEAD"]);
+    let index = std::fs::read(dir.join(".git/index")).unwrap();
+    let result = git::checkpoint_paths(dir, "Must not expand selection", &["content".into()]).await;
+    assert!(
+        result.is_err(),
+        "directory selection must be rejected: {result:?}"
+    );
+    assert_eq!(cli(dir, &["rev-parse", "HEAD"]), head);
+    assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index);
+    if replace_with_file {
+        assert_eq!(
+            std::fs::read_to_string(dir.join("content")).unwrap(),
+            "replacement\n"
+        );
+    } else {
+        assert!(!dir.join("content").exists());
+    }
+}
+
+#[tokio::test]
+async fn rejects_removed_directory_from_head() {
+    reject_directory_selection(false, true).await;
+}
+#[tokio::test]
+async fn rejects_removed_directory_from_index() {
+    reject_directory_selection(false, false).await;
+}
+#[tokio::test]
+async fn rejects_directory_replaced_with_file_from_head() {
+    reject_directory_selection(true, true).await;
+}
+#[tokio::test]
+async fn rejects_directory_replaced_with_file_from_index() {
+    reject_directory_selection(true, false).await;
+}

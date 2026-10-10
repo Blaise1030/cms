@@ -243,10 +243,27 @@ pub async fn checkpoint_paths(
     .await?;
     let index = PathBuf::from(index.trim());
     let index_lock = index.with_file_name("index.lock");
-    let guard = ScopedIndexFiles::create(index_lock)?;
+    let mut guard = ScopedIndexFiles::create(index_lock)?;
     let head = run(dir, &["rev-parse", "HEAD"]).await?.trim().to_string();
     let commit_index = guard.temporary.join("commit-index");
     run_with_index(dir, &["read-tree", &head], Some(&commit_index)).await?;
+    // Literal pathspecs still match descendants. Refuse directory prefixes in
+    // either HEAD or the user's index, even when the directory is gone on disk.
+    for path in &selected {
+        for source in [&commit_index, &index] {
+            let entries =
+                run_with_index(dir, &["ls-files", "-z", "--", path], Some(source)).await?;
+            if entries
+                .split('\0')
+                .filter(|entry| !entry.is_empty())
+                .any(|entry| entry != *path)
+            {
+                return Err(ApiError::badreq(
+                    "checkpoint paths must identify exact files",
+                ));
+            }
+        }
+    }
     for path in &selected {
         // A path absent from HEAD and disk is already in the desired state.
         let tracked = run_with_index(dir, &["ls-files", "--", path], Some(&commit_index)).await?;
@@ -288,7 +305,7 @@ pub async fn checkpoint_paths(
     // Publish the prepared index through Git's lock path, on the same filesystem.
     std::fs::copy(&prepared, &guard.lock)?;
     run(dir, &["update-ref", "-m", &message, "HEAD", &sha, &head]).await?;
-    std::fs::rename(&guard.lock, &index)?;
+    guard.publish(&index)?;
     Ok(Some(Checkpoint {
         sha,
         summary,
@@ -298,11 +315,18 @@ pub async fn checkpoint_paths(
 }
 
 struct ScopedIndexFiles {
+    owns_lock: bool,
     lock: PathBuf,
     temporary: PathBuf,
 }
 
 impl ScopedIndexFiles {
+    fn publish(&mut self, index: &Path) -> Result<(), ApiError> {
+        std::fs::rename(&self.lock, index)?;
+        self.owns_lock = false;
+        Ok(())
+    }
+
     fn create(lock: PathBuf) -> Result<Self, ApiError> {
         std::fs::OpenOptions::new()
             .write(true)
@@ -313,7 +337,11 @@ impl ScopedIndexFiles {
             .parent()
             .unwrap()
             .join(format!("workbench-index-{:032x}", rand::random::<u128>()));
-        let guard = Self { lock, temporary };
+        let guard = Self {
+            lock,
+            temporary,
+            owns_lock: true,
+        };
         std::fs::create_dir(&guard.temporary)?;
         Ok(guard)
     }
@@ -321,7 +349,9 @@ impl ScopedIndexFiles {
 
 impl Drop for ScopedIndexFiles {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.lock);
+        if self.owns_lock {
+            let _ = std::fs::remove_file(&self.lock);
+        }
         let _ = std::fs::remove_dir_all(&self.temporary);
     }
 }
@@ -411,6 +441,30 @@ pub async fn restore(dir: &Path, sha: &str) -> Result<String, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::clean_summary;
+
+    #[test]
+    fn published_index_cleanup_preserves_the_next_owners_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = tmp.path().join("index.lock");
+        let mut guard = super::ScopedIndexFiles::create(lock.clone()).unwrap();
+        let temporary = guard.temporary.clone();
+        std::fs::write(&lock, b"our index").unwrap();
+        guard.publish(&tmp.path().join("index")).unwrap();
+        // Model another Git process acquiring the lock after the atomic rename.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+            .unwrap();
+        std::fs::write(&lock, b"another operation").unwrap();
+        drop(guard);
+        assert_eq!(std::fs::read(&lock).unwrap(), b"another operation");
+        assert_eq!(
+            std::fs::read(tmp.path().join("index")).unwrap(),
+            b"our index"
+        );
+        assert!(!temporary.exists());
+    }
 
     #[test]
     fn summary_is_single_line_and_bounded() {
