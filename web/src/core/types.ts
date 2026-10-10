@@ -86,6 +86,16 @@ export interface Change {
   prUrl?: string;
 }
 
+/** Result of `POST /api/changes/update` (Get latest). */
+export interface ChangesUpdate {
+  /** Local `main` moved forward from GitHub. */
+  mainUpdated: boolean;
+  /** Change branches that now include `main`. */
+  updated: string[];
+  /** Change branches whose merge conflicts; left untouched. */
+  conflicts: string[];
+}
+
 /** Result of `POST /api/changes/{branch}/share`. */
 export interface SharedChange {
   branch: string;

@@ -210,4 +210,31 @@ describe("changes store", () => {
     expect(store.needsSignIn).toBe(true);
     expect(store.error).toBeNull();
   });
+
+  it("getLatest updates changes, refreshes files and preview", async () => {
+    const result = { mainUpdated: true, updated: ["content/a", "content/b"], conflicts: [] };
+    const updateChanges = vi.fn(async () => result);
+    const store = setup({ updateChanges, tree: vi.fn(async () => ({ entries: [] })) });
+    const files = useFilesStore();
+    files.projectId = "site";
+    const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await expect(store.getLatest("site")).resolves.toEqual(result);
+    expect(updateChanges).toHaveBeenCalledWith("site");
+    expect(refresh).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalled();
+    expect(store.updating).toBe(false);
+  });
+
+  it("getLatest surfaces errors (e.g. uncommitted changes)", async () => {
+    const store = setup({
+      updateChanges: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "Uncommitted changes — checkpoint first", 409);
+      }),
+    });
+    await expect(store.getLatest("site")).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toMatch(/checkpoint/i);
+    expect(store.updating).toBe(false);
+  });
 });

@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ChangesBranchPicker from "@/modules/changes/ChangesBranchPicker.vue";
+import GetLatestButton from "@/modules/changes/GetLatestButton.vue";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
 const props = defineProps<{ projectId: string }>();
@@ -41,5 +42,6 @@ function onTab(value: string | number) {
 
     <div class="bg-border h-4 w-px shrink-0" aria-hidden="true" />
     <ChangesBranchPicker :project-id="projectId" />
+    <GetLatestButton :project-id="projectId" />
   </div>
 </template>

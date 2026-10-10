@@ -6,7 +6,7 @@ import { agentCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
 }
 
 function isAncestor(cwd: string, ancestor: string, descendant: string): boolean {
