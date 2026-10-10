@@ -19,6 +19,7 @@ export const useChangesStore = defineStore("changes", () => {
   const prUrl = ref<string | null>(null);
   const creating = ref(false);
   const sharing = ref(false);
+  const markingReady = ref(false);
   const switching = ref(false);
   const listing = ref(false);
   const loading = ref(false);
@@ -193,6 +194,20 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /** Mark the change's draft PR ready for review, then show (and keep polling) its status. */
+  async function markReady(id: string, branch: string): Promise<void> {
+    markingReady.value = true;
+    try {
+      const pr = await daemon.api.markChangeReady(id, branch);
+      if (projectId.value === id && active.value?.branch === branch) {
+        status.value = pr;
+        await refreshStatus();
+      }
+    } finally {
+      markingReady.value = false;
+    }
+  }
+
   return {
     projectId,
     active,
@@ -200,6 +215,7 @@ export const useChangesStore = defineStore("changes", () => {
     prUrl,
     creating,
     sharing,
+    markingReady,
     switching,
     listing,
     loading,
@@ -211,6 +227,7 @@ export const useChangesStore = defineStore("changes", () => {
     create,
     switchTo,
     share,
+    markReady,
     refreshStatus,
     stopStatusPolling,
   };

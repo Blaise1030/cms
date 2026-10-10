@@ -22,6 +22,8 @@ export type WorkbenchEnv = {
     pullsPosts: () => import("./githubStub").PullsPost[];
     setPullsStatus: (status: number | null) => void;
     setPrStatus: (patch: import("./githubStub").PrStatusPatch) => void;
+    readyForReviewCalls: () => string[];
+    setGraphqlStatus: (status: number | null) => void;
   };
   stop: () => Promise<void>;
 };
@@ -211,6 +213,8 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
       pullsPosts: () => stub.pullsPosts(),
       setPullsStatus: (status) => stub.setPullsStatus(status),
       setPrStatus: (patch) => stub.setPrStatus(patch),
+      readyForReviewCalls: () => stub.readyForReviewCalls(),
+      setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
     },
     stop: async () => {
       if (exited === null) {
