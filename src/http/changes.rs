@@ -1,5 +1,6 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
-//! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`.
+//! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
+//! `POST /api/changes/update`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -144,4 +145,24 @@ pub async fn share(
         "title": change.title,
         "prUrl": pr.html_url,
     })))
+}
+
+#[derive(Deserialize)]
+struct UpdateRequest {
+    project: String,
+}
+
+/// `POST /api/changes/update` `{ project }` → `{ mainUpdated, updated: [branch], conflicts: [branch] }`.
+/// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
+pub async fn update(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<changes::Update>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{\"project\": string}}: {e}"
+        ))
+    })?;
+    let dir = project_dir(&state, &req.project).await?;
+    Ok(Json(changes::get_latest(&dir).await?))
 }
