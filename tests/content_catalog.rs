@@ -15,6 +15,10 @@ async fn template_catalog_and_raw_entries() {
         ["site", "pages", "sections", "blog", "helpDocs"]
     );
     assert!(collections.iter().all(|c| c.editable));
+    assert_eq!(
+        serde_json::to_value(&collections).unwrap()[3]["fields"]["properties"]["pubDate"]["type"],
+        "date"
+    );
     for (collection, id, path) in [
         ("site", "site", "src/content/site.json"),
         ("pages", "home", "src/content/pages/home.json"),
@@ -181,4 +185,18 @@ async fn unknown_helper_collection_is_read_only_even_with_a_supported_glob() {
             .body,
         "Body"
     );
+}
+
+#[tokio::test]
+async fn required_unsupported_schema_is_read_only() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
+    std::fs::write(temp.path().join("scripts/workbench-content.mjs"), r#"console.log(JSON.stringify({collections:[{name:'blog',loader:{base:'posts',pattern:'*.md'},kind:'markdown',supportedForEditing:true,fields:{type:'object',properties:{special:{type:'unsupported',required:true,reason:'Unknown transform'}}}}]}))"#).unwrap();
+    let collections = list_collections(temp.path()).await.unwrap();
+    assert!(!collections[0].editable);
+    assert_eq!(
+        collections[0].fields["properties"]["special"]["type"],
+        "unsupported"
+    );
+    assert!(collections[0].reason.as_deref().unwrap().contains("schema"));
 }

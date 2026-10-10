@@ -21,6 +21,8 @@ pub struct ContentCollection {
     pub supported_for_editing: bool,
     #[serde(default)]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub fields: Value,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentEntrySummary {
@@ -41,7 +43,7 @@ pub struct ContentEntry {
     pub branch: String,
     pub hash: String,
 }
-async fn helper(root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
+async fn helper(root: &Path, op: &str) -> Result<Vec<ContentCollection>, ApiError> {
     // Verify helper containment before executing project code.
     fs::read_file(root, "scripts/workbench-content.mjs").await?;
     let mut child = tokio::process::Command::new("node")
@@ -57,7 +59,7 @@ async fn helper(root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"{\"op\":\"list\"}\n")
+        .write_all(format!("{{\"op\":\"{op}\"}}\n").as_bytes())
         .await?;
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait_with_output())
         .await
@@ -118,18 +120,51 @@ fn fallback(reason: String) -> Vec<ContentCollection> {
         editable: false,
         supported_for_editing: false,
         reason: Some(reason.clone()),
+        fields: Value::Null,
     })
     .collect()
 }
+fn required_unsupported(field: &Value) -> bool {
+    if field.get("required").and_then(Value::as_bool) == Some(false) {
+        return false;
+    }
+    field.get("type").and_then(Value::as_str) == Some("unsupported")
+        || field
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(|p| p.values().any(required_unsupported))
+        || field.get("items").is_some_and(required_unsupported)
+        || field
+            .get("variants")
+            .and_then(Value::as_array)
+            .is_some_and(|v| v.iter().any(required_unsupported))
+}
 pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
-    match helper(project_root).await {
+    match helper(project_root, "list").await {
         Ok(mut collections) => {
+            let descriptions = helper(project_root, "describe").await;
             for c in &mut collections {
-                c.editable = c.supported_for_editing && supported(c);
+                let description = descriptions
+                    .as_ref()
+                    .ok()
+                    .and_then(|items| items.iter().find(|d| d.name == c.name));
+                c.fields = description.map(|d| d.fields.clone()).unwrap_or(Value::Null);
+                c.editable = matches!(
+                    c.name.as_str(),
+                    "site" | "pages" | "sections" | "blog" | "helpDocs"
+                ) && c.supported_for_editing
+                    && supported(c)
+                    && !c.fields.is_null()
+                    && !required_unsupported(&c.fields);
                 c.reason = if c.editable {
                     None
                 } else {
-                    Some("Unsupported collection loader; content is read-only".into())
+                    Some(match &descriptions {
+                        Err(error) => format!("Content helper describe unavailable: {error}"),
+                        Ok(_) => {
+                            "Unsupported collection loader or schema; content is read-only".into()
+                        }
+                    })
                 };
             }
             Ok(collections)
