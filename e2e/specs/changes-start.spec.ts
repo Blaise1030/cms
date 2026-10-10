@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -30,8 +30,8 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
     "Launch week",
   );
 
-  // Real ACP settle path (fake agent → git::checkpoint), not a raw git commit.
-  await agentCheckpoint(workbench, "edit the notes");
+  // Fake CLI turn-end hook → git::checkpoint, not a raw git commit.
+  await terminalCheckpoint(workbench, "edit the notes");
 
   const changeTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   const mainTip = git(projectDir, ["rev-parse", "main"]);

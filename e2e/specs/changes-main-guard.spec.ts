@@ -7,11 +7,17 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
-async function sendChatPrompt(page: import("@playwright/test").Page, text: string) {
-  const composer = page.getByTestId("composer-editor");
-  await composer.click();
-  await page.keyboard.type(text);
-  await page.getByTestId("send").click();
+async function terminalEdit(page: import("@playwright/test").Page, line: string) {
+  await page.locator(".xterm-screen").click();
+  await page.keyboard.type(line);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".xterm-rows")).toContainText("TURN-END", { timeout: 60_000 });
+}
+
+async function startFakeTerminal(page: import("@playwright/test").Page) {
+  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-start").click();
+  await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
 }
 
 test("GitHub project on main prompts Start a change, then runs on the new branch", async ({
@@ -25,19 +31,24 @@ test("GitHub project on main prompts Start a change, then runs on the new branch
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId("chat-panel")).toBeVisible();
+  await expect(page.getByTestId("terminal-panel")).toBeVisible();
 
-  await sendChatPrompt(page, "edit the notes");
+  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-start").click();
+  await expect(page.getByTestId("terminal-error")).toContainText("Start a change first");
 
-  const dialog = page.getByRole("dialog", { name: "Start a change first" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Change title").fill("New post: Launch week");
-  await dialog.getByRole("button", { name: "Create change" }).click();
+  await page.getByTestId("changes-menu").click();
+  await page.getByTestId("new-change").click();
+  await page.getByLabel("Change title").fill("New post: Launch week");
+  await page.getByRole("button", { name: "Create change" }).click();
 
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
   await expect
     .poll(() => git(projectDir, ["branch", "--show-current"]))
     .toBe("content/launch-week");
+
+  await startFakeTerminal(page);
+  await terminalEdit(page, "edit the notes");
 
   await expect
     .poll(() => {
@@ -82,11 +93,15 @@ test("local-only project edits main with no Start a change dialog", async ({
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${localId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByTestId("chat-panel")).toBeVisible();
+  await expect(page.getByTestId("terminal-panel")).toBeVisible();
 
-  await sendChatPrompt(page, "edit the notes");
+  await startFakeTerminal(page);
+  await terminalEdit(page, "edit the notes");
 
   await expect(page.getByRole("dialog", { name: "Start a change first" })).toHaveCount(0);
-  await expect(page.getByTestId("user-text")).toHaveText("edit the notes");
-  await expect(page.getByTestId("assistant-text")).toContainText("edited", { timeout: 60_000 });
+  await expect(page.getByTestId("terminal-error")).toHaveCount(0);
+  await page.goto(`${origin}/p/${localId}/history`);
+  await expect(page.getByTestId("checkpoint-item").first()).toContainText("the notes", {
+    timeout: 60_000,
+  });
 });

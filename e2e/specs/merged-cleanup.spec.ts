@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 const BRANCH = "content/merged-post";
@@ -50,7 +50,7 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
   await page.getByLabel("Change title").fill("New post: Merged post");
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Merged post");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
   fs.writeFileSync(path.join(projectDir, FILE), CONTENT);
   git(projectDir, ["add", FILE]);
   git(projectDir, ["commit", "-m", "checkpoint: merged post"]);

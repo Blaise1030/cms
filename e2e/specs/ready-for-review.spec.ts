@@ -1,4 +1,4 @@
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 test("writer marks a shared draft change ready for review", async ({ page, workbench }) => {
@@ -12,7 +12,7 @@ test("writer marks a shared draft change ready for review", async ({ page, workb
   await page.getByLabel("Change title").fill("New post: Launch week");
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 
   // Share → draft PR.
   await page.getByTestId("share-preview").click();

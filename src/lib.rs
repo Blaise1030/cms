@@ -67,6 +67,8 @@ pub async fn serve(config: Config) -> std::io::Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
+    let mut config = config;
+    config.port = bound.port();
     let state = AppState::new(config);
     if let Some(e) = state.projects.init_error() {
         return Err(std::io::Error::other(e.to_string()));

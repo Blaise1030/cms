@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { agentCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
+import { terminalCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -59,14 +59,14 @@ test("get latest merges new main into every open change without force-pushing", 
 
   // First change: edit + share (pushes the branch to the remote).
   await newChange(page, "New post: First change", "First change");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
   const sharedTip = git(bareRemote, ["rev-parse", "refs/heads/content/first-change"]);
 
   // Second change (active from here on).
   await newChange(page, "New post: Second change", "Second change");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 
   const preview = page.frameLocator('[data-testid="preview-frame"]');
   await expect(preview.locator("body")).toContainText("Not found", { timeout: 30_000 });
