@@ -12,6 +12,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
 import GetLatestButton from "./GetLatestButton.vue";
+import { useChangesStore } from "./store";
 
 function mountButton(updateChanges: () => Promise<ChangesUpdate>) {
   h.daemon = createFakeDaemon({ updateChanges, tree: vi.fn(async () => ({ entries: [] })) });
@@ -27,7 +28,11 @@ describe("GetLatestButton", () => {
   it("toasts Up to date on a clean update", async () => {
     const w = mountButton(async () => ({
       mainUpdated: true,
-      updated: ["content/a", "content/b"],
+      mainDiverged: false,
+      updated: [
+        { branch: "content/a", title: "A" },
+        { branch: "content/b", title: "B" },
+      ],
       conflicts: [],
     }));
     await w.find("[data-testid='get-latest']").trigger("click");
@@ -37,16 +42,58 @@ describe("GetLatestButton", () => {
     });
   });
 
-  it("reports conflicts in N changes", async () => {
+  it("reports conflicts in N changes, naming them and what was updated", async () => {
     const w = mountButton(async () => ({
       mainUpdated: true,
-      updated: [],
-      conflicts: ["content/a"],
+      mainDiverged: false,
+      updated: [{ branch: "content/b", title: "Pricing page" }],
+      conflicts: [
+        { branch: "content/a", title: "Launch week" },
+        { branch: "content/c", title: "About us" },
+      ],
     }));
     await w.find("[data-testid='get-latest']").trigger("click");
     await flushPromises();
-    expect(toast.warning).toHaveBeenCalledWith("Conflicts in 1 change", expect.anything());
+    expect(toast.warning).toHaveBeenCalledWith("Conflicts in 2 changes", {
+      description:
+        "Left as they were: Launch week, About us. Updated main and 1 change (Pricing page).",
+    });
     expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("warns when local main has diverged", async () => {
+    const w = mountButton(async () => ({
+      mainUpdated: false,
+      mainDiverged: true,
+      updated: [{ branch: "content/b", title: "Pricing page" }],
+      conflicts: [],
+    }));
+    await w.find("[data-testid='get-latest']").trigger("click");
+    await flushPromises();
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Changes updated, but main was left as is",
+      expect.objectContaining({ description: expect.stringMatching(/not on GitHub/) }),
+    );
+  });
+
+  it("is disabled while switching or creating a change", async () => {
+    const w = mountButton(async () => ({
+      mainUpdated: false,
+      mainDiverged: false,
+      updated: [],
+      conflicts: [],
+    }));
+    const store = useChangesStore();
+    store.switching = true;
+    await flushPromises();
+    expect(w.find("[data-testid='get-latest']").attributes("disabled")).toBeDefined();
+    store.switching = false;
+    store.creating = true;
+    await flushPromises();
+    expect(w.find("[data-testid='get-latest']").attributes("disabled")).toBeDefined();
+    store.creating = false;
+    await flushPromises();
+    expect(w.find("[data-testid='get-latest']").attributes("disabled")).toBeUndefined();
   });
 
   it("shows the refusal message as an error toast", async () => {

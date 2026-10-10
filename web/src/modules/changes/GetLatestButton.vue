@@ -2,7 +2,7 @@
 import { RefreshCw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
-import type { ChangesUpdate } from "@/core/types";
+import type { Change, ChangesUpdate } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useChangesStore } from "./store";
 
@@ -13,11 +13,39 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+function titles(list: Change[]): string {
+  return list.map((c) => c.title).join(", ");
+}
+
+/** "Updated main and 2 changes (A, B)." — or undefined when nothing moved. */
+function updatedSummary(result: ChangesUpdate): string | undefined {
+  const parts: string[] = [];
+  if (result.mainUpdated) parts.push("main");
+  if (result.updated.length) {
+    parts.push(`${plural(result.updated.length, "change")} (${titles(result.updated)})`);
+  }
+  return parts.length ? `Updated ${parts.join(" and ")}.` : undefined;
+}
+
+const DIVERGED =
+  "Your local main has commits that are not on GitHub, so it was left as is. Ask a developer to bring it back in line with GitHub.";
+
 function report(result: ChangesUpdate) {
-  const n = result.conflicts.length;
-  if (n > 0) {
-    toast.warning(`Conflicts in ${plural(n, "change")}`, {
-      description: "Those changes were left as they were.",
+  const summary = updatedSummary(result);
+  if (result.conflicts.length > 0) {
+    const description = [
+      `Left as they were: ${titles(result.conflicts)}.`,
+      summary,
+      result.mainDiverged ? DIVERGED : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    toast.warning(`Conflicts in ${plural(result.conflicts.length, "change")}`, { description });
+    return;
+  }
+  if (result.mainDiverged) {
+    toast.warning("Changes updated, but main was left as is", {
+      description: [DIVERGED, summary].filter(Boolean).join(" "),
     });
     return;
   }
@@ -44,7 +72,7 @@ async function onGetLatest() {
     class="h-7 gap-1 px-2 text-xs"
     data-testid="get-latest"
     title="Pull main and bring every open change up to date"
-    :disabled="store.updating"
+    :disabled="store.updating || store.switching || store.creating"
     @click="onGetLatest"
   >
     <RefreshCw class="size-3.5" :class="store.updating ? 'animate-spin' : ''" />

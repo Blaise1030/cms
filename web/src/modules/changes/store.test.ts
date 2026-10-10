@@ -211,10 +211,25 @@ describe("changes store", () => {
     expect(store.error).toBeNull();
   });
 
-  it("getLatest updates changes, refreshes files and preview", async () => {
-    const result = { mainUpdated: true, updated: ["content/a", "content/b"], conflicts: [] };
+  it("getLatest updates changes, refreshes files, preview, list and active", async () => {
+    const result = {
+      mainUpdated: true,
+      mainDiverged: false,
+      updated: [
+        { branch: "content/a", title: "A" },
+        { branch: "content/b", title: "B" },
+      ],
+      conflicts: [],
+    };
     const updateChanges = vi.fn(async () => result);
-    const store = setup({ updateChanges, tree: vi.fn(async () => ({ entries: [] })) });
+    const listChanges = vi.fn(async () => [{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
+    const store = setup({
+      updateChanges,
+      listChanges,
+      activeChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
     const files = useFilesStore();
     files.projectId = "site";
     const refresh = vi.spyOn(files, "refresh").mockResolvedValue();
@@ -224,6 +239,10 @@ describe("changes store", () => {
     expect(updateChanges).toHaveBeenCalledWith("site");
     expect(refresh).toHaveBeenCalled();
     expect(reload).toHaveBeenCalled();
+    expect(listChanges).toHaveBeenCalledWith("site");
+    expect(activeChange).toHaveBeenCalledWith("site");
+    expect(store.items).toEqual([{ branch: "content/a", title: "A", lastEdited: 300 }]);
+    expect(store.active).toEqual({ branch: "content/a", title: "A" });
     expect(store.updating).toBe(false);
   });
 

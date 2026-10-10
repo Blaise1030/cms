@@ -90,10 +90,12 @@ export interface Change {
 export interface ChangesUpdate {
   /** Local `main` moved forward from GitHub. */
   mainUpdated: boolean;
-  /** Change branches that now include `main`. */
-  updated: string[];
-  /** Change branches whose merge conflicts; left untouched. */
-  conflicts: string[];
+  /** Local `main` has commits not on GitHub; it was left as is. */
+  mainDiverged: boolean;
+  /** Changes that now include latest `main`. */
+  updated: Change[];
+  /** Changes whose merge conflicts; left untouched. */
+  conflicts: Change[];
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */

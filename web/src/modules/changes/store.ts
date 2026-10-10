@@ -113,13 +113,15 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  /** Get latest: pull `main` and merge it into every open change, then refresh the views. */
+  /** Get latest: pull `main` and merge it into every open change, then refresh every view. */
   async function getLatest(id: string): Promise<ChangesUpdate> {
     updating.value = true;
     error.value = null;
     try {
       const result = await daemon.api.updateChanges(id);
       await refreshTreeAndPreview();
+      // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
+      await Promise.all([load(id), list(id).catch(() => undefined)]);
       return result;
     } catch (e) {
       error.value = errorMessage(e);
