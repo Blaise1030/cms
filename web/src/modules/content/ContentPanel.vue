@@ -68,8 +68,9 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <h2 class="font-medium">{{ store.entry.id }}</h2>
         <p class="mb-4 text-xs text-muted-foreground">{{ store.entry.path }} · {{ store.entry.branch || 'No branch' }}</p>
         <div v-if="canRemove" class="mb-4 flex gap-2">
-          <Button type="button" variant="outline" size="sm" data-testid="content-rename" @click="store.startLifecycle('rename')">Rename</Button>
-          <Button type="button" variant="outline" size="sm" data-testid="content-delete" @click="store.startLifecycle('delete')">Delete</Button>
+          <Button type="button" variant="outline" size="sm" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')">Rename</Button>
+          <Button type="button" variant="outline" size="sm" data-testid="content-delete" :disabled="store.dirty" @click="store.startLifecycle('delete')">Delete</Button>
+          <span v-if="store.dirty" class="self-center text-xs text-muted-foreground" data-testid="content-lifecycle-blocked">Save or discard your changes first</span>
         </div>
         <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">
@@ -110,7 +111,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
               <AlertDialogTitle>{{ store.lifecycle.action === "rename" ? "Rename" : "Delete" }} {{ store.lifecycle.collection }}/{{ store.lifecycle.id }}?</AlertDialogTitle>
               <AlertDialogDescription>
                 <template v-if="store.lifecycle.action === 'rename'">The entry file, its public URL, and its asset folder move to the new slug. References below are updated too.</template>
-                <template v-else>The entry and its asset folder are removed. History can restore them.<template v-if="store.dirty"> Your unsaved edits are discarded.</template></template>
+                <template v-else>The entry and its asset folder are removed. History can restore them.</template>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <p v-if="!store.lifecycle.impact && !store.lifecycle.error" class="text-sm text-muted-foreground">Checking references…</p>

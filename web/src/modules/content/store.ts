@@ -151,7 +151,8 @@ export const useContentStore = defineStore("content", () => {
   }
   /** Open the rename/delete confirmation and load its dry-run impact. */
   async function startLifecycle(action: ContentLifecycle["action"]) {
-    const e = entry.value; if (!e) return;
+    // A rename rewrites owned paths on disk; a draft would carry the old ones back.
+    const e = entry.value; if (!e || dirty.value) return;
     const opened = { action, collection: e.collection, id: e.id, impact: null, slug: "", busy: false, error: null };
     lifecycle.value = opened;
     try {
@@ -163,7 +164,7 @@ export const useContentStore = defineStore("content", () => {
   /** Rename or delete the opened entry with its opened branch and hash. Throws after recording the failure. */
   async function confirmLifecycle(branch?: string) {
     const l = lifecycle.value; const e = entry.value;
-    if (!l || !e || !l.impact) return;
+    if (!l || !e || !l.impact || dirty.value) return;
     const saved = { id: projectId.value, entryId: e.id };
     const target = { project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash };
     resumeAction = "lifecycle";
@@ -172,11 +173,7 @@ export const useContentStore = defineStore("content", () => {
     try {
       if (l.action === "rename") {
         const res = await daemon.api.renameContentEntry({ ...target, slug: l.slug.trim() });
-        if (stillOpen()) {
-          entries.value = res.entries;
-          // Unsaved edits stay in the draft, rebased on the renamed entry.
-          if (dirty.value) { entry.value = res.entry; draftSource.value = res.entry.source; } else loadEntry(res.entry);
-        }
+        if (stillOpen()) { entries.value = res.entries; loadEntry(res.entry); }
       } else {
         const res = await daemon.api.deleteContentEntry(target);
         if (stillOpen()) {

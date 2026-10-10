@@ -517,10 +517,30 @@ async fn failed_checkpoint_rolls_back_rename_and_delete() {
     let lock = e.dir.join(".git/index.lock");
     std::fs::write(&lock, b"").unwrap();
     let (s, v) = rename(&e, "blog", "welcome", "hello").await;
-    assert!(!s.is_success(), "{v}");
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+    assert_eq!(v["error"]["code"], "GIT_ERR", "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot lock project index"),
+        "{v}"
+    );
+    // A clean rollback reports the checkpoint failure itself, not `rollback_failed`.
+    assert!(v["error"].get("reason").is_none(), "{v}");
     assert_eq!(snapshot(&e.dir), before);
     let (s, v) = delete(&e, "blog", "launch").await;
-    assert!(!s.is_success(), "{v}");
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
+    assert_eq!(v["error"]["code"], "GIT_ERR", "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot lock project index"),
+        "{v}"
+    );
+    // A clean rollback reports the checkpoint failure itself, not `rollback_failed`.
+    assert!(v["error"].get("reason").is_none(), "{v}");
     assert_eq!(snapshot(&e.dir), before);
     std::fs::remove_file(&lock).unwrap();
     assert_eq!(head(&e.dir), base);

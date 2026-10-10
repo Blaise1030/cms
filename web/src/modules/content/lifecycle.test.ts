@@ -89,30 +89,45 @@ it("refuses to confirm deleting a referenced entry and deletes an unreferenced o
   expect(store.entries).toEqual([]);
 });
 
-it("keeps the draft and dialog on a rename conflict", async () => {
+it("keeps the entry and dialog on a rename conflict", async () => {
   const conflict = new ApiError("CONFLICT", "The entry changed since it was opened; reload to compare", 409, { reason: "stale_content" });
   await setup({ renameContentEntry: vi.fn(async () => { throw conflict; }) });
-  await w.get('[data-testid="field-title"]').setValue("Mine");
   await w.get('[data-testid="content-rename"]').trigger("click"); await flushPromises();
   await typeSlug("hello");
   el("content-lifecycle-confirm")!.click(); await flushPromises();
   const store = useContentStore();
   expect(store.conflict?.reason).toBe("stale_content");
   expect(store.entry?.id).toBe("welcome");
-  expect((w.get('[data-testid="field-title"]').element as HTMLInputElement).value).toBe("Mine");
-  expect(w.get('[data-testid="content-conflict"]').text()).toContain("Your edits are kept");
+  expect(w.get('[data-testid="content-conflict"]').text()).toContain("Reload entry");
   expect(dialog()!.textContent).toContain("The entry changed since it was opened");
+  expect(el<HTMLInputElement>("content-rename-slug")!.value).toBe("hello");
 });
 
-it("keeps the draft and dialog on a delete refusal", async () => {
+it("keeps the entry and dialog on a delete refusal", async () => {
   const refused = new ApiError("CONFLICT", "blog/welcome is still referenced; remove those references first", 409, { reason: "entry_referenced" });
   await setup({ contentImpact: vi.fn(async () => unreferenced), deleteContentEntry: vi.fn(async () => { throw refused; }) });
-  await w.get('[data-testid="field-title"]').setValue("Mine");
   await w.get('[data-testid="content-delete"]').trigger("click"); await flushPromises();
   el("content-lifecycle-confirm")!.click(); await flushPromises();
   expect(dialog()!.textContent).toContain("still referenced");
   expect(useContentStore().entry?.id).toBe("welcome");
+});
+
+it("blocks rename and delete while the draft has unsaved edits", async () => {
+  await setup();
+  await w.get('[data-testid="field-title"]').setValue("Mine");
+  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeDefined();
+  expect(w.get('[data-testid="content-delete"]').attributes("disabled")).toBeDefined();
+  expect(w.get('[data-testid="content-lifecycle-blocked"]').text()).toBe("Save or discard your changes first");
+  const store = useContentStore();
+  await store.startLifecycle("rename"); await store.startLifecycle("delete"); await flushPromises();
+  expect(store.lifecycle).toBeNull();
+  expect(dialog()).toBeNull();
+  expect(api().contentImpact).not.toHaveBeenCalled();
   expect((w.get('[data-testid="field-title"]').element as HTMLInputElement).value).toBe("Mine");
+  // Reverting the edit re-enables both actions.
+  await w.get('[data-testid="field-title"]').setValue("Welcome");
+  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
+  expect(w.find('[data-testid="content-lifecycle-blocked"]').exists()).toBe(false);
 });
 
 it("resumes a rename on the new change after Create Change", async () => {
