@@ -86,3 +86,30 @@ test("writer can abandon a conflict without moving the branch", async ({ page, w
   expect(git(projectDir, ["rev-parse", "HEAD"])).toBe(before);
   expect(git(projectDir, ["status", "--porcelain", "--untracked-files=no"])).toBe("");
 });
+
+test("writer resolves a deleted-versus-edited page by choosing a side", async ({ page, workbench }) => {
+  const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
+  fs.writeFileSync(path.join(projectDir, "index.html"), "<h1>Base headline</h1>\n");
+  git(projectDir, ["add", "index.html"]);
+  git(projectDir, ["commit", "-m", "add home"]);
+  git(projectDir, ["push", "origin", "main"]);
+  await page.goto(`${origin}/?t=${token}`);
+  await page.goto(`${origin}/p/${projectId}`);
+  await page.getByTestId("changes-menu").click();
+  await page.getByTestId("new-change").click();
+  await page.getByLabel("Change title").fill("Remove home page");
+  await page.getByRole("button", { name: "Create change" }).click();
+  await expect(page.getByTestId("active-change")).toHaveText("Remove home page");
+  git(projectDir, ["rm", "index.html"]);
+  git(projectDir, ["commit", "-m", "remove home"]);
+  pushConflictingMain(tmp, bareRemote);
+  await page.getByTestId("get-latest").click();
+  await expect(page.getByTestId("conflict-file")).toContainText("index.html");
+  await expect(page.getByTestId("keep-yours")).toHaveText("Keep your deletion");
+  await expect(page.getByTestId("keep-both")).toBeDisabled();
+  await page.getByTestId("use-latest").click();
+  await expect(page.getByTestId("finish-conflict")).toBeEnabled();
+  await page.getByTestId("finish-conflict").click();
+  await expect(page.getByTestId("conflict-view")).toHaveCount(0);
+  expect(fs.readFileSync(path.join(projectDir, "index.html"), "utf8")).toBe("<h1>Latest headline</h1>\n");
+});

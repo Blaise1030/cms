@@ -78,4 +78,24 @@ describe("ConflictView", () => {
     await wrapper.findAll("button").find((button) => button.text() === "Mobile")!.trigger("click");
     expect(wrapper.findAll("iframe")[0]!.element.parentElement?.getAttribute("style")).toContain("390px");
   });
+
+  it("warns and blocks Finish when the selected result page is missing", async () => {
+    const daemon = h.daemon.api as unknown as Record<string, unknown>;
+    daemon.conflictPreviews = vi.fn(async () => ({
+      yours: { status: "ready", url: "/preview/site/conflicts/s1/yours/" },
+      latest: { status: "ready", url: "/preview/site/conflicts/s1/latest/" },
+      result: { status: "ready", url: "/preview/site/conflicts/s1/result/" },
+    }));
+    const store = useChangesStore();
+    await store.openConflict("site", "s1");
+    store.candidate = { tree: "candidate", complete: true };
+    const wrapper = mount(ConflictView, { props: { projectId: "site" } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeUndefined();
+    const frame = wrapper.get('iframe[title="result preview"]');
+    Object.defineProperty(frame.element, "contentDocument", { value: { contentType: "application/json", body: { textContent: '{"error":{"code":"ENOENT"}}' } } });
+    await frame.trigger("load");
+    expect(wrapper.text()).toContain("This page is missing from the preview");
+    expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeDefined();
+  });
 });

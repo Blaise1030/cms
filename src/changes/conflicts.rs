@@ -22,6 +22,8 @@ pub enum Choice {
 pub struct ConflictFile {
     pub path: String,
     pub binary: bool,
+    pub ours_deleted: bool,
+    pub theirs_deleted: bool,
     pub ours_oid: String,
     pub theirs_oid: String,
     pub base_oid: Option<String>,
@@ -190,18 +192,19 @@ pub(crate) async fn discover(
     }
     let mut files = Vec::new();
     for (path, [base, ours, theirs]) in stages {
-        let ours = ours.ok_or_else(|| {
-            ApiError::badreq(format!(
-                "delete/modify conflict needs developer help: {path}"
-            ))
-        })?;
-        let theirs = theirs.ok_or_else(|| {
-            ApiError::badreq(format!(
-                "delete/modify conflict needs developer help: {path}"
-            ))
-        })?;
-        let ours_bytes = blob(dir, &ours.1).await?;
-        let theirs_bytes = blob(dir, &theirs.1).await?;
+        if ours.is_none() && theirs.is_none() {
+            return Err(ApiError::git(format!(
+                "conflict has no file version: {path}"
+            )));
+        }
+        let ours_bytes = match &ours {
+            Some((_, oid)) => blob(dir, oid).await?,
+            None => Vec::new(),
+        };
+        let theirs_bytes = match &theirs {
+            Some((_, oid)) => blob(dir, oid).await?,
+            None => Vec::new(),
+        };
         let binary = ours_bytes.contains(&0)
             || theirs_bytes.contains(&0)
             || std::str::from_utf8(&ours_bytes).is_err()
@@ -209,10 +212,18 @@ pub(crate) async fn discover(
         files.push(ConflictFile {
             path,
             binary,
-            ours_mode: ours.0,
-            theirs_mode: theirs.0,
-            ours_oid: ours.1,
-            theirs_oid: theirs.1,
+            ours_deleted: ours.is_none(),
+            theirs_deleted: theirs.is_none(),
+            ours_mode: ours
+                .as_ref()
+                .map(|(mode, _)| mode.clone())
+                .unwrap_or_default(),
+            theirs_mode: theirs
+                .as_ref()
+                .map(|(mode, _)| mode.clone())
+                .unwrap_or_default(),
+            ours_oid: ours.map(|(_, oid)| oid).unwrap_or_default(),
+            theirs_oid: theirs.map(|(_, oid)| oid).unwrap_or_default(),
             base_oid: base.map(|(_, oid)| oid),
         });
     }
@@ -220,9 +231,9 @@ pub(crate) async fn discover(
 }
 
 pub(crate) async fn both(dir: &Path, file: &ConflictFile) -> Result<Vec<u8>, ApiError> {
-    if file.binary {
+    if file.binary || file.ours_deleted || file.theirs_deleted {
         return Err(ApiError::badreq(
-            "Keep both is unavailable for binary files",
+            "Keep both is unavailable when a side is deleted or binary",
         ));
     }
     let base = file
@@ -281,6 +292,18 @@ pub(crate) async fn candidate_tree(
             let Some(choice) = choices.get(&file.path) else {
                 continue;
             };
+            if matches!(choice, Choice::Yours) && file.ours_deleted
+                || matches!(choice, Choice::Latest) && file.theirs_deleted
+            {
+                checked(
+                    dir,
+                    &["update-index", "--force-remove", "--", &file.path],
+                    &env,
+                    None,
+                )
+                .await?;
+                continue;
+            }
             let mode = match choice {
                 Choice::Latest => &file.theirs_mode,
                 Choice::Yours | Choice::Both => &file.ours_mode,

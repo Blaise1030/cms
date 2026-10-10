@@ -229,6 +229,39 @@ async fn latest_choice_uses_latest_file_mode() {
 }
 
 #[tokio::test]
+async fn deletion_conflict_can_keep_deleted_or_modified_file() {
+    let (_tmp, dir, _tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
+    git(&dir, &["rm", "page.md"]);
+    git(&dir, &["commit", "-m", "delete page"]);
+    let sessions = ConflictSessions::new();
+    let session = sessions
+        .start(&dir, "site", "content/page", &incoming)
+        .await
+        .unwrap();
+    assert!(session.files[0].ours_deleted);
+    assert!(!session.files[0].theirs_deleted);
+    assert!(sessions
+        .choose(&session.id, "page.md", Choice::Both)
+        .await
+        .is_err());
+    let deleted = sessions
+        .choose(&session.id, "page.md", Choice::Yours)
+        .await
+        .unwrap();
+    assert!(git(&dir, &["ls-tree", &deleted.tree, "page.md"]).is_empty());
+    let modified = sessions
+        .choose(&session.id, "page.md", Choice::Latest)
+        .await
+        .unwrap();
+    assert!(git(&dir, &["show", &format!("{}:page.md", modified.tree)]).contains("latest"));
+    let merged = sessions
+        .finish(&session.id, &Identity::workbench())
+        .await
+        .unwrap();
+    assert_eq!(git(&dir, &["show", &format!("{merged}:page.md")]), "latest");
+}
+
+#[tokio::test]
 async fn sessions_on_different_branches_coexist() {
     let (_tmp, dir, tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
     git(&dir, &["branch", "content/other", &tip]);

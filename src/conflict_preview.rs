@@ -325,6 +325,11 @@ async fn build_snapshot(
             "Preview build produced no dist directory".into(),
         ));
     }
+    if !dir.join("dist/index.html").is_file() {
+        return Err(BuildError::Unavailable(
+            "Preview build produced no home page".into(),
+        ));
+    }
     Ok(())
 }
 

@@ -118,6 +118,19 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
         .await;
     assert!(matches!(state, PreviewState::Invalid { .. }), "{state:?}");
     assert!(manager.is_invalid("session", Source::Result).await);
+    fs::write(
+        repo.join("package.json"),
+        r#"{"scripts":{"build":"mkdir -p dist"}}"#,
+    )
+    .unwrap();
+    let no_page = commit(&repo, "<h1>No build output</h1>\n");
+    let state = manager
+        .prepare(&repo, "site", "session", Source::Result, &no_page)
+        .await;
+    assert!(
+        matches!(state, PreviewState::Unavailable { .. }),
+        "{state:?}"
+    );
     manager.remove_session("session").await;
     assert!(!manager.is_invalid("session", Source::Result).await);
     assert!(manager

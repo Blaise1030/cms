@@ -105,6 +105,8 @@ export type ConflictChoice = "yours" | "latest" | "both";
 export interface ConflictFile {
   path: string;
   binary: boolean;
+  oursDeleted?: boolean;
+  theirsDeleted?: boolean;
   oursOid: string;
   theirsOid: string;
   baseOid: string | null;

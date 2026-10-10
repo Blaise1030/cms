@@ -26,11 +26,12 @@ watch(() => props.file.patch, async (patch) => {
     </div>
     <p class="text-muted-foreground text-sm">
       Choose the version to keep in this file. Keep both places your text before the latest text in each conflicting region.
+      <span v-if="file.oursDeleted || file.theirsDeleted"> One version deleted this file.</span>
     </p>
     <div class="flex flex-wrap gap-2">
-      <Button size="sm" :variant="choice === 'yours' ? 'default' : 'outline'" data-testid="keep-yours" @click="emit('choose', 'yours')">Keep yours</Button>
-      <Button size="sm" :variant="choice === 'latest' ? 'default' : 'outline'" data-testid="use-latest" @click="emit('choose', 'latest')">Use latest</Button>
-      <Button size="sm" :variant="choice === 'both' ? 'default' : 'outline'" :disabled="file.binary" data-testid="keep-both" @click="emit('choose', 'both')">Keep both</Button>
+      <Button size="sm" :variant="choice === 'yours' ? 'default' : 'outline'" data-testid="keep-yours" @click="emit('choose', 'yours')">{{ file.oursDeleted ? 'Keep your deletion' : 'Keep yours' }}</Button>
+      <Button size="sm" :variant="choice === 'latest' ? 'default' : 'outline'" data-testid="use-latest" @click="emit('choose', 'latest')">{{ file.theirsDeleted ? 'Use latest deletion' : 'Use latest' }}</Button>
+      <Button size="sm" :variant="choice === 'both' ? 'default' : 'outline'" :disabled="file.binary || file.oursDeleted || file.theirsDeleted" data-testid="keep-both" @click="emit('choose', 'both')">Keep both</Button>
     </div>
     <p v-if="file.binary" class="text-muted-foreground text-sm">This file cannot be compared as text.</p>
     <DiffView v-else-if="parsed" :diff="parsed.meta" />

@@ -151,9 +151,9 @@ impl ConflictSessions {
             .iter()
             .find(|f| f.path == path)
             .ok_or_else(|| ApiError::badreq("file is not in this conflict"))?;
-        if file.binary && choice == Choice::Both {
+        if (file.binary || file.ours_deleted || file.theirs_deleted) && choice == Choice::Both {
             return Err(ApiError::badreq(
-                "Keep both is unavailable for binary files",
+                "Keep both is unavailable when a side is deleted or binary",
             ));
         }
         session.choices.insert(path.to_string(), choice);

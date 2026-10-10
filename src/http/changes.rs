@@ -223,6 +223,7 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    let _update_guard = state.conflict_updates.lock().await;
     if !state.conflicts.list(&req.project).await.is_empty() {
         return Err(ApiError::conflict(
             "Finish or abandon the open conflict before running Get latest again",
