@@ -25,6 +25,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 
 use crate::auth;
+use crate::conflict_preview::Source;
 use crate::error::ApiError;
 use crate::projects::DevserverStatus;
 use crate::state::AppState;
@@ -61,10 +62,47 @@ pub fn new_client() -> UpstreamClient {
 
 /// Router handler for `/preview/{id}`, `/preview/{id}/` and `/preview/{id}/{*rest}`.
 pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
+    if let Some((project, session, source, rest)) = conflict_path(req.uri().path()) {
+        let current_project = state.projects.get(&project).await;
+        let valid = state.conflicts.get(&session).await.ok().is_some_and(|s| {
+            s.project_id == project && current_project.as_ref().is_some_and(|p| p.dir == s.dir)
+        });
+        if !valid {
+            return ApiError::enoent("conflict preview not found").into_response();
+        }
+        let section = req
+            .uri()
+            .query()
+            .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("section=")));
+        return match state
+            .conflict_previews
+            .serve(&session, source, &rest, section)
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => e.into_response(),
+        };
+    }
     match forward(&state, req, None).await {
         Ok(res) => res,
         Err(e) => e.into_response(),
     }
+}
+
+fn conflict_path(path: &str) -> Option<(String, String, Source, String)> {
+    let rest = path.strip_prefix("/preview/")?;
+    let (project, rest) = rest.split_once("/conflicts/")?;
+    let (session, rest) = rest.split_once('/')?;
+    let (source, rest) = rest.split_once('/').unwrap_or((rest, ""));
+    if project.is_empty() || session.is_empty() {
+        return None;
+    }
+    Some((
+        project.to_owned(),
+        session.to_owned(),
+        Source::parse(source)?,
+        rest.to_owned(),
+    ))
 }
 
 /// Router handler for Astro/Vite root-absolute module URLs (`/@vite/client`, …).

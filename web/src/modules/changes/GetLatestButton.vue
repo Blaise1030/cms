@@ -33,8 +33,10 @@ const DIVERGED =
 function report(result: ChangesUpdate) {
   const summary = updatedSummary(result);
   if (result.conflicts.length > 0) {
+    const unsupported = result.conflictErrors && Object.entries(result.conflictErrors).map(([branch, reason]) => `${branch}: ${reason}`);
     const description = [
       `Left as they were: ${titles(result.conflicts)}.`,
+      ...(unsupported ?? []),
       summary,
       result.mainDiverged ? DIVERGED : undefined,
     ]

@@ -73,6 +73,24 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
         .route("/api/changes/update", post(changes::update))
+        .route("/api/changes/conflicts", get(changes::list_conflicts))
+        .route("/api/changes/conflicts/{id}", get(changes::get_conflict))
+        .route(
+            "/api/changes/conflicts/{id}/previews",
+            get(changes::conflict_previews),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/choice",
+            post(changes::choose_conflict),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/finish",
+            post(changes::finish_conflict),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/abandon",
+            post(changes::abandon_conflict),
+        )
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))

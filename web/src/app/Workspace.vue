@@ -4,11 +4,14 @@ import { RouterView, useRoute } from "vue-router";
 import type { Project } from "@/core/types";
 import { projectTabFromRoute } from "@/router";
 import PreviewPanel from "@/modules/preview/PreviewPanel.vue";
+import ConflictView from "@/modules/changes/ConflictView.vue";
+import { useChangesStore } from "@/modules/changes/store";
 
 defineProps<{ project: Project }>();
 
 const route = useRoute();
 const tab = computed(() => projectTabFromRoute(route.name));
+const changes = useChangesStore();
 </script>
 
 <template>
@@ -24,6 +27,7 @@ const tab = computed(() => projectTabFromRoute(route.name));
       <div v-show="tab !== 'preview'" class="absolute inset-0">
         <RouterView />
       </div>
+      <ConflictView v-if="changes.selectedConflictId" :project-id="project.id" />
     </div>
   </div>
 </template>

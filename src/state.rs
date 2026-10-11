@@ -1,8 +1,11 @@
 //! Shared application state.
 
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
+use crate::changes::conflict_sessions::ConflictSessions;
 use crate::config::Config;
+use crate::conflict_preview::ConflictPreviewManager;
 use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
 use crate::github::GithubAuth;
@@ -27,6 +30,11 @@ pub struct AppState {
     pub github: Arc<GithubAuth>,
     /// HTTP client for the `/preview/{id}/*` reverse proxy.
     pub preview: UpstreamClient,
+    /// Proposed conflict resolutions; never mutates a branch until Finish.
+    pub conflicts: Arc<ConflictSessions>,
+    pub conflict_previews: Arc<ConflictPreviewManager>,
+    /// Serializes Get latest through session creation as one operation.
+    pub conflict_updates: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -92,6 +100,9 @@ impl AppState {
             watchers,
             github,
             preview: preview::new_client(),
+            conflicts: Arc::new(ConflictSessions::new()),
+            conflict_previews: Arc::new(ConflictPreviewManager::new()),
+            conflict_updates: Arc::new(Mutex::new(())),
         }
     }
 }
