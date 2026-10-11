@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -9,10 +9,13 @@ import type { Change } from "@/core/types";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { sameValue } from "./draft";
 import { useContentStore } from "./store";
+import { IMAGE_REGISTRY } from "./ImageDialog.vue";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string}>();
 const store = useContentStore();
+// Images inserted by the form or body editor stay pending in the draft until Save.
+provide(IMAGE_REGISTRY, { add: image => store.addImage(image) });
 watch(() => props.projectId, id => void store.open(id), {immediate:true});
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());

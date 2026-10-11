@@ -5,6 +5,8 @@ import {
   type ContentEntrySummary,
   type ContentEntry,
   type ContentEntryUpdate,
+  type ContentImageUpload,
+  type SavedContentEntry,
   type ContentEntryRename,
   type ContentEntryDelete,
   type ContentImpact,
@@ -119,12 +121,14 @@ export function createApi(
 ) {
   const cfg = typeof config === "function" ? config : () => config;
 
-  async function send(method: string, path: string, opts: { query?: Query; body?: unknown } = {}) {
+  async function send(method: string, path: string, opts: { query?: Query; body?: unknown; form?: FormData } = {}) {
     const { origin, token } = cfg();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     const init: RequestInit = { method, headers };
-    if (opts.body !== undefined) {
+    // The browser sets the multipart Content-Type with its boundary.
+    if (opts.form) init.body = opts.form;
+    else if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
@@ -140,7 +144,7 @@ export function createApi(
     return res;
   }
 
-  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown }) {
+  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown; form?: FormData }) {
     const res = await send(method, path, opts);
     try {
       return (await res.json()) as T;
@@ -158,7 +162,15 @@ export function createApi(
       (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
-    updateContentEntry: (body: ContentEntryUpdate) => json<ContentEntry>("PUT", "/api/content/entry", { body }),
+    /** JSON without images; with images, multipart: a JSON `entry` part plus one part per image named by its client ID. */
+    updateContentEntry: (body: ContentEntryUpdate, images: ContentImageUpload[] = []) => {
+      if (!images.length) return json<SavedContentEntry>("PUT", "/api/content/entry", { body });
+      const form = new FormData();
+      const meta = images.map(({ clientId, alt, filename }) => ({ clientId, alt, filename }));
+      form.append("entry", new Blob([JSON.stringify({ ...body, images: meta })], { type: "application/json" }));
+      for (const image of images) form.append(image.clientId, image.file, image.filename);
+      return json<SavedContentEntry>("PUT", "/api/content/entry", { form });
+    },
     contentImpact: (project: string, collection: string, id: string) =>
       json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
     renameContentEntry: (body: ContentEntryRename) =>

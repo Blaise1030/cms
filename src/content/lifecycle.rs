@@ -7,7 +7,7 @@
 //! were. A rename or delete is one scoped checkpoint covering the old and new entry paths,
 //! the owned asset files (`src/assets/<collection>/<id>/`), and every rewritten reference.
 use super::mutation::{self as m, Leaf};
-use super::{catalog, helper};
+use super::{catalog, helper, images};
 use crate::{error::ApiError, git, state::AppState};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -99,7 +99,7 @@ fn public_url(collection: &str, id: &str) -> Option<String> {
 }
 
 /// `to` relative to the directory `from` (both project-relative, `/`-separated).
-fn relative(from: &str, to: &str) -> String {
+pub(super) fn relative(from: &str, to: &str) -> String {
     let a: Vec<_> = from.split('/').filter(|p| !p.is_empty()).collect();
     let b: Vec<_> = to.split('/').collect();
     let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
@@ -366,9 +366,9 @@ fn mode_of(path: &Path) -> Result<u32, ApiError> {
 
 /// Undo log for applied file-system steps, replayed in reverse on failure.
 #[derive(Default)]
-struct Journal(Vec<Undo>);
+pub(super) struct Journal(pub(super) Vec<Undo>);
 
-enum Undo {
+pub(super) enum Undo {
     /// Restore `bytes` at `path` (a file that was overwritten or removed).
     Write {
         path: PathBuf,
@@ -377,13 +377,15 @@ enum Undo {
     },
     /// Remove a file that was created.
     Remove(PathBuf),
+    /// Remove a directory that was created (only if it is empty again).
+    RemoveDir(PathBuf),
     /// A directory moved from `to` to `from`; move it back.
     Move { from: PathBuf, to: PathBuf },
 }
 
 impl Journal {
     /// Roll back and return `error`, extended with every rollback step that failed.
-    fn fail(self, error: ApiError) -> ApiError {
+    pub(super) fn fail(self, error: ApiError) -> ApiError {
         let mut failures = vec![];
         for step in self.0.into_iter().rev() {
             let (path, result) = match step {
@@ -393,6 +395,10 @@ impl Journal {
                 }
                 Undo::Remove(path) => {
                     let r = std::fs::remove_file(&path).map_err(ApiError::from);
+                    (path, r)
+                }
+                Undo::RemoveDir(path) => {
+                    let r = std::fs::remove_dir(&path).map_err(ApiError::from);
                     (path, r)
                 }
                 Undo::Move { from, to } => {
@@ -448,6 +454,7 @@ pub async fn rename_entry(
     let root = m::project_root(state, &request.project).await?;
     let lock = m::lock_for(&root);
     let _guard = lock.lock().await;
+    images::cleanup_orphans(&root);
     let branch = m::require_content_change(&root, &request.branch).await?;
     let collections = catalog::list_collections(&root).await?;
     let c = m::editable_in(&collections, &request.collection)?;
@@ -604,6 +611,7 @@ pub async fn delete_entry(state: &AppState, request: DeleteEntry) -> Result<(), 
     let root = m::project_root(state, &request.project).await?;
     let lock = m::lock_for(&root);
     let _guard = lock.lock().await;
+    images::cleanup_orphans(&root);
     m::require_content_change(&root, &request.branch).await?;
     let collections = catalog::list_collections(&root).await?;
     let c = m::editable_in(&collections, &request.collection)?;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject, ref } from "vue";
 import type { FieldDescriptor } from "@/core/types";
+import ImageDialog, { IMAGE_REGISTRY, type PendingImage } from "./ImageDialog.vue";
 
 defineOptions({ name: "FrontmatterForm" });
 const props = withDefaults(defineProps<{
@@ -11,7 +12,11 @@ const props = withDefaults(defineProps<{
   label?: string;
   errors?: Record<string, string>;
 }>(), { path: () => [], errors: () => ({}) });
-const emit = defineEmits<{ "update:modelValue": [value: unknown] }>();
+const emit = defineEmits<{
+  "update:modelValue": [value: unknown];
+  /** An image field got a new image; its parent object also fills the alt-text companion. */
+  image: [value: { value: string; alt: string }];
+}>();
 
 const key = computed(() => props.path.join("."));
 const id = computed(() => `field-${key.value}`);
@@ -40,6 +45,27 @@ function setChild(name: string, value: unknown) {
   const { [name]: _old, ...rest } = objectValue.value;
   set(value === undefined ? rest : { ...rest, [name]: value });
 }
+/** `coverImage` → `coverAlt`, or `<name>Alt`, when the object declares it. */
+function companion(name: string, properties: Record<string, FieldDescriptor> | undefined): string | null {
+  for (const key of [name.replace(/Image$/, "Alt"), `${name}Alt`]) if (key !== name && properties?.[key]) return key;
+  return null;
+}
+/** One update for an image field and its alt companion, so neither overwrites the other. */
+function setImage(name: string, image: { value: string; alt: string }, properties: Record<string, FieldDescriptor> | undefined) {
+  const alt = companion(name, properties);
+  set({ ...objectValue.value, [name]: image.value, ...(alt ? { [alt]: image.alt } : {}) });
+}
+
+// Image fields: the dialog's image stays pending in the draft (shown by its preview) until Save.
+const registry = inject(IMAGE_REGISTRY, null);
+const imageOpen = ref(false);
+const pendingPreview = computed(() => typeof props.modelValue === "string" && props.modelValue.startsWith("blob:"));
+function chooseImage(image: PendingImage) {
+  registry?.add(image);
+  set(image.previewUrl);
+  emit("image", { value: image.previewUrl, alt: image.alt });
+}
+
 function setItem(index: number, value: unknown) {
   set(listValue.value.map((item, i) => (i === index ? value : item)));
 }
@@ -102,7 +128,7 @@ const box = "w-full rounded-md border bg-background px-2 py-1 text-sm";
     </template>
 
     <fieldset v-else-if="descriptor.type === 'object'" class="rounded-md border p-2">
-      <FrontmatterForm v-for="(child, name) in descriptor.properties" :key="name" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" @update:model-value="setChild(String(name), $event)" />
+      <FrontmatterForm v-for="(child, name) in descriptor.properties" :key="name" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" @update:model-value="setChild(String(name), $event)" @image="setImage(String(name), $event, descriptor.properties)" />
     </fieldset>
 
     <fieldset v-else-if="descriptor.type === 'union'" class="rounded-md border p-2">
@@ -112,14 +138,18 @@ const box = "w-full rounded-md border bg-background px-2 py-1 text-sm";
       </select>
       <template v-if="variant">
         <template v-for="(child, name) in variant.properties" :key="name">
-          <FrontmatterForm v-if="name !== descriptor.discriminator" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" class="mt-2" @update:model-value="setChild(String(name), $event)" />
+          <FrontmatterForm v-if="name !== descriptor.discriminator" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" class="mt-2" @update:model-value="setChild(String(name), $event)" @image="setImage(String(name), $event, variant.properties)" />
         </template>
       </template>
     </fieldset>
 
-    <!-- reference and image store a string; the image upload dialog arrives separately. -->
     <input v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" :class="box" :placeholder="`${descriptor.collection} entry`" :value="modelValue as string | undefined" @input="setText" />
-    <input v-else-if="descriptor.type === 'image'" :id="id" :data-testid="id" type="text" :class="box" placeholder="Image path" :value="modelValue as string | undefined" @input="setText" />
+    <div v-else-if="descriptor.type === 'image'" class="flex items-center gap-2">
+      <img v-if="pendingPreview" :src="modelValue as string" alt="" class="h-10 w-10 shrink-0 rounded border object-cover" :data-testid="`${id}-preview`" />
+      <input :id="id" :data-testid="id" type="text" :class="box" placeholder="Image path" :readonly="pendingPreview" :value="pendingPreview ? 'New image, uploaded on save' : modelValue as string | undefined" @input="setText" />
+      <button type="button" class="shrink-0 text-xs underline" :data-testid="`${id}-choose`" @click="imageOpen = true">Choose image</button>
+      <ImageDialog v-model:open="imageOpen" @insert="chooseImage" />
+    </div>
 
     <input v-else :id="id" :data-testid="id" type="text" :class="box" :value="modelValue as string | undefined" @input="setText" />
 

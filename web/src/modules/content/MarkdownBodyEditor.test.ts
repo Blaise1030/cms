@@ -34,6 +34,17 @@ async function mode(w: VueWrapper, which: "rich" | "raw") {
   await flushPromises();
 }
 async function selectAll(w: VueWrapper) { editorOf(w).commands.selectAll(); await flushPromises(); }
+/** Choose a PNG in the open image dialog and type its alt text. */
+async function pickImage(alt: string) {
+  URL.createObjectURL = vi.fn(() => "blob:preview");
+  URL.revokeObjectURL = vi.fn();
+  const input = document.body.querySelector('[data-testid="image-file"]') as HTMLInputElement;
+  Object.defineProperty(input, "files", { value: [new File([new Uint8Array([0x89])], "cat.png", { type: "image/png" })], configurable: true });
+  input.dispatchEvent(new Event("change"));
+  const text = document.body.querySelector('[data-testid="image-alt"]') as HTMLInputElement;
+  text.value = alt; text.dispatchEvent(new Event("input"));
+  await flushPromises();
+}
 
 describe("canRoundTrip", () => {
   it.each([
@@ -92,17 +103,14 @@ describe("MarkdownBodyEditor", () => {
     expect(last(w)?.body).toBe("[Hello](https://x.test)");
   });
 
-  it("toolbar image asks for a source and non-empty alt text", async () => {
-    const answers = ["./cat.png", "A cat"];
-    vi.stubGlobal("prompt", vi.fn(() => answers.shift()));
+  it("toolbar image opens the image dialog and needs non-empty alt text", async () => {
     const w = await render("Hello");
     await w.get('[data-testid="body-tool-image"]').trigger("click"); await flushPromises();
-    expect(last(w)?.body).toContain("![A cat](./cat.png)");
-    const blank = ["./dog.png", "  "];
-    vi.stubGlobal("prompt", vi.fn(() => blank.shift()));
-    const before = changes(w).length;
-    await w.get('[data-testid="body-tool-image"]').trigger("click"); await flushPromises();
-    expect(changes(w).length).toBe(before);
+    await pickImage(" ");
+    expect((document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).disabled).toBe(true);
+    await pickImage("A cat");
+    (document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).click(); await flushPromises();
+    expect(last(w)?.body).toContain("![A cat](blob:preview)");
   });
 
   it.each([
@@ -129,10 +137,10 @@ describe("MarkdownBodyEditor", () => {
       expect(labels.some(l => l.includes(label))).toBe(true);
     editorOf(w).commands.insertContent("ima"); await flushPromises();
     expect(w.findAll('[data-testid="slash-item"]').map(i => i.text())).toEqual([expect.stringContaining("Image")]);
-    const answers = ["./cat.png", "A cat"];
-    vi.stubGlobal("prompt", vi.fn(() => answers.shift()));
     await w.get('[data-testid="slash-item"]').trigger("mousedown"); await flushPromises();
-    expect(last(w)?.body).toContain("![A cat](./cat.png)");
+    await pickImage("A cat");
+    (document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).click(); await flushPromises();
+    expect(last(w)?.body).toContain("![A cat](blob:preview)");
     expect(last(w)?.body).not.toContain("/ima");
   });
 

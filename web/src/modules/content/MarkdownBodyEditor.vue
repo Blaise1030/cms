@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Extension, type Range } from "@tiptap/core";
 import { Editor, EditorContent } from "@tiptap/vue-3";
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
@@ -8,6 +8,7 @@ import { EditorView } from "@codemirror/view";
 import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import { Button } from "@/components/ui/button";
 import { canRoundTrip, markdownExtensions } from "./markdown";
+import ImageDialog, { IMAGE_REGISTRY, markdownImage, type PendingImage } from "./ImageDialog.vue";
 
 /**
  * Body editor for Markdown/MDX entries. `body` is the draft body and `original` the loaded one.
@@ -33,20 +34,50 @@ function edited(next: string) {
   emit("change", { body: next, dirty: next !== props.original });
 }
 
-// ---- Toolbar and slash actions -------------------------------------------------------------
-/** Image source and alt text. Task 9 replaces these prompts with the upload/alt-text dialog. */
-function requestImage(): { src: string; alt: string } | null {
-  const src = window.prompt("Image URL or path")?.trim();
-  if (!src) return null;
-  const alt = window.prompt("Alt text (required)")?.trim();
-  return alt ? { src, alt } : null;
+// ---- Images ----------------------------------------------------------------------------------
+/** The draft that uploads inserted images on Save. */
+const registry = inject(IMAGE_REGISTRY, null);
+const imageOpen = ref(false);
+const imageFile = shallowRef<File | null>(null);
+let placeImage: ((image: PendingImage) => void) | null = null;
+/** Open the one preview/alt dialog; `place` inserts the image once alt text is given. */
+function requestImage(file: File | null, place: (image: PendingImage) => void) {
+  if (imageOpen.value) return;
+  imageFile.value = file; placeImage = place; imageOpen.value = true;
 }
-function insertImage(editor: Editor, range?: Range) {
-  const image = requestImage();
-  if (!image) return;
+function imageInserted(image: PendingImage) {
+  registry?.add(image);
+  placeImage?.(image); placeImage = null;
+}
+function insertRich(editor: Editor, image: PendingImage, range?: Range) {
   const chain = editor.chain().focus();
   if (range) chain.deleteRange(range);
-  chain.setImage(image).run();
+  // The Markdown parser keeps `\\` in alt text as written, so store backslashes the way it would
+  // read them back from `escapeAlt` output.
+  chain.setImage({ src: image.previewUrl, alt: image.alt.replace(/\\/g, "\\\\") }).run();
+}
+function insertRaw(image: PendingImage) {
+  if (!rawView) return;
+  rawView.dispatch(rawView.state.replaceSelection(markdownImage(image.alt, image.previewUrl)), { userEvent: "input" });
+  rawView.focus();
+}
+function insertHere(image: PendingImage) {
+  if (mode.value === "rich" && richEditor.value) insertRich(richEditor.value, image);
+  else insertRaw(image);
+}
+/** Paste or drop of a file in either mode goes through the dialog instead of the editor. */
+function transfer(event: ClipboardEvent | DragEvent) {
+  const data = "clipboardData" in event ? event.clipboardData : event.dataTransfer;
+  const file = data?.files?.[0];
+  if (!file) return;
+  event.preventDefault(); event.stopPropagation();
+  requestImage(file, insertHere);
+}
+function dragOver(event: DragEvent) { if (event.dataTransfer?.types?.includes("Files")) event.preventDefault(); }
+
+// ---- Toolbar and slash actions -------------------------------------------------------------
+function insertImage(editor: Editor, range?: Range) {
+  requestImage(null, image => insertRich(editor, image, range));
 }
 function insertLink(editor: Editor, range?: Range) {
   const href = window.prompt("Link URL")?.trim();
@@ -174,7 +205,7 @@ defineExpose({ richEditor: () => richEditor.value, mode });
 </script>
 
 <template>
-  <div class="mb-3" data-testid="body-editor">
+  <div class="mb-3" data-testid="body-editor" @paste.capture="transfer" @drop.capture="transfer" @dragover.capture="dragOver">
     <div class="mb-1 flex flex-wrap items-center gap-1">
       <span class="mr-auto text-xs font-medium">Body</span>
       <template v-if="richCapable">
@@ -197,7 +228,11 @@ defineExpose({ richEditor: () => richEditor.value, mode });
         </ul>
       </div>
     </template>
+    <div v-if="mode === 'raw'" class="mb-1 flex gap-1">
+      <Button type="button" size="sm" variant="outline" data-testid="body-raw-image" @click="requestImage(null, insertRaw)">Image</Button>
+    </div>
     <div v-show="mode === 'raw'" ref="rawHost" data-testid="body-raw" class="rounded-md border bg-background" />
+    <ImageDialog v-model:open="imageOpen" :file="imageFile" @insert="imageInserted" />
   </div>
 </template>
 

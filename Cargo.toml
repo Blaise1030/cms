@@ -13,7 +13,7 @@ name = "workbench"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8.9", features = ["json", "query", "ws"] }
+axum = { version = "0.8.9", features = ["json", "multipart", "query", "ws"] }
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["client-legacy", "http1", "tokio"] }
 http-body-util = "0.1.5"

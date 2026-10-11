@@ -15,7 +15,7 @@ pub mod terminal;
 use std::path::PathBuf;
 
 use axum::extract::rejection::QueryRejection;
-use axum::extract::Query;
+use axum::extract::{DefaultBodyLimit, Query};
 use axum::http::{header, HeaderValue, Method};
 use axum::routing::{any, delete, get, post};
 use axum::{middleware, Router};
@@ -39,7 +39,10 @@ pub fn router(state: AppState) -> Router {
             get(content::entry)
                 .post(content::create)
                 .put(content::update)
-                .delete(content::delete),
+                .delete(content::delete)
+                .layer(DefaultBodyLimit::max(
+                    crate::content::images::MAX_SAVE_BYTES,
+                )),
         )
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/github/clone", post(projects::clone))

@@ -1,10 +1,14 @@
 import { defineStore } from "pinia";
-import { computed, onScopeDispose, ref } from "vue";
+import { computed, onScopeDispose, ref, shallowRef } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
 import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, FieldDescriptor } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { diffDraft, cloneValue } from "./draft";
+import type { PendingImage } from "./ImageDialog.vue";
+
+/** How a submitted entry names a pending image; the daemon swaps in the saved path. */
+const IMAGE_TOKEN = "workbench-image:";
 
 export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
 /** A rename or delete awaiting confirmation; `impact` is the daemon's dry run. */
@@ -35,6 +39,19 @@ export const useContentStore = defineStore("content", () => {
   /** Current on-disk entry fetched for comparison with the draft. */
   const current = ref<ContentEntry | null>(null);
   const lifecycle = ref<ContentLifecycle | null>(null);
+  /** Images inserted into the draft, shown from local preview URLs until a save uploads them. */
+  const pendingImages = shallowRef<PendingImage[]>([]);
+  /** Pending images the draft still uses; one the writer deleted again is not uploaded. */
+  const usedImages = computed(() => {
+    const text = draftBody.value + JSON.stringify(draftFields.value);
+    return pendingImages.value.filter(i => text.includes(i.previewUrl));
+  });
+  function addImage(image: PendingImage) { pendingImages.value = [...pendingImages.value, image]; }
+  /** Revoke the previews of `done` (default: all) and stop tracking them. */
+  function releaseImages(done: PendingImage[] = pendingImages.value) {
+    for (const image of done) URL.revokeObjectURL(image.previewUrl);
+    pendingImages.value = pendingImages.value.filter(i => !done.includes(i));
+  }
   /** Which mutation a Create Change resumes. */
   let resumeAction: "save" | "lifecycle" = "save";
   const descriptor = computed<FieldDescriptor | null>(() => {
@@ -46,9 +63,10 @@ export const useContentStore = defineStore("content", () => {
   /** Body text from the body editor; it only reports real edits, so opening an entry never dirties it. */
   function setBody(body: string) { draftBody.value = body; }
   const pending = computed(() => entry.value ? diffDraft(entry.value, draftFields.value, draftBody.value, descriptor.value) : null);
-  const dirty = computed(() => !!entry.value && (draftSource.value !== entry.value.source || !!pending.value?.changed));
+  const dirty = computed(() => !!entry.value && (draftSource.value !== entry.value.source || !!pending.value?.changed || usedImages.value.length > 0));
   function clearSaveState() { saveError.value = null; fieldErrors.value = {}; conflict.value = null; needsChange.value = false; current.value = null; }
   function loadEntry(next: ContentEntry) {
+    releaseImages();
     entry.value = next; draftSource.value = next.source;
     draftFields.value = cloneValue(next.fields ?? {}); draftBody.value = next.body ?? "";
     changedOnDisk.value = false; clearSaveState();
@@ -71,6 +89,7 @@ export const useContentStore = defineStore("content", () => {
     ++selectionRequest;
     ++refreshRequest;
     selectionPending = false;
+    releaseImages();
     projectId.value = id; selectedCollection.value = null; entry.value = null; lifecycle.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
     await refresh();
@@ -105,6 +124,7 @@ export const useContentStore = defineStore("content", () => {
   async function selectCollection(name: string) {
     if (!canLeave()) return;
     const version = ++selectionRequest; selectionPending = true;
+    releaseImages();
     selectedCollection.value = name; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
     try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === selectionRequest) entries.value = next; }
     catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
@@ -120,23 +140,38 @@ export const useContentStore = defineStore("content", () => {
     } catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === selectionRequest) selectionPending = false; }
   }
-  /** Send only the changed fields. Throws after recording the failure so the draft stays intact. */
+  /**
+   * Send only the changed fields, plus the pending images the draft uses (their previews become
+   * tokens). Throws after recording the failure so the draft and its pending images stay intact.
+   */
   async function saveDraft(branch?: string): Promise<ContentEntry> {
     const e = entry.value; const change = pending.value;
     if (!e) throw new Error("No entry is open");
     if (!change?.changed) return e;
     const saved = { id: projectId.value, entryId: e.id };
     const submitted = { fields: JSON.stringify(draftFields.value), body: draftBody.value };
+    const images = usedImages.value;
+    const tokens = (text: string) => images.reduce((t, i) => t.split(i.previewUrl).join(IMAGE_TOKEN + i.clientId), text);
     saving.value = true; clearSaveState(); resumeAction = "save";
     try {
-      const next = await daemon.api.updateContentEntry({
+      const update = {
         project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash,
-        fields: change.fields, ...(change.body !== undefined ? { body: change.body } : {}), ...(change.unset.length ? { unset: change.unset } : {}),
-      });
+        fields: images.length ? JSON.parse(tokens(JSON.stringify(change.fields))) as Record<string, unknown> : change.fields,
+        ...(change.body !== undefined ? { body: tokens(change.body) } : {}), ...(change.unset.length ? { unset: change.unset } : {}),
+      };
+      const uploads = images.map(({ clientId, alt, filename, file }) => ({ clientId, alt, filename, file }));
+      const { images: placed, ...next } = await (uploads.length ? daemon.api.updateContentEntry(update, uploads) : daemon.api.updateContentEntry(update));
       if (projectId.value === saved.id && entry.value?.id === saved.entryId) {
-        // Edits typed while the request was in flight stay in the draft, rebased on the saved entry.
+        // Edits typed while the request was in flight stay in the draft, rebased on the saved entry;
+        // the uploaded images' previews in it become their saved links.
         if (JSON.stringify(draftFields.value) === submitted.fields && draftBody.value === submitted.body) loadEntry(next);
-        else { entry.value = next; draftSource.value = next.source; changedOnDisk.value = false; clearSaveState(); }
+        else {
+          const links = (text: string) => images.reduce((t, i) => placed?.[i.clientId] ? t.split(i.previewUrl).join(placed[i.clientId]!.link) : t, text);
+          draftBody.value = links(draftBody.value);
+          draftFields.value = JSON.parse(links(JSON.stringify(draftFields.value))) as Record<string, unknown>;
+          releaseImages(images);
+          entry.value = next; draftSource.value = next.source; changedOnDisk.value = false; clearSaveState();
+        }
       }
       return next;
     } catch (err) {
@@ -216,5 +251,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(() => void refresh()),
   ];
   onScopeDispose(() => offs.forEach(off => off()));
-  return { projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
+  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
 });

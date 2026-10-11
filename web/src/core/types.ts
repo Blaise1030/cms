@@ -275,3 +275,9 @@ export interface ContentEntrySummary { collection: string; id: string; path: str
 export interface ContentEntry extends ContentEntrySummary {
   source: string; fields: Record<string, unknown> | null; body: string; branch: string; hash: string;
 }
+/** An image sent with a save; the entry names it with a `workbench-image:<clientId>` token. */
+export interface ContentImageUpload { clientId: string; alt: string; filename: string; file: Blob }
+/** A saved entry; a save with images also says where each one went, by client ID. */
+export interface SavedContentEntry extends ContentEntry {
+  images?: Record<string, { path: string; link: string }>;
+}

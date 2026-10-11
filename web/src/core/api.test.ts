@@ -109,3 +109,30 @@ describe("createApi", () => {
     expect(a.previewUrl("my proj")).toBe("http://b.test/preview/my%20proj/");
   });
 });
+
+describe("updateContentEntry", () => {
+  const body = { project: "p", collection: "blog", id: "welcome", branch: "content/a", hash: "h1", fields: {}, body: "![A](workbench-image:c1)\n" };
+
+  it("sends JSON when the save has no images", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => json({ id: "welcome" }));
+    await api(fetchImpl).updateContentEntry(body);
+    const init = fetchImpl.mock.calls[0]![1]!;
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("sends multipart with a JSON entry part and one part per image keyed by client ID", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => json({ id: "welcome" }));
+    const file = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+    await api(fetchImpl, "tok").updateContentEntry(body, [{ clientId: "c1", alt: "A", filename: "a.png", file }]);
+    const init = fetchImpl.mock.calls[0]![1]!;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+    expect(headers.Authorization).toBe("Bearer tok");
+    const form = init.body as FormData;
+    expect(JSON.parse(await (form.get("entry") as Blob).text())).toEqual({ ...body, images: [{ clientId: "c1", alt: "A", filename: "a.png" }] });
+    const part = form.get("c1") as File;
+    expect(part.name).toBe("a.png");
+    expect(new Uint8Array(await part.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+});

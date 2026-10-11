@@ -3,11 +3,13 @@
 //! Under a per-project lock: require an active change, check the opened branch and hash,
 //! resolve only catalog-declared paths without following symlinks, validate the complete
 //! candidate with the template helper, write through a same-directory temporary file and
-//! rename, then checkpoint only the entry path.
-use super::{catalog, helper};
+//! rename, then checkpoint only the entry path (plus any images attached through `images`).
+use super::lifecycle::{Journal, Undo};
+use super::{catalog, helper, images};
 use crate::{changes, error::ApiError, git, state::AppState};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -36,6 +38,17 @@ pub struct SaveEntry {
     pub body: Option<String>,
     /// Optional top-level fields to remove.
     pub unset: Vec<String>,
+    /// Images named by `workbench-image:<clientId>` tokens in `fields` or `body`.
+    pub images: Vec<images::Upload>,
+}
+
+/// A saved entry and, for each attached image, where it was placed.
+#[derive(Debug, Serialize)]
+pub struct SavedEntry {
+    #[serde(flatten)]
+    pub entry: catalog::ContentEntry,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub images: BTreeMap<String, images::SavedImage>,
 }
 
 /// Page slugs owned by template routes.
@@ -186,24 +199,36 @@ pub(super) fn resolve_as(root: &Path, rel: &str, leaf: Leaf) -> Result<PathBuf, 
     Ok(target)
 }
 
-/// Create missing parents one level at a time, re-checking each for symlinks.
-fn create_parents(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
-    let target = resolve(root, rel)?;
-    let parent = target.parent().unwrap();
+/// Create the missing directories of `rel_dir` one level at a time, re-checking each for
+/// symlinks. Directories it created are appended to `created`, outermost first, even when
+/// it fails part-way.
+pub(super) fn create_dirs(
+    root: &Path,
+    rel_dir: &str,
+    created: &mut Vec<PathBuf>,
+) -> Result<PathBuf, ApiError> {
+    let target = resolve_as(root, rel_dir, Leaf::Dir)?;
     let canon_root = std::fs::canonicalize(root)?;
     let mut dir = canon_root.clone();
-    for part in parent.strip_prefix(&canon_root).unwrap().components() {
+    for part in target.strip_prefix(&canon_root).unwrap().components() {
         dir.push(part);
         match std::fs::create_dir(&dir) {
-            Ok(()) => {}
+            Ok(()) => created.push(dir.clone()),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e.into()),
         }
     }
-    // Containment after creation: the parent's real path must be the lexical one.
-    if std::fs::canonicalize(parent)? != parent {
+    // Containment after creation: the directory's real path must be the lexical one.
+    if std::fs::canonicalize(&target)? != target {
         return Err(unsafe_path("content parent escapes the project"));
     }
+    resolve_as(root, rel_dir, Leaf::Dir)
+}
+
+/// Create the missing parents of the file at `rel`; see [`create_dirs`].
+fn create_parents(root: &Path, rel: &str, created: &mut Vec<PathBuf>) -> Result<PathBuf, ApiError> {
+    let parent = Path::new(rel).parent().and_then(Path::to_str).unwrap_or("");
+    create_dirs(root, parent, created)?;
     resolve(root, rel)
 }
 
@@ -336,13 +361,11 @@ pub(super) fn emit_checkpoint(state: &AppState, project: &str, cp: Option<git::C
     }
 }
 
-pub async fn save_entry(
-    state: &AppState,
-    request: SaveEntry,
-) -> Result<catalog::ContentEntry, ApiError> {
+pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEntry, ApiError> {
     let root = project_root(state, &request.project).await?;
     let lock = lock_for(&root);
     let _guard = lock.lock().await;
+    images::cleanup_orphans(&root);
     let branch = require_content_change(&root, &request.branch).await?;
     let c = editable_collection(&root, &request.collection).await?;
     if request.body.is_some() && c.kind == "json" && request.body.as_deref() != Some("") {
@@ -364,16 +387,27 @@ pub async fn save_entry(
     };
     let rel = entry_path(&c, &id)?;
     let target = resolve(&root, &rel)?;
+    if created && std::fs::symlink_metadata(&target).is_ok() {
+        return Err(duplicate_slug(&c, &id));
+    }
+    // Validate and stage attached images, turning their tokens into relative paths.
+    let (mut fields, mut body) = (request.fields, request.body);
+    let prepared = images::prepare(
+        &root,
+        &c.name,
+        &id,
+        &rel,
+        &request.images,
+        &mut fields,
+        &mut body,
+    )?;
 
     let (old, mode, source) = if created {
-        if std::fs::symlink_metadata(&target).is_ok() {
-            return Err(duplicate_slug(&c, &id));
-        }
-        let mut fields = request.fields.clone();
+        let mut fields = fields.clone();
         for key in &request.unset {
             fields.remove(key);
         }
-        let initial = render(&c.kind, &fields, request.body.as_deref().unwrap_or(""))?;
+        let initial = render(&c.kind, &fields, body.as_deref().unwrap_or(""))?;
         let source = helper::patch(&root, &c.name, &initial, &Map::new(), &[], None).await?;
         (None, 0o644, source)
     } else {
@@ -388,54 +422,83 @@ pub async fn save_entry(
         let body = if c.kind == "json" {
             None
         } else {
-            request.body.as_deref()
+            body.as_deref()
         };
-        let source =
-            helper::patch(&root, &c.name, &old, &request.fields, &request.unset, body).await?;
+        let source = helper::patch(&root, &c.name, &old, &fields, &request.unset, body).await?;
         if source == old {
-            return Ok(catalog::build_entry(c.name, id, rel, &c.kind, old, branch));
+            return Ok(SavedEntry {
+                entry: catalog::build_entry(c.name, id, rel, &c.kind, old, branch),
+                images: BTreeMap::new(),
+            });
         }
         (Some(old), mode, source)
     };
 
     // Re-verify immediately before mutating: the helper ran outside git's view.
     require_content_change(&root, &request.branch).await?;
-    let target = if created {
+    if created {
         if std::fs::symlink_metadata(resolve(&root, &rel)?).is_ok() {
             return Err(duplicate_slug(&c, &id));
         }
-        create_parents(&root, &rel)?
-    } else {
-        let target = resolve(&root, &rel)?;
-        if read_current(&target)? != *old.as_ref().unwrap() {
-            return Err(stale());
-        }
-        target
+    } else if read_current(&resolve(&root, &rel)?)? != *old.as_ref().unwrap() {
+        return Err(stale());
+    }
+
+    // Apply under an undo journal so a failed write or checkpoint leaves no partial update.
+    let mut journal = Journal::default();
+    let applied = (|| {
+        let assets = match &prepared {
+            Some(p) => p.place(&root, &mut journal)?,
+            None => vec![],
+        };
+        let target = if created {
+            let mut dirs = vec![];
+            let target = create_parents(&root, &rel, &mut dirs);
+            journal.0.extend(dirs.into_iter().map(Undo::RemoveDir));
+            target?
+        } else {
+            resolve(&root, &rel)?
+        };
+        write_atomic(&target, source.as_bytes(), mode)?;
+        journal.0.push(match &old {
+            Some(old) => Undo::Write {
+                path: target,
+                bytes: old.clone(),
+                mode,
+            },
+            None => Undo::Remove(target),
+        });
+        Ok::<_, ApiError>(assets)
+    })();
+    let assets = match applied {
+        Ok(assets) => assets,
+        Err(e) => return Err(journal.fail(e)),
     };
-    write_atomic(&target, source.as_bytes(), mode)?;
 
     let summary = format!(
         "{} {}/{id}",
         if created { "Create" } else { "Update" },
         c.name
     );
-    let checkpoint = match git::checkpoint_paths(&root, &summary, &[PathBuf::from(&rel)]).await {
+    let mut paths = vec![PathBuf::from(&rel)];
+    paths.extend(assets.iter().map(PathBuf::from));
+    let checkpoint = match git::checkpoint_paths(&root, &summary, &paths).await {
         Ok(cp) => cp,
-        Err(e) => {
-            // Roll back the entry so a failed save leaves no partial update.
-            let _ = match &old {
-                Some(old) => write_atomic(&target, old.as_bytes(), mode),
-                None => std::fs::remove_file(&target).map_err(ApiError::from),
-            };
-            return Err(e);
-        }
+        Err(e) => return Err(journal.fail(e)),
     };
     state.events.emit(
         "fs.change",
         json!({ "projectId": request.project, "path": rel, "kind": if created { "create" } else { "modify" } }),
     );
+    for asset in &assets {
+        state.events.emit(
+            "fs.change",
+            json!({ "projectId": request.project, "path": asset, "kind": "create" }),
+        );
+    }
     emit_checkpoint(state, &request.project, checkpoint);
-    Ok(catalog::build_entry(
-        c.name, id, rel, &c.kind, source, branch,
-    ))
+    Ok(SavedEntry {
+        entry: catalog::build_entry(c.name, id, rel, &c.kind, source, branch),
+        images: prepared.as_ref().map(|p| p.saved()).unwrap_or_default(),
+    })
 }

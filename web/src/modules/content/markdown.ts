@@ -12,10 +12,24 @@ import { Markdown, type MarkdownManager } from "@tiptap/markdown";
 export function markdownExtensions(): AnyExtension[] {
   return [
     StarterKit.configure({ underline: false, trailingNode: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
-    Image,
+    SafeImage,
     Markdown,
   ];
 }
+
+/**
+ * Images whose alt text keeps its brackets escaped. The parser unescapes only `\[` and `\]` in
+ * alt text, so escaping exactly those is its inverse and an unbalanced bracket cannot end the
+ * image early.
+ */
+const SafeImage = Image.extend({
+  renderMarkdown: (node: { attrs?: Record<string, unknown> }) => {
+    const src = String(node.attrs?.src ?? "");
+    const alt = String(node.attrs?.alt ?? "").replace(/\s*\n\s*/g, " ").replace(/[[\]]/g, c => `\\${c}`);
+    const title = node.attrs?.title ? String(node.attrs.title) : "";
+    return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
+  },
+});
 
 /** marked token types the configured extensions parse and serialize without loss. */
 const SUPPORTED_TOKENS = new Set([
