@@ -13,7 +13,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{project_dir, query_or_badreq};
+use crate::changes::conflicts::{self, Choice};
 use crate::changes::{self, PrMerge};
+use crate::conflict_preview::{PreviewState, Source};
 use crate::error::ApiError;
 use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
 use crate::state::AppState;
@@ -213,10 +215,7 @@ struct UpdateRequest {
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
 /// `conflict` while that project's terminal is live — git must not run under the CLI.
-pub async fn update(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<Json<changes::Update>, ApiError> {
+pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
@@ -230,13 +229,211 @@ pub async fn update(
             "A terminal is running — stop it before getting the latest",
         ));
     }
+    let _update_guard = state.conflict_updates.lock().await;
+    if !state.conflicts.list(&req.project).await.is_empty() {
+        return Err(ApiError::conflict(
+            "Finish or abandon the open conflict before running Get latest again",
+        ));
+    }
     // GitHub projects fetch with the signed-in user's credentials (private repos).
     let env = if project.repo.is_some() {
         state.github.git_env().await?
     } else {
         Vec::new()
     };
-    Ok(Json(changes::get_latest(&project.dir, &env).await?))
+    let result = changes::get_latest(&project.dir, &env).await?;
+    let mut value = serde_json::to_value(&result).map_err(|e| ApiError::io(e.to_string()))?;
+    let incoming_ref = if result.main_diverged {
+        "refs/remotes/origin/main"
+    } else {
+        "refs/heads/main"
+    };
+    let incoming = conflicts::text(&project.dir, &["rev-parse", "--verify", incoming_ref]).await?;
+    let mut sessions = serde_json::Map::new();
+    let mut errors = serde_json::Map::new();
+    for change in &result.conflicts {
+        match state
+            .conflicts
+            .start(&project.dir, &req.project, &change.branch, &incoming)
+            .await
+        {
+            Ok(session) => {
+                sessions.insert(change.branch.clone(), json!(session.id));
+            }
+            Err(error) => {
+                errors.insert(change.branch.clone(), json!(error.to_string()));
+            }
+        }
+    }
+    value["conflictSessions"] = Value::Object(sessions);
+    value["conflictErrors"] = Value::Object(errors);
+    Ok(Json(value))
+}
+
+async fn project_session(
+    state: &AppState,
+    project: &str,
+    id: &str,
+) -> Result<changes::conflict_sessions::ConflictSession, ApiError> {
+    let session = state.conflicts.get(id).await?;
+    let dir = project_dir(state, project).await?;
+    if session.project_id != project || session.dir != dir {
+        return Err(ApiError::enoent("conflict session not found"));
+    }
+    Ok(session)
+}
+
+/// Active conflict sessions survive page reloads while the daemon is running.
+pub async fn list_conflicts(
+    State(state): State<AppState>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    project_dir(&state, &q.project).await?;
+    Ok(Json(
+        json!({ "sessions": state.conflicts.list(&q.project).await }),
+    ))
+}
+
+pub async fn get_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let session = project_session(&state, &q.project, &id).await?;
+    let mut value = serde_json::to_value(&session).map_err(|e| ApiError::io(e.to_string()))?;
+    let mut files = Vec::new();
+    for file in &session.files {
+        let patch = conflicts::text(
+            &session.dir,
+            &[
+                "diff",
+                "--no-ext-diff",
+                &session.tip,
+                &session.incoming,
+                "--",
+                &file.path,
+            ],
+        )
+        .await?;
+        let mut f = serde_json::to_value(file).map_err(|e| ApiError::io(e.to_string()))?;
+        f["patch"] = json!(patch);
+        files.push(f);
+    }
+    value["files"] = json!(files);
+    value["candidate"] = serde_json::to_value(
+        conflicts::candidate_tree(
+            &session.dir,
+            &session.merged_tree,
+            &session.files,
+            &session.choices,
+        )
+        .await?,
+    )
+    .map_err(|e| ApiError::io(e.to_string()))?;
+    Ok(Json(value))
+}
+
+pub async fn conflict_previews(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let session = project_session(&state, &q.project, &id).await?;
+    let candidate = conflicts::candidate_tree(
+        &session.dir,
+        &session.merged_tree,
+        &session.files,
+        &session.choices,
+    )
+    .await?;
+    let yours = state
+        .conflict_previews
+        .prepare(&session.dir, &q.project, &id, Source::Yours, &session.tip)
+        .await;
+    let latest = state
+        .conflict_previews
+        .prepare(
+            &session.dir,
+            &q.project,
+            &id,
+            Source::Latest,
+            &session.incoming,
+        )
+        .await;
+    let result = if candidate.complete {
+        let commit = conflicts::preview_commit(&session.dir, &candidate.tree, &session.tip).await?;
+        state
+            .conflict_previews
+            .prepare(&session.dir, &q.project, &id, Source::Result, &commit)
+            .await
+    } else {
+        state
+            .conflict_previews
+            .remove_source(&id, Source::Result)
+            .await;
+        PreviewState::Unavailable {
+            reason: "Choose a resolution for every file to preview the result".into(),
+        }
+    };
+    Ok(Json(
+        json!({ "yours": yours, "latest": latest, "result": result }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct ChoiceRequest {
+    project: String,
+    path: String,
+    choice: Choice,
+}
+
+pub async fn choose_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<conflicts::Candidate>, ApiError> {
+    let req: ChoiceRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid conflict choice: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    let candidate = state.conflicts.choose(&id, &req.path, req.choice).await?;
+    state
+        .conflict_previews
+        .remove_source(&id, Source::Result)
+        .await;
+    Ok(Json(candidate))
+}
+
+pub async fn finish_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    let identity = state.github.identity().await;
+    let commit = state
+        .conflicts
+        .finish_validated(&id, &identity, &state.conflict_previews)
+        .await?;
+    state.conflict_previews.remove_session(&id).await;
+    Ok(Json(json!({ "commit": commit })))
+}
+
+pub async fn abandon_conflict(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: UpdateRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
+    project_session(&state, &req.project, &id).await?;
+    state.conflicts.abandon(&id).await?;
+    state.conflict_previews.remove_session(&id).await;
+    Ok(Json(json!({ "abandoned": true })))
 }
 
 /// `POST /api/changes/{branch}/cleanup` `{ project }` → `{ branch: "main", mainUpdated }`.

@@ -49,8 +49,21 @@ vi.mock("./socket", () => ({
   buildTerminalUrl: () => "ws://x",
   connectTerminal: (opts: unknown) => {
     h.connects += 1;
-    h.opts = opts;
-    h.conn = { send: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    const connection = {
+      send: vi.fn(),
+      resize: vi.fn(),
+      closed: false,
+      close: vi.fn(() => {
+        connection.closed = true;
+      }),
+    };
+    h.conn = connection;
+    h.opts = {
+      ...(opts as Record<string, unknown>),
+      onData: (bytes: Uint8Array) => {
+        if (!connection.closed) (opts as any).onData(bytes);
+      },
+    };
     return h.conn;
   },
 }));
@@ -166,6 +179,20 @@ describe("TerminalPanel", () => {
     expect(w.find("[data-testid='terminal-restart']").exists()).toBe(true);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(h.connects).toBe(1);
+  });
+
+  it("drains terminal output after the daemon exit event", async () => {
+    const w = await startRunning();
+    h.daemon.emit({ type: "terminal.exited", projectId: "p", code: 1 });
+    h.opts.onData(new TextEncoder().encode("FINAL-ERROR"));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(
+      h.term.writes.some(
+        (data: unknown) =>
+          data instanceof Uint8Array && new TextDecoder().decode(data).includes("FINAL-ERROR"),
+      ),
+    ).toBe(true);
+    expect(w.find("[data-testid='terminal-ended']").text()).toContain("Session ended (code 1)");
   });
 
   it("ignores terminal.exited for another project and still reconnects", async () => {

@@ -94,6 +94,52 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
+  /** Branch → resolution session. Older daemons may omit this field. */
+  conflictSessions?: Record<string, string>;
+  /** Conflicts the visual resolver cannot safely open. */
+  conflictErrors?: Record<string, string>;
+}
+
+export type ConflictChoice = "yours" | "latest" | "both";
+
+export interface ConflictFile {
+  path: string;
+  binary: boolean;
+  oursDeleted?: boolean;
+  theirsDeleted?: boolean;
+  oursOid: string;
+  theirsOid: string;
+  baseOid: string | null;
+  patch?: string;
+}
+
+export interface ConflictSession {
+  id: string;
+  projectId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  base: string;
+  expiresAt: number;
+  choices: Record<string, ConflictChoice>;
+  files: ConflictFile[];
+  candidate?: ConflictCandidate;
+}
+
+export interface ConflictCandidate {
+  tree: string;
+  complete: boolean;
+}
+
+export type ConflictPreviewState =
+  | { status: "ready"; url: string }
+  | { status: "unavailable"; reason: string }
+  | { status: "invalid"; errors: string };
+
+export interface ConflictPreviews {
+  yours: ConflictPreviewState;
+  latest: ConflictPreviewState;
+  result: ConflictPreviewState;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */

@@ -13,6 +13,10 @@ import {
   type ContentImpact,
   type Change,
   type ChangesUpdate,
+  type ConflictCandidate,
+  type ConflictChoice,
+  type ConflictSession,
+  type ConflictPreviews,
   type SharedChange,
   type PrStatus,
   type Checkpoint,
@@ -231,6 +235,18 @@ export function createApi(
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
+    listConflicts: async (project: string): Promise<ConflictSession[]> =>
+      (await json<{ sessions: ConflictSession[] }>("GET", "/api/changes/conflicts", { query: { project } })).sessions,
+    getConflict: (project: string, id: string) =>
+      json<ConflictSession>("GET", `/api/changes/conflicts/${enc(id)}`, { query: { project } }),
+    conflictPreviews: (project: string, id: string) =>
+      json<ConflictPreviews>("GET", `/api/changes/conflicts/${enc(id)}/previews`, { query: { project } }),
+    chooseConflict: (project: string, id: string, path: string, choice: ConflictChoice) =>
+      json<ConflictCandidate>("POST", `/api/changes/conflicts/${enc(id)}/choice`, { body: { project, path, choice } }),
+    finishConflict: (project: string, id: string) =>
+      json<{ commit: string }>("POST", `/api/changes/conflicts/${enc(id)}/finish`, { body: { project } }),
+    abandonConflict: (project: string, id: string) =>
+      json<{ abandoned: true }>("POST", `/api/changes/conflicts/${enc(id)}/abandon`, { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },
