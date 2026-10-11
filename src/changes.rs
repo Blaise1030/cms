@@ -8,6 +8,9 @@ use tokio::process::Command;
 use crate::error::ApiError;
 use crate::projects;
 
+pub mod conflict_sessions;
+pub mod conflicts;
+
 /// An open change branch plus its display title.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,7 +158,7 @@ async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// GitHub-remote projects cannot be edited (agent prompt / checkpoint) on `main`.
+/// GitHub-remote projects cannot be edited (terminal / checkpoint) on `main`.
 /// Local-only projects (`github_repo == None`) may edit `main`.
 pub async fn require_change(dir: &Path, github_repo: Option<&str>) -> Result<(), ApiError> {
     if github_repo.is_none() {

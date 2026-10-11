@@ -1,8 +1,22 @@
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type ContentCollection,
+  type ContentEntrySummary,
+  type ContentEntry,
+  type ContentEntryUpdate,
+  type ContentEntryCreate,
+  type ContentImageUpload,
+  type SavedContentEntry,
+  type ContentEntryRename,
+  type ContentEntryDelete,
+  type ContentImpact,
   type Change,
   type ChangesUpdate,
+  type ConflictCandidate,
+  type ConflictChoice,
+  type ConflictSession,
+  type ConflictPreviews,
   type SharedChange,
   type PrStatus,
   type Checkpoint,
@@ -13,20 +27,30 @@ import {
   type GithubRepo,
   type GithubStatus,
   type Health,
-  type PermissionDecision,
   type Project,
-  type Provider,
   type Tree,
-  type Turn,
 } from "./types";
+
+export interface ApiErrorDetail { path: (string | number)[]; message: string }
 
 /** The daemon answered with an error (or something unparseable). */
 export class ApiError extends Error {
   readonly code: ErrorCode | "UNKNOWN";
   readonly status: number;
+  /** Machine-readable sub-code (e.g. `stale_content`), when the daemon gave one. */
+  readonly reason?: string;
+  /** Per-field validation problems, when the daemon gave them. */
+  readonly details?: ApiErrorDetail[];
 
-  constructor(code: ErrorCode | "UNKNOWN", message: string, status: number) {
+  constructor(
+    code: ErrorCode | "UNKNOWN",
+    message: string,
+    status: number,
+    extra: { reason?: string; details?: ApiErrorDetail[] } = {},
+  ) {
     super(message);
+    this.reason = extra.reason;
+    this.details = extra.details;
     this.name = "ApiError";
     this.code = code;
     this.status = status;
@@ -60,9 +84,14 @@ export function mapErrorResponse(status: number, statusText: string, body: strin
     if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
       const err = (parsed as { error: unknown }).error;
       if (typeof err === "object" && err !== null) {
-        const { code, message } = err as { code?: unknown; message?: unknown };
+        const { code, message, reason, details } = err as {
+          code?: unknown; message?: unknown; reason?: unknown; details?: unknown;
+        };
         const text = typeof message === "string" && message ? message : statusText;
-        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status);
+        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status, {
+          reason: typeof reason === "string" ? reason : undefined,
+          details: Array.isArray(details) ? (details as ApiErrorDetail[]) : undefined,
+        });
       }
     }
   } catch {
@@ -97,12 +126,14 @@ export function createApi(
 ) {
   const cfg = typeof config === "function" ? config : () => config;
 
-  async function send(method: string, path: string, opts: { query?: Query; body?: unknown } = {}) {
+  async function send(method: string, path: string, opts: { query?: Query; body?: unknown; form?: FormData } = {}) {
     const { origin, token } = cfg();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     const init: RequestInit = { method, headers };
-    if (opts.body !== undefined) {
+    // The browser sets the multipart Content-Type with its boundary.
+    if (opts.form) init.body = opts.form;
+    else if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
@@ -118,7 +149,7 @@ export function createApi(
     return res;
   }
 
-  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown }) {
+  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown; form?: FormData }) {
     const res = await send(method, path, opts);
     try {
       return (await res.json()) as T;
@@ -130,10 +161,34 @@ export function createApi(
   const enc = encodeURIComponent;
 
   return {
+    listContentCollections: async (project: string): Promise<ContentCollection[]> =>
+      (await json<{collections: ContentCollection[]}>("GET", "/api/content/collections", {query:{project}})).collections,
+    listContentEntries: async (project: string, collection: string): Promise<ContentEntrySummary[]> =>
+      (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
+    contentEntry: (project: string, collection: string, id: string) =>
+      json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    /** JSON without images; with images, multipart: a JSON `entry` part plus one part per image named by its client ID. */
+    updateContentEntry: (body: ContentEntryUpdate, images: ContentImageUpload[] = []) => {
+      if (!images.length) return json<SavedContentEntry>("PUT", "/api/content/entry", { body });
+      const form = new FormData();
+      const meta = images.map(({ clientId, alt, filename }) => ({ clientId, alt, filename }));
+      form.append("entry", new Blob([JSON.stringify({ ...body, images: meta })], { type: "application/json" }));
+      for (const image of images) form.append(image.clientId, image.file, image.filename);
+      return json<SavedContentEntry>("PUT", "/api/content/entry", { form });
+    },
+    /** Create an entry on the active change with complete starting fields. */
+    createContentEntry: (body: ContentEntryCreate) =>
+      json<SavedContentEntry>("POST", "/api/content/entry", { body }),
+    /** A project file's bytes, served read-only (the session cookie authenticates it, like Preview). */
+    rawFileUrl: (project: string, path: string) =>
+      `${cfg().origin}/api/file?project=${enc(project)}&path=${enc(path)}&raw=true`,
+    contentImpact: (project: string, collection: string, id: string) =>
+      json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
+    renameContentEntry: (body: ContentEntryRename) =>
+      json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
+    deleteContentEntry: (body: ContentEntryDelete) =>
+      json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
     health: () => json<Health>("GET", "/api/health"),
-
-    listAgents: async (): Promise<Provider[]> =>
-      (await json<{ providers: Provider[] }>("GET", "/api/agents")).providers,
 
     listProjects: async (): Promise<Project[]> =>
       (await json<{ projects: Project[] }>("GET", "/api/projects")).projects,
@@ -157,29 +212,19 @@ export function createApi(
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
-    startSession: async (project: string, provider: string): Promise<string> =>
+    terminalProviders: async (): Promise<{ id: string; command: string[] }[]> =>
       (
-        await json<{ sessionId: string }>("POST", "/api/agent/session", {
-          body: { project, provider },
-        })
-      ).sessionId,
-    prompt: async (project: string, sessionId: string, text: string): Promise<string> =>
-      (
-        await json<{ turnId: string }>("POST", "/api/agent/prompt", {
-          body: { project, sessionId, text },
-        })
-      ).turnId,
-    cancelTurn: (turnId: string) =>
-      json<unknown>("POST", `/api/agent/prompt/${enc(turnId)}/cancel`),
-    resolvePermission: (requestId: string, decision: PermissionDecision) =>
-      json<unknown>("POST", `/api/agent/permission/${enc(requestId)}`, { body: { decision } }),
-    history: async (project: string, session?: string): Promise<Turn[]> =>
-      (
-        await json<{ turns: Turn[] }>("GET", "/api/agent/history", {
-          query: { project, session },
-        })
-      ).turns,
-
+        await json<{ providers: { id: string; command: string[] }[] }>(
+          "GET",
+          "/api/terminal/providers",
+        )
+      ).providers,
+    startTerminal: (project: string, provider: string) =>
+      json<{ running: true }>("POST", "/api/terminal", { body: { project, provider } }),
+    stopTerminal: (project: string) =>
+      json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
+    terminalStatus: (project: string) =>
+      json<{ running: boolean; provider?: string }>("GET", `/api/terminal/${enc(project)}`),
     createChange: (project: string, title: string) =>
       json<Change>("POST", "/api/changes", { body: { project, title } }),
     listChanges: async (project: string): Promise<Change[]> =>
@@ -190,6 +235,18 @@ export function createApi(
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
+    listConflicts: async (project: string): Promise<ConflictSession[]> =>
+      (await json<{ sessions: ConflictSession[] }>("GET", "/api/changes/conflicts", { query: { project } })).sessions,
+    getConflict: (project: string, id: string) =>
+      json<ConflictSession>("GET", `/api/changes/conflicts/${enc(id)}`, { query: { project } }),
+    conflictPreviews: (project: string, id: string) =>
+      json<ConflictPreviews>("GET", `/api/changes/conflicts/${enc(id)}/previews`, { query: { project } }),
+    chooseConflict: (project: string, id: string, path: string, choice: ConflictChoice) =>
+      json<ConflictCandidate>("POST", `/api/changes/conflicts/${enc(id)}/choice`, { body: { project, path, choice } }),
+    finishConflict: (project: string, id: string) =>
+      json<{ commit: string }>("POST", `/api/changes/conflicts/${enc(id)}/finish`, { body: { project } }),
+    abandonConflict: (project: string, id: string) =>
+      json<{ abandoned: true }>("POST", `/api/changes/conflicts/${enc(id)}/abandon`, { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },

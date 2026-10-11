@@ -1,0 +1,20 @@
+---
+import { getCollection } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { href } from "../../lib/href";
+const posts = (await getCollection("blog")).sort((a, b) => b.data.pubDate.localeCompare(a.data.pubDate) || a.id.localeCompare(b.id));
+---
+<Base title="Blog" description="News and stories from our team.">
+  <section class="content-page">
+    <h1>Blog</h1>
+    {posts.length === 0 ? <p>No blog posts yet. Check back soon for news and stories.</p> : (
+      <div class="grid">{posts.map((post) => (
+        <article class="card">
+          <h2><a href={href(`/blog/${post.id}/`)}>{post.data.title}</a></h2>
+          <time datetime={post.data.pubDate}>{post.data.pubDate}</time>
+          <p>{post.data.description}</p>
+        </article>
+      ))}</div>
+    )}
+  </section>
+</Base>

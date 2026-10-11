@@ -13,26 +13,15 @@ export function buildEventsUrl(config: DaemonConfig): string {
   return url.toString();
 }
 
-/** `nullable-string`: a string, `null`, or absent (e.g. session-level `chat.error.turnId`). */
-type Shape = Record<string, "string" | "number" | "nullable-string">;
+type Shape = Record<string, "string" | "number" | "nullable-string" | "nullable-number">;
 
 /** Required fields per event type (beyond `type`); enough to protect consumers from junk. */
 const SHAPES: Record<DaemonEventType, Shape> = {
-  "chat.chunk": { sessionId: "string", turnId: "string", delta: "string" },
-  "chat.tool": {
-    sessionId: "string",
-    turnId: "string",
-    tool: "string",
-    state: "string",
-    summary: "string",
-  },
-  "chat.plan": { sessionId: "string", turnId: "string" },
-  "chat.done": { sessionId: "string", turnId: "string" },
-  "chat.error": { sessionId: "string", turnId: "nullable-string", message: "string" },
-  "permission.request": { sessionId: "string", requestId: "string", tool: "string" },
   "devserver.status": { projectId: "string", state: "string" },
   "checkpoint.created": { projectId: "string", sha: "string", summary: "string" },
   "fs.change": { projectId: "string", path: "string", kind: "string" },
+  "terminal.exited": { projectId: "string", code: "nullable-number" },
+  "checkpoint.blocked": { projectId: "string", reason: "string" },
   "events.lagged": { missed: "number" },
 };
 
@@ -40,6 +29,7 @@ function matches(obj: Record<string, unknown>, shape: Shape): boolean {
   return Object.entries(shape).every(([key, kind]) => {
     const v = obj[key];
     if (kind === "nullable-string") return v === undefined || v === null || typeof v === "string";
+    if (kind === "nullable-number") return v === null || typeof v === "number";
     return typeof v === kind;
   });
 }

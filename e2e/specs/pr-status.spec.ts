@@ -1,4 +1,4 @@
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 test("browser bar shows PR state, checks and preview link; changes menu shows PR state", async ({
@@ -15,7 +15,7 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   await page.getByLabel("Change title").fill("New post: Launch week");
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 
   // No PR yet: no status pill.
   await expect(page.getByTestId("pr-status")).toHaveCount(0);

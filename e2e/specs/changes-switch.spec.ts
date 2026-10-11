@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -37,7 +37,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await page.getByLabel("Change title").fill("New post: First change");
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("First change");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-first-change\n");
 
   // Second (newer) change + different edit.
@@ -46,7 +46,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await page.getByLabel("Change title").fill("New post: Second change");
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Second change");
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-second-change\n");
 
   // Menu: both listed, newest first.

@@ -1,0 +1,23 @@
+---
+import { getCollection } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { href } from "../../lib/href";
+const docs = (await getCollection("helpDocs")).sort((a, b) => a.data.section.localeCompare(b.data.section) || a.data.order - b.data.order || a.data.title.localeCompare(b.data.title));
+const sections = [...new Set(docs.map((doc) => doc.data.section))];
+---
+<Base title="Help" description="Guides and answers to help you get started.">
+  <section class="content-page">
+    <h1>Help</h1>
+    {docs.length === 0 ? <p>No help docs yet. Check back soon for guides and answers.</p> : sections.map((section) => (
+      <section>
+        <h2>{section}</h2>
+        <div class="grid">{docs.filter((doc) => doc.data.section === section).map((doc) => (
+          <article class="card">
+            <h3><a href={href(`/help/${doc.id}/`)}>{doc.data.title}</a></h3>
+            <p>{doc.data.description}</p>
+          </article>
+        ))}</div>
+      </section>
+    ))}
+  </section>
+</Base>

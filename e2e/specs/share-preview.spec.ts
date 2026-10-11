@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -23,7 +23,7 @@ async function startChangeAndCheckpoint(
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 }
 
 test("shares a preview: push, draft PR, link; re-share advances remote without second PR", async ({
@@ -56,8 +56,8 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
   });
 
   const remoteBefore = git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"]);
-  // `late` writes a new file (second `edit` would rewrite the same bytes → no checkpoint).
-  await agentCheckpoint(workbench, "late");
+  // Second append to `notes.md` (fake CLI `edit`); distinct from the first turn's text.
+  await terminalCheckpoint(workbench, "edit late");
   const localTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   expect(localTip).not.toBe(remoteBefore);
 

@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    setupFiles: ["src/test/vitest-globals.ts"],
     include: ["src/**/*.test.ts"],
     // Component tests opt in with `// @vitest-environment happy-dom`; never load iframe URLs.
     environmentOptions: { happyDOM: { settings: { disableIframePageLoading: true } } },
@@ -23,7 +24,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": "http://127.0.0.1:7800",
+      // `ws: true` is required: the terminal lives at `/api/terminal/{id}/ws`.
+      // The string form proxies HTTP only, so the panel stays blank in `just dev`.
+      "/api": { target: "http://127.0.0.1:7800", ws: true },
       "/ws": { target: "ws://127.0.0.1:7800", ws: true },
       "/preview": "http://127.0.0.1:7800",
     },

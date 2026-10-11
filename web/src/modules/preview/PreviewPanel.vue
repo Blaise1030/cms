@@ -313,7 +313,7 @@ function toggleFullscreen() {
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              {{ store.picking ? "Cancel selection (Esc)" : "Select an element to mention in chat" }}
+              {{ store.picking ? "Cancel selection (Esc)" : "Select an element to mention in the terminal" }}
             </TooltipContent>
           </Tooltip>
           <Tooltip>

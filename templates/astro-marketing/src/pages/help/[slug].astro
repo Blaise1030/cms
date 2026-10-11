@@ -1,0 +1,20 @@
+---
+import { getCollection, render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { href } from "../../lib/href";
+
+export async function getStaticPaths() {
+  return (await getCollection("helpDocs")).map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+---
+<Base title={entry.data.title} description={entry.data.description}>
+  <article class="content-page">
+    <a href={href("/help/")}>Back to Help</a>
+    <h1>{entry.data.title}</h1>
+    <p>{entry.data.description}</p>
+    <p>{entry.data.section}</p>
+    <div class="article-body"><Content /></div>
+  </article>
+</Base>

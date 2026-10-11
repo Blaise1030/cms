@@ -2,10 +2,11 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change, ChangesUpdate, PrStatus, ProtectionHint } from "@/core/types";
+import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
+import { useContentStore } from "@/modules/content/store";
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -32,6 +33,12 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  const conflictSessions = ref<ConflictSession[]>([]);
+  const selectedConflictId = ref<string | null>(null);
+  const currentConflict = ref<ConflictSession | null>(null);
+  const candidate = ref<ConflictCandidate | null>(null);
+  const conflictLoading = ref(false);
+  const conflictError = ref<string | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
    *  applies its result nor schedules a poll, so at most one timer ever exists. */
@@ -69,8 +76,12 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function refreshTreeAndPreview() {
-    await useFilesStore().refresh();
+  /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
+  async function refreshTreeAndPreview(branch?: string) {
+    await Promise.all([
+      useFilesStore().refresh(),
+      branch ? useContentStore().refreshForBranch(branch) : undefined,
+    ]);
     usePreviewStore().reload();
   }
 
@@ -84,6 +95,10 @@ export const useChangesStore = defineStore("changes", () => {
       items.value = [];
       error.value = null;
       needsSignIn.value = false;
+      conflictSessions.value = [];
+      selectedConflictId.value = null;
+      currentConflict.value = null;
+      candidate.value = null;
     }
     projectId.value = id;
     loading.value = true;
@@ -139,7 +154,7 @@ export const useChangesStore = defineStore("changes", () => {
       status.value = null;
       stopStatusPolling();
       protectionHint.value = null;
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview(change.branch);
       return change;
     } catch (e) {
       error.value = errorMessage(e);
@@ -161,7 +176,7 @@ export const useChangesStore = defineStore("changes", () => {
       prUrl.value = change.prUrl ?? null;
       status.value = null;
       protectionHint.value = null;
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview(change.branch);
       await refreshStatus();
       return change;
     } catch (e) {
@@ -181,12 +196,90 @@ export const useChangesStore = defineStore("changes", () => {
       await refreshTreeAndPreview();
       // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
       await Promise.all([load(id), list(id).catch(() => undefined)]);
+      const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
+      if (first) await openConflict(id, result.conflictSessions![first.branch]!);
       return result;
     } catch (e) {
       error.value = errorMessage(e);
       throw e;
     } finally {
       updating.value = false;
+    }
+  }
+
+  async function loadConflicts(id: string) {
+    conflictSessions.value = await daemon.api.listConflicts(id);
+    if (conflictSessions.value.length) {
+      const current = conflictSessions.value.find((s) => s.id === selectedConflictId.value);
+      await openConflict(id, current?.id ?? conflictSessions.value[0]!.id);
+    } else {
+      selectedConflictId.value = null;
+      currentConflict.value = null;
+      candidate.value = null;
+    }
+  }
+
+  async function openConflict(id: string, sessionId: string) {
+    conflictLoading.value = true;
+    conflictError.value = null;
+    try {
+      const session = await daemon.api.getConflict(id, sessionId);
+      projectId.value = id;
+      selectedConflictId.value = sessionId;
+      currentConflict.value = session;
+      candidate.value = session.candidate ?? null;
+    } catch (e) {
+      conflictError.value = errorMessage(e);
+      throw e;
+    } finally {
+      conflictLoading.value = false;
+    }
+  }
+
+  async function chooseConflict(id: string, path: string, choice: ConflictChoice) {
+    const session = currentConflict.value;
+    if (!session) return;
+    conflictError.value = null;
+    try {
+      candidate.value = await daemon.api.chooseConflict(id, session.id, path, choice);
+      currentConflict.value = { ...session, choices: { ...session.choices, [path]: choice } };
+    } catch (e) {
+      conflictError.value = errorMessage(e);
+      throw e;
+    }
+  }
+
+  async function finishConflict(id: string) {
+    const sessionId = selectedConflictId.value;
+    if (!sessionId || !candidate.value?.complete) return;
+    conflictError.value = null;
+    try {
+      await daemon.api.finishConflict(id, sessionId);
+      selectedConflictId.value = null;
+      currentConflict.value = null;
+      candidate.value = null;
+      await refreshTreeAndPreview();
+      await Promise.all([load(id), list(id).catch(() => undefined)]);
+      await loadConflicts(id);
+    } catch (e) {
+      conflictError.value = errorMessage(e);
+      throw e;
+    }
+  }
+
+  async function abandonConflict(id: string) {
+    const sessionId = selectedConflictId.value;
+    if (!sessionId) return;
+    conflictError.value = null;
+    try {
+      await daemon.api.abandonConflict(id, sessionId);
+      selectedConflictId.value = null;
+      currentConflict.value = null;
+      candidate.value = null;
+      await loadConflicts(id);
+    } catch (e) {
+      conflictError.value = errorMessage(e);
+      throw e;
     }
   }
 
@@ -209,7 +302,7 @@ export const useChangesStore = defineStore("changes", () => {
         prUrl.value = null;
         status.value = null;
       }
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview("main");
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);
@@ -306,11 +399,22 @@ export const useChangesStore = defineStore("changes", () => {
     error,
     needsSignIn,
     status,
+    conflictSessions,
+    selectedConflictId,
+    currentConflict,
+    candidate,
+    conflictLoading,
+    conflictError,
     load,
     list,
     create,
     switchTo,
     getLatest,
+    loadConflicts,
+    openConflict,
+    chooseConflict,
+    finishConflict,
+    abandonConflict,
     share,
     cleanup,
     markReady,

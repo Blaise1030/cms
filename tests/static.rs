@@ -248,3 +248,16 @@ async fn host_allowlist_still_applies_to_the_shell() {
     let (status, _, _) = send(r).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[test]
+fn content_editor_template_files_are_embedded() {
+    use workbench::static_files::Template;
+    for path in [
+        "src/content-schemas.mjs", "scripts/workbench-content.mjs",
+        "src/pages/[slug].astro", "src/pages/blog/index.astro", "src/pages/blog/[slug].astro",
+        "src/pages/help/index.astro", "src/pages/help/[slug].astro",
+        "src/content/blog/en/welcome.md", "src/content/helpDocs/en/getting-started.md",
+    ] {
+        assert!(Template::get(path).is_some(), "missing template file: {path}");
+    }
+}

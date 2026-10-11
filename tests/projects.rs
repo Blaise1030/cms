@@ -208,10 +208,10 @@ async fn delete_requires_confirm_then_removes_dir() {
         .unwrap()
         .to_string();
     let dir = tmp.path().join(&id);
-    // history-style daemon state outside the repo is removed too
+    // Daemon state outside the repo is removed too
     let state = tmp.path().join(".workbench").join(&id);
     std::fs::create_dir_all(&state).unwrap();
-    std::fs::write(state.join("history.jsonl"), "").unwrap();
+    std::fs::write(state.join("daemon-state.txt"), "").unwrap();
 
     for uri in [
         format!("/api/projects/{id}"),

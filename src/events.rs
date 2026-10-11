@@ -1,6 +1,6 @@
 //! Event broadcaster feeding `WS /ws/events`.
 //!
-//! Every event is a flat JSON object tagged by `"type"` (e.g. `chat.chunk`). Events are
+//! Every event is a flat JSON object tagged by `"type"` (e.g. `fs.change`). Events are
 //! serialised once and fanned out to all subscribers as text frames.
 
 use std::sync::Arc;
@@ -58,10 +58,10 @@ mod tests {
     fn events_are_flat_and_tagged() {
         let bus = EventBus::new();
         let mut rx = bus.subscribe();
-        bus.emit("chat.chunk", json!({ "delta": "hi", "type": "spoofed" }));
+        bus.emit("fs.change", json!({ "path": "a.md", "type": "spoofed" }));
         let v: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
-        assert_eq!(v["delta"], "hi");
-        assert_eq!(v["type"], "chat.chunk");
+        assert_eq!(v["path"], "a.md");
+        assert_eq!(v["type"], "fs.change");
     }
 
     #[test]

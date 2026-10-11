@@ -37,18 +37,20 @@ function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
-/** Path to the scripted ACP agent used by e2e (built by `just e2e` / CI). */
-export function fakeAgentPath(root = repoRoot()): string {
-  const candidates = [
-    path.join(root, "target/release/examples/fake_acp_agent"),
-    path.join(root, "target/debug/examples/fake_acp_agent"),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  throw new Error(
-    "fake_acp_agent not found; run: cargo build --release --example fake_acp_agent",
-  );
+function fakeCliPath(root = repoRoot()): string {
+  return path.join(root, "tests/fixtures/fake_cli.sh");
+}
+
+/** `http(s)://host` → `ws(s)://host/api/terminal/{project}/ws[?t=token]`. */
+function buildTerminalUrl(
+  origin: string,
+  token: string,
+  projectId: string,
+): string {
+  const url = new URL(`/api/terminal/${encodeURIComponent(projectId)}/ws`, origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (token) url.searchParams.set("t", token);
+  return url.toString();
 }
 
 export async function api(
@@ -69,12 +71,11 @@ export async function api(
 }
 
 /**
- * Drive a fake-agent turn that edits a file and settles into a product checkpoint
- * (same path as a real ACP turn — not a raw `git commit`).
+ * Drive a fake CLI turn over the terminal WebSocket: start session, send `edit …`, wait for checkpoint.
  */
-export async function agentCheckpoint(
+export async function terminalCheckpoint(
   env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
-  prompt = "edit the notes",
+  text = "edit the notes",
 ): Promise<void> {
   const beforeRes = await api(
     env.origin,
@@ -86,22 +87,73 @@ export async function agentCheckpoint(
   const before = (await beforeRes.json()) as { checkpoints: unknown[] };
   const beforeCount = before.checkpoints.length;
 
-  const session = await api(env.origin, env.token, "POST", "/api/agent/session", {
+  const start = await api(env.origin, env.token, "POST", "/api/terminal", {
     project: env.projectId,
     provider: "fake",
   });
-  if (!session.ok) throw new Error(`agent session failed: ${await session.text()}`);
-  const { sessionId } = (await session.json()) as { sessionId: string };
+  if (!start.ok && start.status !== 409) {
+    throw new Error(`terminal start failed: ${await start.text()}`);
+  }
 
-  const turn = await api(env.origin, env.token, "POST", "/api/agent/prompt", {
-    project: env.projectId,
-    sessionId,
-    text: prompt,
+  const wsUrl = buildTerminalUrl(env.origin, env.token, env.projectId);
+  const ws = new WebSocket(wsUrl);
+  ws.binaryType = "arraybuffer";
+
+  let pty = "";
+
+  await new Promise<void>((resolve, reject) => {
+    const deadline = Date.now() + 30_000;
+    let sent = false;
+    let done = false;
+
+    const fail = (err: Error) => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      ws.close();
+      reject(err);
+    };
+
+    const timer = setInterval(() => {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        fail(
+          new Error(
+            sent
+              ? `timed out waiting for TURN-END on terminal websocket; pty=${JSON.stringify(pty)}`
+              : "timed out waiting for FAKE-CLI READY on terminal websocket",
+          ),
+        );
+      }
+    }, 250);
+
+    ws.onopen = () => {
+      // wait for replay/data
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") return;
+      pty += Buffer.from(ev.data as ArrayBuffer).toString("utf8");
+      if (!sent && pty.includes("FAKE-CLI READY")) {
+        sent = true;
+        ws.send(new TextEncoder().encode(`${text}\r`));
+        return;
+      }
+      if (sent && pty.includes("TURN-END")) {
+        done = true;
+        clearInterval(timer);
+        resolve();
+      }
+    };
+    ws.onerror = () => fail(new Error("terminal websocket error"));
+    ws.onclose = () => {
+      if (!done && !pty.includes("TURN-END")) {
+        fail(new Error(`terminal websocket closed early; pty=${JSON.stringify(pty)}`));
+      }
+    };
   });
-  if (!turn.ok) throw new Error(`agent prompt failed: ${await turn.text()}`);
 
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
+  const pollDeadline = Date.now() + 30_000;
+  while (Date.now() < pollDeadline) {
     const list = await api(
       env.origin,
       env.token,
@@ -110,10 +162,14 @@ export async function agentCheckpoint(
     );
     if (!list.ok) throw new Error(`checkpoints list failed: ${await list.text()}`);
     const body = (await list.json()) as { checkpoints: unknown[] };
-    if (body.checkpoints.length > beforeCount) return;
+    if (body.checkpoints.length > beforeCount) {
+      ws.close();
+      return;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error("timed out waiting for checkpoint after agent turn");
+  ws.close();
+  throw new Error("timed out waiting for checkpoint after terminal turn");
 }
 
 async function signInAndClone(origin: string, token: string): Promise<string> {
@@ -137,7 +193,7 @@ async function signInAndClone(origin: string, token: string): Promise<string> {
   return info.id;
 }
 
-/** Boot release `workbench serve`, stub GitHub, bare remote, fake ACP agent, and a cloned project. */
+/** Boot release `workbench serve`, stub GitHub, bare remote, fake CLI, and a cloned project. */
 export async function startWorkbench(): Promise<WorkbenchEnv> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-e2e-"));
   const projectsDir = path.join(tmp, "projects");
@@ -161,10 +217,7 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
 
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
-  fs.writeFileSync(
-    agents,
-    JSON.stringify({ fake: [fakeAgentPath(root)] }) + "\n",
-  );
+  fs.writeFileSync(agents, JSON.stringify({ fake: [fakeCliPath(root)] }) + "\n");
 
   const child = spawn(
     path.join(root, "target/release/workbench"),

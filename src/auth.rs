@@ -15,8 +15,10 @@ use crate::static_files;
 
 pub const SESSION_COOKIE: &str = "wb_session";
 const HEALTH_PATH: &str = "/api/health";
+const TURN_END_PATH: &str = "/api/terminal/turn-end";
 
-fn ct_eq(a: &str, b: &str) -> bool {
+/// Constant-time string equality (length is not hidden).
+pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
         return false;
@@ -103,7 +105,7 @@ fn cookie_token(req: &Request) -> Option<&str> {
 /// Token middleware. Passes everything through when `--no-auth`.
 pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let cfg = &state.config;
-    if cfg.no_auth || req.uri().path() == HEALTH_PATH {
+    if cfg.no_auth || req.uri().path() == HEALTH_PATH || req.uri().path() == TURN_END_PATH {
         return next.run(req).await;
     }
     let Some(expected) = cfg.token.as_deref() else {

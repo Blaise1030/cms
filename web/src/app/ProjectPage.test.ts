@@ -32,7 +32,10 @@ const stubs = {
   },
   EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
-  ChatPanel: { props: ["projectId"], template: "<div data-testid='chat'>{{ projectId }}</div>" },
+  TerminalPanel: {
+    props: ["projectId", "autoApprove"],
+    template: "<div data-testid='chat'>{{ projectId }}</div>",
+  },
   GithubAccount: true,
 };
 
@@ -64,6 +67,18 @@ describe("ProjectPage", () => {
     await mountAt("/p/gone");
     expect(router.currentRoute.value.path).toBe("/");
     expect(h.toastError).toHaveBeenCalledWith('Project "gone" was not found');
+  });
+
+  it("toasts checkpoint.blocked for the open project", async () => {
+    await mountAt("/p/a");
+    h.daemon.emit({ type: "checkpoint.blocked", projectId: "a", reason: "Start a change first" });
+    expect(h.toastError).toHaveBeenCalledWith("Start a change first");
+  });
+
+  it("ignores checkpoint.blocked for another project", async () => {
+    await mountAt("/p/a");
+    h.daemon.emit({ type: "checkpoint.blocked", projectId: "other", reason: "not this one" });
+    expect(h.toastError).not.toHaveBeenCalled();
   });
 
   it("stops PR status polling when the page unmounts", async () => {

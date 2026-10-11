@@ -1,14 +1,17 @@
 //! Shared application state.
 
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
-use crate::acp::AgentManager;
+use crate::changes::conflict_sessions::ConflictSessions;
 use crate::config::Config;
+use crate::conflict_preview::ConflictPreviewManager;
 use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::ProjectRegistry;
+use crate::terminal::TerminalManager;
 use crate::watch::WatchManager;
 
 #[derive(Clone)]
@@ -17,8 +20,8 @@ pub struct AppState {
     pub projects: Arc<ProjectRegistry>,
     /// Broadcaster behind `WS /ws/events`.
     pub events: EventBus,
-    /// ACP agent sessions (one per project).
-    pub agents: Arc<AgentManager>,
+    /// PTY terminal sessions (one per project).
+    pub terminals: Arc<TerminalManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
     /// `fs.change` watcher per project.
@@ -27,6 +30,11 @@ pub struct AppState {
     pub github: Arc<GithubAuth>,
     /// HTTP client for the `/preview/{id}/*` reverse proxy.
     pub preview: UpstreamClient,
+    /// Proposed conflict resolutions; never mutates a branch until Finish.
+    pub conflicts: Arc<ConflictSessions>,
+    pub conflict_previews: Arc<ConflictPreviewManager>,
+    /// Serializes Get latest through session creation as one operation.
+    pub conflict_updates: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -76,11 +84,7 @@ impl AppState {
         let config = Arc::new(config);
         let projects = Arc::new(projects);
         let events = EventBus::new();
-        let agents = Arc::new(AgentManager::new(
-            config.clone(),
-            projects.clone(),
-            events.clone(),
-        ));
+        let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
@@ -91,11 +95,14 @@ impl AppState {
             config,
             projects,
             events,
-            agents,
+            terminals,
             devservers,
             watchers,
             github,
             preview: preview::new_client(),
+            conflicts: Arc::new(ConflictSessions::new()),
+            conflict_previews: Arc::new(ConflictPreviewManager::new()),
+            conflict_updates: Arc::new(Mutex::new(())),
         }
     }
 }

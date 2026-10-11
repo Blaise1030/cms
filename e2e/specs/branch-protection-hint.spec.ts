@@ -1,4 +1,4 @@
-import { agentCheckpoint } from "../fixtures/daemon";
+import { terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 async function startChangeAndCheckpoint(
@@ -16,7 +16,7 @@ async function startChangeAndCheckpoint(
   await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await agentCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 }
 
 test("unprotected main: hint after share, dismissal survives reload", async ({

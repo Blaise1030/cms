@@ -59,32 +59,13 @@ describe("createApi", () => {
     expect((post!.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
-  it("builds queries, skipping undefined values, and requires confirm on delete", async () => {
-    const fetchMock = vi.fn<FetchLike>(async () => json({ turns: [], deleted: "p" }));
-    await api(fetchMock).history("p1");
-    expect(fetchMock.mock.calls[0]![0]).toBe("http://127.0.0.1:7800/api/agent/history?project=p1");
-    await api(fetchMock).history("p 1", "s1");
-    expect(fetchMock.mock.calls[1]![0]).toContain("project=p+1&session=s1");
+  it("requires confirm on delete", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => json({ deleted: "p" }));
     await api(fetchMock).deleteProject("p1");
-    expect(fetchMock.mock.calls[2]![0]).toBe(
+    expect(fetchMock.mock.calls[0]![0]).toBe(
       "http://127.0.0.1:7800/api/projects/p1?confirm=true",
     );
-    expect(fetchMock.mock.calls[2]![1]!.method).toBe("DELETE");
-  });
-
-  it("returns ids for session and prompt calls", async () => {
-    const fetchMock = vi
-      .fn<FetchLike>()
-      .mockResolvedValueOnce(json({ sessionId: "s1" }))
-      .mockResolvedValueOnce(json({ turnId: "t1" }));
-    const a = api(fetchMock);
-    expect(await a.startSession("p", "claude")).toBe("s1");
-    expect(await a.prompt("p", "s1", "hi")).toBe("t1");
-    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
-      project: "p",
-      sessionId: "s1",
-      text: "hi",
-    });
+    expect(fetchMock.mock.calls[0]![1]!.method).toBe("DELETE");
   });
 
   it("reads diffs as text", async () => {
@@ -126,5 +107,32 @@ describe("createApi", () => {
     expect(fetchMock.mock.calls[0]![0]).toBe("http://a.test/api/health");
     expect(fetchMock.mock.calls[1]![0]).toBe("http://b.test/api/health");
     expect(a.previewUrl("my proj")).toBe("http://b.test/preview/my%20proj/");
+  });
+});
+
+describe("updateContentEntry", () => {
+  const body = { project: "p", collection: "blog", id: "welcome", branch: "content/a", hash: "h1", fields: {}, body: "![A](workbench-image:c1)\n" };
+
+  it("sends JSON when the save has no images", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => json({ id: "welcome" }));
+    await api(fetchImpl).updateContentEntry(body);
+    const init = fetchImpl.mock.calls[0]![1]!;
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("sends multipart with a JSON entry part and one part per image keyed by client ID", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => json({ id: "welcome" }));
+    const file = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+    await api(fetchImpl, "tok").updateContentEntry(body, [{ clientId: "c1", alt: "A", filename: "a.png", file }]);
+    const init = fetchImpl.mock.calls[0]![1]!;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+    expect(headers.Authorization).toBe("Bearer tok");
+    const form = init.body as FormData;
+    expect(JSON.parse(await (form.get("entry") as Blob).text())).toEqual({ ...body, images: [{ clientId: "c1", alt: "A", filename: "a.png" }] });
+    const part = form.get("c1") as File;
+    expect(part.name).toBe("a.png");
+    expect(new Uint8Array(await part.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

@@ -62,6 +62,9 @@ pub struct Config {
     /// Base URL printed in the ready link instead of the daemon's own address (dev: the Vite
     /// server, so the link opens the live HMR app rather than the embedded `web/dist` build).
     pub ui_url: Option<String>,
+    /// Executable terminal CLIs run as `<exe> hook turn-end`. `None` = this daemon's own
+    /// binary ([`Config::hook_exe_path`]); tests point it at the built `workbench`.
+    pub hook_exe: Option<PathBuf>,
 }
 
 /// Tests build configs with `..Default::default()`, so the default must never run the
@@ -80,11 +83,20 @@ impl Default for Config {
                 ..GithubConfig::default()
             },
             ui_url: None,
+            hook_exe: None,
         }
     }
 }
 
 impl Config {
+    /// Absolute path of the hook executable: `hook_exe`, else the running binary.
+    pub fn hook_exe_path(&self) -> PathBuf {
+        self.hook_exe
+            .clone()
+            .or_else(|| std::env::current_exe().ok())
+            .unwrap_or_else(|| PathBuf::from("workbench"))
+    }
+
     /// Reject configs whose token is not URL/cookie safe.
     pub fn validate(&self) -> Result<(), String> {
         match &self.token {

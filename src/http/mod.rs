@@ -1,8 +1,8 @@
 //! HTTP layer: router, middleware wiring.
 
-pub mod agent;
 pub mod changes;
 pub mod checkpoints;
+pub mod content;
 pub mod devserver;
 pub mod error;
 pub mod events;
@@ -10,11 +10,12 @@ pub mod files;
 pub mod github;
 pub mod health;
 pub mod projects;
+pub mod terminal;
 
 use std::path::PathBuf;
 
 use axum::extract::rejection::QueryRejection;
-use axum::extract::Query;
+use axum::extract::{DefaultBodyLimit, Query};
 use axum::http::{header, HeaderValue, Method};
 use axum::routing::{any, delete, get, post};
 use axum::{middleware, Router};
@@ -29,6 +30,20 @@ use crate::static_files;
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
+        .route("/api/content/collections", get(content::collections))
+        .route("/api/content/entries", get(content::entries))
+        .route("/api/content/entry/rename", post(content::rename))
+        .route("/api/content/entry/impact", post(content::impact))
+        .route(
+            "/api/content/entry",
+            get(content::entry)
+                .post(content::create)
+                .put(content::update)
+                .delete(content::delete)
+                .layer(DefaultBodyLimit::max(
+                    crate::content::images::MAX_SAVE_BYTES,
+                )),
+        )
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/github/clone", post(projects::clone))
         .route("/api/github/status", get(github::status))
@@ -58,15 +73,14 @@ pub fn router(state: AppState) -> Router {
         .route("/@fs/{*rest}", any(preview::handle_vite_root))
         .route("/node_modules/{*rest}", any(preview::handle_vite_root))
         .route("/src/{*rest}", any(preview::handle_vite_root))
-        .route("/api/agents", get(agent::providers))
-        .route("/api/agent/session", post(agent::start_session))
-        .route("/api/agent/prompt", post(agent::prompt))
-        .route("/api/agent/prompt/{turn_id}/cancel", post(agent::cancel))
+        .route("/api/terminal/providers", get(terminal::list_providers))
+        .route("/api/terminal", post(terminal::start))
+        .route("/api/terminal/turn-end", post(terminal::turn_end))
         .route(
-            "/api/agent/permission/{request_id}",
-            post(agent::permission),
+            "/api/terminal/{project}",
+            get(terminal::status).delete(terminal::stop),
         )
-        .route("/api/agent/history", get(agent::history))
+        .route("/api/terminal/{project}/ws", get(terminal::ws))
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))
@@ -74,6 +88,24 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
         .route("/api/changes/update", post(changes::update))
+        .route("/api/changes/conflicts", get(changes::list_conflicts))
+        .route("/api/changes/conflicts/{id}", get(changes::get_conflict))
+        .route(
+            "/api/changes/conflicts/{id}/previews",
+            get(changes::conflict_previews),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/choice",
+            post(changes::choose_conflict),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/finish",
+            post(changes::finish_conflict),
+        )
+        .route(
+            "/api/changes/conflicts/{id}/abandon",
+            post(changes::abandon_conflict),
+        )
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))

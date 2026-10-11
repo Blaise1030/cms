@@ -41,32 +41,6 @@ export interface Project {
   repo: string | null;
 }
 
-export interface Provider {
-  id: string;
-  command: string[];
-}
-
-export type ToolState = "running" | "done" | "failed";
-
-export interface ToolSummary {
-  tool: string;
-  summary: string;
-  state: string;
-}
-
-export interface Turn {
-  id: string;
-  sessionId: string;
-  provider: string;
-  /** Unix seconds. */
-  ts: number;
-  userText: string;
-  assistantText: string;
-  tools: ToolSummary[];
-  stopReason?: string;
-  error?: string;
-}
-
 export interface Checkpoint {
   sha: string;
   summary: string;
@@ -120,6 +94,52 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
+  /** Branch → resolution session. Older daemons may omit this field. */
+  conflictSessions?: Record<string, string>;
+  /** Conflicts the visual resolver cannot safely open. */
+  conflictErrors?: Record<string, string>;
+}
+
+export type ConflictChoice = "yours" | "latest" | "both";
+
+export interface ConflictFile {
+  path: string;
+  binary: boolean;
+  oursDeleted?: boolean;
+  theirsDeleted?: boolean;
+  oursOid: string;
+  theirsOid: string;
+  baseOid: string | null;
+  patch?: string;
+}
+
+export interface ConflictSession {
+  id: string;
+  projectId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  base: string;
+  expiresAt: number;
+  choices: Record<string, ConflictChoice>;
+  files: ConflictFile[];
+  candidate?: ConflictCandidate;
+}
+
+export interface ConflictCandidate {
+  tree: string;
+  complete: boolean;
+}
+
+export type ConflictPreviewState =
+  | { status: "ready"; url: string }
+  | { status: "unavailable"; reason: string }
+  | { status: "invalid"; errors: string };
+
+export interface ConflictPreviews {
+  yours: ConflictPreviewState;
+  latest: ConflictPreviewState;
+  result: ConflictPreviewState;
 }
 
 /** Result of `POST /api/changes/{branch}/share`. */
@@ -155,59 +175,9 @@ export interface Health {
   version: string;
 }
 
-export type PermissionDecision = "allow" | "deny";
-
 // ---------------------------------------------------------------------------
 // WebSocket events (`/ws/events`) — flat objects tagged by `type`.
 // ---------------------------------------------------------------------------
-
-interface SessionScoped {
-  projectId?: string;
-  sessionId: string;
-}
-
-export interface ChatChunkEvent extends SessionScoped {
-  type: "chat.chunk";
-  turnId: string;
-  delta: string;
-}
-
-export interface ChatToolEvent extends SessionScoped {
-  type: "chat.tool";
-  turnId: string;
-  toolCallId?: string;
-  tool: string;
-  state: ToolState;
-  summary: string;
-}
-
-export interface ChatPlanEvent extends SessionScoped {
-  type: "chat.plan";
-  turnId: string;
-  entries: unknown;
-}
-
-export interface ChatDoneEvent extends SessionScoped {
-  type: "chat.done";
-  turnId: string;
-  stopReason?: string;
-}
-
-export interface ChatErrorEvent extends SessionScoped {
-  type: "chat.error";
-  /** `null` when the agent process died while no turn was active (session-level error). */
-  turnId: string | null;
-  message: string;
-}
-
-export interface PermissionRequestEvent extends SessionScoped {
-  type: "permission.request";
-  requestId: string;
-  turnId?: string | null;
-  tool: string;
-  summary?: string;
-  command?: string;
-}
 
 export interface DevserverStatusEvent {
   type: "devserver.status";
@@ -234,6 +204,18 @@ export interface FsChangeEvent {
   kind: string;
 }
 
+export interface TerminalExitedEvent {
+  type: "terminal.exited";
+  projectId: string;
+  code: number | null;
+}
+
+export interface CheckpointBlockedEvent {
+  type: "checkpoint.blocked";
+  projectId: string;
+  reason: string;
+}
+
 /** Emitted when this client's subscription fell behind and events were dropped. */
 export interface EventsLaggedEvent {
   type: "events.lagged";
@@ -241,15 +223,11 @@ export interface EventsLaggedEvent {
 }
 
 export type DaemonEvent =
-  | ChatChunkEvent
-  | ChatToolEvent
-  | ChatPlanEvent
-  | ChatDoneEvent
-  | ChatErrorEvent
-  | PermissionRequestEvent
   | DevserverStatusEvent
   | CheckpointCreatedEvent
   | FsChangeEvent
+  | TerminalExitedEvent
+  | CheckpointBlockedEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];
@@ -300,4 +278,56 @@ export interface GithubRepo {
   private: boolean;
   defaultBranch: string;
   canPush: boolean;
+}
+
+export interface ContentCollection {
+  name: string;
+  loader: { base?: string; pattern?: string };
+  kind: "json" | "markdown" | "mdx";
+  singleton?: string | null;
+  editable: boolean;
+  reason: string | null;
+  /** Field descriptors projected from the template schema. */
+  fields?: FieldDescriptor;
+}
+/** Limited projection of a template schema node; `type` may also be an editor type such as image. */
+export interface FieldDescriptor {
+  type: "string" | "boolean" | "number" | "date" | "literal" | "enum" | "array" | "object" | "union" | "reference" | "image" | "unsupported";
+  required: boolean;
+  default?: unknown;
+  values?: unknown[];
+  items?: FieldDescriptor;
+  properties?: Record<string, FieldDescriptor>;
+  discriminator?: string;
+  variants?: FieldDescriptor[];
+  collection?: string;
+  reason?: string;
+}
+export interface ContentEntryUpdate {
+  project: string; collection: string; id: string; branch: string; hash: string;
+  fields: Record<string, unknown>; body?: string; unset?: string[];
+}
+export interface ContentEntryCreate {
+  project: string; collection: string; slug: string; branch: string;
+  fields: Record<string, unknown>; body?: string;
+}
+export interface ContentEntryRename {
+  project: string; collection: string; id: string; slug: string; branch: string; hash: string;
+}
+export interface ContentEntryDelete { project: string; collection: string; id: string; branch: string; hash: string }
+/** A schema reference field in another entry that names the inspected entry. */
+export interface ContentReference { collection: string; id: string; path: string; field: string }
+/** A local Markdown link to the entry's public URL; reported, never rewritten. */
+export interface ContentProseLink { collection: string; id: string; path: string; url: string; line: number }
+/** Dry-run impact shown before a rename or delete is confirmed. */
+export interface ContentImpact { references: ContentReference[]; assets: string[]; proseLinks: ContentProseLink[] }
+export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
+export interface ContentEntry extends ContentEntrySummary {
+  source: string; fields: Record<string, unknown> | null; body: string; branch: string; hash: string;
+}
+/** An image sent with a save; the entry names it with a `workbench-image:<clientId>` token. */
+export interface ContentImageUpload { clientId: string; alt: string; filename: string; file: Blob }
+/** A saved entry; a save with images also says where each one went, by client ID. */
+export interface SavedContentEntry extends ContentEntry {
+  images?: Record<string, { path: string; link: string }>;
 }
