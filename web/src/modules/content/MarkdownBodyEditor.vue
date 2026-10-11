@@ -16,7 +16,8 @@ import ImageDialog, { IMAGE_REGISTRY, markdownImage, type PendingImage } from ".
  * represented by the configured extensions; everything else is edited raw (CodeMirror).
  * The text is kept byte-for-byte until the writer edits it: opening or toggling never reserializes.
  */
-const props = defineProps<{ body: string; original: string; kind: "markdown" | "mdx"; rich: boolean }>();
+/** `resolveImage` maps an image link to the URL the rich editor displays; the text keeps the link. */
+const props = defineProps<{ body: string; original: string; kind: "markdown" | "mdx"; rich: boolean; resolveImage?: (src: string) => string }>();
 const emit = defineEmits<{ change: [value: { body: string; dirty: boolean }] }>();
 
 const richCapable = computed(() => props.rich && props.kind === "markdown");
@@ -148,7 +149,7 @@ function mountRich() {
   const ending = /\n*$/.exec(text)![0];
   // Loading content does not fire `onUpdate`; only the writer's transactions do.
   richEditor.value = new Editor({
-    extensions: [...markdownExtensions(), SlashCommands],
+    extensions: [...markdownExtensions(props.resolveImage), SlashCommands],
     content: text,
     contentType: "markdown",
     onUpdate: ({ editor }) => edited(editor.getMarkdown().replace(/\n+$/, "") + ending),

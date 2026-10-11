@@ -5,12 +5,15 @@ import { ApiError } from "@/core/api";
 import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, FieldDescriptor } from "@/core/types";
 import { errorMessage } from "@/lib/errors";
 import { diffDraft, cloneValue } from "./draft";
+import { startingFields } from "./create";
 import type { PendingImage } from "./ImageDialog.vue";
 
 /** How a submitted entry names a pending image; the daemon swaps in the saved path. */
 const IMAGE_TOKEN = "workbench-image:";
 
 export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
+/** A new entry being named in the Create dialog. */
+export interface ContentCreation { collection: string; title: string; slug: string; busy: boolean; error: string | null }
 /** A rename or delete awaiting confirmation; `impact` is the daemon's dry run. */
 export interface ContentLifecycle {
   action: "rename" | "delete"; collection: string; id: string;
@@ -53,7 +56,7 @@ export const useContentStore = defineStore("content", () => {
     pendingImages.value = pendingImages.value.filter(i => !done.includes(i));
   }
   /** Which mutation a Create Change resumes. */
-  let resumeAction: "save" | "lifecycle" = "save";
+  let resumeAction: "save" | "lifecycle" | "create" = "save";
   const descriptor = computed<FieldDescriptor | null>(() => {
     const c = collections.value.find(x => x.name === entry.value?.collection);
     return c?.editable && c.fields?.type === "object" ? c.fields : null;
@@ -120,31 +123,33 @@ export const useContentStore = defineStore("content", () => {
       // Any refresh that starts while a branch switch is unapplied applies it (fs events race it).
       const branch = switchedTo;
       if (openedEntry && canRefreshEntry && !selectionPending) {
-        if (branch !== null) { await followBranch(id, branch, openedEntry, () => version === refreshRequest && selectionVersion === selectionRequest); return; }
-        if (dirty.value) { changedOnDisk.value = true; return; }
-        const next = await daemon.api.contentEntry(id, openedEntry.collection, openedEntry.id);
-        if (version !== refreshRequest || selectionVersion !== selectionRequest || dirty.value) return;
-        loadEntry(next);
+        await reconcileEntry(id, branch, openedEntry, () => version === refreshRequest && selectionVersion === selectionRequest);
       } else if (!openedEntry && branch !== null && switchedTo === branch) switchedTo = null;
     } catch (e) { if (version === refreshRequest && selectionVersion === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === refreshRequest) loading.value = false; }
   }
   /**
-   * Re-read the open entry on `branch` after a switch. A clean entry reloads, or closes when the
-   * branch does not have it. A draft is never discarded or replaced: the same draft object follows
-   * the switch when `branch` has the very entry it was loaded from, and is otherwise flagged.
+   * Re-read the open entry from disk. A clean entry reloads; after a branch switch it closes when
+   * the branch does not have it. A draft is never discarded, replaced, or moved to another branch:
+   * it keeps the branch and hash it was opened with (so Save conflicts elsewhere), and is flagged
+   * while the file on disk is not the one it was opened from.
    */
-  async function followBranch(id: string, branch: string, opened: ContentEntry, current: () => boolean) {
+  async function reconcileEntry(id: string, branch: string | null, opened: ContentEntry, current: () => boolean) {
     let next: ContentEntry | null = null;
+    let missing: unknown = null;
     try { next = await daemon.api.contentEntry(id, opened.collection, opened.id); }
-    catch (e) { if (!(e instanceof ApiError && e.code === "ENOENT")) throw e; }
+    catch (e) { if (!(e instanceof ApiError && e.code === "ENOENT")) throw e; missing = e; }
     if (!current() || entry.value !== opened) return;
-    if (switchedTo === branch) switchedTo = null;
-    if (!dirty.value) {
-      if (next) loadEntry(next);
-      else { releaseImages(); entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState(); }
-    } else if (next && next.branch === branch && next.hash === opened.hash) { entry.value = next; changedOnDisk.value = false; }
-    else changedOnDisk.value = true;
+    if (branch !== null && switchedTo === branch) switchedTo = null;
+    if (dirty.value) changedOnDisk.value = !next || next.branch !== opened.branch || next.hash !== opened.hash;
+    else if (next) loadEntry(next);
+    else if (branch !== null) closeEntry();
+    else throw missing;
+  }
+  /** Leave the detail view empty (no entry, no draft). */
+  function closeEntry() {
+    releaseImages();
+    entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
   }
   /** After the project switched to `branch` (change created or switched): reload Content from it. */
   async function refreshForBranch(branch: string) {
@@ -249,8 +254,7 @@ export const useContentStore = defineStore("content", () => {
       } else {
         const res = await daemon.api.deleteContentEntry(target);
         if (stillOpen()) {
-          entries.value = res.entries; entry.value = null;
-          draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false;
+          entries.value = res.entries; closeEntry();
         }
       }
       lifecycle.value = null; resumeAction = "save";
@@ -260,9 +264,48 @@ export const useContentStore = defineStore("content", () => {
       throw err;
     } finally { l.busy = false; }
   }
-  /** After Create Change from a main-branch save: retry the same draft on the new branch. */
+  const creation = ref<ContentCreation | null>(null);
+  /** Open the Create dialog for a multi-entry collection; an open draft must be left first. */
+  function startCreate(collection: string) {
+    if (!canLeave()) return;
+    clearSaveState();
+    creation.value = { collection, title: "", slug: "", busy: false, error: null };
+  }
+  function cancelCreate() { if (creation.value?.busy) return; creation.value = null; clearSaveState(); }
+  /**
+   * Create the named entry with schema defaults on `branch`, then open it. On main this records
+   * `needsChange` so Create Change can resume it. Throws after recording the failure.
+   */
+  async function confirmCreate(branch: string): Promise<ContentEntry | undefined> {
+    const c = creation.value; const id = projectId.value;
+    const collection = collections.value.find(x => x.name === c?.collection);
+    if (!c || c.busy || !collection?.fields) return;
+    const start = startingFields(collection.fields, c.title.trim());
+    if ("reason" in start) { c.error = start.reason; return; }
+    resumeAction = "create";
+    c.busy = true; c.error = null; clearSaveState();
+    try {
+      const saved = await daemon.api.createContentEntry({
+        project: id, collection: c.collection, slug: c.slug.trim(), branch, fields: start.fields,
+        ...(collection.kind !== "json" ? { body: "" } : {}),
+      });
+      resumeAction = "save";
+      if (projectId.value !== id) return saved;
+      creation.value = null;
+      ++selectionRequest; selectionPending = false;
+      selectedCollection.value = saved.collection; lifecycle.value = null; loadEntry(saved);
+      try { entries.value = await daemon.api.listContentEntries(id, saved.collection); } catch { /* the next refresh lists it */ }
+      return saved;
+    } catch (err) {
+      recordFailure(err, branch);
+      if (!needsChange.value) c.error = errorMessage(err);
+      throw err;
+    } finally { c.busy = false; }
+  }
+  /** After Create Change from main: retry the same save, rename/delete, or create on the new branch. */
   async function resumeSave(branch: string): Promise<unknown> {
     needsChange.value = false;
+    if (resumeAction === "create" && creation.value) return confirmCreate(branch);
     return resumeAction === "lifecycle" && lifecycle.value ? confirmLifecycle(branch) : saveDraft(branch);
   }
   async function compare() {
@@ -282,5 +325,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(() => void refresh()),
   ];
   onScopeDispose(() => offs.forEach(off => off()));
-  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
+  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
 });

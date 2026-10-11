@@ -1,5 +1,5 @@
 import type { AnyExtension, JSONContent } from "@tiptap/core";
-import { Editor } from "@tiptap/core";
+import { Editor, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { Markdown, type MarkdownManager } from "@tiptap/markdown";
@@ -9,12 +9,26 @@ import { Markdown, type MarkdownManager } from "@tiptap/markdown";
  * empty paragraph (it would add blank lines to the output), plus images,
  * read and written through the official `@tiptap/markdown` extension.
  */
-export function markdownExtensions(): AnyExtension[] {
+export function markdownExtensions(resolveImage?: (src: string) => string): AnyExtension[] {
   return [
     StarterKit.configure({ underline: false, trailingNode: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
-    SafeImage,
+    resolveImage ? SafeImage.configure({ resolveSrc: resolveImage }) : SafeImage,
     Markdown,
   ];
+}
+
+/**
+ * The project path an entry-relative image link points at (`../../../assets/x.png` from
+ * `src/content/blog/en/a.md` → `src/assets/x.png`), or null for absolute, scheme, or escaping links.
+ */
+export function entryAssetPath(entryPath: string, src: string): string | null {
+  if (!src || /^[a-z][a-z\d+.-]*:/i.test(src) || src.startsWith("/") || src.startsWith("#")) return null;
+  const parts = entryPath.split("/").slice(0, -1);
+  for (const part of decodeURI(src.split(/[?#]/)[0]!).split("/")) {
+    if (part === "..") { if (!parts.length) return null; parts.pop(); }
+    else if (part && part !== ".") parts.push(part);
+  }
+  return parts.length ? parts.join("/") : null;
 }
 
 /**
@@ -22,7 +36,14 @@ export function markdownExtensions(): AnyExtension[] {
  * alt text, so escaping exactly those is its inverse and an unbalanced bracket cannot end the
  * image early.
  */
-const SafeImage = Image.extend({
+const SafeImage = Image.extend<{ resolveSrc: ((src: string) => string) | null } & Record<string, unknown>>({
+  addOptions() { return { ...this.parent?.(), resolveSrc: null }; },
+  // Display only: the node keeps the link as written, so Markdown output stays relative.
+  renderHTML({ HTMLAttributes }) {
+    const resolve = this.options.resolveSrc as ((src: string) => string) | null;
+    const src = resolve && typeof HTMLAttributes.src === "string" ? resolve(HTMLAttributes.src) : HTMLAttributes.src;
+    return ["img", mergeAttributes(this.options.HTMLAttributes as Record<string, unknown>, HTMLAttributes, { src })];
+  },
   renderMarkdown: (node: { attrs?: Record<string, unknown> }) => {
     const src = String(node.attrs?.src ?? "");
     const alt = String(node.attrs?.alt ?? "").replace(/\s*\n\s*/g, " ").replace(/[[\]]/g, c => `\\${c}`);

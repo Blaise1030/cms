@@ -5,6 +5,7 @@ import {
   type ContentEntrySummary,
   type ContentEntry,
   type ContentEntryUpdate,
+  type ContentEntryCreate,
   type ContentImageUpload,
   type SavedContentEntry,
   type ContentEntryRename,
@@ -171,6 +172,12 @@ export function createApi(
       for (const image of images) form.append(image.clientId, image.file, image.filename);
       return json<SavedContentEntry>("PUT", "/api/content/entry", { form });
     },
+    /** Create an entry on the active change with complete starting fields. */
+    createContentEntry: (body: ContentEntryCreate) =>
+      json<SavedContentEntry>("POST", "/api/content/entry", { body }),
+    /** A project file's bytes, served read-only (the session cookie authenticates it, like Preview). */
+    rawFileUrl: (project: string, path: string) =>
+      `${cfg().origin}/api/file?project=${enc(project)}&path=${enc(path)}&raw=true`,
     contentImpact: (project: string, collection: string, id: string) =>
       json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
     renameContentEntry: (body: ContentEntryRename) =>

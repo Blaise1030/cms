@@ -24,8 +24,13 @@ it("navigates collections and entries and reads content on main", async () => {
  w.unmount();
 });
 it("preserves a dirty draft on filesystem refresh and cancelled navigation", async () => {
- const w = await setup(); await flushPromises(); const store = useContentStore();
+ let onDisk = entry;
+ const w = await setup({ contentEntry: async () => onDisk }); await flushPromises(); const store = useContentStore();
  await store.selectCollection("blog"); await store.selectEntry("welcome"); store.draftSource = "Draft";
+ // An unrelated file event does not flag the draft; a change to its file does.
+ h.daemon.emit({type:"fs.change",projectId:"p",path:"notes.txt",kind:"modify"}); await flushPromises();
+ expect(store.changedOnDisk).toBe(false);
+ onDisk = {...entry, source: "Changed", hash: "def"};
  h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"}); await flushPromises();
  expect(store.draftSource).toBe("Draft"); expect(store.dirty).toBe(true); expect(store.changedOnDisk).toBe(true);
  vi.stubGlobal("confirm", vi.fn(() => false)); await store.selectCollection("blog"); expect(store.entry?.id).toBe("welcome");

@@ -261,6 +261,10 @@ export interface ContentEntryUpdate {
   project: string; collection: string; id: string; branch: string; hash: string;
   fields: Record<string, unknown>; body?: string; unset?: string[];
 }
+export interface ContentEntryCreate {
+  project: string; collection: string; slug: string; branch: string;
+  fields: Record<string, unknown>; body?: string;
+}
 export interface ContentEntryRename {
   project: string; collection: string; id: string; slug: string; branch: string; hash: string;
 }

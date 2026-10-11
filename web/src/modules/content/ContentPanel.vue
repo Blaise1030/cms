@@ -4,16 +4,23 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
+import { useChangesStore } from "@/modules/changes/store";
 import type { Change } from "@/core/types";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { sameValue } from "./draft";
+import { slugify, startingFields } from "./create";
+import { entryAssetPath } from "./markdown";
 import { useContentStore } from "./store";
 import { IMAGE_REGISTRY } from "./ImageDialog.vue";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string}>();
 const store = useContentStore();
+const changes = useChangesStore();
+const daemon = useDaemon();
 // Images inserted by the form or body editor stay pending in the draft until Save.
 provide(IMAGE_REGISTRY, { add: image => store.addImage(image) });
 watch(() => props.projectId, id => void store.open(id), {immediate:true});
@@ -38,6 +45,32 @@ const canConfirm = computed(() => {
   return l.action === "rename" ? !!l.slug.trim() && l.slug.trim() !== l.id : !l.impact.references.length;
 });
 async function confirmLifecycle() { try { await store.confirmLifecycle(); } catch { /* recorded on the store; the draft stays */ } }
+/** The branch the project is on, as the Changes picker knows it. */
+const currentBranch = () => changes.active?.branch ?? "main";
+const selected = computed(() => store.collections.find(c => c.name === store.selectedCollection) ?? null);
+/** Create is offered for multi-entry collections; this is why it is disabled, or null when it is not. */
+const createBlocked = computed<string | null>(() => {
+  const c = selected.value; if (!c || c.singleton) return null;
+  if (!c.editable || !c.fields) return c.reason ?? "This collection is read only";
+  const start = startingFields(c.fields, "");
+  return "reason" in start ? start.reason : null;
+});
+const createOpen = computed({
+  get: () => !!store.creation && !store.needsChange,
+  set: open => { if (!open) store.cancelCreate(); },
+});
+/** The slug follows the title until the writer edits it. */
+const slugEdited = ref(false);
+function startCreate() { slugEdited.value = false; if (selected.value) store.startCreate(selected.value.name); }
+function setTitle(title: string) { const c = store.creation; if (!c) return; c.title = title; if (!slugEdited.value) c.slug = slugify(title); }
+function setSlug(slug: string) { const c = store.creation; if (!c) return; c.slug = slug; slugEdited.value = true; }
+const canCreate = computed(() => { const c = store.creation; return !!c && !c.busy && !!c.title.trim() && !!c.slug.trim(); });
+async function confirmCreate() { try { await store.confirmCreate(currentBranch()); } catch { /* recorded on the store */ } }
+/** Entry-relative image links shown in the rich editor are read from the project's files. */
+function resolveImage(src: string): string {
+  const e = store.entry; const path = e ? entryAssetPath(e.path, src) : null;
+  return path ? daemon.api.rawFileUrl(props.projectId, path) : src;
+}
 async function resume(change: Change) { try { await store.resumeSave(change.branch); } catch { /* recorded on the store */ } }
 const differences = computed(() => {
   const now = store.current; if (!now) return [];
@@ -62,6 +95,10 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
     </aside>
     <aside v-if="store.selectedCollection" class="w-56 shrink-0 overflow-auto border-r p-3">
       <h2 class="mb-3 text-sm font-medium">Entries</h2>
+      <template v-if="selected && !selected.singleton">
+        <Button type="button" size="sm" variant="outline" class="mb-2 w-full" data-testid="content-create" :disabled="!!createBlocked" :title="createBlocked ?? undefined" @click="startCreate">New entry</Button>
+        <p v-if="createBlocked" class="mb-2 text-xs text-muted-foreground" data-testid="content-create-reason">{{ createBlocked }}</p>
+      </template>
       <button v-for="item in store.entries" :key="item.id" data-testid="content-entry" class="block w-full rounded px-2 py-2 text-left text-sm hover:bg-muted" @click="store.selectEntry(item.id)">{{ item.id }}</button>
       <p v-if="!store.entries.length && !store.loading" class="text-xs text-muted-foreground">No entries</p>
     </aside>
@@ -69,6 +106,10 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
       <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
       <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
       <p v-for="collection in store.collections.filter(c => c.reason && (!store.selectedCollection || c.name === store.selectedCollection))" :key="collection.name" class="mb-2 text-xs text-muted-foreground">{{ collection.name }}: {{ collection.reason }}</p>
+      <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
+        <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
+        <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
+      </section>
       <template v-if="store.entry">
         <h2 class="font-medium">{{ store.entry.id }}</h2>
         <p class="mb-4 text-xs text-muted-foreground">{{ store.entry.path }} · {{ store.entry.branch || 'No branch' }}</p>
@@ -80,7 +121,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">
           <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
-          <MarkdownBodyEditor v-if="store.entry.kind !== 'json'" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind" :rich="store.richBody" @change="store.setBody($event.body)" />
+          <MarkdownBodyEditor v-if="store.entry.kind !== 'json'" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
           <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
           <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
             <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
@@ -98,10 +139,6 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
                 <tr v-if="!differences.length"><td colspan="3">No differences from the current file.</td></tr>
               </tbody>
             </table>
-          </section>
-          <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-            <p>Content cannot be edited on main. Create a change to save your edits.</p>
-            <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
           </section>
           <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving">{{ store.saving ? "Saving…" : "Save" }}</Button>
         </form>
@@ -147,9 +184,33 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       </template>
       <p v-else-if="!store.loading" class="text-sm text-muted-foreground">Select a collection and entry to read its content.</p>
+      <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
+      <Dialog v-model:open="createOpen">
+        <DialogContent v-if="store.creation" data-testid="content-create-dialog">
+          <form class="space-y-3" @submit.prevent="confirmCreate">
+            <DialogHeader>
+              <DialogTitle>New {{ store.creation.collection }} entry</DialogTitle>
+              <DialogDescription>It starts from the collection's defaults; fill in the rest after it opens.</DialogDescription>
+            </DialogHeader>
+            <label class="block text-xs font-medium">Title
+              <Input :model-value="store.creation.title" data-testid="content-create-title" class="mt-1" @update:model-value="setTitle(String($event))" />
+            </label>
+            <label class="block text-xs font-medium">Slug
+              <Input :model-value="store.creation.slug" data-testid="content-create-slug" class="mt-1" placeholder="my-entry" @update:model-value="setSlug(String($event))" />
+            </label>
+            <p v-if="store.creation.error" role="alert" class="text-sm text-destructive" data-testid="content-create-error">{{ store.creation.error }}</p>
+            <ul v-if="Object.keys(store.fieldErrors).length" class="text-xs text-destructive" data-testid="content-create-field-errors">
+              <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
+            </ul>
+            <DialogFooter>
+              <Button type="button" variant="outline" data-testid="content-create-cancel" @click="store.cancelCreate()">Cancel</Button>
+              <Button type="submit" data-testid="content-create-confirm" :disabled="!canCreate">{{ store.creation.busy ? "Creating…" : "Create" }}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </main>
   </div>
 </template>

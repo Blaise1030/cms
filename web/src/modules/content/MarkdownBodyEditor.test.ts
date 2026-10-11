@@ -223,3 +223,31 @@ describe("MarkdownBodyEditor", () => {
     expect(rawText(w)).toBe("Hello\n");
   });
 });
+
+describe("saved image links", () => {
+  it("resolves entry-relative image paths and leaves other links alone", async () => {
+    const { entryAssetPath } = await import("./markdown");
+    const entry = "src/content/blog/en/spring.md";
+    expect(entryAssetPath(entry, "../../../assets/blog/spring/team.png")).toBe("src/assets/blog/spring/team.png");
+    expect(entryAssetPath(entry, "./a%20b.png")).toBe("src/content/blog/en/a b.png");
+    expect(entryAssetPath(entry, "../../../../../../etc/passwd")).toBeNull();
+    for (const src of ["https://x.test/a.png", "blob:abc", "data:image/png;base64,AA", "/abs.png", ""]) expect(entryAssetPath(entry, src)).toBeNull();
+  });
+
+  it("shows a resolved src in rich mode while the Markdown keeps the relative link", async () => {
+    const body = "Intro\n\n![Team](../../../assets/blog/spring/team.png)\n";
+    const w = mount(MarkdownBodyEditor, {
+      props: { body, original: body, kind: "markdown", rich: true, resolveImage: (src: string) => `http://daemon/raw?path=${encodeURIComponent(src)}` },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    await flushPromises();
+    const img = w.get('[data-testid="body-rich"] img').element as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe(`http://daemon/raw?path=${encodeURIComponent("../../../assets/blog/spring/team.png")}`);
+    expect(img.getAttribute("alt")).toBe("Team");
+    expect(editorOf(w).getMarkdown()).toContain("![Team](../../../assets/blog/spring/team.png)");
+    editorOf(w).commands.insertContentAt(0, "New ");
+    await flushPromises();
+    expect(last(w)?.body).toContain("![Team](../../../assets/blog/spring/team.png)");
+  });
+});
