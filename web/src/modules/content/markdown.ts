@@ -24,7 +24,10 @@ export function markdownExtensions(resolveImage?: (src: string) => string): AnyE
 export function entryAssetPath(entryPath: string, src: string): string | null {
   if (!src || /^[a-z][a-z\d+.-]*:/i.test(src) || src.startsWith("/") || src.startsWith("#")) return null;
   const parts = entryPath.split("/").slice(0, -1);
-  for (const part of decodeURI(src.split(/[?#]/)[0]!).split("/")) {
+  let decoded: string;
+  // A malformed escape (`100%.png`) is left alone: no display rewrite.
+  try { decoded = decodeURI(src.split(/[?#]/)[0]!); } catch { return null; }
+  for (const part of decoded.split("/")) {
     if (part === "..") { if (!parts.length) return null; parts.pop(); }
     else if (part && part !== ".") parts.push(part);
   }
@@ -38,11 +41,21 @@ export function entryAssetPath(entryPath: string, src: string): string | null {
  */
 const SafeImage = Image.extend<{ resolveSrc: ((src: string) => string) | null } & Record<string, unknown>>({
   addOptions() { return { ...this.parent?.(), resolveSrc: null }; },
+  // Copied or re-parsed HTML carries the link as written in `data-src`; the shown `src` may be a
+  // display URL that must never reach the Markdown.
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      src: { default: null, parseHTML: (el: HTMLElement) => el.getAttribute("data-src") ?? el.getAttribute("src") },
+    };
+  },
   // Display only: the node keeps the link as written, so Markdown output stays relative.
   renderHTML({ HTMLAttributes }) {
     const resolve = this.options.resolveSrc as ((src: string) => string) | null;
-    const src = resolve && typeof HTMLAttributes.src === "string" ? resolve(HTMLAttributes.src) : HTMLAttributes.src;
-    return ["img", mergeAttributes(this.options.HTMLAttributes as Record<string, unknown>, HTMLAttributes, { src })];
+    const written = HTMLAttributes.src;
+    const src = resolve && typeof written === "string" ? resolve(written) : written;
+    const original = src !== written ? { "data-src": written } : {};
+    return ["img", mergeAttributes(this.options.HTMLAttributes as Record<string, unknown>, HTMLAttributes, { src, ...original })];
   },
   renderMarkdown: (node: { attrs?: Record<string, unknown> }) => {
     const src = String(node.attrs?.src ?? "");

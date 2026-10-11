@@ -129,3 +129,39 @@ it("does nothing before a project is open", async () => {
   await store.refreshForBranch("content/b");
   expect(listContentCollections).not.toHaveBeenCalled();
 });
+
+it("after Create Change, a resumed save that fails keeps the new change as the draft's target", async () => {
+  let branch = "main";
+  const onMain = entry({ branch: "main" });
+  const updateContentEntry = vi.fn(async (body: { branch: string; fields: Record<string, unknown> }) => {
+    if (branch === "main") throw new ApiError("CHANGE_REQUIRED", "Start a change first", 409);
+    if (body.branch !== branch) throw branchChanged();
+    if (body.fields.title === "") throw new ApiError("BADREQ", "invalid entry", 400, { reason: "invalid_schema", details: [{ path: ["title"], message: "Required" }] });
+    return { ...entry({ branch, hash: "h2", source: "S2" }), fields: body.fields };
+  });
+  h.daemon = createFakeDaemon({
+    listContentCollections: async () => [blog], listContentEntries: async () => [onMain],
+    contentEntry: async () => entry({ branch }), updateContentEntry,
+  });
+  setActivePinia(createPinia());
+  const store = useContentStore();
+  await store.open("p"); await store.selectCollection("blog"); await store.selectEntry("welcome");
+  store.draftFields.title = "";
+  await expect(store.saveDraft()).rejects.toBeInstanceOf(ApiError);
+  expect(store.needsChange).toBe(true);
+
+  // Create Change: the project moves to the new change, then the save resumes there and fails.
+  branch = "content/x";
+  await store.refreshForBranch("content/x");
+  await expect(store.resumeSave("content/x")).rejects.toBeInstanceOf(ApiError);
+  expect(store.fieldErrors).toEqual({ title: "Required" });
+  expect(store.entry?.hash).toBe("h1");
+
+  // Fixing the field and saving again goes to the new change with the original hash.
+  store.draftFields.title = "Fixed";
+  await store.saveDraft();
+  expect(updateContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "content/x", hash: "h1", fields: { title: "Fixed" } }));
+  expect(store.conflict).toBeNull();
+  expect(store.dirty).toBe(false);
+  expect(store.entry?.branch).toBe("content/x");
+});

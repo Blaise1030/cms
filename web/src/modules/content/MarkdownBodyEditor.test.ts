@@ -251,3 +251,45 @@ describe("saved image links", () => {
     expect(last(w)?.body).toContain("![Team](../../../assets/blog/spring/team.png)");
   });
 });
+
+describe("saved image links survive copy and paste", () => {
+  it("re-parses the written link, not the display URL, from the editor's HTML", async () => {
+    const body = "![Team](../../../assets/blog/spring/team.png)\n";
+    const w = mount(MarkdownBodyEditor, {
+      props: { body, original: body, kind: "markdown", rich: true, resolveImage: (src: string) => `http://daemon/api/file?path=${encodeURIComponent(src)}&raw=true` },
+      attachTo: document.body,
+    });
+    mounted.push(w);
+    await flushPromises();
+    const editor = editorOf(w);
+    expect(editor.getHTML()).toContain('data-src="../../../assets/blog/spring/team.png"');
+    // What a copy then paste does: the copied HTML is parsed back into the document.
+    editor.commands.insertContentAt(editor.state.doc.content.size, editor.getHTML());
+    await flushPromises();
+    const markdown = editor.getMarkdown();
+    expect(markdown.match(/!\[Team\]\(\.\.\/\.\.\/\.\.\/assets\/blog\/spring\/team\.png\)/g)).toHaveLength(2);
+    expect(markdown).not.toContain("api/file");
+  });
+
+  it("keeps a pasted outside image's src", async () => {
+    const w = await render("Text\n");
+    const editor = editorOf(w);
+    editor.commands.insertContentAt(editor.state.doc.content.size, '<img src="https://example.com/a.png" alt="A">');
+    await flushPromises();
+    expect(editor.getMarkdown()).toContain("![A](https://example.com/a.png)");
+  });
+
+  it("leaves malformed escapes unresolved instead of breaking the editor", async () => {
+    const { entryAssetPath } = await import("./markdown");
+    expect(entryAssetPath("src/content/blog/en/a.md", "100%.png")).toBeNull();
+    const body = "![x](100%.png)\n";
+    const resolveImage = vi.fn((src: string) => `http://daemon/${src}`);
+    const w = mount(MarkdownBodyEditor, { props: { body, original: body, kind: "markdown", rich: true, resolveImage: (src: string) => {
+      const path = entryAssetPath("src/content/blog/en/a.md", src); return path ? resolveImage(path) : src;
+    } }, attachTo: document.body });
+    mounted.push(w);
+    await flushPromises();
+    expect(w.find('[data-testid="body-rich"] img').attributes("src")).toBe("100%.png");
+    expect(resolveImage).not.toHaveBeenCalled();
+  });
+});

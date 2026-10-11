@@ -70,6 +70,7 @@ export const useContentStore = defineStore("content", () => {
   function clearSaveState() { saveError.value = null; fieldErrors.value = {}; conflict.value = null; needsChange.value = false; current.value = null; }
   function loadEntry(next: ContentEntry) {
     releaseImages();
+    targetBranch = null;
     // A freshly read entry belongs to the current branch.
     switchedTo = null;
     entry.value = next; draftSource.value = next.source;
@@ -77,6 +78,13 @@ export const useContentStore = defineStore("content", () => {
     changedOnDisk.value = false; clearSaveState();
   }
   const changedOnDisk = ref(false);
+  /**
+   * The change a Create Change → resume moved the open draft to. The draft keeps its opened hash
+   * (the change was cut from main), but later saves go to this change. Ordinary branch switches
+   * never set it. Null means the opened entry's own branch.
+   */
+  let targetBranch: string | null = null;
+  const boundBranch = (e: ContentEntry) => targetBranch ?? e.branch;
   const error = ref<string | null>(null);
   const loading = ref(false);
   let selectionRequest = 0;
@@ -98,6 +106,7 @@ export const useContentStore = defineStore("content", () => {
     selectionPending = false;
     releaseImages();
     switchedTo = null;
+    targetBranch = null;
     projectId.value = id; selectedCollection.value = null; entry.value = null; lifecycle.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
     await refresh();
@@ -141,14 +150,14 @@ export const useContentStore = defineStore("content", () => {
     catch (e) { if (!(e instanceof ApiError && e.code === "ENOENT")) throw e; missing = e; }
     if (!current() || entry.value !== opened) return;
     if (branch !== null && switchedTo === branch) switchedTo = null;
-    if (dirty.value) changedOnDisk.value = !next || next.branch !== opened.branch || next.hash !== opened.hash;
+    if (dirty.value) changedOnDisk.value = !next || next.branch !== boundBranch(opened) || next.hash !== opened.hash;
     else if (next) loadEntry(next);
     else if (branch !== null) closeEntry();
     else throw missing;
   }
   /** Leave the detail view empty (no entry, no draft). */
   function closeEntry() {
-    releaseImages();
+    releaseImages(); targetBranch = null;
     entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
   }
   /** After the project switched to `branch` (change created or switched): reload Content from it. */
@@ -161,7 +170,7 @@ export const useContentStore = defineStore("content", () => {
     if (!canLeave()) return;
     const version = ++selectionRequest; selectionPending = true;
     releaseImages();
-    selectedCollection.value = name; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
+    selectedCollection.value = name; targetBranch = null; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
     try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === selectionRequest) entries.value = next; }
     catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === selectionRequest) selectionPending = false; }
@@ -191,7 +200,7 @@ export const useContentStore = defineStore("content", () => {
     saving.value = true; clearSaveState(); resumeAction = "save";
     try {
       const update = {
-        project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash,
+        project: saved.id, collection: e.collection, id: e.id, branch: branch ?? boundBranch(e), hash: e.hash,
         fields: images.length ? JSON.parse(tokens(JSON.stringify(change.fields))) as Record<string, unknown> : change.fields,
         ...(change.body !== undefined ? { body: tokens(change.body) } : {}), ...(change.unset.length ? { unset: change.unset } : {}),
       };
@@ -206,7 +215,7 @@ export const useContentStore = defineStore("content", () => {
           draftBody.value = links(draftBody.value);
           draftFields.value = JSON.parse(links(JSON.stringify(draftFields.value))) as Record<string, unknown>;
           releaseImages(images);
-          entry.value = next; draftSource.value = next.source; changedOnDisk.value = false; clearSaveState();
+          entry.value = next; targetBranch = null; draftSource.value = next.source; changedOnDisk.value = false; clearSaveState();
         }
       }
       return next;
@@ -243,7 +252,7 @@ export const useContentStore = defineStore("content", () => {
     const l = lifecycle.value; const e = entry.value;
     if (!l || !e || !l.impact || dirty.value) return;
     const saved = { id: projectId.value, entryId: e.id };
-    const target = { project: saved.id, collection: e.collection, id: e.id, branch: branch ?? e.branch, hash: e.hash };
+    const target = { project: saved.id, collection: e.collection, id: e.id, branch: branch ?? boundBranch(e), hash: e.hash };
     resumeAction = "lifecycle";
     l.busy = true; l.error = null; clearSaveState();
     const stillOpen = () => projectId.value === saved.id && entry.value?.id === saved.entryId;
@@ -306,6 +315,8 @@ export const useContentStore = defineStore("content", () => {
   async function resumeSave(branch: string): Promise<unknown> {
     needsChange.value = false;
     if (resumeAction === "create" && creation.value) return confirmCreate(branch);
+    // The writer created this change for the open draft: it stays the target even if this try fails.
+    if (entry.value) { targetBranch = branch; changedOnDisk.value = false; }
     return resumeAction === "lifecycle" && lifecycle.value ? confirmLifecycle(branch) : saveDraft(branch);
   }
   async function compare() {
