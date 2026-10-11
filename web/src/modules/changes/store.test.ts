@@ -10,6 +10,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
+import { useContentStore } from "@/modules/content/store";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -86,6 +87,21 @@ describe("changes store", () => {
     expect(store.active).toEqual({ branch: "content/alpha", title: "Alpha" });
     expect(refresh).toHaveBeenCalled();
     expect(reload).toHaveBeenCalled();
+  });
+
+  it("switchTo and create refresh Content for the new branch", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
+      createChange: vi.fn(async () => ({ branch: "content/beta", title: "Beta" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    const refreshForBranch = vi.spyOn(useContentStore(), "refreshForBranch").mockResolvedValue();
+
+    await store.switchTo("site", "content/alpha");
+    expect(refreshForBranch).toHaveBeenLastCalledWith("content/alpha");
+    await store.create("site", "Beta");
+    expect(refreshForBranch).toHaveBeenLastCalledWith("content/beta");
   });
 
   it("switchTo surfaces checkpoint-first errors", async () => {

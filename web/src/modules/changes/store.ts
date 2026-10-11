@@ -6,6 +6,7 @@ import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, Conflict
 import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
+import { useContentStore } from "@/modules/content/store";
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -75,8 +76,12 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function refreshTreeAndPreview() {
-    await useFilesStore().refresh();
+  /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
+  async function refreshTreeAndPreview(branch?: string) {
+    await Promise.all([
+      useFilesStore().refresh(),
+      branch ? useContentStore().refreshForBranch(branch) : undefined,
+    ]);
     usePreviewStore().reload();
   }
 
@@ -149,7 +154,7 @@ export const useChangesStore = defineStore("changes", () => {
       status.value = null;
       stopStatusPolling();
       protectionHint.value = null;
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview(change.branch);
       return change;
     } catch (e) {
       error.value = errorMessage(e);
@@ -171,7 +176,7 @@ export const useChangesStore = defineStore("changes", () => {
       prUrl.value = change.prUrl ?? null;
       status.value = null;
       protectionHint.value = null;
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview(change.branch);
       await refreshStatus();
       return change;
     } catch (e) {
@@ -297,7 +302,7 @@ export const useChangesStore = defineStore("changes", () => {
         prUrl.value = null;
         status.value = null;
       }
-      await refreshTreeAndPreview();
+      await refreshTreeAndPreview("main");
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);

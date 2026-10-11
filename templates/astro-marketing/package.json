@@ -6,10 +6,14 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "npm run build && node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@astrojs/mdx": "8.0.2",
-    "astro": "7.3.5"
+    "astro": "7.3.5",
+    "js-yaml": "^4.3.2",
+    "jsonc-parser": "^3.3.1",
+    "yaml": "^2.9.1"
   }
 }

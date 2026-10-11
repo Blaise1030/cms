@@ -13,6 +13,7 @@ const router = useRouter();
 
 const tabs: { id: ProjectTab; label: string }[] = [
   { id: "preview", label: "Preview" },
+  { id: "content", label: "Content" },
   { id: "code", label: "Code" },
   { id: "history", label: "History" },
 ];

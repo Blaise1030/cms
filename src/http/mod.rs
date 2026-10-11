@@ -2,6 +2,7 @@
 
 pub mod changes;
 pub mod checkpoints;
+pub mod content;
 pub mod devserver;
 pub mod error;
 pub mod events;
@@ -14,7 +15,7 @@ pub mod terminal;
 use std::path::PathBuf;
 
 use axum::extract::rejection::QueryRejection;
-use axum::extract::Query;
+use axum::extract::{DefaultBodyLimit, Query};
 use axum::http::{header, HeaderValue, Method};
 use axum::routing::{any, delete, get, post};
 use axum::{middleware, Router};
@@ -29,6 +30,20 @@ use crate::static_files;
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
+        .route("/api/content/collections", get(content::collections))
+        .route("/api/content/entries", get(content::entries))
+        .route("/api/content/entry/rename", post(content::rename))
+        .route("/api/content/entry/impact", post(content::impact))
+        .route(
+            "/api/content/entry",
+            get(content::entry)
+                .post(content::create)
+                .put(content::update)
+                .delete(content::delete)
+                .layer(DefaultBodyLimit::max(
+                    crate::content::images::MAX_SAVE_BYTES,
+                )),
+        )
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/github/clone", post(projects::clone))
         .route("/api/github/status", get(github::status))

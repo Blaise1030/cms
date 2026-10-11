@@ -2,10 +2,11 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 import HomePage from "@/app/HomePage.vue";
 import ProjectPage from "@/app/ProjectPage.vue";
 import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
+import ContentPanel from "@/modules/content/ContentPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "code" | "history";
+export type ProjectTab = "preview" | "content" | "code" | "history";
 
 const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };
 
@@ -20,6 +21,7 @@ export const routes: RouteRecordRaw[] = [
     children: [
       { path: "", redirect: { name: "project-preview" } },
       { path: "preview", name: "project-preview", component: ProjectPreviewPage },
+      { path: "content", name: "project-content", component: ContentPanel, props: (r) => ({projectId:r.params.id as string}) },
       {
         path: "code",
         name: "project-code",
@@ -42,6 +44,7 @@ export function projectPath(id: string, tab: ProjectTab = "preview") {
 }
 
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
+  if (name === "project-content") return "content";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
   return "preview";

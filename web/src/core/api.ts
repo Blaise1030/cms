@@ -1,6 +1,16 @@
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type ContentCollection,
+  type ContentEntrySummary,
+  type ContentEntry,
+  type ContentEntryUpdate,
+  type ContentEntryCreate,
+  type ContentImageUpload,
+  type SavedContentEntry,
+  type ContentEntryRename,
+  type ContentEntryDelete,
+  type ContentImpact,
   type Change,
   type ChangesUpdate,
   type ConflictCandidate,
@@ -21,13 +31,26 @@ import {
   type Tree,
 } from "./types";
 
+export interface ApiErrorDetail { path: (string | number)[]; message: string }
+
 /** The daemon answered with an error (or something unparseable). */
 export class ApiError extends Error {
   readonly code: ErrorCode | "UNKNOWN";
   readonly status: number;
+  /** Machine-readable sub-code (e.g. `stale_content`), when the daemon gave one. */
+  readonly reason?: string;
+  /** Per-field validation problems, when the daemon gave them. */
+  readonly details?: ApiErrorDetail[];
 
-  constructor(code: ErrorCode | "UNKNOWN", message: string, status: number) {
+  constructor(
+    code: ErrorCode | "UNKNOWN",
+    message: string,
+    status: number,
+    extra: { reason?: string; details?: ApiErrorDetail[] } = {},
+  ) {
     super(message);
+    this.reason = extra.reason;
+    this.details = extra.details;
     this.name = "ApiError";
     this.code = code;
     this.status = status;
@@ -61,9 +84,14 @@ export function mapErrorResponse(status: number, statusText: string, body: strin
     if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
       const err = (parsed as { error: unknown }).error;
       if (typeof err === "object" && err !== null) {
-        const { code, message } = err as { code?: unknown; message?: unknown };
+        const { code, message, reason, details } = err as {
+          code?: unknown; message?: unknown; reason?: unknown; details?: unknown;
+        };
         const text = typeof message === "string" && message ? message : statusText;
-        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status);
+        return new ApiError(isErrorCode(code) ? code : "UNKNOWN", text || `HTTP ${status}`, status, {
+          reason: typeof reason === "string" ? reason : undefined,
+          details: Array.isArray(details) ? (details as ApiErrorDetail[]) : undefined,
+        });
       }
     }
   } catch {
@@ -98,12 +126,14 @@ export function createApi(
 ) {
   const cfg = typeof config === "function" ? config : () => config;
 
-  async function send(method: string, path: string, opts: { query?: Query; body?: unknown } = {}) {
+  async function send(method: string, path: string, opts: { query?: Query; body?: unknown; form?: FormData } = {}) {
     const { origin, token } = cfg();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     const init: RequestInit = { method, headers };
-    if (opts.body !== undefined) {
+    // The browser sets the multipart Content-Type with its boundary.
+    if (opts.form) init.body = opts.form;
+    else if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
@@ -119,7 +149,7 @@ export function createApi(
     return res;
   }
 
-  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown }) {
+  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown; form?: FormData }) {
     const res = await send(method, path, opts);
     try {
       return (await res.json()) as T;
@@ -131,6 +161,33 @@ export function createApi(
   const enc = encodeURIComponent;
 
   return {
+    listContentCollections: async (project: string): Promise<ContentCollection[]> =>
+      (await json<{collections: ContentCollection[]}>("GET", "/api/content/collections", {query:{project}})).collections,
+    listContentEntries: async (project: string, collection: string): Promise<ContentEntrySummary[]> =>
+      (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
+    contentEntry: (project: string, collection: string, id: string) =>
+      json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    /** JSON without images; with images, multipart: a JSON `entry` part plus one part per image named by its client ID. */
+    updateContentEntry: (body: ContentEntryUpdate, images: ContentImageUpload[] = []) => {
+      if (!images.length) return json<SavedContentEntry>("PUT", "/api/content/entry", { body });
+      const form = new FormData();
+      const meta = images.map(({ clientId, alt, filename }) => ({ clientId, alt, filename }));
+      form.append("entry", new Blob([JSON.stringify({ ...body, images: meta })], { type: "application/json" }));
+      for (const image of images) form.append(image.clientId, image.file, image.filename);
+      return json<SavedContentEntry>("PUT", "/api/content/entry", { form });
+    },
+    /** Create an entry on the active change with complete starting fields. */
+    createContentEntry: (body: ContentEntryCreate) =>
+      json<SavedContentEntry>("POST", "/api/content/entry", { body }),
+    /** A project file's bytes, served read-only (the session cookie authenticates it, like Preview). */
+    rawFileUrl: (project: string, path: string) =>
+      `${cfg().origin}/api/file?project=${enc(project)}&path=${enc(path)}&raw=true`,
+    contentImpact: (project: string, collection: string, id: string) =>
+      json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
+    renameContentEntry: (body: ContentEntryRename) =>
+      json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
+    deleteContentEntry: (body: ContentEntryDelete) =>
+      json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

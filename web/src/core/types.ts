@@ -279,3 +279,55 @@ export interface GithubRepo {
   defaultBranch: string;
   canPush: boolean;
 }
+
+export interface ContentCollection {
+  name: string;
+  loader: { base?: string; pattern?: string };
+  kind: "json" | "markdown" | "mdx";
+  singleton?: string | null;
+  editable: boolean;
+  reason: string | null;
+  /** Field descriptors projected from the template schema. */
+  fields?: FieldDescriptor;
+}
+/** Limited projection of a template schema node; `type` may also be an editor type such as image. */
+export interface FieldDescriptor {
+  type: "string" | "boolean" | "number" | "date" | "literal" | "enum" | "array" | "object" | "union" | "reference" | "image" | "unsupported";
+  required: boolean;
+  default?: unknown;
+  values?: unknown[];
+  items?: FieldDescriptor;
+  properties?: Record<string, FieldDescriptor>;
+  discriminator?: string;
+  variants?: FieldDescriptor[];
+  collection?: string;
+  reason?: string;
+}
+export interface ContentEntryUpdate {
+  project: string; collection: string; id: string; branch: string; hash: string;
+  fields: Record<string, unknown>; body?: string; unset?: string[];
+}
+export interface ContentEntryCreate {
+  project: string; collection: string; slug: string; branch: string;
+  fields: Record<string, unknown>; body?: string;
+}
+export interface ContentEntryRename {
+  project: string; collection: string; id: string; slug: string; branch: string; hash: string;
+}
+export interface ContentEntryDelete { project: string; collection: string; id: string; branch: string; hash: string }
+/** A schema reference field in another entry that names the inspected entry. */
+export interface ContentReference { collection: string; id: string; path: string; field: string }
+/** A local Markdown link to the entry's public URL; reported, never rewritten. */
+export interface ContentProseLink { collection: string; id: string; path: string; url: string; line: number }
+/** Dry-run impact shown before a rename or delete is confirmed. */
+export interface ContentImpact { references: ContentReference[]; assets: string[]; proseLinks: ContentProseLink[] }
+export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
+export interface ContentEntry extends ContentEntrySummary {
+  source: string; fields: Record<string, unknown> | null; body: string; branch: string; hash: string;
+}
+/** An image sent with a save; the entry names it with a `workbench-image:<clientId>` token. */
+export interface ContentImageUpload { clientId: string; alt: string; filename: string; file: Blob }
+/** A saved entry; a save with images also says where each one went, by client ID. */
+export interface SavedContentEntry extends ContentEntry {
+  images?: Record<string, { path: string; link: string }>;
+}
