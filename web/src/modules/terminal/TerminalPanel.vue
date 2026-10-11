@@ -143,11 +143,15 @@ function disposeTerminal() {
   fit = null;
 }
 
-/** Exit frame and `terminal.exited` share this: stop reconnecting and show Restart. */
-function endSession(code: number | null) {
+/** Stop reconnecting, but let the terminal socket deliver its ordered final output. */
+function markEnded(code: number | null) {
   ended.value = { code };
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
+}
+
+function endSession(code: number | null) {
+  markEnded(code);
   conn?.close();
   conn = null;
 }
@@ -193,7 +197,7 @@ onMounted(async () => {
 
 const offExited = daemon.on("terminal.exited", (e) => {
   if (e.projectId !== props.projectId || ended.value) return;
-  endSession(e.code);
+  markEnded(e.code);
 });
 
 onBeforeUnmount(() => {
@@ -264,7 +268,7 @@ async function onStart() {
     <div
       v-if="ended"
       data-testid="terminal-ended"
-      class="bg-background/90 absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm"
+      class="border-border bg-background flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-3 py-2 text-sm"
     >
       <p v-if="ended.code === 127">`{{ notFoundCommand() }}` not found on PATH</p>
       <p v-else>Session ended (code {{ ended.code ?? "unknown" }})</p>

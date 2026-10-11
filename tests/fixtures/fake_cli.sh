@@ -3,6 +3,10 @@
 echo "FAKE-CLI READY"
 while IFS= read -r line; do
   case "$line" in
+    exit-test)
+      echo "FAKE-CLI EXIT REASON"
+      exit 1
+      ;;
     size) stty size ;;
     argv) for a in "$@"; do printf '%s\n' "$a"; done ;;
     spawn-child)
