@@ -67,6 +67,8 @@ export const useContentStore = defineStore("content", () => {
   function clearSaveState() { saveError.value = null; fieldErrors.value = {}; conflict.value = null; needsChange.value = false; current.value = null; }
   function loadEntry(next: ContentEntry) {
     releaseImages();
+    // A freshly read entry belongs to the current branch.
+    switchedTo = null;
     entry.value = next; draftSource.value = next.source;
     draftFields.value = cloneValue(next.fields ?? {}); draftBody.value = next.body ?? "";
     changedOnDisk.value = false; clearSaveState();
@@ -77,6 +79,8 @@ export const useContentStore = defineStore("content", () => {
   let selectionRequest = 0;
   let refreshRequest = 0;
   let selectionPending = false;
+  /** The branch the project switched to, until a refresh has applied the switch to the open entry. */
+  let switchedTo: string | null = null;
   function canLeave() {
     if (!dirty.value) return true;
     if (!window.confirm("Discard unsaved content changes?")) return false;
@@ -90,6 +94,7 @@ export const useContentStore = defineStore("content", () => {
     ++refreshRequest;
     selectionPending = false;
     releaseImages();
+    switchedTo = null;
     projectId.value = id; selectedCollection.value = null; entry.value = null; lifecycle.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
     await refresh();
@@ -112,14 +117,40 @@ export const useContentStore = defineStore("content", () => {
       // A refresh owns catalog loading; a user selection owns the detail view.
       if (selectionVersion !== selectionRequest) return;
       entries.value = nextEntries;
+      // Any refresh that starts while a branch switch is unapplied applies it (fs events race it).
+      const branch = switchedTo;
       if (openedEntry && canRefreshEntry && !selectionPending) {
+        if (branch !== null) { await followBranch(id, branch, openedEntry, () => version === refreshRequest && selectionVersion === selectionRequest); return; }
         if (dirty.value) { changedOnDisk.value = true; return; }
         const next = await daemon.api.contentEntry(id, openedEntry.collection, openedEntry.id);
         if (version !== refreshRequest || selectionVersion !== selectionRequest || dirty.value) return;
         loadEntry(next);
-      }
+      } else if (!openedEntry && branch !== null && switchedTo === branch) switchedTo = null;
     } catch (e) { if (version === refreshRequest && selectionVersion === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === refreshRequest) loading.value = false; }
+  }
+  /**
+   * Re-read the open entry on `branch` after a switch. A clean entry reloads, or closes when the
+   * branch does not have it. A draft is never discarded or replaced: the same draft object follows
+   * the switch when `branch` has the very entry it was loaded from, and is otherwise flagged.
+   */
+  async function followBranch(id: string, branch: string, opened: ContentEntry, current: () => boolean) {
+    let next: ContentEntry | null = null;
+    try { next = await daemon.api.contentEntry(id, opened.collection, opened.id); }
+    catch (e) { if (!(e instanceof ApiError && e.code === "ENOENT")) throw e; }
+    if (!current() || entry.value !== opened) return;
+    if (switchedTo === branch) switchedTo = null;
+    if (!dirty.value) {
+      if (next) loadEntry(next);
+      else { releaseImages(); entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState(); }
+    } else if (next && next.branch === branch && next.hash === opened.hash) { entry.value = next; changedOnDisk.value = false; }
+    else changedOnDisk.value = true;
+  }
+  /** After the project switched to `branch` (change created or switched): reload Content from it. */
+  async function refreshForBranch(branch: string) {
+    if (!projectId.value) return;
+    switchedTo = branch;
+    await refresh();
   }
   async function selectCollection(name: string) {
     if (!canLeave()) return;
@@ -251,5 +282,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(() => void refresh()),
   ];
   onScopeDispose(() => offs.forEach(off => off()));
-  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
+  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
 });
