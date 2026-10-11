@@ -200,3 +200,61 @@ async fn required_unsupported_schema_is_read_only() {
     );
     assert!(collections[0].reason.as_deref().unwrap().contains("schema"));
 }
+
+/// A fake helper that logs each run and reports one collection named `name`.
+fn counting_helper(root: &Path, name: &str) {
+    std::fs::create_dir_all(root.join("scripts")).unwrap();
+    std::fs::write(
+        root.join("scripts/workbench-content.mjs"),
+        format!("import {{appendFileSync}} from 'node:fs'; appendFileSync('runs.log','run\\n'); console.log(JSON.stringify({{collections:[{{name:'{name}',loader:{{base:'posts',pattern:'*.md'}},kind:'markdown'}}]}}))"),
+    )
+    .unwrap();
+}
+fn runs(root: &Path) -> usize {
+    std::fs::read_to_string(root.join("runs.log"))
+        .map(|log| log.lines().count())
+        .unwrap_or(0)
+}
+fn set_mtime(path: &Path, time: std::time::SystemTime) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
+}
+#[tokio::test]
+async fn collections_use_one_helper_run_and_are_cached_until_schema_inputs_change() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let script = root.join("scripts/workbench-content.mjs");
+    let schemas = root.join("src/content-schemas.mjs");
+    let config = root.join("src/content.config.ts");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(&schemas, "export {}").unwrap();
+    counting_helper(root, "first");
+    let written = std::fs::metadata(&script).unwrap().modified().unwrap();
+
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "first");
+    assert_eq!(runs(root), 1, "list and describe share one helper run");
+    // Cache hit: same mtimes, so a rewritten helper is not consulted.
+    counting_helper(root, "second");
+    set_mtime(&script, written);
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "first");
+    assert_eq!(runs(root), 1);
+
+    // Each schema input invalidates the cache when its mtime changes.
+    let later = written + std::time::Duration::from_secs(5);
+    set_mtime(&schemas, later);
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "second");
+    assert_eq!(runs(root), 2);
+    std::fs::write(&config, "export const collections = {}").unwrap();
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "second");
+    assert_eq!(runs(root), 3, "a new content.config.ts invalidates");
+    counting_helper(root, "third");
+    set_mtime(&script, later + std::time::Duration::from_secs(5));
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
+    assert_eq!(runs(root), 4);
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
+    assert_eq!(runs(root), 4);
+}

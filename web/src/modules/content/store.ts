@@ -21,6 +21,14 @@ export interface ContentLifecycle {
 }
 
 const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
+/** File events within this window coalesce into one trailing refresh. */
+export const REFRESH_DELAY_MS = 250;
+const CONTENT_FILES = ["src/content-schemas.mjs", "src/content.config.ts", "scripts/workbench-content.mjs"];
+/** Whether a changed project path can change the catalog or an entry; "" is the watcher's overflow. */
+export function affectsContent(path: string): boolean {
+  return path === "" || CONTENT_FILES.includes(path)
+    || ["src/content", "src/assets"].some(dir => path === dir || path.startsWith(`${dir}/`));
+}
 
 export const useContentStore = defineStore("content", () => {
   const daemon = useDaemon();
@@ -98,8 +106,38 @@ export const useContentStore = defineStore("content", () => {
     if (entry.value) loadEntry(entry.value);
     return true;
   }
+  /** Whether the Content panel is mounted; file events refresh only while it is. */
+  let active = false;
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleRefresh() {
+    if (!active || !projectId.value) return;
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { refreshTimer = null; void refresh(); }, REFRESH_DELAY_MS);
+  }
+  /** The Content panel unmounted: stop following file events until it opens a project again. */
+  function suspend() {
+    active = false;
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+  }
+  /** Show `id`; reopening the same project after a suspend refreshes it once. */
+  /**
+   * Reset the draft to the loaded entry, after confirming when pending images would be lost.
+   * Not a fresh read: a Create Change target and an unapplied branch switch are kept, and a
+   * stale entry is re-read by a refresh once it is clean.
+   */
+  function discard(): boolean {
+    const e = entry.value; if (!e || !dirty.value) return true;
+    const images = pendingImages.value.length;
+    if (images && !window.confirm(`Discard your changes and ${images === 1 ? "the image" : `${images} images`} not saved yet?`)) return false;
+    const stale = changedOnDisk.value, target = targetBranch, switched = switchedTo;
+    loadEntry(e);
+    targetBranch = target; switchedTo = switched;
+    if (stale) void refresh();
+    return true;
+  }
   async function open(id: string) {
-    if (id === projectId.value) return;
+    const resumed = !active; active = true;
+    if (id === projectId.value) { if (resumed) await refresh(); return; }
     if (!canLeave()) return;
     ++selectionRequest;
     ++refreshRequest;
@@ -107,9 +145,26 @@ export const useContentStore = defineStore("content", () => {
     releaseImages();
     switchedTo = null;
     targetBranch = null;
+    referenceEntries.value = {};
     projectId.value = id; selectedCollection.value = null; entry.value = null; lifecycle.value = null; entries.value = []; collections.value = [];
     draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; changedOnDisk.value = false; clearSaveState();
     await refresh();
+  }
+  /** Entry ids per target collection for reference pickers, reloaded in place by each refresh. */
+  const referenceEntries = ref<Record<string, string[]>>({});
+  const referenceLoads = new Set<string>();
+  async function fetchReferenceEntries(collection: string) {
+    const id = projectId.value;
+    if (!id || referenceLoads.has(collection)) return;
+    referenceLoads.add(collection);
+    try {
+      const listed = await daemon.api.listContentEntries(id, collection);
+      if (projectId.value === id) referenceEntries.value = { ...referenceEntries.value, [collection]: listed.map(e => e.id) };
+    } catch { /* the picker keeps its last list or stays free text; the daemon checks references on save */ }
+    finally { referenceLoads.delete(collection); }
+  }
+  async function loadReferenceEntries(collection: string) {
+    if (!referenceEntries.value[collection]) await fetchReferenceEntries(collection);
   }
   async function refresh() {
     const id = projectId.value;
@@ -126,6 +181,7 @@ export const useContentStore = defineStore("content", () => {
       const nextEntries = name ? await daemon.api.listContentEntries(id, name) : [];
       if (version !== refreshRequest) return;
       collections.value = nextCollections;
+      for (const target of Object.keys(referenceEntries.value)) void fetchReferenceEntries(target);
       // A refresh owns catalog loading; a user selection owns the detail view.
       if (selectionVersion !== selectionRequest) return;
       entries.value = nextEntries;
@@ -331,10 +387,10 @@ export const useContentStore = defineStore("content", () => {
     catch (err) { saveError.value = errorMessage(err); }
   }
   const offs = [
-    daemon.on("fs.change", (e) => { if(e.projectId === projectId.value) void refresh(); }),
-    daemon.on("events.lagged", () => void refresh()),
-    daemon.onReconnected(() => void refresh()),
+    daemon.on("fs.change", (e) => { if (e.projectId === projectId.value && affectsContent(e.path)) scheduleRefresh(); }),
+    daemon.on("events.lagged", scheduleRefresh),
+    daemon.onReconnected(scheduleRefresh),
   ];
-  onScopeDispose(() => offs.forEach(off => off()));
-  return { pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
+  onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
 });

@@ -32,6 +32,8 @@ pub const MAX_IMAGES: usize = 20;
 pub const TOKEN_PREFIX: &str = "workbench-image:";
 const STAGING: &str = ".git/workbench-staging";
 const TEMP_SUFFIX: &str = ".workbench-tmp";
+/// Suffix of an asset folder a delete set aside (`.<id>.<pid>-<n>.workbench-trash`).
+pub(super) const TRASH_SUFFIX: &str = ".workbench-trash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -645,7 +647,8 @@ impl Prepared {
 
 // ---- Crash leftovers --------------------------------------------------------------------------
 
-/// Remove staging directories and temporary files a crashed operation left behind. Runs
+/// Remove staging directories, temporary files, and set-aside trash folders that a crashed
+/// or partly failed operation left behind. Runs
 /// under the project's content lock, so nothing found is in use. Best effort: a failure is
 /// logged and the operation continues.
 pub(super) fn cleanup_orphans(root: &Path) {
@@ -655,7 +658,10 @@ pub(super) fn cleanup_orphans(root: &Path) {
             let meta = std::fs::symlink_metadata(e.path())?;
             let name = e.file_name();
             let name = name.to_string_lossy();
-            if meta.is_dir() && !meta.file_type().is_symlink() && depth < 16 {
+            if meta.is_dir() && name.starts_with('.') && name.ends_with(TRASH_SUFFIX) {
+                // symlink_metadata never reports a symlink as a dir: only a real folder goes.
+                std::fs::remove_dir_all(e.path())?;
+            } else if meta.is_dir() && !meta.file_type().is_symlink() && depth < 16 {
                 sweep(&e.path(), depth + 1)?;
             } else if meta.is_file() && name.starts_with('.') && name.ends_with(TEMP_SUFFIX) {
                 std::fs::remove_file(e.path())?;

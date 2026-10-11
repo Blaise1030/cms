@@ -153,3 +153,31 @@ it("offers no rename or delete for the site singleton or the home page", async (
   expect(w.find('[data-testid="content-rename"]').exists()).toBe(false);
   expect(w.find('[data-testid="content-delete"]').exists()).toBe(false);
 });
+
+it("offers Discard beside the blocked message and resets the draft to the loaded entry", async () => {
+  await setup();
+  await w.get('[data-testid="field-title"]').setValue("Mine");
+  await w.get('[data-testid="content-discard"]').trigger("click"); await flushPromises();
+  const store = useContentStore();
+  expect(store.dirty).toBe(false);
+  expect((w.get('[data-testid="field-title"]').element as HTMLInputElement).value).toBe("Welcome");
+  expect(w.find('[data-testid="content-discard"]').exists()).toBe(false);
+  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
+});
+
+it("confirms before Discard drops pending images", async () => {
+  await setup();
+  const store = useContentStore();
+  const revoke = vi.fn(); vi.stubGlobal("URL", Object.assign(URL, { revokeObjectURL: revoke }));
+  const image = { clientId: "c1", file: new File(["x"], "a.png", { type: "image/png" }), alt: "A", filename: "a.png", previewUrl: "blob:preview-1" };
+  store.addImage(image); store.draftFields = { ...store.draftFields, title: "blob:preview-1" }; await flushPromises();
+  const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
+  await w.get('[data-testid="content-discard"]').trigger("click"); await flushPromises();
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(store.dirty).toBe(true); expect(store.pendingImages).toHaveLength(1);
+  confirm.mockReturnValue(true);
+  await w.get('[data-testid="content-discard"]').trigger("click"); await flushPromises();
+  expect(store.dirty).toBe(false); expect(store.pendingImages).toHaveLength(0);
+  expect(revoke).toHaveBeenCalledWith("blob:preview-1");
+  vi.unstubAllGlobals();
+});

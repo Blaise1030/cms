@@ -571,3 +571,70 @@ async fn unrelated_staged_and_unstaged_changes_survive_a_save() {
     assert_eq!(git_cli(&e.dir, &["diff", "--cached", "--binary"]), staged);
     assert_eq!(git_cli(&e.dir, &["diff", "--binary"]), unstaged);
 }
+
+#[tokio::test]
+async fn dangling_and_empty_references_are_refused_without_writes() {
+    let e = env(true).await;
+    let branch = git_cli(&e.dir, &["branch", "--show-current"]);
+    let home = read(&e, "pages", "home").await;
+    let before = std::fs::read(e.dir.join("src/content/pages/home.json")).unwrap();
+    for (sections, path, needle) in [
+        (json!(["hero", "faqs"]), json!(["sections", 1]), "faqs"),
+        (json!(["hero", ""]), json!(["sections", 1]), "Choose"),
+    ] {
+        let (s, v) = call(
+            &e.app,
+            "PUT",
+            "/api/content/entry",
+            Some(json!({"project":e.id,"collection":"pages","id":"home","branch":branch,"hash":home["hash"],"fields":{"sections":sections}})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+        assert_eq!(v["error"]["reason"], "invalid_schema");
+        assert_eq!(v["error"]["details"][0]["path"], path, "{v}");
+        assert!(
+            v["error"]["details"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains(needle),
+            "{v}"
+        );
+        assert_eq!(
+            std::fs::read(e.dir.join("src/content/pages/home.json")).unwrap(),
+            before
+        );
+    }
+    // A new entry is checked too: relatedPosts must name existing posts.
+    let mut fields = post_fields();
+    fields["relatedPosts"] = json!(["welcome", "missing-post"]);
+    let (s, v) = call(
+        &e.app,
+        "POST",
+        "/api/content/entry",
+        Some(post(&e, &branch, "blog", "related", fields.clone(), "")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
+    assert_eq!(v["error"]["details"][0]["path"], json!(["relatedPosts", 1]));
+    assert!(!e.dir.join("src/content/blog/en/related.md").exists());
+    assert_eq!(git_cli(&e.dir, &["status", "--porcelain"]), "");
+
+    // Existing targets save.
+    fields["relatedPosts"] = json!(["welcome"]);
+    let (s, v) = call(
+        &e.app,
+        "POST",
+        "/api/content/entry",
+        Some(post(&e, &branch, "blog", "related", fields, "")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = call(
+        &e.app,
+        "PUT",
+        "/api/content/entry",
+        Some(json!({"project":e.id,"collection":"pages","id":"home","branch":branch,"hash":home["hash"],"fields":{"sections":["hero","faq"]}})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+}

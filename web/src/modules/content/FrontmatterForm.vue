@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, inject, ref } from "vue";
+import { computed, inject, ref, watchEffect } from "vue";
 import type { FieldDescriptor } from "@/core/types";
 import ImageDialog, { IMAGE_REGISTRY, type PendingImage } from "./ImageDialog.vue";
+import { REFERENCE_ENTRIES } from "./references";
 
 defineOptions({ name: "FrontmatterForm" });
 const props = withDefaults(defineProps<{
@@ -65,6 +66,13 @@ function chooseImage(image: PendingImage) {
   set(image.previewUrl);
   emit("image", { value: image.previewUrl, alt: image.alt });
 }
+
+// Reference fields choose among the target collection's entries; without them, free text.
+const references = inject(REFERENCE_ENTRIES, null);
+const referenceIds = computed(() => props.descriptor.type === "reference" && props.descriptor.collection ? references?.entries(props.descriptor.collection) : undefined);
+watchEffect(() => { if (props.descriptor.type === "reference" && props.descriptor.collection && references && referenceIds.value === undefined) references.load(props.descriptor.collection); });
+/** A saved value that names no current entry stays selectable so it is visible, not silently changed. */
+const missingReference = computed(() => typeof props.modelValue === "string" && props.modelValue !== "" && !!referenceIds.value && !referenceIds.value.includes(props.modelValue) ? props.modelValue : null);
 
 function setItem(index: number, value: unknown) {
   set(listValue.value.map((item, i) => (i === index ? value : item)));
@@ -143,6 +151,11 @@ const box = "w-full rounded-md border bg-background px-2 py-1 text-sm";
       </template>
     </fieldset>
 
+    <select v-else-if="descriptor.type === 'reference' && referenceIds" :id="id" :data-testid="id" :class="box" :value="(modelValue as string | undefined) ?? ''" @change="setText">
+      <option value="" :disabled="!optional">{{ optional ? "Not set" : `Choose a ${descriptor.collection} entry` }}</option>
+      <option v-for="entryId in referenceIds" :key="entryId" :value="entryId">{{ entryId }}</option>
+      <option v-if="missingReference" :value="missingReference">{{ missingReference }} (missing)</option>
+    </select>
     <input v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" :class="box" :placeholder="`${descriptor.collection} entry`" :value="modelValue as string | undefined" @input="setText" />
     <div v-else-if="descriptor.type === 'image'" class="flex items-center gap-2">
       <img v-if="pendingPreview" :src="modelValue as string" alt="" class="h-10 w-10 shrink-0 rounded border object-cover" :data-testid="`${id}-preview`" />

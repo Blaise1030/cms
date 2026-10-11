@@ -108,24 +108,28 @@ pub(super) fn relative(from: &str, to: &str) -> String {
     parts.join("/")
 }
 
-/// Leaf visitor: `(descriptor, value, dotted field path)` → optional replacement.
-type Visit<'a> = dyn FnMut(&Value, &Value, &[String]) -> Option<Value> + 'a;
+/// Leaf visitor: `(descriptor, value, path)` → optional replacement. The path holds field
+/// names as strings and array indexes as numbers.
+type Visit<'a> = dyn FnMut(&Value, &Value, &[Value]) -> Option<Value> + 'a;
 
-/// Walk `value` along its field descriptor, calling `visit` on every leaf with the dotted
-/// field path. Returns the rewritten value when `visit` replaced any leaf.
-fn rewrite(
-    desc: &Value,
-    value: &Value,
-    path: &mut Vec<String>,
-    visit: &mut Visit,
-) -> Option<Value> {
+/// The dotted field name of a leaf path, without array indexes.
+fn field_name(path: &[Value]) -> String {
+    path.iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Walk `value` along its field descriptor, calling `visit` on every leaf with its path.
+/// Returns the rewritten value when `visit` replaced any leaf.
+fn rewrite(desc: &Value, value: &Value, path: &mut Vec<Value>, visit: &mut Visit) -> Option<Value> {
     match desc["type"].as_str() {
         Some("object") => {
             let (obj, props) = (value.as_object()?, desc["properties"].as_object()?);
             let mut out: Option<Map<String, Value>> = None;
             for (key, field) in props {
                 let Some(item) = obj.get(key) else { continue };
-                path.push(key.clone());
+                path.push(Value::from(key.as_str()));
                 if let Some(next) = rewrite(field, item, path, visit) {
                     out.get_or_insert_with(|| obj.clone())
                         .insert(key.clone(), next);
@@ -138,9 +142,11 @@ fn rewrite(
             let items = value.as_array()?;
             let mut out: Option<Vec<Value>> = None;
             for (i, item) in items.iter().enumerate() {
+                path.push(Value::from(i));
                 if let Some(next) = rewrite(&desc["items"], item, path, visit) {
                     out.get_or_insert_with(|| items.clone())[i] = next;
                 }
+                path.pop();
             }
             out.map(Value::Array)
         }
@@ -165,6 +171,70 @@ fn changed_fields(old: &Value, new: Option<Value>) -> Map<String, Value> {
     new.into_iter()
         .filter(|(k, v)| old.get(k) != Some(v))
         .collect()
+}
+
+/// Refuse `fields` of `collection/id` when a reference leaf does not name an existing entry
+/// of its target collection (an empty string included): a dangling reference fails the
+/// site build. Issues use the helper's `invalid_schema` `{path, message}` shape.
+pub(super) async fn check_references(
+    root: &Path,
+    collection: &catalog::ContentCollection,
+    id: &str,
+    fields: &Value,
+) -> Result<(), ApiError> {
+    let mut leaves: Vec<(Vec<Value>, String, Value)> = vec![];
+    rewrite(
+        &collection.fields,
+        fields,
+        &mut vec![],
+        &mut |desc, value, path| {
+            if desc["type"] == "reference" {
+                let target = desc["collection"].as_str().unwrap_or_default().to_string();
+                leaves.push((path.to_vec(), target, value.clone()));
+            }
+            None
+        },
+    );
+    if leaves.is_empty() {
+        return Ok(());
+    }
+    let collections = catalog::list_collections(root).await?;
+    let mut known: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let mut issues = vec![];
+    for (path, target, value) in leaves {
+        if !known.contains_key(&target) {
+            let mut ids = match collections.iter().find(|c| c.name == target) {
+                Some(c) => catalog::entries(root, c)
+                    .await?
+                    .into_iter()
+                    .map(|e| e.id)
+                    .collect(),
+                None => vec![],
+            };
+            // An entry may reference itself, including one being created.
+            if target == collection.name {
+                ids.push(id.to_string());
+            }
+            known.insert(target.clone(), ids);
+        }
+        let message = match value.as_str() {
+            None | Some("") => format!("Choose a {target} entry"),
+            Some(name) if !known[&target].iter().any(|id| id == name) => {
+                format!("No {target} entry named \"{name}\"")
+            }
+            Some(_) => continue,
+        };
+        issues.push(json!({ "path": path, "message": message }));
+    }
+    if issues.is_empty() {
+        return Ok(());
+    }
+    Err(
+        ApiError::badreq("Content does not match the collection schema")
+            .with_status(422)
+            .with_reason("invalid_schema")
+            .with_details(Value::Array(issues)),
+    )
 }
 
 /// Local Markdown links (`](url)`) whose target is `url`, ignoring a trailing slash,
@@ -299,7 +369,7 @@ async fn analyze(
                 if !hit {
                     return None;
                 }
-                let field = path.join(".");
+                let field = field_name(path);
                 if !hits.contains(&field) {
                     hits.push(field);
                 }
@@ -650,9 +720,10 @@ pub async fn delete_entry(state: &AppState, request: DeleteEntry) -> Result<(), 
             // Move aside rather than delete so a failed checkpoint can put it back.
             static COUNTER: AtomicU64 = AtomicU64::new(0);
             let aside = dir.with_file_name(format!(
-                ".{id}.{}-{}.workbench-trash",
+                ".{id}.{}-{}{}",
                 std::process::id(),
-                COUNTER.fetch_add(1, Ordering::Relaxed)
+                COUNTER.fetch_add(1, Ordering::Relaxed),
+                images::TRASH_SUFFIX
             ));
             std::fs::rename(&dir, &aside)?;
             journal.0.push(Undo::Move {

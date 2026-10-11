@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createRouter, createMemoryHistory, RouterView } from "vue-router";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -7,7 +7,11 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import ContentPanel from "./ContentPanel.vue";
-import { useContentStore } from "./store";
+import { REFRESH_DELAY_MS, useContentStore } from "./store";
+beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
+afterEach(() => { vi.useRealTimers(); });
+/** Emit a file event and let its debounced refresh start. */
+function fsChange(path: string) { h.daemon.emit({type:"fs.change",projectId:"p",path,kind:"modify"}); vi.advanceTimersByTime(REFRESH_DELAY_MS); }
 const entry = { collection: "blog", id: "welcome", path: "src/content/blog/en/welcome.md", kind: "markdown", source: "Original", fields: {title: "Welcome"}, body: "Original", branch: "main", hash: "abc" };
 async function setup(api: Record<string, unknown> = {}) {
  h.daemon = createFakeDaemon({ listContentCollections: async () => [{name:"blog",kind:"markdown",editable:true,reason:null}], listContentEntries: async () => [entry], contentEntry: async () => entry, ...api });
@@ -28,10 +32,10 @@ it("preserves a dirty draft on filesystem refresh and cancelled navigation", asy
  const w = await setup({ contentEntry: async () => onDisk }); await flushPromises(); const store = useContentStore();
  await store.selectCollection("blog"); await store.selectEntry("welcome"); store.draftSource = "Draft";
  // An unrelated file event does not flag the draft; a change to its file does.
- h.daemon.emit({type:"fs.change",projectId:"p",path:"notes.txt",kind:"modify"}); await flushPromises();
+ fsChange("notes.txt"); await flushPromises();
  expect(store.changedOnDisk).toBe(false);
  onDisk = {...entry, source: "Changed", hash: "def"};
- h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"}); await flushPromises();
+ fsChange(entry.path); await flushPromises();
  expect(store.draftSource).toBe("Draft"); expect(store.dirty).toBe(true); expect(store.changedOnDisk).toBe(true);
  vi.stubGlobal("confirm", vi.fn(() => false)); await store.selectCollection("blog"); expect(store.entry?.id).toBe("welcome");
  vi.unstubAllGlobals(); w.unmount();
@@ -68,9 +72,9 @@ it.each(["selection-first", "refresh-first"])("keeps the user's entry selection 
  let chosen: Promise<void>;
  if (ordering === "selection-first") {
   chosen = store.selectEntry("second");
-  h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"});
+  fsChange(entry.path);
  } else {
-  h.daemon.emit({type:"fs.change",projectId:"p",path:entry.path,kind:"modify"});
+  fsChange(entry.path);
   chosen = store.selectEntry("second");
  }
  await flushPromises(); expect(store.loading).toBe(true);

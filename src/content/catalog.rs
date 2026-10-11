@@ -3,7 +3,9 @@ use crate::{error::ApiError, fs};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentCollection {
@@ -114,38 +116,80 @@ fn required_unsupported(field: &Value) -> bool {
             .and_then(Value::as_array)
             .is_some_and(|v| v.iter().any(required_unsupported))
 }
-pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
-    match helper(project_root, "list").await {
-        Ok(mut collections) => {
-            let descriptions = helper(project_root, "describe").await;
-            for c in &mut collections {
-                let description = descriptions
-                    .as_ref()
-                    .ok()
-                    .and_then(|items| items.iter().find(|d| d.name == c.name));
-                c.fields = description.map(|d| d.fields.clone()).unwrap_or(Value::Null);
-                c.editable = matches!(
-                    c.name.as_str(),
-                    "site" | "pages" | "sections" | "blog" | "helpDocs"
-                ) && c.supported_for_editing
-                    && supported(c)
-                    && !c.fields.is_null()
-                    && !required_unsupported(&c.fields);
-                c.reason = if c.editable {
-                    None
-                } else {
-                    Some(match &descriptions {
-                        Err(error) => format!("Content helper describe unavailable: {error}"),
-                        Ok(_) => {
-                            "Unsupported collection loader or schema; content is read-only".into()
-                        }
-                    })
-                };
-            }
-            Ok(collections)
-        }
-        Err(e) => Ok(fallback(format!("Content helper unavailable: {e}"))),
+/// Apply editability and the read-only reason from the helper's descriptions.
+fn finish(
+    mut collections: Vec<ContentCollection>,
+    describe_error: Option<&ApiError>,
+) -> Vec<ContentCollection> {
+    for c in &mut collections {
+        c.editable = matches!(
+            c.name.as_str(),
+            "site" | "pages" | "sections" | "blog" | "helpDocs"
+        ) && c.supported_for_editing
+            && supported(c)
+            && !c.fields.is_null()
+            && !required_unsupported(&c.fields);
+        c.reason = if c.editable {
+            None
+        } else {
+            Some(match describe_error {
+                Some(error) => format!("Content helper describe unavailable: {error}"),
+                None => "Unsupported collection loader or schema; content is read-only".into(),
+            })
+        };
     }
+    collections
+}
+/// Files whose modification times decide whether a cached catalog is still current.
+const CATALOG_INPUTS: [&str; 3] = [
+    "src/content-schemas.mjs",
+    "src/content.config.ts",
+    super::helper::SCRIPT,
+];
+type CatalogKey = [Option<std::time::SystemTime>; 3];
+type CatalogCache = HashMap<PathBuf, (CatalogKey, Vec<ContentCollection>)>;
+static CATALOG: LazyLock<Mutex<CatalogCache>> = LazyLock::new(Default::default);
+fn catalog_key(root: &Path) -> CatalogKey {
+    // symlink_metadata: replacing an input with a link also changes the key.
+    CATALOG_INPUTS.map(|path| {
+        std::fs::symlink_metadata(root.join(path))
+            .and_then(|m| m.modified())
+            .ok()
+    })
+}
+/// The catalog with field descriptors. One `describe` helper run serves both the
+/// collection list and the fields; complete results are cached per project until a schema
+/// input's mtime changes, so file events do not spawn Node for an unchanged catalog.
+pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
+    let key = catalog_key(project_root);
+    let cached = CATALOG
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(project_root)
+        .filter(|(k, _)| *k == key)
+        .map(|(_, collections)| collections.clone());
+    if let Some(collections) = cached {
+        return Ok(collections);
+    }
+    let collections = match helper(project_root, "describe").await {
+        Ok(described) => {
+            let collections = finish(described, None);
+            CATALOG
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(project_root.to_path_buf(), (key, collections.clone()));
+            collections
+        }
+        // Not cached: a helper without `describe`, or a transient failure, lists read-only.
+        Err(describe_error) => match helper(project_root, "list").await {
+            Ok(mut listed) => {
+                listed.iter_mut().for_each(|c| c.fields = Value::Null);
+                finish(listed, Some(&describe_error))
+            }
+            Err(e) => fallback(format!("Content helper unavailable: {e}")),
+        },
+    };
+    Ok(collections)
 }
 pub(crate) async fn collection(root: &Path, name: &str) -> Result<ContentCollection, ApiError> {
     list_collections(root)

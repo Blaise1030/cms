@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 
-const SCRIPT: &str = "scripts/workbench-content.mjs";
+pub(crate) const SCRIPT: &str = "scripts/workbench-content.mjs";
 
 /// Send one request. The outer error means the helper could not run; the inner error is
 /// the helper's own refusal message (stderr of a failed request).

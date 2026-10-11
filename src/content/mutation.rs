@@ -434,6 +434,17 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
         (Some(old), mode, source)
     };
 
+    // Every reference in the saved entry must name an existing entry of its target.
+    let saved = catalog::build_entry(
+        c.name.clone(),
+        id.clone(),
+        rel.clone(),
+        &c.kind,
+        source.clone(),
+        String::new(),
+    );
+    super::lifecycle::check_references(&root, &c, &id, &saved.fields).await?;
+
     // Re-verify immediately before mutating: the helper ran outside git's view.
     require_content_change(&root, &request.branch).await?;
     if created {

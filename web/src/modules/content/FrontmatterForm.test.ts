@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { reactive } from "vue";
 import { mount } from "@vue/test-utils";
 import FrontmatterForm from "./FrontmatterForm.vue";
+import { REFERENCE_ENTRIES } from "./references";
 import type { FieldDescriptor } from "@/core/types";
 
 const str: FieldDescriptor = { type: "string", required: true };
@@ -70,4 +72,24 @@ it("shows validation messages under the field path", () => {
   const w = mount(FrontmatterForm, { props: { descriptor, modelValue: value(), errors: { "section.heading": "Required", title: "Too short" } } });
   expect(w.get('[data-testid="field-title-error"]').text()).toBe("title: Too short");
   expect(w.get('[data-testid="field-section.heading-error"]').text()).toContain("section.heading: Required");
+});
+
+it("offers existing target entries for reference fields and keeps a missing value visible", async () => {
+  const loaded = reactive<Record<string, string[]>>({});
+  const load = vi.fn((collection: string) => { loaded[collection] = ["welcome", "launch-week"]; });
+  const w = mount(FrontmatterForm, {
+    props: { descriptor, modelValue: { ...value(), related: ["welcome", "", "gone"] }, errors: {}, "onUpdate:modelValue": (v: unknown) => w.setProps({ modelValue: v }) },
+    global: { provide: { [REFERENCE_ENTRIES as symbol]: { entries: (c: string) => loaded[c], load } } },
+  });
+  await w.vm.$nextTick();
+  expect(load).toHaveBeenCalledWith("blog");
+  const picker = w.get('[data-testid="field-related.0"]');
+  expect(picker.element.tagName).toBe("SELECT");
+  const options = (id: string) => w.get(`[data-testid="${id}"]`).findAll("option").map(o => [o.attributes("value"), o.text()]);
+  expect(options("field-related.0")).toEqual([["", "Choose a blog entry"], ["welcome", "welcome"], ["launch-week", "launch-week"]]);
+  expect((w.get('[data-testid="field-related.1"]').element as HTMLSelectElement).value).toBe("");
+  expect(options("field-related.2")).toContainEqual(["gone", "gone (missing)"]);
+  expect((w.get('[data-testid="field-related.2"]').element as HTMLSelectElement).value).toBe("gone");
+  await w.get('[data-testid="field-related.1"]').setValue("launch-week");
+  expect((w.props("modelValue") as { related: string[] }).related).toEqual(["welcome", "launch-week", "gone"]);
 });

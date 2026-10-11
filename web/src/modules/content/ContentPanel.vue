@@ -15,6 +15,7 @@ import { slugify, startingFields } from "./create";
 import { entryAssetPath } from "./markdown";
 import { useContentStore } from "./store";
 import { IMAGE_REGISTRY } from "./ImageDialog.vue";
+import { REFERENCE_ENTRIES } from "./references";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string}>();
@@ -23,6 +24,7 @@ const changes = useChangesStore();
 const daemon = useDaemon();
 // Images inserted by the form or body editor stay pending in the draft until Save.
 provide(IMAGE_REGISTRY, { add: image => store.addImage(image) });
+provide(REFERENCE_ENTRIES, { entries: collection => store.referenceEntries[collection], load: collection => void store.loadReferenceEntries(collection) });
 watch(() => props.projectId, id => void store.open(id), {immediate:true});
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
@@ -83,7 +85,8 @@ const differences = computed(() => {
 const show = (v: unknown) => v === undefined ? "(not set)" : typeof v === "string" ? v : JSON.stringify(v);
 function beforeUnload(event: BeforeUnloadEvent) { if(store.dirty) { event.preventDefault(); event.returnValue = ""; } }
 onMounted(() => window.addEventListener("beforeunload", beforeUnload));
-onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
+// File events stop refreshing Content while the tab is closed; reopening it refreshes once.
+onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
 </script>
 <template>
   <div class="flex h-full min-h-0" data-testid="content-panel">
@@ -116,7 +119,10 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <div v-if="canRemove" class="mb-4 flex gap-2">
           <Button type="button" variant="outline" size="sm" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')">Rename</Button>
           <Button type="button" variant="outline" size="sm" data-testid="content-delete" :disabled="store.dirty" @click="store.startLifecycle('delete')">Delete</Button>
-          <span v-if="store.dirty" class="self-center text-xs text-muted-foreground" data-testid="content-lifecycle-blocked">Save or discard your changes first</span>
+          <template v-if="store.dirty">
+            <span class="self-center text-xs text-muted-foreground" data-testid="content-lifecycle-blocked">Save or discard your changes first</span>
+            <Button type="button" variant="ghost" size="sm" data-testid="content-discard" @click="store.discard()">Discard</Button>
+          </template>
         </div>
         <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">

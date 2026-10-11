@@ -638,6 +638,14 @@ async fn orphan_staging_and_temp_files_are_cleaned_on_the_next_operation() {
     // A file the writer owns that merely looks similar stays.
     let keep = assets.join("notes.workbench-tmp.png");
     std::fs::write(&keep, "keep").unwrap();
+    // A delete whose set-aside asset folder could not be removed leaves it behind.
+    let trash = e
+        .dir
+        .join("src/assets/blog/.old-post.99999-0.workbench-trash");
+    std::fs::create_dir_all(trash.join("nested")).unwrap();
+    std::fs::write(trash.join("nested/photo.png"), PNG).unwrap();
+    let keep_dir = e.dir.join("src/assets/blog/kept.workbench-trash");
+    std::fs::create_dir_all(&keep_dir).unwrap();
 
     // The next content operation is an ordinary JSON save without images.
     let opened = read(&e, "blog", "welcome").await;
@@ -653,10 +661,15 @@ async fn orphan_staging_and_temp_files_are_cleaned_on_the_next_operation() {
         .unwrap();
     let (s, v) = send(&e.app, req).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert!(v.get("images").is_none(), "JSON saves keep the plain entry shape");
+    assert!(
+        v.get("images").is_none(),
+        "JSON saves keep the plain entry shape"
+    );
     assert!(staging_is_empty(&e.dir));
     assert!(!entry_tmp.exists());
     assert!(!asset_tmp.exists());
     assert!(keep.exists());
+    assert!(!trash.exists());
+    assert!(keep_dir.exists());
     let _ = &e.tmp;
 }
