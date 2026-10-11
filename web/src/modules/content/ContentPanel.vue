@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -9,6 +9,8 @@ import type { Change } from "@/core/types";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { sameValue } from "./draft";
 import { useContentStore } from "./store";
+// Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
+const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string}>();
 const store = useContentStore();
 watch(() => props.projectId, id => void store.open(id), {immediate:true});
@@ -75,9 +77,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">
           <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
-          <label v-if="store.entry.kind !== 'json'" class="mb-3 block text-xs font-medium">Body
-            <textarea v-model="store.draftBody" data-testid="content-body" rows="12" class="mt-1 w-full rounded-md border bg-background px-2 py-1 font-mono text-sm" />
-          </label>
+          <MarkdownBodyEditor v-if="store.entry.kind !== 'json'" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind" :rich="store.richBody" @change="store.setBody($event.body)" />
           <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
           <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
             <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>

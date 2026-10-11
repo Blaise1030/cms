@@ -13,6 +13,8 @@ export interface ContentLifecycle {
   impact: ContentImpact | null; slug: string; busy: boolean; error: string | null;
 }
 
+const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
+
 export const useContentStore = defineStore("content", () => {
   const daemon = useDaemon();
   const projectId = ref("");
@@ -39,6 +41,10 @@ export const useContentStore = defineStore("content", () => {
     const c = collections.value.find(x => x.name === entry.value?.collection);
     return c?.editable && c.fields?.type === "object" ? c.fields : null;
   });
+  /** Blog and Help docs Markdown bodies get the rich editor; every other body (section MDX included) stays raw. */
+  const richBody = computed(() => !!entry.value && entry.value.kind === "markdown" && RICH_BODY_COLLECTIONS.includes(entry.value.collection));
+  /** Body text from the body editor; it only reports real edits, so opening an entry never dirties it. */
+  function setBody(body: string) { draftBody.value = body; }
   const pending = computed(() => entry.value ? diffDraft(entry.value, draftFields.value, draftBody.value, descriptor.value) : null);
   const dirty = computed(() => !!entry.value && (draftSource.value !== entry.value.source || !!pending.value?.changed));
   function clearSaveState() { saveError.value = null; fieldErrors.value = {}; conflict.value = null; needsChange.value = false; current.value = null; }
@@ -210,5 +216,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(() => void refresh()),
   ];
   onScopeDispose(() => offs.forEach(off => off()));
-  return { projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
+  return { projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle };
 });

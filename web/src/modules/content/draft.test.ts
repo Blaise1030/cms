@@ -5,6 +5,7 @@ import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
+import { EditorView } from "@codemirror/view";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import ContentPanel from "./ContentPanel.vue";
@@ -28,10 +29,20 @@ async function setup(api: Record<string, unknown> = {}, loaded = entry()) {
   await flushPromises();
   await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
   await w.get('[data-testid="content-entry"]').trigger("click"); await flushPromises();
+  // The body editor is an async chunk.
+  if (loaded.kind !== "json") await vi.waitFor(() => w.get('[data-testid="body-editor"]'));
+  await flushPromises();
   return w;
 }
 beforeEach(() => { document.body.innerHTML = ""; });
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); });
+/** Replace the body through the editor's Raw Markdown view, as a writer would. */
+async function typeBody(text: string) {
+  if (w.find('[data-testid="body-mode-raw"]').exists()) { await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises(); }
+  const view = EditorView.findFromDOM(w.get('[data-testid="body-raw"] .cm-editor').element as HTMLElement)!;
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: "input.type" });
+  await flushPromises();
+}
 const update = () => (h.daemon.api as unknown as { updateContentEntry: ReturnType<typeof vi.fn> }).updateContentEntry;
 
 it("saves only on explicit Save, sending just the changed fields and the opened branch and hash", async () => {
@@ -47,7 +58,7 @@ it("saves only on explicit Save, sending just the changed fields and the opened 
 it("sends cleared optional fields in unset and a changed body", async () => {
   await setup();
   await w.get('[data-testid="field-subtitle"]').setValue("");
-  await w.get('[data-testid="content-body"]').setValue("New body");
+  await typeBody("New body");
   await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises();
   expect(update()).toHaveBeenCalledWith(expect.objectContaining({ fields: {}, unset: ["subtitle"], body: "New body" }));
 });
@@ -154,4 +165,25 @@ it("keeps the draft and reports the new branch when the resumed save conflicts",
   expect(w.get('[data-testid="content-compare-table"]').text()).toMatch(/title\s*Mine\s*Disk/);
   await w.get('[data-testid="content-reload"]').trigger("click"); await flushPromises();
   expect(useContentStore().entry?.branch).toBe("content/new");
+});
+
+it("opens and toggles a Blog body without dirtying the draft, then saves a body edit", async () => {
+  await setup({}, entry({ body: "Intro\n\n* one\n" }));
+  expect(w.find('[data-testid="body-rich"]').exists()).toBe(true);
+  await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises();
+  await w.get('[data-testid="body-mode-rich"]').trigger("click"); await flushPromises();
+  expect(useContentStore().dirty).toBe(false);
+  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
+  await typeBody("Intro\n\n* one\n* two\n");
+  expect(useContentStore().dirty).toBe(true);
+  await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises();
+  expect(update()).toHaveBeenCalledWith(expect.objectContaining({ fields: {}, body: "Intro\n\n* one\n* two\n" }));
+});
+
+it("keeps section MDX bodies raw-only", async () => {
+  const sections = { ...collection, name: "sections", kind: "mdx" };
+  await setup({ listContentCollections: async () => [sections] }, entry({ collection: "sections", id: "hero", kind: "mdx", body: "Plain text\n" }));
+  expect(w.find('[data-testid="body-mode-rich"]').exists()).toBe(false);
+  expect(w.find('[data-testid="body-raw"]').exists()).toBe(true);
+  expect(useContentStore().dirty).toBe(false);
 });
