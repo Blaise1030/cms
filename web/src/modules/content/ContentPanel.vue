@@ -319,7 +319,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
             </Tabs>
           </aside>
           <div class="min-w-0 flex-1 px-6 pt-8 pb-12 @3xl:order-1 @3xl:px-12">
-          <div class="mx-auto w-full max-w-3xl">
+          <div class="mx-auto w-full" :class="{ 'max-w-3xl': !history.version }">
           <VersionDiff v-if="history.version" :path="history.version.path" :old-source="history.version.source" :new-source="store.entry.source" :dirty="versionDirty" :can-restore="!restoreReason" :restore-reason="restoreReason" @back="history.select(null)" @restore="restore" />
           <MarkdownBodyEditor v-else-if="hasFieldsPanel" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
           <FrontmatterForm v-else data-testid="content-fields" :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
