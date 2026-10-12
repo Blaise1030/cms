@@ -31,7 +31,7 @@ Writers editing one content entry need to see how that entry evolved, compare an
 ### `src/git.rs`
 
 - `file_log(dir, path) -> Vec<FileVersion>` runs `git log --follow --format=%H%x1f%ct%x1f%an%x1f%s -- <path>`. `FileVersion` extends the fields of `Checkpoint` with `path`, the file's path at that commit (taken from `--name-only` so renames resolve), and `published: bool`.
-- `published` is computed with one call, `git log --follow --format=%H main -- <path>`. The result goes into a set, and a version is published when its SHA is in the set. If `main` does not exist, everything is `false`.
+- `published` is computed with one call, `git rev-list HEAD ^main`, which lists the commits that exist only on the branch. A version is published when its SHA is not in that set. If `main` does not exist, everything is `false`.
 - `file_at(dir, sha, path) -> String` validates `sha` with the existing `resolve()`, which accepts only hex SHAs reachable from HEAD. It then runs `git show <full>:<path>`. Non-UTF-8 content returns `badreq`.
 - An unborn HEAD returns an empty log, like `log()` does.
 
