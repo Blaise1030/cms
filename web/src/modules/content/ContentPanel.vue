@@ -318,7 +318,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
               </TabsContent>
             </Tabs>
           </aside>
-          <div class="min-w-0 flex-1 px-6 pt-8 pb-12 @3xl:order-1 @3xl:px-12">
+          <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">
           <div class="mx-auto w-full" :class="{ 'max-w-3xl': !history.version }">
           <VersionDiff v-if="history.version" :path="history.version.path" :old-source="history.version.source" :new-source="store.entry.source" :dirty="versionDirty" :can-restore="!restoreReason" :restore-reason="restoreReason" @back="history.select(null)" @restore="restore" />
           <MarkdownBodyEditor v-else-if="hasFieldsPanel" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
