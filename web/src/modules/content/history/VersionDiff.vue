@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from "vue";
+import { computed, defineAsyncComponent, useId } from "vue";
 import { ArrowLeft, RotateCcw } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ const props = defineProps<{
 }>();
 defineEmits<{ back: []; restore: [] }>();
 
+const reasonId = useId();
+const showReason = computed(() => !props.canRestore && !!props.restoreReason);
 const diff = computed(() =>
   props.oldSource === props.newSource ? null : versionDiff(props.path, props.oldSource, props.newSource),
 );
@@ -30,16 +32,18 @@ const diff = computed(() =>
         <ArrowLeft />
         Back to editor
       </Button>
-      <div class="flex min-w-0 items-center gap-2">
-        <span v-if="!canRestore && restoreReason" class="text-muted-foreground truncate text-xs">
-          {{ restoreReason }}
-        </span>
-        <Button size="sm" :disabled="!canRestore" data-testid="restore-version" @click="$emit('restore')">
-          <RotateCcw />
-          Restore this version
-        </Button>
-      </div>
+      <Button
+        size="sm"
+        :disabled="!canRestore"
+        :aria-describedby="showReason ? reasonId : undefined"
+        data-testid="restore-version"
+        @click="$emit('restore')"
+      >
+        <RotateCcw />
+        Restore this version
+      </Button>
     </div>
+    <p v-if="showReason" :id="reasonId" class="text-muted-foreground text-xs">{{ restoreReason }}</p>
     <Alert v-if="dirty">
       <AlertDescription>Comparing with the last saved version. Unsaved edits aren't included.</AlertDescription>
     </Alert>

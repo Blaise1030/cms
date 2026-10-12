@@ -32,12 +32,13 @@ defineEmits<{ select: [sha: string]; retry: [] }>();
       v-else
       :key="v.sha"
       type="button"
-      class="hover:bg-accent/60 aria-pressed:bg-accent flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left"
+      class="hover:bg-accent/60 aria-pressed:bg-accent focus-visible:ring-ring/50 flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left outline-none focus-visible:ring-3"
       :aria-pressed="v.sha === selectedSha"
       data-testid="history-version"
       @click="$emit('select', v.sha)"
     >
       <span
+        aria-hidden="true"
         class="border-primary mt-1.5 size-2.5 shrink-0 rounded-full border-2"
         :class="{ 'bg-primary': v.sha === selectedSha || i === 0 }"
       />
