@@ -271,6 +271,10 @@ impl TerminalManager {
         cmd.arg(exec_line(&launch.argv));
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        // The pane is a real color terminal even when the daemon was launched from a non-TTY.
+        cmd.env_remove("NO_COLOR");
+        cmd.env_remove("FORCE_COLOR");
         cmd.env("WORKBENCH_URL", format!("http://127.0.0.1:{}", config.port));
         cmd.env("WORKBENCH_PROJECT", project_id);
         cmd.env("WORKBENCH_HOOK_TOKEN", &token);

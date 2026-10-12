@@ -14,6 +14,9 @@ import { errorMessage } from "@/lib/errors";
 import DeviceCodeDialog from "./DeviceCodeDialog.vue";
 import { useGithubStore } from "./store";
 
+/** `rail`: a larger avatar, an icon-only sign-in, and a menu opening to the right, for the project sidebar. */
+defineProps<{ rail?: boolean }>();
+
 const gh = useGithubStore();
 
 const daemon = useDaemon();
@@ -50,18 +53,21 @@ async function signOut() {
   <template v-if="gh.configured || gh.user">
     <DropdownMenu v-if="gh.user">
       <DropdownMenuTrigger as-child>
-        <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs" data-testid="github-account">
-          <img :src="gh.user.avatarUrl" alt="" class="size-5 rounded-full" />
-          {{ gh.user.name || gh.user.login }}
+        <Button variant="ghost" size="icon" class="rounded-full" :class="rail ? 'size-9' : 'size-7'" :title="gh.user.name || gh.user.login" data-testid="github-account">
+          <img :src="gh.user.avatarUrl" alt="" class="rounded-full" :class="rail ? 'size-7' : 'size-5'" />
+          <span class="sr-only">{{ gh.user.name || gh.user.login }}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent :side="rail ? 'right' : 'bottom'" align="end">
         <DropdownMenuItem v-if="gh.source === 'cli'" disabled>
           Signed in with GitHub CLI (gh)
         </DropdownMenuItem>
         <DropdownMenuItem v-else @select="signOut"><LogOut /> Sign out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <Button v-else-if="gh.deviceFlow && rail" variant="ghost" size="icon" class="size-9" title="Sign in with GitHub" aria-label="Sign in with GitHub" data-testid="github-sign-in" @click="gh.signIn()">
+      <LogIn />
+    </Button>
     <Button v-else-if="gh.deviceFlow" variant="outline" size="sm" data-testid="github-sign-in" @click="gh.signIn()">
       <LogIn /> Sign in with GitHub
     </Button>

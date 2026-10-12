@@ -219,6 +219,11 @@ async fn client_routes_fall_back_to_index_but_missing_files_and_daemon_paths_404
             .unwrap()
             .starts_with("text/html"));
         assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\">"));
+        // Project routes can end in a file name (an open file in the Code tab).
+        let (status, _, body) =
+            send(req(Method::GET, "/p/some-project/code/src/pages/index.astro")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\">"));
     }
     let (status, _, _) = send(req(Method::GET, "/assets/missing-abc.js")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);

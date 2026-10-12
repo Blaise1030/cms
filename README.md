@@ -35,9 +35,9 @@ pnpm -C web dev
 
 ### Terminal providers
 
-Each project runs a coding CLI in a daemon-owned terminal (Claude Code, Codex, OpenCode, or
-your own). Provider commands come from `~/.config/workbench/agents.json` by default, or pass
-`--agents-config` to point at another file.
+Each project runs a coding CLI in a daemon-owned terminal. The built-in providers are Cursor
+CLI (`cursor-agent`), Claude (`claude`), and Codex (`codex`). Override them in
+`~/.config/workbench/agents.json`, or pass `--agents-config` to point at another file.
 
 ### Other tasks
 

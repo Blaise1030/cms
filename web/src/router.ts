@@ -21,12 +21,21 @@ export const routes: RouteRecordRaw[] = [
     children: [
       { path: "", redirect: { name: "project-preview" } },
       { path: "preview", name: "project-preview", component: ProjectPreviewPage },
-      { path: "content", name: "project-content", component: ContentPanel, props: (r) => ({projectId:r.params.id as string}) },
       {
-        path: "code",
+        path: "content/:collection?/:entry(.*)?",
+        name: "project-content",
+        component: ContentPanel,
+        props: (r) => ({
+          projectId: r.params.id as string,
+          collection: (r.params.collection as string) || undefined,
+          entry: (r.params.entry as string) || undefined,
+        }),
+      },
+      {
+        path: "code/:path(.*)?",
         name: "project-code",
         component: FilesPanel,
-        props: (r) => ({ projectId: r.params.id as string }),
+        props: (r) => ({ projectId: r.params.id as string, path: (r.params.path as string) || undefined }),
       },
       {
         path: "history",
@@ -41,6 +50,20 @@ export const routes: RouteRecordRaw[] = [
 
 export function projectPath(id: string, tab: ProjectTab = "preview") {
   return `/p/${encodeURIComponent(id)}/${tab}`;
+}
+
+/** Each segment is encoded but the slashes are kept, so nested paths read naturally in the URL. */
+const segments = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+
+export function contentPath(id: string, collection?: string | null, entry?: string | null) {
+  const base = projectPath(id, "content");
+  if (!collection) return base;
+  return entry ? `${base}/${encodeURIComponent(collection)}/${segments(entry)}` : `${base}/${encodeURIComponent(collection)}`;
+}
+
+export function codePath(id: string, path?: string | null) {
+  const base = projectPath(id, "code");
+  return path ? `${base}/${segments(path)}` : base;
 }
 
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FILE_TREE_DENSITY_PRESETS, FileTree, type GitStatus } from "@pierre/trees";
+import { TREE_SCROLL_FADE_CSS } from "@/lib/treeScrollFade";
 
 const props = withDefaults(
   defineProps<{ files: { path: string; status: GitStatus }[]; fill?: boolean }>(),
@@ -38,6 +39,7 @@ function mount() {
     density: "compact",
     initialExpansion: "open",
     flattenEmptyDirectories: true,
+    unsafeCSS: TREE_SCROLL_FADE_CSS,
     onSelectionChange: (selected) => {
       const path = selected[0];
       if (path && paths.includes(path)) emit("select", path);

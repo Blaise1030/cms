@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createRouter, createMemoryHistory, RouterView } from "vue-router";
+import { RouterView } from "vue-router";
+import { contentRouter } from "@/test/contentRouter";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-import ContentPanel from "./ContentPanel.vue";
+vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 
 const blog = { name: "blog", kind: "markdown", editable: true, reason: null, fields: { type: "object", required: true, properties: {
@@ -33,8 +34,7 @@ async function setup(api: Record<string, unknown> = {}, collection: object = blo
     ...api,
   });
   setActivePinia(createPinia());
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: ContentPanel, props: { projectId: "p" } }] });
-  await router.push("/"); await router.isReady();
+  const router = await contentRouter();
   w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body }); mounted.push(w);
   await flushPromises();
   await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
@@ -117,7 +117,8 @@ it("blocks rename and delete while the draft has unsaved edits", async () => {
   await w.get('[data-testid="field-title"]').setValue("Mine");
   expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeDefined();
   expect(w.get('[data-testid="content-delete"]').attributes("disabled")).toBeDefined();
-  expect(w.get('[data-testid="content-lifecycle-blocked"]').text()).toBe("Save or discard your changes first");
+  expect(w.get('[data-testid="content-delete"]').attributes("title")).toBe("Save or discard your changes first");
+  expect(w.get('[data-testid="content-unsaved"]').text()).toContain("Unsaved changes");
   const store = useContentStore();
   await store.startLifecycle("rename"); await store.startLifecycle("delete"); await flushPromises();
   expect(store.lifecycle).toBeNull();
@@ -127,7 +128,7 @@ it("blocks rename and delete while the draft has unsaved edits", async () => {
   // Reverting the edit re-enables both actions.
   await w.get('[data-testid="field-title"]').setValue("Welcome");
   expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
-  expect(w.find('[data-testid="content-lifecycle-blocked"]').exists()).toBe(false);
+  expect(w.find('[data-testid="content-unsaved"]').exists()).toBe(false);
 });
 
 it("resumes a rename on the new change after Create Change", async () => {

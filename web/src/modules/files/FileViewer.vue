@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
+import { FileCode } from "@lucide/vue";
 import { useFilesStore } from "./store";
 
 // CodeMirror and its language packs are large; keep them out of the main bundle.
@@ -16,12 +17,13 @@ const readyFile = computed(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="file-viewer">
-    <p
+    <div
       v-if="!store.selectedPath"
-      class="text-muted-foreground flex flex-1 items-center justify-center text-sm"
+      class="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-3 text-sm"
     >
-      Select a file to view it.
-    </p>
+      <FileCode class="size-8 opacity-50" aria-hidden="true" />
+      <p>Select a file to view it.</p>
+    </div>
     <template v-else>
       <div class="text-muted-foreground flex h-8 shrink-0 items-center px-3 font-mono text-xs">
         {{ store.selectedPath }}

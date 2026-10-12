@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRouter, createMemoryHistory, RouterView } from "vue-router";
+import { RouterView } from "vue-router";
+import { contentRouter } from "@/test/contentRouter";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { EditorView } from "@codemirror/view";
@@ -8,9 +9,9 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import ImageDialog, { IMAGE_REGISTRY, escapeAlt, type PendingImage } from "./ImageDialog.vue";
 import MarkdownBodyEditor from "./MarkdownBodyEditor.vue";
-import ContentPanel from "./ContentPanel.vue";
 import { useContentStore } from "./store";
 
 const mounted: VueWrapper[] = [];
@@ -137,19 +138,15 @@ describe("body editor image inputs", () => {
     expect(add).toHaveBeenCalledTimes(1);
   });
 
-  it("the toolbar and raw image buttons open the picker; blank alt inserts nothing", async () => {
-    const { w, last } = await editor("Hello\n", true);
-    await w.get('[data-testid="body-tool-image"]').trigger("click"); await flushPromises();
-    await pick(png());
+  it("blank alt inserts nothing; cancelling leaves the body alone", async () => {
+    const { w, last } = await editor("Hello\n", false);
+    w.get('[data-testid="body-raw"] .cm-content').element.dispatchEvent(transfer("drop", png()));
+    await flushPromises();
     await setAlt(" ");
     expect(insertButton().disabled).toBe(true);
     ($('[data-testid="image-cancel"]') as HTMLButtonElement).click(); await flushPromises();
     expect(last()).toBeUndefined();
-    await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises();
-    await w.get('[data-testid="body-raw-image"]').trigger("click"); await flushPromises();
-    await pick(png());
-    await insert("Chart");
-    expect(rawText(w)).toContain("![Chart](blob:http://localhost/preview-2)");
+    expect(rawText(w)).toBe("Hello\n");
   });
 });
 
@@ -166,8 +163,7 @@ describe("pending images in the draft", () => {
       contentEntry: async () => entry(), updateContentEntry: vi.fn(async () => entry({ hash: "h2" })), ...api,
     });
     setActivePinia(createPinia());
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: ContentPanel, props: { projectId: "p" } }] });
-    await router.push("/"); await router.isReady();
+    const router = await contentRouter();
     w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body }); mounted.push(w);
     await flushPromises();
     await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
@@ -177,9 +173,10 @@ describe("pending images in the draft", () => {
   }
   const update = () => (h.daemon.api as unknown as { updateContentEntry: ReturnType<typeof vi.fn> }).updateContentEntry;
   async function addBodyImage(alt: string) {
-    await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises();
-    await w.get('[data-testid="body-raw-image"]').trigger("click"); await flushPromises();
-    await pick(png());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (w.findComponent({ name: "MarkdownBodyEditor" }).vm as any).setMode("raw"); await flushPromises();
+    w.get('[data-testid="body-raw"] .cm-content').element.dispatchEvent(transfer("drop", png()));
+    await flushPromises();
     await insert(alt);
   }
   const save = async () => { await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises(); };
@@ -220,13 +217,15 @@ describe("pending images in the draft", () => {
 
   it("an image field fills its value and alt companion from the dialog", async () => {
     await setup();
-    await w.get('[data-testid="field-coverImage-choose"]').trigger("click"); await flushPromises();
-    await pick(png("cover.png"));
+    const upload = w.get('[data-testid="field-coverImage-uploader"] input[type="file"]');
+    Object.defineProperty(upload.element, "files", { value: [png("cover.png")], configurable: true });
+    await upload.trigger("change"); await flushPromises();
+    expect(($('[data-testid="image-preview"]') as HTMLImageElement).src).toBe("blob:http://localhost/preview-1");
     await insert("Team photo");
     const store = useContentStore();
     expect(store.draftFields.coverImage).toBe("blob:http://localhost/preview-1");
     expect(store.draftFields.coverAlt).toBe("Team photo");
-    expect(w.get('[data-testid="field-coverImage-preview"]').attributes("src")).toBe("blob:http://localhost/preview-1");
+    expect(w.get('[data-testid="field-coverImage-uploader"] img').attributes("src")).toBe("blob:http://localhost/preview-1");
     await save();
     const [body, images] = update().mock.calls[0]!;
     expect(body.fields).toEqual({ coverImage: `workbench-image:${images[0].clientId}`, coverAlt: "Team photo" });

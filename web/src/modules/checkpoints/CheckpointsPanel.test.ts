@@ -81,6 +81,22 @@ describe("CheckpointsPanel", () => {
     w.unmount();
   });
 
+  it("groups the timeline by day", async () => {
+    const w = mountPanel();
+    await flushPromises();
+    expect(w.findAll("[data-testid='checkpoint-day']")).toHaveLength(1);
+    h.daemon.emit({
+      type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: new",
+      author: "Grace", ts: Math.floor(Date.now() / 1000),
+    });
+    await flushPromises();
+    expect(w.findAll("[data-testid='checkpoint-day']").map((d) => d.text())).toEqual([
+      "Today",
+      expect.stringContaining("1970"),
+    ]);
+    w.unmount();
+  });
+
   it("prepends checkpoint.created events", async () => {
     const w = mountPanel();
     await flushPromises();

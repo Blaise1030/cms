@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import ConnectionStatus from "@/app/ConnectionStatus.vue";
 import EditorMenubar from "@/app/EditorMenubar.vue";
+import ProjectRail from "@/app/ProjectRail.vue";
 import Shell from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
@@ -23,7 +25,10 @@ const projects = useProjectsStore();
 const changes = useChangesStore();
 
 const project = computed(() => projects.projects.find((p) => p.id === props.id) ?? null);
-const showChat = computed(() => projectTabFromRoute(route.name) === "preview");
+const showChat = computed(() => {
+  const tab = projectTabFromRoute(route.name);
+  return tab === "preview" || tab === "content" || tab === "code";
+});
 
 watch(
   () => props.id,
@@ -64,15 +69,20 @@ async function toggleAutoApprove() {
 </script>
 
 <template>
-  <Shell :status="daemon.status.value" :show-chat="showChat">
+  <Shell :show-chat="showChat">
+    <template #rail>
+      <ProjectRail v-if="project" :project-id="project.id">
+        <template #footer>
+          <ConnectionStatus :status="daemon.status.value" />
+          <GithubAccount rail />
+        </template>
+      </ProjectRail>
+    </template>
     <template #menubar>
       <EditorMenubar v-if="project" :project-id="project.id" />
     </template>
     <template #actions>
       <SharePreviewButton v-if="project" :project-id="project.id" />
-    </template>
-    <template #account>
-      <GithubAccount />
     </template>
     <template #workspace>
       <Workspace v-if="project" :project="project" />

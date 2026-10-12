@@ -76,6 +76,7 @@ let api: Record<string, ReturnType<typeof vi.fn>>;
 async function mountPanel(status: { running: boolean; provider?: string } = { running: false }) {
   api = {
     terminalProviders: vi.fn(async () => [
+      { id: "cursor", command: ["cursor-agent"] },
       { id: "claude", command: ["claude"] },
       { id: "codex", command: ["codex"] },
     ]),
@@ -115,6 +116,11 @@ describe("TerminalPanel", () => {
   it("shows provider picker and starts the chosen provider", async () => {
     const w = await mountPanel();
     expect(w.find("[data-testid='terminal-panel']").exists()).toBe(true);
+    expect(w.find("[data-testid='terminal-provider']").findAll("option").map((o) => o.text())).toEqual([
+      "Cursor CLI",
+      "Claude",
+      "Codex",
+    ]);
     await w.find("[data-testid='terminal-provider']").setValue("codex");
     await w.find("[data-testid='terminal-start']").trigger("click");
     await flushPromises();
@@ -157,7 +163,7 @@ describe("TerminalPanel", () => {
     const w = await startRunning();
     h.opts.onExit(127);
     await flushPromises();
-    expect(w.find("[data-testid='terminal-ended']").text()).toContain("`claude` not found on PATH");
+    expect(w.find("[data-testid='terminal-ended']").text()).toContain("`cursor-agent` not found on PATH");
   });
 
   it("reconnects when the socket closes without an exit", async () => {

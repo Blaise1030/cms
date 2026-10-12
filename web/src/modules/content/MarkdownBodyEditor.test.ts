@@ -30,7 +30,8 @@ function typeRaw(w: VueWrapper, text: string) {
   view.dispatch({ changes: { from: view.state.doc.length, insert: text }, userEvent: "input.type" });
 }
 async function mode(w: VueWrapper, which: "rich" | "raw") {
-  await w.get(`[data-testid="body-mode-${which}"]`).trigger("click");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (w.vm as any).setMode(which);
   await flushPromises();
 }
 async function selectAll(w: VueWrapper) { editorOf(w).commands.selectAll(); await flushPromises(); }
@@ -75,27 +76,60 @@ describe("MarkdownBodyEditor", () => {
   it("opens supported Markdown in rich mode without emitting a change", async () => {
     const w = await render("# Title\n\nBody text\n");
     expect(w.find('[data-testid="body-rich"]').exists()).toBe(true);
-    expect(w.find('[data-testid="body-toolbar"]').exists()).toBe(true);
+    expect(w.find('[data-testid="body-bubble"]').exists()).toBe(false);
     expect(changes(w)).toEqual([]);
   });
 
+  it("shows the selection menu only while text is selected", async () => {
+    const w = await render("Hello");
+    await selectAll(w);
+    expect(w.find('[data-testid="body-bubble"]').exists()).toBe(true);
+    expect((w.get('[data-testid="body-block-type"]').element as HTMLSelectElement).value).toBe("text");
+    editorOf(w).commands.setTextSelection(1); await flushPromises();
+    expect(w.find('[data-testid="body-bubble"]').exists()).toBe(false);
+  });
+
   it.each([
-    ["heading", "## Hello"],
+    ["h1", "# Hello"],
+    ["h2", "## Hello"],
     ["bullet-list", "- Hello"],
     ["ordered-list", "1. Hello"],
     ["quote", "> Hello"],
     ["code-block", "```\nHello\n```"],
+  ])("block type %s rewrites the selection", async (block, expected) => {
+    const w = await render("Hello");
+    await selectAll(w);
+    await w.get('[data-testid="body-block-type"]').setValue(block); await flushPromises();
+    expect(last(w)).toEqual({ body: expected, dirty: true });
+  });
+
+  it("block type Text turns a heading back into a paragraph", async () => {
+    const w = await render("## Hello");
+    await selectAll(w);
+    expect((w.get('[data-testid="body-block-type"]').element as HTMLSelectElement).value).toBe("h2");
+    await w.get('[data-testid="body-block-type"]').setValue("text"); await flushPromises();
+    expect(last(w)).toEqual({ body: "Hello", dirty: true });
+  });
+
+  it.each([
     ["bold", "**Hello**"],
     ["italic", "*Hello*"],
     ["code", "`Hello`"],
-  ])("toolbar %s rewrites the selection", async (tool, expected) => {
+  ])("selection menu %s rewrites the selection", async (tool, expected) => {
     const w = await render("Hello");
     await selectAll(w);
     await w.get(`[data-testid="body-tool-${tool}"]`).trigger("click"); await flushPromises();
     expect(last(w)).toEqual({ body: expected, dirty: true });
   });
 
-  it("toolbar link asks for a URL", async () => {
+  it("selection menu clear removes formatting", async () => {
+    const w = await render("**Hello**");
+    await selectAll(w);
+    await w.get('[data-testid="body-tool-clear"]').trigger("click"); await flushPromises();
+    expect(last(w)).toEqual({ body: "Hello", dirty: true });
+  });
+
+  it("selection menu link asks for a URL", async () => {
     vi.stubGlobal("prompt", vi.fn(() => "https://x.test"));
     const w = await render("Hello");
     await selectAll(w);
@@ -103,9 +137,43 @@ describe("MarkdownBodyEditor", () => {
     expect(last(w)?.body).toBe("[Hello](https://x.test)");
   });
 
-  it("toolbar image opens the image dialog and needs non-empty alt text", async () => {
-    const w = await render("Hello");
-    await w.get('[data-testid="body-tool-image"]').trigger("click"); await flushPromises();
+  /** Put the cursor at the end of the text node `text`. */
+  function cursorAfter(w: VueWrapper, text: string) {
+    let at = 0;
+    editorOf(w).state.doc.descendants((node: { isText: boolean; text?: string; nodeSize: number }, pos: number) => { if (node.isText && node.text === text) at = pos + node.nodeSize; });
+    editorOf(w).chain().focus().setTextSelection(at).run();
+  }
+  async function altArrow(w: VueWrapper, key: "ArrowUp" | "ArrowDown") {
+    editorOf(w).view.dom.dispatchEvent(new KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true }));
+    await flushPromises();
+  }
+
+  it("Alt+Up and Alt+Down move the current block; the last block stays put", async () => {
+    const w = await render("One\n\nTwo\n\nThree");
+    cursorAfter(w, "Three");
+    await altArrow(w, "ArrowDown");
+    expect(last(w)).toBeUndefined();
+    await altArrow(w, "ArrowUp");
+    expect(last(w)?.body).toBe("One\n\nThree\n\nTwo");
+    await altArrow(w, "ArrowUp");
+    expect(last(w)?.body).toBe("Three\n\nOne\n\nTwo");
+    await altArrow(w, "ArrowDown");
+    expect(last(w)?.body).toBe("One\n\nThree\n\nTwo");
+  });
+
+  it("Alt+Up moves a list item within its list", async () => {
+    const w = await render("- a\n- b\n- c");
+    cursorAfter(w, "c");
+    await altArrow(w, "ArrowUp");
+    expect(last(w)?.body).toBe("- a\n- c\n- b");
+    await altArrow(w, "ArrowUp");
+    expect(last(w)?.body).toBe("- c\n- a\n- b");
+  });
+
+  it("slash image needs non-empty alt text", async () => {
+    const w = await render("");
+    editorOf(w).chain().focus().insertContent("/image").run(); await flushPromises();
+    await w.get('[data-testid="slash-item"]').trigger("mousedown"); await flushPromises();
     await pickImage(" ");
     expect((document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).disabled).toBe(true);
     await pickImage("A cat");
@@ -211,8 +279,9 @@ describe("MarkdownBodyEditor", () => {
   it("keeps section MDX raw-only", async () => {
     const source = "Plain words only\n";
     const w = await render(source, { kind: "mdx", rich: true });
-    expect(w.find('[data-testid="body-mode-rich"]').exists()).toBe(false);
-    expect(w.find('[data-testid="body-toolbar"]').exists()).toBe(false);
+    expect(w.find('[data-testid="body-rich"]').exists()).toBe(false);
+    await mode(w, "rich");
+    expect(w.find('[data-testid="body-rich"]').exists()).toBe(false);
     expect(rawText(w)).toBe(source);
   });
 

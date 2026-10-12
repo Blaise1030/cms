@@ -1,30 +1,44 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createRouter, createMemoryHistory, RouterView } from "vue-router";
+import { RouterView } from "vue-router";
+import { contentRouter } from "@/test/contentRouter";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-import ContentPanel from "./ContentPanel.vue";
+vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { REFRESH_DELAY_MS, useContentStore } from "./store";
 beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
 afterEach(() => { vi.useRealTimers(); });
 /** Emit a file event and let its debounced refresh start. */
 function fsChange(path: string) { h.daemon.emit({type:"fs.change",projectId:"p",path,kind:"modify"}); vi.advanceTimersByTime(REFRESH_DELAY_MS); }
 const entry = { collection: "blog", id: "welcome", path: "src/content/blog/en/welcome.md", kind: "markdown", source: "Original", fields: {title: "Welcome"}, body: "Original", branch: "main", hash: "abc" };
-async function setup(api: Record<string, unknown> = {}) {
+async function setup(api: Record<string, unknown> = {}, start = "/p/p/content") {
  h.daemon = createFakeDaemon({ listContentCollections: async () => [{name:"blog",kind:"markdown",editable:true,reason:null}], listContentEntries: async () => [entry], contentEntry: async () => entry, ...api });
  setActivePinia(createPinia());
- const router = createRouter({history:createMemoryHistory(),routes:[{path:"/",component:ContentPanel,props:{projectId:"p"}},{path:"/other",component:{template:"<p>Other</p>"}}]});
- await router.push("/"); await router.isReady();
- return mount(RouterView, {global:{plugins:[router]}});
+ return mount(RouterView, {global:{plugins:[await contentRouter(start)]}});
 }
 it("navigates collections and entries and reads content on main", async () => {
  const w = await setup(); await flushPromises();
  await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
  await w.get('[data-testid="content-entry"]').trigger("click"); await flushPromises();
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
  expect(w.text()).toContain("main"); expect(w.get('[data-testid="content-source"]').text()).toBe("Original");
+ w.unmount();
+});
+it("opens the collection and entry named in the URL", async () => {
+ const contentEntry = vi.fn(async () => entry);
+ const w = await setup({ contentEntry }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect(contentEntry).toHaveBeenCalledWith("p", "blog", "welcome");
+ expect(w.get('[data-testid="content-source"]').text()).toBe("Original");
+ expect(w.get('[data-testid="content-entry"]').text()).toBe("welcome");
+ w.unmount();
+});
+it("puts the entry left open back in the URL when the tab reopens", async () => {
+ const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
+ await w.vm.$router.push("/other"); await w.vm.$router.push("/p/p/content"); await flushPromises();
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
  w.unmount();
 });
 it("preserves a dirty draft on filesystem refresh and cancelled navigation", async () => {
@@ -45,7 +59,7 @@ it("blocks leaving the Content tab until a dirty draft is discarded", async () =
  await store.selectCollection("blog"); await store.selectEntry("welcome"); store.draftSource = "Draft";
  vi.stubGlobal("confirm", vi.fn(() => false));
  await w.vm.$router.push("/other");
- expect(w.vm.$route.path).toBe("/"); expect(store.draftSource).toBe("Draft");
+ expect(w.vm.$route.path).toBe("/p/p/content"); expect(store.draftSource).toBe("Draft");
  vi.stubGlobal("confirm", vi.fn(() => true));
  await w.vm.$router.push("/other"); expect(w.vm.$route.path).toBe("/other");
  expect(store.dirty).toBe(false); expect(store.draftSource).toBe("Original");

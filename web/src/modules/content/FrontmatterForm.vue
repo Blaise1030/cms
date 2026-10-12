@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, inject, ref, watchEffect } from "vue";
+import { Plus, X } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
+import { ImageUploader } from "@/components/ui/image-uploader";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TagInput } from "@/components/ui/tag-input";
 import type { FieldDescriptor } from "@/core/types";
-import ImageDialog, { IMAGE_REGISTRY, type PendingImage } from "./ImageDialog.vue";
+import { humanize, humanizeLower } from "@/lib/text";
+import ImageDialog, { ACCEPTED_IMAGES, IMAGE_REGISTRY, type PendingImage } from "./ImageDialog.vue";
 import { REFERENCE_ENTRIES } from "./references";
 
 defineOptions({ name: "FrontmatterForm" });
@@ -34,14 +44,18 @@ const variant = computed(() => {
 const variantNames = computed(() => (props.descriptor.variants ?? []).map(v => String(v.properties?.[props.descriptor.discriminator!]?.values?.[0])));
 
 function set(value: unknown) { emit("update:modelValue", value); }
-function setText(event: Event) {
-  const text = (event.target as HTMLInputElement | HTMLSelectElement).value;
+function setText(value: unknown) {
+  const text = String(value ?? "");
   set(text === "" && optional.value ? undefined : text);
 }
-function setNumber(event: Event) {
-  const text = (event.target as HTMLInputElement).value;
-  set(text === "" ? undefined : Number(text));
+function setNumber(value: unknown) {
+  set(value === "" || value === undefined ? undefined : Number(value));
 }
+/** Select items cannot hold an empty value, so "Not set" uses this one. */
+const UNSET = "__unset__";
+function setChoice(value: unknown) { setText(value === UNSET ? "" : value); }
+const choice = (value: unknown) => (value === undefined || value === null || value === "" ? undefined : String(value));
+const stringList = computed(() => props.descriptor.type === "array" && props.descriptor.items?.type === "string");
 function setChild(name: string, value: unknown) {
   const { [name]: _old, ...rest } = objectValue.value;
   set(value === undefined ? rest : { ...rest, [name]: value });
@@ -60,7 +74,15 @@ function setImage(name: string, image: { value: string; alt: string }, propertie
 // Image fields: the dialog's image stays pending in the draft (shown by its preview) until Save.
 const registry = inject(IMAGE_REGISTRY, null);
 const imageOpen = ref(false);
+/** A dropped or picked file, handed to the dialog for its alt text. */
+const imageFile = ref<File | null>(null);
 const pendingPreview = computed(() => typeof props.modelValue === "string" && props.modelValue.startsWith("blob:"));
+const imageSrc = computed(() => {
+  const v = props.modelValue;
+  if (typeof v !== "string" || !v) return null;
+  return pendingPreview.value || !registry?.resolve ? v : registry.resolve(v);
+});
+function uploadImage(file: File) { imageFile.value = file; imageOpen.value = true; }
 function chooseImage(image: PendingImage) {
   registry?.add(image);
   set(image.previewUrl);
@@ -90,17 +112,20 @@ function empty(d: FieldDescriptor | undefined): unknown {
     default: return "";
   }
 }
-function chooseVariant(event: Event) {
-  const name = (event.target as HTMLSelectElement).value;
+function chooseVariant(value: unknown) {
+  const name = String(value);
   const next = (props.descriptor.variants ?? []).find(v => String(v.properties?.[props.descriptor.discriminator!]?.values?.[0]) === name);
   set(next ? { ...(empty(next) as object), [props.descriptor.discriminator!]: name } : {});
 }
-const box = "w-full rounded-md border bg-background px-2 py-1 text-sm";
+/** The field name shown to the writer (`coverAlt` → "Cover alt"); list items have no label of their own. */
+const title = computed(() => (props.label ? humanize(props.label) : undefined));
+const phrase = computed(() => (props.label ? humanizeLower(props.label) : undefined));
+const placeholder = computed(() => (phrase.value ? `Enter ${phrase.value}` : "Enter a value"));
 </script>
 
 <template>
   <div class="mb-3" :data-testid="`field-wrap-${key}`">
-    <label v-if="label && descriptor.type !== 'boolean'" :for="id" class="mb-1 block text-xs font-medium">{{ label }}<span v-if="!optional" class="text-destructive"> *</span></label>
+    <Label v-if="label && descriptor.type !== 'boolean'" :for="id" class="mb-1.5 text-xs">{{ title }}<span v-if="!optional" class="text-destructive">*</span></Label>
 
     <template v-if="descriptor.type === 'unsupported'">
       <p class="text-xs text-muted-foreground" :data-testid="`${id}-readonly`">Read only: {{ descriptor.reason }}</p>
@@ -111,60 +136,71 @@ const box = "w-full rounded-md border bg-background px-2 py-1 text-sm";
       <p :id="id" class="text-sm text-muted-foreground">{{ descriptor.values?.[0] }}</p>
     </template>
 
-    <label v-else-if="descriptor.type === 'boolean'" class="flex items-center gap-2 text-sm">
-      <input :id="id" :data-testid="id" type="checkbox" :checked="modelValue === true" @change="set(($event.target as HTMLInputElement).checked)" />
-      {{ label }}
-    </label>
+    <div v-else-if="descriptor.type === 'boolean'" class="flex items-center gap-2">
+      <Checkbox :id="id" :data-testid="id" :model-value="modelValue === true" @update:model-value="set($event === true)" />
+      <Label :for="id" class="text-sm font-normal">{{ title }}</Label>
+    </div>
 
-    <input v-else-if="descriptor.type === 'number'" :id="id" :data-testid="id" type="number" :class="box" :value="modelValue as number | undefined" @input="setNumber" />
+    <Input v-else-if="descriptor.type === 'number'" :id="id" :data-testid="id" type="number" :placeholder="placeholder" :model-value="modelValue as number | undefined" @update:model-value="setNumber" />
 
-    <input v-else-if="descriptor.type === 'date'" :id="id" :data-testid="id" type="date" :class="box" :value="modelValue as string | undefined" @input="setText" />
+    <DatePicker v-else-if="descriptor.type === 'date'" :id="id" :data-testid="id" :model-value="modelValue as string | undefined" :clearable="optional" @update:model-value="setText" />
 
-    <select v-else-if="descriptor.type === 'enum'" :id="id" :data-testid="id" :class="box" :value="modelValue as string | undefined" @change="setText">
-      <option v-if="optional" value="">Not set</option>
-      <option v-for="v in descriptor.values" :key="String(v)" :value="v as string">{{ v }}</option>
-    </select>
+    <Select v-else-if="descriptor.type === 'enum'" :model-value="choice(modelValue)" @update:model-value="setChoice">
+      <SelectTrigger :id="id" :data-testid="id" class="w-full"><SelectValue :placeholder="optional ? 'Not set' : phrase ? `Choose ${phrase}` : 'Choose a value'" /></SelectTrigger>
+      <SelectContent>
+        <SelectItem v-if="optional" :value="UNSET">Not set</SelectItem>
+        <SelectItem v-for="v in descriptor.values" :key="String(v)" :value="String(v)">{{ v }}</SelectItem>
+      </SelectContent>
+    </Select>
+
+    <TagInput v-else-if="stringList" :id="id" :data-testid="id" :model-value="listValue.map(String)" :placeholder="`Add ${phrase ?? 'items'}, press Enter`" @update:model-value="set" />
 
     <template v-else-if="descriptor.type === 'array'">
-      <div v-for="(item, index) in listValue" :key="index" class="mb-2 flex items-start gap-2" :data-testid="`${id}-item`">
-        <div class="min-w-0 flex-1">
+      <div v-for="(item, index) in listValue" :key="index" class="mb-2 flex items-start gap-1" :data-testid="`${id}-item`">
+        <div class="min-w-0 flex-1 [&>*]:mb-0">
           <FrontmatterForm :descriptor="descriptor.items!" :model-value="item" :path="[...path, index]" :errors="errors" @update:model-value="setItem(index, $event)" />
         </div>
-        <button type="button" class="text-xs underline" :data-testid="`${id}-remove-${index}`" @click="set(listValue.filter((_, i) => i !== index))">Remove</button>
+        <Button type="button" variant="outline" size="icon" class="size-9 shrink-0" aria-label="Remove item" :data-testid="`${id}-remove-${index}`" @click="set(listValue.filter((_, i) => i !== index))"><X /></Button>
       </div>
-      <button type="button" class="text-xs underline" :data-testid="`${id}-add`" @click="set([...listValue, empty(descriptor.items)])">Add item</button>
+      <Button type="button" variant="outline" size="sm" :data-testid="`${id}-add`" @click="set([...listValue, empty(descriptor.items)])"><Plus /> Add item</Button>
     </template>
 
-    <fieldset v-else-if="descriptor.type === 'object'" class="rounded-md border p-2">
+    <fieldset v-else-if="descriptor.type === 'object'" :class="path.length ? 'rounded-md border p-3' : ''">
       <FrontmatterForm v-for="(child, name) in descriptor.properties" :key="name" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" @update:model-value="setChild(String(name), $event)" @image="setImage(String(name), $event, descriptor.properties)" />
     </fieldset>
 
-    <fieldset v-else-if="descriptor.type === 'union'" class="rounded-md border p-2">
-      <select :id="id" :data-testid="id" :class="box" :value="String(objectValue[descriptor.discriminator!] ?? '')" @change="chooseVariant">
-        <option value="" disabled>Choose {{ descriptor.discriminator }}</option>
-        <option v-for="name in variantNames" :key="name" :value="name">{{ name }}</option>
-      </select>
+    <fieldset v-else-if="descriptor.type === 'union'" class="rounded-md border p-3">
+      <Select :model-value="choice(objectValue[descriptor.discriminator!])" @update:model-value="chooseVariant">
+        <SelectTrigger :id="id" :data-testid="id" class="w-full"><SelectValue :placeholder="`Choose ${descriptor.discriminator}`" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="name in variantNames" :key="name" :value="name">{{ name }}</SelectItem>
+        </SelectContent>
+      </Select>
       <template v-if="variant">
         <template v-for="(child, name) in variant.properties" :key="name">
-          <FrontmatterForm v-if="name !== descriptor.discriminator" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" class="mt-2" @update:model-value="setChild(String(name), $event)" @image="setImage(String(name), $event, variant.properties)" />
+          <FrontmatterForm v-if="name !== descriptor.discriminator" :descriptor="child" :label="String(name)" :model-value="objectValue[name]" :path="[...path, name]" :errors="errors" class="mt-3" @update:model-value="setChild(String(name), $event)" @image="setImage(String(name), $event, variant.properties)" />
         </template>
       </template>
     </fieldset>
 
-    <select v-else-if="descriptor.type === 'reference' && referenceIds" :id="id" :data-testid="id" :class="box" :value="(modelValue as string | undefined) ?? ''" @change="setText">
-      <option value="" :disabled="!optional">{{ optional ? "Not set" : `Choose a ${descriptor.collection} entry` }}</option>
-      <option v-for="entryId in referenceIds" :key="entryId" :value="entryId">{{ entryId }}</option>
-      <option v-if="missingReference" :value="missingReference">{{ missingReference }} (missing)</option>
-    </select>
-    <input v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" :class="box" :placeholder="`${descriptor.collection} entry`" :value="modelValue as string | undefined" @input="setText" />
-    <div v-else-if="descriptor.type === 'image'" class="flex items-center gap-2">
-      <img v-if="pendingPreview" :src="modelValue as string" alt="" class="h-10 w-10 shrink-0 rounded border object-cover" :data-testid="`${id}-preview`" />
-      <input :id="id" :data-testid="id" type="text" :class="box" placeholder="Image path" :readonly="pendingPreview" :value="pendingPreview ? 'New image, uploaded on save' : modelValue as string | undefined" @input="setText" />
-      <button type="button" class="shrink-0 text-xs underline" :data-testid="`${id}-choose`" @click="imageOpen = true">Choose image</button>
-      <ImageDialog v-model:open="imageOpen" @insert="chooseImage" />
+    <Select v-else-if="descriptor.type === 'reference' && referenceIds" :model-value="choice(modelValue)" @update:model-value="setChoice">
+      <SelectTrigger :id="id" :data-testid="id" class="w-full"><SelectValue :placeholder="optional ? 'Not set' : `Choose a ${descriptor.collection} entry`" /></SelectTrigger>
+      <SelectContent>
+        <SelectItem v-if="optional" :value="UNSET">Not set</SelectItem>
+        <SelectItem v-for="entryId in referenceIds" :key="entryId" :value="entryId">{{ entryId }}</SelectItem>
+        <SelectItem v-if="missingReference" :value="missingReference">{{ missingReference }} (missing)</SelectItem>
+      </SelectContent>
+    </Select>
+    <Input v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" :placeholder="`${descriptor.collection} entry`" :model-value="modelValue as string | undefined" @update:model-value="setText" />
+    <div v-else-if="descriptor.type === 'image'" class="grid gap-2">
+      <ImageUploader :data-testid="`${id}-uploader`" :src="imageSrc" :accept="ACCEPTED_IMAGES" @select="uploadImage" @remove="setText('')">
+        <template #hint><span class="text-xs">PNG, JPEG, WebP, or GIF up to 10 MiB</span></template>
+      </ImageUploader>
+      <Input :id="id" :data-testid="id" type="text" placeholder="Image path" :readonly="pendingPreview" :model-value="pendingPreview ? 'New image, uploaded on save' : modelValue as string | undefined" @update:model-value="setText" />
+      <ImageDialog v-model:open="imageOpen" :file="imageFile" @insert="chooseImage" />
     </div>
 
-    <input v-else :id="id" :data-testid="id" type="text" :class="box" :value="modelValue as string | undefined" @input="setText" />
+    <Input v-else :id="id" :data-testid="id" type="text" :placeholder="placeholder" :model-value="modelValue as string | undefined" @update:model-value="setText" />
 
     <p v-if="message" class="mt-1 text-xs text-destructive" role="alert" :data-testid="`${id}-error`">{{ key }}: {{ message }}</p>
   </div>

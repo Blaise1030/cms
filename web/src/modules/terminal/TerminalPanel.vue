@@ -19,6 +19,16 @@ const daemon = useDaemon();
 const store = useTerminalStore();
 const preview = usePreviewStore();
 
+const providerLabels: Record<string, string> = {
+  cursor: "Cursor CLI",
+  claude: "Claude",
+  codex: "Codex",
+};
+
+function providerLabel(id: string): string {
+  return providerLabels[id] ?? id;
+}
+
 const state = ref<"loading" | "idle" | "running">("loading");
 const ended = ref<{ code: number | null } | null>(null);
 const host = ref<HTMLElement | null>(null);
@@ -246,7 +256,7 @@ async function onStart() {
           :value="store.provider ?? ''"
           @change="store.setProvider(($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="p in store.providers" :key="p.id" :value="p.id">{{ p.id }}</option>
+          <option v-for="p in store.providers" :key="p.id" :value="p.id">{{ providerLabel(p.id) }}</option>
         </select>
       </label>
       <label class="flex items-center gap-2">

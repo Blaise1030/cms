@@ -8,13 +8,15 @@
 //! ```
 //!
 //! Each key is a provider id, each value the base argv. A missing file means the built-in
-//! defaults; a present-but-invalid file is an error. Overriding the base argv keeps the
+//! defaults (Cursor CLI via `cursor-agent`, Claude, and Codex); a present-but-invalid file
+//! is an error. Overriding the base argv keeps the
 //! hook injection (keyed on the id). Unknown ids get no injection; they call
 //! `$WORKBENCH_HOOK_EXE hook turn-end` themselves.
 //!
 //! # Hook mechanics (verified 2026-10-10 against claude 2.1.296, codex-cli 0.162.1,
 //! opencode v2.0.25)
 //!
+//! - Cursor CLI: `--force` and `--trust` when auto-approve is on. No turn-end hook.
 //! - Claude: `--settings <json>` adds a `Stop` command hook; `--dangerously-skip-permissions`
 //!   auto-approves.
 //! - Codex: `-c notify=[exe,"hook","turn-end"]` fires with NO `--dangerously-bypass-hook-trust`.
@@ -53,11 +55,11 @@ pub struct LaunchSpec {
 }
 
 pub fn default_providers() -> Vec<Provider> {
-    ["claude", "codex", "opencode"]
-        .iter()
-        .map(|id| Provider {
-            id: (*id).into(),
-            command: vec![(*id).into()],
+    [("cursor", "cursor-agent"), ("claude", "claude"), ("codex", "codex")]
+        .into_iter()
+        .map(|(id, program)| Provider {
+            id: id.into(),
+            command: vec![program.into()],
         })
         .collect()
 }
@@ -157,6 +159,12 @@ pub fn launch_spec(
     let mut argv = provider.command.clone();
     let mut env = Vec::new();
     match provider.id.as_str() {
+        "cursor" => {
+            if auto_approve {
+                argv.push("--force".into());
+                argv.push("--trust".into());
+            }
+        }
         "claude" => {
             let settings = serde_json::json!({"hooks": {"Stop": [{"hooks": [{
                 "type": "command",
@@ -215,8 +223,10 @@ mod tests {
     fn defaults_cover_the_three_agents() {
         let c = default_providers();
         let ids: Vec<_> = c.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode"]);
-        assert_eq!(c[2].command, ["opencode"]);
+        assert_eq!(ids, ["cursor", "claude", "codex"]);
+        assert_eq!(c[0].command, ["cursor-agent"]);
+        assert_eq!(c[1].command, ["claude"]);
+        assert_eq!(c[2].command, ["codex"]);
     }
 
     #[test]
@@ -260,6 +270,15 @@ mod tests {
     }
     fn spec(id: &str, exe: &str, auto: bool, dir: &Path) -> LaunchSpec {
         launch_spec(&p(id), Path::new(exe), auto, dir, "p")
+    }
+
+    #[test]
+    fn cursor_auto_approve_appends_force_and_trust() {
+        let s = spec("cursor", "/x", true, Path::new("/nope"));
+        assert_eq!(s.argv, ["cursor", "--force", "--trust"]);
+        assert!(s.env.is_empty());
+        let plain = spec("cursor", "/x", false, Path::new("/nope"));
+        assert_eq!(plain.argv, ["cursor"]);
     }
 
     #[test]

@@ -69,15 +69,15 @@ async function onGetLatest() {
 
 <template>
   <Button
-    variant="ghost"
-    size="sm"
-    class="h-7 gap-1 px-2 text-xs"
+    variant="secondary"
+    size="icon"
+    class="size-7"
     data-testid="get-latest"
-    title="Pull main and bring every open change up to date"
+    :aria-label="store.updating ? 'Getting latest…' : 'Get latest'"
+    :title="store.updating ? 'Getting latest…' : 'Get latest: pull main and bring every open change up to date'"
     :disabled="store.updating || store.switching || store.creating"
     @click="onGetLatest"
   >
     <RefreshCw class="size-3.5" :class="store.updating ? 'animate-spin' : ''" />
-    {{ store.updating ? "Getting latest…" : "Get latest" }}
   </Button>
 </template>

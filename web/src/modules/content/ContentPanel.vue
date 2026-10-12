@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
+import { useElementBounding, useWindowSize } from "@vueuse/core";
+import { Copy, FileText, Link, PanelLeft, PanelRight, Pencil, Plus, Trash2 } from "@lucide/vue";
+import { toast } from "vue-sonner";
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
+import { contentPath } from "@/router";
 import { Button } from "@/components/ui/button";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
-import type { Change } from "@/core/types";
+import type { Change, ContentCollection, ContentEntrySummary } from "@/core/types";
+import ContentTree from "./ContentTree.vue";
+import { entryTreePath, type TreeAction, type TreeTarget } from "./contentTree";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { sameValue } from "./draft";
 import { slugify, startingFields } from "./create";
@@ -18,24 +26,30 @@ import { IMAGE_REGISTRY } from "./ImageDialog.vue";
 import { REFERENCE_ENTRIES } from "./references";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
-const props = defineProps<{projectId: string}>();
+const props = defineProps<{projectId: string; collection?: string; entry?: string}>();
 const store = useContentStore();
+const router = useRouter();
 const changes = useChangesStore();
 const daemon = useDaemon();
 // Images inserted by the form or body editor stay pending in the draft until Save.
-provide(IMAGE_REGISTRY, { add: image => store.addImage(image) });
+provide(IMAGE_REGISTRY, { add: image => store.addImage(image), resolve: src => resolveImage(src) });
 provide(REFERENCE_ENTRIES, { entries: collection => store.referenceEntries[collection], load: collection => void store.loadReferenceEntries(collection) });
 watch(() => props.projectId, id => void store.open(id), {immediate:true});
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 const showNewChange = ref(false);
 async function save() { try { await store.saveDraft(); } catch { /* recorded on the store; the draft stays */ } }
+/** Put what the store shows into the URL, after an action (create, rename, delete) changed it. */
+function showInUrl() {
+  const e = store.entry;
+  void router.replace(contentPath(props.projectId, e?.collection ?? store.selectedCollection, e?.id));
+}
 /** `site` is update-only and `pages/home` is required: neither can be renamed or deleted. */
-const canRemove = computed(() => {
-  const e = store.entry; if (!e || !store.descriptor) return false;
-  const c = store.collections.find(x => x.name === e.collection);
-  return !c?.singleton && !(e.collection === "pages" && e.id === "home");
-});
+function removable(collection: string, id: string) {
+  const c = store.collections.find(x => x.name === collection);
+  return !c?.singleton && !(collection === "pages" && id === "home");
+}
+const canRemove = computed(() => !!store.entry && !!store.descriptor && removable(store.entry.collection, store.entry.id));
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -46,34 +60,116 @@ const canConfirm = computed(() => {
   if (!l?.impact || l.busy) return false;
   return l.action === "rename" ? !!l.slug.trim() && l.slug.trim() !== l.id : !l.impact.references.length;
 });
-async function confirmLifecycle() { try { await store.confirmLifecycle(); } catch { /* recorded on the store; the draft stays */ } }
+async function confirmLifecycle() { try { await store.confirmLifecycle(); showInUrl(); } catch { /* recorded on the store; the draft stays */ } }
 /** The branch the project is on, as the Changes picker knows it. */
 const currentBranch = () => changes.active?.branch ?? "main";
-const selected = computed(() => store.collections.find(c => c.name === store.selectedCollection) ?? null);
-/** Create is offered for multi-entry collections; this is why it is disabled, or null when it is not. */
-const createBlocked = computed<string | null>(() => {
-  const c = selected.value; if (!c || c.singleton) return null;
-  if (!c.editable || !c.fields) return c.reason ?? "This collection is read only";
-  const start = startingFields(c.fields, "");
-  return "reason" in start ? start.reason : null;
+const collectionsPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
+const sidebarOpen = ref(true);
+const fieldsOpen = ref(true);
+function toggleSidebar() {
+  if (sidebarOpen.value) collectionsPanel.value?.collapse(); else collectionsPanel.value?.expand();
+}
+/** Markdown and MDX entries edit the body in the page and the fields beside it. */
+const hasFieldsPanel = computed(() => !!store.descriptor && !!store.entry && store.entry.kind !== "json");
+const wordCount = computed(() => {
+  if (!hasFieldsPanel.value) return null;
+  const text = store.draftBody.trim();
+  return text ? text.split(/\s+/).length : 0;
 });
+/** Every collection's entries, for the tree. */
+const treeEntries = ref<Record<string, ContentEntrySummary[]>>({});
+const entryLoads = new Map<string, number>();
+watch(() => props.projectId, () => { treeEntries.value = {}; });
+async function loadEntries(name: string) {
+  const id = props.projectId;
+  const version = (entryLoads.get(name) ?? 0) + 1;
+  entryLoads.set(name, version);
+  try {
+    const next = await daemon.api.listContentEntries(id, name);
+    if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
+  } catch { /* the collection keeps the list it last showed */ }
+}
+watch(() => store.collections, collections => { for (const c of collections) void loadEntries(c.name); });
+const treeSelected = computed(() => (store.entry ? entryTreePath(store.entry.collection, store.entry.id) : null));
+function openEntry(collection: string, id: string) {
+  void router.push(contentPath(props.projectId, collection, id));
+}
+/** The URL names the open collection and entry; without one, what was open earlier is put back in the URL. */
+async function follow(collection?: string, id?: string) {
+  if (!collection) {
+    if (store.projectId === props.projectId && store.selectedCollection) showInUrl();
+    return;
+  }
+  if (store.selectedCollection !== collection || (!id && store.entry)) {
+    await store.selectCollection(collection);
+    if (store.selectedCollection !== collection) return;
+  }
+  if (id && store.entry?.id !== id) await store.selectEntry(id);
+}
+watch(() => [props.collection, props.entry, props.projectId] as const, ([collection, id]) => void follow(collection, id), { immediate: true });
+watch(() => store.entries, () => {
+  const name = store.selectedCollection;
+  if (name) void loadEntries(name);
+});
+/** Opens the entry, then starts its rename or delete; leaving a draft is confirmed first. */
+async function lifecycleFor(action: "rename" | "delete", collection: string, id: string) {
+  await router.push(contentPath(props.projectId, collection, id));
+  await follow(collection, id);
+  if (store.entry?.collection === collection && store.entry.id === id) void store.startLifecycle(action);
+}
+async function copy(text: string, what: string) {
+  try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); }
+  catch { toast.error(`Could not copy the ${what.toLowerCase()}`); }
+}
+function treeActions(target: TreeTarget): TreeAction[] {
+  const collection = store.collections.find(c => c.name === target.collection);
+  if (!collection) return [];
+  const name = collection.name;
+  if (!target.id) {
+    if (collection.singleton) return [];
+    const blocked = createBlocked(collection);
+    return [{ id: "create", label: "New entry", icon: Plus, disabled: !!blocked, hint: blocked, run: () => startCreate(name) }];
+  }
+  const id = target.id;
+  const path = treeEntries.value[name]?.find(e => e.id === id)?.path;
+  const pending = store.dirty ? "Save or discard your changes first" : null;
+  const actions: TreeAction[] = [
+    { id: "open", label: "Open", icon: FileText, run: () => openEntry(name, id) },
+    "separator",
+    { id: "copy-link", label: "Copy link", icon: Link, run: () => void copy(new URL(contentPath(props.projectId, name, id), location.origin).href, "Link") },
+  ];
+  if (path) actions.push({ id: "copy-path", label: "Copy file path", icon: Copy, run: () => void copy(path, "File path") });
+  if (removable(name, id)) actions.push(
+    "separator",
+    { id: "rename", label: "Rename…", icon: Pencil, disabled: !!pending, hint: pending, run: () => void lifecycleFor("rename", name, id) },
+    { id: "delete", label: "Delete", icon: Trash2, destructive: true, disabled: !!pending, hint: pending, run: () => void lifecycleFor("delete", name, id) },
+  );
+  return actions;
+}
+/** Create is offered for multi-entry collections; this is why it is disabled, or null when it is not. */
+function createBlocked(collection: ContentCollection): string | null {
+  if (collection.singleton) return null;
+  if (!collection.editable || !collection.fields) return collection.reason ?? "This collection is read only";
+  const start = startingFields(collection.fields, "");
+  return "reason" in start ? start.reason : null;
+}
 const createOpen = computed({
   get: () => !!store.creation && !store.needsChange,
   set: open => { if (!open) store.cancelCreate(); },
 });
 /** The slug follows the title until the writer edits it. */
 const slugEdited = ref(false);
-function startCreate() { slugEdited.value = false; if (selected.value) store.startCreate(selected.value.name); }
+function startCreate(name: string) { slugEdited.value = false; store.startCreate(name); }
 function setTitle(title: string) { const c = store.creation; if (!c) return; c.title = title; if (!slugEdited.value) c.slug = slugify(title); }
 function setSlug(slug: string) { const c = store.creation; if (!c) return; c.slug = slug; slugEdited.value = true; }
 const canCreate = computed(() => { const c = store.creation; return !!c && !c.busy && !!c.title.trim() && !!c.slug.trim(); });
-async function confirmCreate() { try { await store.confirmCreate(currentBranch()); } catch { /* recorded on the store */ } }
+async function confirmCreate() { try { if (await store.confirmCreate(currentBranch())) showInUrl(); } catch { /* recorded on the store */ } }
 /** Entry-relative image links shown in the rich editor are read from the project's files. */
 function resolveImage(src: string): string {
   const e = store.entry; const path = e ? entryAssetPath(e.path, src) : null;
   return path ? daemon.api.rawFileUrl(props.projectId, path) : src;
 }
-async function resume(change: Change) { try { await store.resumeSave(change.branch); } catch { /* recorded on the store */ } }
+async function resume(change: Change) { try { await store.resumeSave(change.branch); showInUrl(); } catch { /* recorded on the store */ } }
 const differences = computed(() => {
   const now = store.current; if (!now) return [];
   const mine = store.draftFields, theirs = now.fields ?? {};
@@ -83,51 +179,74 @@ const differences = computed(() => {
   return rows;
 });
 const show = (v: unknown) => v === undefined ? "(not set)" : typeof v === "string" ? v : JSON.stringify(v);
+// The editor is a CSS container, so `fixed` would still place the bar against it, not the screen.
+const editorForm = ref<HTMLElement | null>(null);
+const { left: editorLeft, width: editorWidth } = useElementBounding(editorForm);
+const { width: screenWidth } = useWindowSize();
+/** The unsaved-changes bar's centre within the editor: the screen's centre, kept inside the editor. */
+const unsavedCentre = computed(() => {
+  const half = Math.min(448, editorWidth.value - 32) / 2;
+  const centre = screenWidth.value / 2 - editorLeft.value;
+  return Math.max(half + 16, Math.min(centre, editorWidth.value - half - 16));
+});
 function beforeUnload(event: BeforeUnloadEvent) { if(store.dirty) { event.preventDefault(); event.returnValue = ""; } }
 onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 // File events stop refreshing Content while the tab is closed; reopening it refreshes once.
 onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
 </script>
 <template>
-  <div class="flex h-full min-h-0" data-testid="content-panel">
-    <aside class="w-48 shrink-0 overflow-auto border-r p-3">
-      <h2 class="mb-3 text-sm font-medium">Collections</h2>
-      <button v-for="collection in store.collections" :key="collection.name" data-testid="content-collection" class="block w-full rounded px-2 py-2 text-left text-sm hover:bg-muted" :class="{'bg-muted':store.selectedCollection === collection.name}" @click="store.selectCollection(collection.name)">
-        {{ collection.name }}<span v-if="!collection.editable" class="block text-xs text-muted-foreground">Read only</span>
-      </button>
-    </aside>
-    <aside v-if="store.selectedCollection" class="w-56 shrink-0 overflow-auto border-r p-3">
-      <h2 class="mb-3 text-sm font-medium">Entries</h2>
-      <template v-if="selected && !selected.singleton">
-        <Button type="button" size="sm" variant="outline" class="mb-2 w-full" data-testid="content-create" :disabled="!!createBlocked" :title="createBlocked ?? undefined" @click="startCreate">New entry</Button>
-        <p v-if="createBlocked" class="mb-2 text-xs text-muted-foreground" data-testid="content-create-reason">{{ createBlocked }}</p>
-      </template>
-      <button v-for="item in store.entries" :key="item.id" data-testid="content-entry" class="block w-full rounded px-2 py-2 text-left text-sm hover:bg-muted" @click="store.selectEntry(item.id)">{{ item.id }}</button>
-      <p v-if="!store.entries.length && !store.loading" class="text-xs text-muted-foreground">No entries</p>
-    </aside>
-    <main class="min-w-0 flex-1 overflow-auto p-4">
-      <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
-      <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
-      <p v-for="collection in store.collections.filter(c => c.reason && (!store.selectedCollection || c.name === store.selectedCollection))" :key="collection.name" class="mb-2 text-xs text-muted-foreground">{{ collection.name }}: {{ collection.reason }}</p>
-      <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-        <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
-        <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
-      </section>
-      <template v-if="store.entry">
-        <h2 class="font-medium">{{ store.entry.id }}</h2>
-        <p class="mb-4 text-xs text-muted-foreground">{{ store.entry.path }} · {{ store.entry.branch || 'No branch' }}</p>
-        <div v-if="canRemove" class="mb-4 flex gap-2">
-          <Button type="button" variant="outline" size="sm" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')">Rename</Button>
-          <Button type="button" variant="outline" size="sm" data-testid="content-delete" :disabled="store.dirty" @click="store.startLifecycle('delete')">Delete</Button>
-          <template v-if="store.dirty">
-            <span class="self-center text-xs text-muted-foreground" data-testid="content-lifecycle-blocked">Save or discard your changes first</span>
-            <Button type="button" variant="ghost" size="sm" data-testid="content-discard" @click="store.discard()">Discard</Button>
-          </template>
-        </div>
-        <p v-if="store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
-        <form v-if="store.descriptor" data-testid="content-form" @submit.prevent="save">
-          <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
-          <MarkdownBodyEditor v-if="store.entry.kind !== 'json'" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
+  <div class="h-full min-h-0" data-testid="content-panel">
+    <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
+      <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
+      <ResizablePanel id="content-collections" ref="collectionsPanel" :default-size="20" :min-size="14" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
+      <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
+        <SidebarContent class="overflow-hidden">
+          <SidebarGroup class="min-h-0 flex-1">
+            <SidebarGroupLabel>Collections</SidebarGroupLabel>
+            <SidebarGroupContent class="min-h-0 flex-1">
+              <ContentTree :storage-key="`content:${projectId}`" :collections="store.collections" :entries="treeEntries" :selected="treeSelected" :actions="treeActions" @open="openEntry" />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
+      </ResizablePanel>
+      <ResizableHandle with-handle class="bg-transparent" />
+      <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
+      <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
+      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && save()">
+      <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
+        <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
+        <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
+          <PanelLeft class="size-4" />
+        </Button>
+        <template v-if="store.entry">
+          <div class="flex min-w-0 items-center gap-1 px-1">
+            <h2 class="truncate text-sm font-medium">{{ store.entry.id }}</h2>
+            <Button v-if="canRemove" type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="Rename" :title="store.dirty ? 'Save or discard your changes first' : 'Rename'" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')"><Pencil class="size-3.5" /></Button>
+            <p class="hidden truncate text-xs text-muted-foreground @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
+          </div>
+          <div class="ml-auto flex shrink-0 items-center gap-1">
+            <span v-if="wordCount !== null" class="hidden px-2 text-xs text-muted-foreground @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
+            <template v-if="canRemove">
+              <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle('delete')"><Trash2 class="size-4" /></Button>
+            </template>
+            <Button v-if="hasFieldsPanel" type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen">
+              <PanelRight class="size-4" />
+            </Button>
+          </div>
+        </template>
+      </header>
+      <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
+      <div class="px-4">
+        <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
+        <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
+        <p v-for="collection in store.collections.filter(c => c.reason && (!store.selectedCollection || c.name === store.selectedCollection))" :key="collection.name" class="mb-2 text-xs text-muted-foreground">{{ collection.name }}: {{ collection.reason }}</p>
+        <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
+          <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
+          <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
+        </section>
+        <p v-if="store.entry && store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
+        <template v-if="store.entry && store.descriptor">
           <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
           <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
             <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
@@ -146,11 +265,40 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
               </tbody>
             </table>
           </section>
-          <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving">{{ store.saving ? "Saving…" : "Save" }}</Button>
-        </form>
-        <template v-else>
-          <pre data-testid="content-source" class="whitespace-pre-wrap break-words text-sm">{{ store.draftSource }}</pre>
         </template>
+      </div>
+      <template v-if="store.entry">
+        <div v-if="store.descriptor" class="@container flex min-h-full">
+          <div class="flex min-h-full w-full flex-col" :class="{ '@3xl:flex-row': hasFieldsPanel }">
+          <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pb-4" :class="hasFieldsPanel ? 'pt-6 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto' : 'mx-auto w-full max-w-3xl pt-8 pb-4'" data-testid="content-fields">
+            <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
+          </aside>
+          <div v-if="hasFieldsPanel" class="min-w-0 flex-1 px-6 pt-8 pb-12 @3xl:order-1 @3xl:px-12">
+          <div class="mx-auto w-full max-w-3xl">
+          <MarkdownBodyEditor :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
+          </div>
+          </div>
+          </div>
+        </div>
+        <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
+      </template>
+      <div v-else-if="!store.loading" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground">
+        <FileText class="size-8 opacity-50" aria-hidden="true" />
+        <p>Select a collection and entry to read its content.</p>
+      </div>
+      <div v-if="store.entry && store.descriptor" class="h-24" aria-hidden="true" />
+      </div>
+      <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0">
+        <div v-if="store.entry && store.descriptor && (store.dirty || store.saving)" role="status" class="absolute bottom-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2" :style="{ left: `${unsavedCentre}px` }" data-testid="content-unsaved">
+          <div class="flex w-full items-center gap-2 rounded-xl border bg-popover py-2 pr-2 pl-4 text-popover-foreground shadow-lg">
+            <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+            <span class="min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
+            <Button type="button" variant="ghost" size="sm" data-testid="content-discard" :disabled="store.saving" @click="store.discard()">Discard</Button>
+            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving">{{ store.saving ? "Saving…" : "Save" }}</Button>
+          </div>
+        </div>
+      </Transition>
+      </form>
         <AlertDialog v-model:open="lifecycleOpen">
           <AlertDialogContent v-if="store.lifecycle" data-testid="content-lifecycle">
             <AlertDialogHeader>
@@ -190,8 +338,6 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </template>
-      <p v-else-if="!store.loading" class="text-sm text-muted-foreground">Select a collection and entry to read its content.</p>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       <Dialog v-model:open="createOpen">
         <DialogContent v-if="store.creation" data-testid="content-create-dialog">
@@ -217,6 +363,9 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
           </form>
         </DialogContent>
       </Dialog>
-    </main>
+      </SidebarInset>
+      </ResizablePanel>
+      </ResizablePanelGroup>
+    </SidebarProvider>
   </div>
 </template>

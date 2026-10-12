@@ -125,3 +125,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Animated by the file trees' scroll fade (lib/treeScrollFade.ts). */
+@property --tree-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --tree-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
