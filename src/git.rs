@@ -452,6 +452,7 @@ pub async fn file_log(dir: &Path, path: &str) -> Result<Vec<FileVersion>, ApiErr
         &[
             "log",
             "--follow",
+            "--diff-filter=d",
             "--name-only",
             "--format=%x1e%H%x1f%ct%x1f%an%x1f%s",
             "--",
@@ -499,7 +500,7 @@ pub async fn file_log(dir: &Path, path: &str) -> Result<Vec<FileVersion>, ApiErr
 
 /// Contents of `path` as of commit `sha`.
 pub async fn file_at(dir: &Path, sha: &str, path: &str) -> Result<String, ApiError> {
-    if path.starts_with('-') || path.contains("..") {
+    if path.starts_with('-') || path.split('/').any(|s| s == "..") {
         return Err(ApiError::badreq("invalid path"));
     }
     let full = resolve(dir, sha).await?;

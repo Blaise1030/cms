@@ -29,7 +29,9 @@ export const useContentHistoryStore = defineStore("contentHistory", () => {
     error.value = null;
     try {
       const list = await daemon.api.contentHistory(project, collection, id);
-      if (request === loadRequest) versions.value = list;
+      if (request !== loadRequest) return;
+      versions.value = list;
+      if (selectedSha.value && !list.some((v) => v.sha === selectedSha.value)) void select(null);
     } catch (e) {
       if (request === loadRequest) error.value = errorMessage(e);
     } finally {

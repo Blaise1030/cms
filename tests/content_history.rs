@@ -126,6 +126,43 @@ async fn file_log_is_empty_for_untracked_file() {
 }
 
 #[tokio::test]
+async fn file_log_skips_deletion_commits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_app, dir) = project(tmp.path()).await;
+    append(&dir, HERO, "\nFirst life.\n");
+    git::checkpoint(&dir, "first").await.unwrap().unwrap();
+    std::fs::remove_file(dir.join(HERO)).unwrap();
+    git::checkpoint(&dir, "deleted").await.unwrap().unwrap();
+    append(&dir, HERO, "Second life.\n");
+    git::checkpoint(&dir, "recreated").await.unwrap().unwrap();
+
+    let log = git::file_log(&dir, HERO).await.unwrap();
+    assert_eq!(log[0].summary, "recreated");
+    assert!(log.iter().all(|v| v.summary != "deleted"));
+    for v in &log {
+        assert!(
+            git::file_at(&dir, &v.sha, &v.path).await.is_ok(),
+            "{}",
+            v.summary
+        );
+    }
+}
+
+#[tokio::test]
+async fn file_at_rejects_option_and_parent_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_app, dir) = project(tmp.path()).await;
+    let head = git_cli(&dir, &["rev-parse", "HEAD"]);
+    for path in ["-x", "../x", "src/../x"] {
+        let err = git::file_at(&dir, &head, path).await.unwrap_err();
+        assert_eq!(err.http_status(), 400, "{path}");
+    }
+    if let Err(err) = git::file_at(&dir, &head, "src/a..b.md").await {
+        assert_ne!(err.http_status(), 400);
+    }
+}
+
+#[tokio::test]
 async fn file_at_rejects_non_hex_sha() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;

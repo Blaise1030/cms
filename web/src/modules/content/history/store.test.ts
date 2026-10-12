@@ -61,6 +61,25 @@ it("select() 404 reloads and clears selection", async () => {
   expect(store.error).toBeNull();
 });
 
+it("reload() clears a selection no longer in the list", async () => {
+  const { store, contentHistory } = setup();
+  await store.open("p", "blog", "post");
+  await store.select("a1");
+  contentHistory.mockResolvedValueOnce([versions[0]]);
+  await store.reload();
+  expect(store.selectedSha).toBeNull();
+  expect(store.version).toBeNull();
+});
+
+it("reload() keeps a selection still in the list", async () => {
+  const { store } = setup();
+  await store.open("p", "blog", "post");
+  await store.select("a1");
+  await store.reload();
+  expect(store.selectedSha).toBe("a1");
+  expect(store.version?.source).toBe("old");
+});
+
 it("open() of another entry clears selection", async () => {
   const { store } = setup();
   await store.open("p", "blog", "post");
