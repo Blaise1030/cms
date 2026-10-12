@@ -50,6 +50,28 @@ export interface Checkpoint {
   ts: number;
 }
 
+/** A commit that touched one content entry's file, newest first. */
+export interface FileVersion {
+  sha: string;
+  summary: string;
+  author: string;
+  /** Unix seconds. */
+  ts: number;
+  /** The entry's path at that commit (it may have been renamed since). */
+  path: string;
+  published: boolean;
+}
+
+/** One content entry as it was at a commit. */
+export interface ContentVersion {
+  sha: string;
+  path: string;
+  source: string;
+  fields: Record<string, unknown>;
+  body: string;
+  parseable: boolean;
+}
+
 /** Active content-change branch. */
 export interface Change {
   branch: string;

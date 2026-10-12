@@ -11,6 +11,8 @@ import {
   type ContentEntryRename,
   type ContentEntryDelete,
   type ContentImpact,
+  type ContentVersion,
+  type FileVersion,
   type Change,
   type ChangesUpdate,
   type ConflictCandidate,
@@ -167,6 +169,11 @@ export function createApi(
       (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    contentHistory: async (project: string, collection: string, id: string): Promise<FileVersion[]> =>
+      (await json<{versions: FileVersion[]}>("GET", "/api/content/history", {query:{project,collection,id}})).versions,
+    /** 404 when `sha` is no longer in the entry's history. */
+    contentVersion: (project: string, collection: string, id: string, sha: string) =>
+      json<ContentVersion>("GET", `/api/content/history/${enc(sha)}`, {query:{project,collection,id}}),
     /** JSON without images; with images, multipart: a JSON `entry` part plus one part per image named by its client ID. */
     updateContentEntry: (body: ContentEntryUpdate, images: ContentImageUpload[] = []) => {
       if (!images.length) return json<SavedContentEntry>("PUT", "/api/content/entry", { body });
