@@ -28,11 +28,12 @@ const diff = computed(() =>
 <template>
   <div class="flex h-full min-h-0 flex-col gap-2 p-2" data-testid="version-diff">
     <div class="flex shrink-0 items-center justify-between gap-2">
-      <Button variant="outline" size="sm" @click="$emit('back')">
+      <Button type="button" variant="outline" size="sm" @click="$emit('back')">
         <ArrowLeft />
         Back to editor
       </Button>
       <Button
+        type="button"
         size="sm"
         :disabled="!canRestore"
         :aria-describedby="showReason ? reasonId : undefined"

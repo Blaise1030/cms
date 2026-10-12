@@ -10,6 +10,7 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
@@ -18,7 +19,10 @@ import type { Change, ContentCollection, ContentEntrySummary } from "@/core/type
 import ContentTree from "./ContentTree.vue";
 import { entryTreePath, type TreeAction, type TreeTarget } from "./contentTree";
 import FrontmatterForm from "./FrontmatterForm.vue";
-import { sameValue } from "./draft";
+import { diffDraft, sameValue } from "./draft";
+import { useContentHistoryStore } from "./history/store";
+import VersionDiff from "./history/VersionDiff.vue";
+import VersionsList from "./history/VersionsList.vue";
 import { slugify, startingFields } from "./create";
 import { entryAssetPath } from "./markdown";
 import { useContentStore } from "./store";
@@ -71,6 +75,36 @@ function toggleSidebar() {
 }
 /** Markdown and MDX entries edit the body in the page and the fields beside it. */
 const hasFieldsPanel = computed(() => !!store.descriptor && !!store.entry && store.entry.kind !== "json");
+const history = useContentHistoryStore();
+const tab = ref<"fields" | "history">("fields");
+/** JSON entries edit their fields in the page, so their side panel only has History. */
+const sideTab = computed(() => (hasFieldsPanel.value ? tab.value : "history"));
+const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${store.entry.id}` : null));
+// History loads the first time its tab shows an entry; another entry drops the open version.
+watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
+  if (key !== old?.[0]) history.close();
+  const e = store.entry;
+  if (e && side === "history" && history.key !== key) void history.open(props.projectId, e.collection, e.id);
+}, { immediate: true });
+// Get latest and branch switches move the file without a checkpoint event.
+watch(() => [entryKey.value, store.entry?.branch, store.entry?.hash] as const, ([key], [oldKey]) => {
+  if (key === oldKey && history.key === key) void history.reload();
+});
+onBeforeUnmount(() => history.close());
+const versionDirty = computed(() => !!store.entry && diffDraft(store.entry, store.draftFields, store.draftBody, store.descriptor).changed);
+const restoreReason = computed(() => {
+  if (store.entry?.branch === "main") return "Start a change to restore this version.";
+  if (history.version && !history.version.parseable) return "This version can't be restored because it couldn't be parsed.";
+  return undefined;
+});
+const confirmRestore = ref(false);
+function restore() { if (versionDirty.value) confirmRestore.value = true; else applyRestore(); }
+function applyRestore() {
+  confirmRestore.value = false;
+  if (!history.version) return;
+  store.restoreVersion(history.version);
+  void history.select(null);
+}
 const wordCount = computed(() => {
   if (!hasFieldsPanel.value) return null;
   const text = store.draftBody.trim();
@@ -213,7 +247,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <ResizableHandle with-handle class="bg-transparent" />
       <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
-      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && save()">
+      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && save()" @keydown.esc="history.selectedSha && history.select(null)">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
         <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
@@ -269,13 +303,26 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       </div>
       <template v-if="store.entry">
         <div v-if="store.descriptor" class="@container flex min-h-full">
-          <div class="flex min-h-full w-full flex-col" :class="{ '@3xl:flex-row': hasFieldsPanel }">
-          <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pb-4" :class="hasFieldsPanel ? 'pt-6 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto' : 'mx-auto w-full max-w-3xl pt-8 pb-4'" data-testid="content-fields">
-            <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
+          <div class="flex min-h-full w-full flex-col @3xl:flex-row">
+          <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" data-testid="content-side">
+            <Tabs :model-value="sideTab" @update:model-value="tab = $event as 'fields' | 'history'">
+              <TabsList class="w-full">
+                <TabsTrigger v-if="hasFieldsPanel" value="fields">Fields</TabsTrigger>
+                <TabsTrigger value="history">History</TabsTrigger>
+              </TabsList>
+              <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
+                <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
+              </TabsContent>
+              <TabsContent value="history">
+                <VersionsList :versions="history.versions" :selected-sha="history.selectedSha" :loading="history.loading" :error="history.error" @select="history.select($event)" @retry="history.reload()" />
+              </TabsContent>
+            </Tabs>
           </aside>
-          <div v-if="hasFieldsPanel" class="min-w-0 flex-1 px-6 pt-8 pb-12 @3xl:order-1 @3xl:px-12">
+          <div class="min-w-0 flex-1 px-6 pt-8 pb-12 @3xl:order-1 @3xl:px-12">
           <div class="mx-auto w-full max-w-3xl">
-          <MarkdownBodyEditor :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
+          <VersionDiff v-if="history.version" :path="history.version.path" :old-source="history.version.source" :new-source="store.entry.source" :dirty="versionDirty" :can-restore="!restoreReason" :restore-reason="restoreReason" @back="history.select(null)" @restore="restore" />
+          <MarkdownBodyEditor v-else-if="hasFieldsPanel" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
+          <FrontmatterForm v-else data-testid="content-fields" :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
           </div>
           </div>
           </div>
@@ -338,6 +385,18 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      <AlertDialog v-model:open="confirmRestore">
+        <AlertDialogContent data-testid="content-restore-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace unsaved edits?</AlertDialogTitle>
+            <AlertDialogDescription>Your unsaved edits to this entry are replaced by this version. Nothing is saved until you choose Save.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant="destructive" @click="applyRestore">Replace</Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       <Dialog v-model:open="createOpen">
         <DialogContent v-if="store.creation" data-testid="content-create-dialog">
