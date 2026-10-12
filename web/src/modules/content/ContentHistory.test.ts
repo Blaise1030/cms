@@ -139,6 +139,13 @@ it("JSON entry shows History tab", async () => {
   expect(tab("History")).toBeDefined();
   expect(tab("Fields")).toBeUndefined();
   expect(w.findAll('[data-testid="history-version"]')).toHaveLength(2);
+  // The form stays first at every width; Markdown keeps its fields-first narrow layout.
+  expect(w.get('[data-testid="content-side"]').classes()).toContain("order-2");
+});
+
+it("Markdown keeps the side panel first at narrow widths", async () => {
+  await setup();
+  expect(w.get('[data-testid="content-side"]').classes()).not.toContain("order-2");
 });
 
 it("restore is disabled on main", async () => {
@@ -164,4 +171,12 @@ it("reloads history when the open entry's file moves", async () => {
   h.daemon.emit({ type: "fs.change", projectId: "p", path: loaded.path, kind: "modify" });
   vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
   expect(api.contentHistory).toHaveBeenCalledTimes(2);
+});
+
+it("does not reload history when a refresh returns the same file", async () => {
+  const api = await setup({ contentEntry: async () => entry() });
+  await openHistory();
+  h.daemon.emit({ type: "fs.change", projectId: "p", path: entry().path, kind: "modify" });
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(api.contentHistory).toHaveBeenCalledTimes(1);
 });

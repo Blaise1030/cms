@@ -87,7 +87,7 @@ watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
   if (e && side === "history" && history.key !== key) void history.open(props.projectId, e.collection, e.id);
 }, { immediate: true });
 // Get latest and branch switches move the file without a checkpoint event.
-watch(() => [entryKey.value, store.entry?.branch, store.entry?.hash] as const, ([key], [oldKey]) => {
+watch([entryKey, () => store.entry?.branch, () => store.entry?.hash], ([key], [oldKey]) => {
   if (key === oldKey && history.key === key) void history.reload();
 });
 onBeforeUnmount(() => history.close());
@@ -304,7 +304,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <template v-if="store.entry">
         <div v-if="store.descriptor" class="@container flex min-h-full">
           <div class="flex min-h-full w-full flex-col @3xl:flex-row">
-          <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" data-testid="content-side">
+          <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" :class="{ 'order-2': !hasFieldsPanel }" data-testid="content-side">
             <Tabs :model-value="sideTab" @update:model-value="tab = $event as 'fields' | 'history'">
               <TabsList class="w-full">
                 <TabsTrigger v-if="hasFieldsPanel" value="fields">Fields</TabsTrigger>
