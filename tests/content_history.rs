@@ -1,9 +1,14 @@
 use std::path::Path;
 use std::process::Command;
 
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 use workbench::config::Config;
 use workbench::state::AppState;
-use workbench::{git, http};
+use workbench::{changes, git, http};
 
 fn config(dir: &Path, no_auth: bool) -> Config {
     Config {
@@ -126,4 +131,160 @@ async fn file_at_rejects_non_hex_sha() {
     let (_app, dir) = project(tmp.path()).await;
     let err = git::file_at(&dir, "HEAD~1", HERO).await.unwrap_err();
     assert_eq!(err.http_status(), 400);
+}
+
+fn req(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "localhost");
+    let body = match body {
+        Some(v) => {
+            b = b.header(header::CONTENT_TYPE, "application/json");
+            Body::from(v.to_string())
+        }
+        None => Body::empty(),
+    };
+    b.body(body).unwrap()
+}
+
+async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
+    let res = app.clone().oneshot(r).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// Content endpoints run the content helper (node), which needs the template's modules.
+fn link_node_modules(dir: &Path) {
+    let modules =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
+    std::os::unix::fs::symlink(modules, dir.join("node_modules")).unwrap();
+    let exclude = dir.join(".git/info/exclude");
+    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
+    text.push_str("\n/node_modules\n");
+    std::fs::write(exclude, text).unwrap();
+}
+
+/// A project on a change branch, ready for the content endpoints; returns its ID too.
+async fn content_project(tmp: &Path) -> (axum::Router, std::path::PathBuf, String) {
+    let (app, dir) = project(tmp).await;
+    link_node_modules(&dir);
+    changes::create(&dir, "Edit content").await.unwrap();
+    let id = dir.file_name().unwrap().to_string_lossy().to_string();
+    (app, dir, id)
+}
+
+fn set_headline(dir: &Path, headline: &str) {
+    let file = dir.join(HERO);
+    let text = std::fs::read_to_string(&file).unwrap();
+    let text = text
+        .lines()
+        .map(|l| {
+            if l.starts_with("headline:") {
+                format!("headline: {headline}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(file, text + "\n").unwrap();
+}
+
+fn history_uri(id: &str, entry: &str, sha: Option<&str>) -> String {
+    let base = match sha {
+        Some(sha) => format!("/api/content/history/{sha}"),
+        None => "/api/content/history".to_string(),
+    };
+    format!("{base}?project={id}&collection=sections&id={entry}")
+}
+
+#[tokio::test]
+async fn history_endpoint_lists_versions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir, id) = content_project(tmp.path()).await;
+    set_headline(&dir, "Edited");
+    git::checkpoint(&dir, "edit hero").await.unwrap().unwrap();
+
+    let (s, v) = call(&app, req("GET", &history_uri(&id, "hero", None), None)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["versions"][0]["summary"], "edit hero");
+    assert!(v["versions"][0].get("published").is_some(), "{v}");
+}
+
+#[tokio::test]
+async fn version_endpoint_returns_parsed_old_content() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir, id) = content_project(tmp.path()).await;
+    set_headline(&dir, "Old");
+    let old = git::checkpoint(&dir, "old").await.unwrap().unwrap();
+    set_headline(&dir, "New");
+    git::checkpoint(&dir, "new").await.unwrap().unwrap();
+
+    let short = &old.sha[..10];
+    let (s, v) = call(
+        &app,
+        req("GET", &history_uri(&id, "hero", Some(short)), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["sha"], old.sha);
+    assert_eq!(v["path"], HERO);
+    assert_eq!(v["fields"]["headline"], "Old");
+    assert_eq!(v["parseable"], true);
+    assert!(v["source"].as_str().unwrap().contains("Old"));
+    assert!(v["body"].as_str().unwrap().contains("Trusted by makers"));
+}
+
+#[tokio::test]
+async fn version_endpoint_404s_for_commit_not_touching_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir, id) = content_project(tmp.path()).await;
+    append(&dir, "README.md", "\nOther.\n");
+    let other = git::checkpoint(&dir, "other").await.unwrap().unwrap();
+
+    let (s, v) = call(
+        &app,
+        req("GET", &history_uri(&id, "hero", Some(&other.sha)), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+}
+
+#[tokio::test]
+async fn version_endpoint_returns_old_content_after_rename() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir, id) = content_project(tmp.path()).await;
+    set_headline(&dir, "Before rename");
+    let before = git::checkpoint(&dir, "before").await.unwrap().unwrap();
+
+    let entry_uri = format!("/api/content/entry?project={id}&collection=sections&id=hero");
+    let (s, entry) = call(&app, req("GET", &entry_uri, None)).await;
+    assert_eq!(s, StatusCode::OK, "{entry}");
+    let body = json!({"project":id,"collection":"sections","id":"hero","slug":"hero2",
+        "branch":entry["branch"],"hash":entry["hash"]});
+    let (s, v) = call(&app, req("POST", "/api/content/entry/rename", Some(body))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let (s, v) = call(
+        &app,
+        req("GET", &history_uri(&id, "hero2", Some(&before.sha)), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["path"], HERO);
+    assert_eq!(v["fields"]["headline"], "Before rename");
+}
+
+#[tokio::test]
+async fn history_requires_collection_and_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, _dir, id) = content_project(tmp.path()).await;
+    let uri = format!("/api/content/history?project={id}&collection=sections");
+    let (s, v) = call(&app, req("GET", &uri, None)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
 }
