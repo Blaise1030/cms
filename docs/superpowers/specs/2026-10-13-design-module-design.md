@@ -73,7 +73,8 @@ from what the template's components already use (Tailwind defaults):
 - Body: the spec's section headings in order plus `## Voice & Tone`, each with a one-line prompt for
   the user to replace.
 
-The frontend's `starter.ts` and the template file hold the same starter; a test keeps them equal.
+The template file is the only copy: when a project has no `DESIGN.md`, `GET /api/design` returns
+it as `starter: { tokens, body }`, parsed from the embedded template.
 
 ## Backend
 
@@ -88,7 +89,7 @@ Returns `{ exists, tokens, body, hash, branch }`.
 - `body` is everything after the closing `---`.
 - `hash` is the content hash used by content entries (`catalog::hash`).
 - `branch` is the branch the file was read on.
-- Missing file: `{ exists: false, branch }`.
+- Missing file: `{ exists: false, tokens: {}, body: "", branch, starter }`.
 - Frontmatter that is not valid YAML, or not a mapping: `400` with reason `invalid_design` and the
   raw source, so the tab can show it read-only and point the user to the agent. The file is never
   overwritten in this state.
@@ -144,7 +145,7 @@ Following `tests/content_mutation.rs`:
 
 - **`store.ts`** (Pinia, same shape as the content store)
   - State: `doc`, `draftTokens`, `draftBody`, `dirty`, `loading`, `saving`, `error`, `conflict`,
-    `needsChange`, `invalid` (raw source when the frontmatter is invalid).
+    `needsChange`, `changedOnDisk`, `invalid` (raw source when the frontmatter is invalid).
   - Actions: `open(projectId)`, `create()` (fills the draft from the starter), `save(branch?)`,
     `resumeSave(branch)` for `NewChangeDialog`, `discard()`, `reload()`, `canLeave()`.
   - `save` sends the full `draftTokens` object, so keys the form does not show are kept.
@@ -167,7 +168,6 @@ Following `tests/content_mutation.rs`:
   - Rounded and Spacing: rows of name and value.
   - Add, rename and remove a token in each group. Renaming keeps the token's position.
   - Other keys are not shown and are passed through.
-- **`starter.ts`**: the starter tokens and body.
 - **`agentRequests.ts`** in the design module: `askAgentToApplyDesign()` sends a request
   (`submit: true`) through the agent outbox:
   "Update the `@theme` block in `src/styles/global.css` (fonts, colours, radius, spacing) to match
@@ -183,8 +183,6 @@ Following `tests/content_mutation.rs`:
 - `DesignPanel.test.ts`: empty state leads to Create; Apply to site sends the outbox message; Apply
   disabled while dirty.
 - `router.test.ts`: the `design` tab route and `projectTabFromRoute`.
-- `starter.test.ts`: the frontend starter matches `templates/astro-marketing/DESIGN.md`.
-
 ## Template
 
 - Add `templates/astro-marketing/DESIGN.md` (the starter, matching the template's look).
