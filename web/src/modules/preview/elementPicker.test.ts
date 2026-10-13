@@ -40,6 +40,11 @@ describe("describeElement", () => {
     );
   });
 
+  it("puts the screenshot path after the reference, escaped, so the agent attaches it", () => {
+    const pick = { tag: "<h1>", selector: "h1", text: "Hi", label: "h1", screenshot: "/state/My Site/a.png" };
+    expect(elementPrompt(pick)).toBe('[element <h1> "Hi" at `h1`] /state/My\\ Site/a.png ');
+  });
+
   it("labels by id, then by up to two classes", () => {
     document.body.innerHTML = `<nav id="top" class="a"></nav><p class="a b c"></p>`;
     expect(elementLabel(document.querySelector("nav")!)).toBe("nav#top");

@@ -12,6 +12,8 @@ export interface PickedElement {
   file?: string;
   /** `line:col` in `file`. */
   loc?: string;
+  /** Absolute path of a screenshot of the element, saved by the daemon for the agent. */
+  screenshot?: string;
 }
 
 const MAX_TEXT = 80;
@@ -94,7 +96,9 @@ export function elementPrompt(pick: PickedElement): string {
     ? `in ${pick.file}${pick.loc ? `:${pick.loc}` : ""}`
     : `at \`${pick.selector}\``;
   const text = pick.text ? ` "${pick.text}"` : "";
-  return `[element ${pick.tag}${text} ${where}]`;
+  // Outside the brackets and escaped like a dropped file, so agent CLIs attach the image.
+  const shot = pick.screenshot ? ` ${pick.screenshot.replace(/ /g, "\\ ")} ` : "";
+  return `[element ${pick.tag}${text} ${where}]${shot}`;
 }
 
 const OVERLAY_ID = "__workbench-picker";

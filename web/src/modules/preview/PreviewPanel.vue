@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
+  LoaderCircle,
   Maximize2,
   Minimize2,
   Monitor,
@@ -12,10 +13,13 @@ import {
   PilcrowRight,
   RotateCw,
   Smartphone,
+  Sparkles,
   Sun,
   Tablet,
+  TriangleAlert,
+  X,
 } from "@lucide/vue";
-import { useEventListener } from "@vueuse/core";
+import { useElementSize, useEventListener } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,10 +35,13 @@ import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import { frameHref, framePath } from "@workbench/utils";
+import { frameHref, framePath, readPref, writePref } from "@workbench/utils";
 import { attachPicker, describeElement } from "./elementPicker";
+import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
+import { DESKTOP_MIN_WIDTH, frameFit } from "./frameFit";
 import { useFrameHistory } from "./frameHistory";
+import { type PageError, watchPageErrors } from "./pageErrors";
 import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 
 const props = defineProps<{ projectId: string; devserver?: DevserverState }>();
@@ -50,6 +57,9 @@ watch(
   { immediate: true },
 );
 
+watch(() => props.projectId, (id) => void store.loadAgentBusy(id), { immediate: true });
+const agentBusy = computed(() => store.agentBusy[props.projectId] === true);
+
 const state = computed<DevserverState>(
   () => store.status[props.projectId] ?? props.devserver ?? "starting",
 );
@@ -63,7 +73,14 @@ const daemonOrigin = computed(() => daemon.config.value.origin);
 const crossSite = computed(
   () => !forceFrame.value && isCrossSite(window.location.origin, daemonOrigin.value),
 );
-const width = computed(() => DEVICE_WIDTH[store.device]);
+/** The area the frame sits in: the page is laid out at the device width and scaled to fit it. */
+const viewport = ref<HTMLElement | null>(null);
+const viewportSize = useElementSize(viewport);
+const fit = computed(() =>
+  frameFit(store.device, viewportSize.width.value, viewportSize.height.value),
+);
+const zoomed = computed(() => fit.value.scale < 1);
+const zoomPercent = computed(() => Math.round(fit.value.scale * 100));
 
 const DEVICES: { id: Device; label: string; icon: typeof Monitor }[] = [
   { id: "desktop", label: "Desktop", icon: Monitor },
@@ -88,15 +105,31 @@ const LABEL: Record<DevserverState, string> = {
 const shell = ref<HTMLElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const history = useFrameHistory();
+/** The last path the frame showed, per project, so the preview reopens where the user left it. */
+const lastPathKey = (projectId: string) => `workbench.preview.path.${projectId}`;
+const lastPath = ref(readPref(lastPathKey(props.projectId)) ?? "/");
+/** What the address bar shows: the frame's page, or the restored one until the frame reports in. */
+const currentPath = computed(() =>
+  history.entries.value.length ? history.current.value : lastPath.value,
+);
+const hrefFor = (path: string) => new URL(frameHref(path, base.value), src.value).href;
 /** Where the frame starts when (re)mounted: a reload keeps the page the user was on. */
-const startHref = ref(src.value);
+const startHref = ref(hrefFor(lastPath.value));
 const draft = ref<string | null>(null);
 
 watch(
   src,
-  (url) => {
+  () => {
     history.reset();
-    startHref.value = url;
+    lastPath.value = readPref(lastPathKey(props.projectId)) ?? "/";
+    startHref.value = hrefFor(lastPath.value);
+  },
+);
+
+watch(
+  () => history.entries.value.length && history.current.value,
+  (path) => {
+    if (path) writePref(lastPathKey(props.projectId), path);
   },
 );
 
@@ -104,7 +137,7 @@ watch(
   () => store.reloadNonce,
   () => {
     if (history.entries.value.length) {
-      startHref.value = new URL(frameHref(history.current.value, base.value), src.value).href;
+      startHref.value = hrefFor(history.current.value);
     }
   },
 );
@@ -122,6 +155,7 @@ function frameWindow(): Window | null {
 function onLoad() {
   const win = frameWindow();
   syncPicker();
+  watchErrors(win);
   if (!win) return;
   const sync = () => history.visit(framePath(win.location.href, base.value));
   sync();
@@ -132,6 +166,36 @@ function onLoad() {
   syncAppearance();
   // Astro's router copies the next page's `<html>` attributes over ours.
   win.document.addEventListener("astro:after-swap", () => syncAppearance(true));
+}
+
+// --- Page errors -------------------------------------------------------------------------------
+
+/** The error to offer a fix for: an error overlay wins over uncaught errors. */
+const pageError = ref<PageError | null>(null);
+let detachErrors: (() => void) | null = null;
+
+/** Follow the newly loaded document; the previous one's errors went with it. */
+function watchErrors(win: Window | null) {
+  detachErrors?.();
+  detachErrors = null;
+  pageError.value = null;
+  if (!win) return;
+  detachErrors = watchPageErrors(win, {
+    onError(error) {
+      if (error.kind === "build" || pageError.value?.kind !== "build") pageError.value = error;
+    },
+    onOverlayCleared() {
+      if (pageError.value?.kind === "build") pageError.value = null;
+    },
+  });
+}
+
+onBeforeUnmount(() => detachErrors?.());
+
+function fixPageError() {
+  if (!pageError.value) return;
+  store.fixPageError(pageError.value, currentPath.value);
+  pageError.value = null;
 }
 
 // --- RTL / dark mode -----------------------------------------------------------------------------
@@ -160,9 +224,24 @@ function syncPicker() {
   }
   detachPicker = attachPicker(
     win,
-    (el) => store.pick(describeElement(el, props.projectId)),
+    (el) => void pickElement(el),
     () => store.setPicking(false),
   );
+}
+
+/** Mention a picked element, with a screenshot of it when one can be taken. */
+async function pickElement(el: Element) {
+  const projectId = props.projectId;
+  const element = describeElement(el, projectId);
+  store.setPicking(false);
+  try {
+    const shot = await captureElement(el);
+    if (shot) element.screenshot = await daemon.api.attachTerminalImage(projectId, shot);
+  } catch (e) {
+    // The mention is still useful without the picture.
+    console.warn("element screenshot failed", e);
+  }
+  store.pick(element);
 }
 
 watch(() => store.picking, syncPicker);
@@ -194,7 +273,7 @@ function navigate() {
 }
 
 function openExternal() {
-  const href = new URL(frameHref(history.current.value, base.value), src.value).href;
+  const href = hrefFor(currentPath.value);
   window.open(href, "_blank", "noopener");
 }
 
@@ -270,7 +349,7 @@ function toggleFullscreen() {
                 <TooltipContent>{{ LABEL[state] }}</TooltipContent>
               </Tooltip>
               <input
-                :value="draft ?? history.current.value"
+                :value="draft ?? currentPath"
                 class="min-w-0 flex-1 bg-transparent text-sm outline-none"
                 aria-label="Preview address"
                 spellcheck="false"
@@ -290,11 +369,12 @@ function toggleFullscreen() {
             <DropdownMenuTrigger as-child>
               <Button
                 variant="ghost"
-                size="icon-sm"
-                :aria-label="`Viewport: ${device.label}`"
+                :size="zoomed ? 'sm' : 'icon-sm'"
+                :aria-label="`Viewport: ${device.label}${zoomed ? `, ${zoomPercent}%` : ''}`"
                 data-testid="viewport-size"
               >
                 <component :is="device.icon" />
+                <span v-if="zoomed" class="text-muted-foreground text-xs tabular-nums">{{ zoomPercent }}%</span>
               </Button>
             </DropdownMenuTrigger>
             <!-- Portal into the shell while it is fullscreen; `body` is not rendered then. -->
@@ -306,8 +386,8 @@ function toggleFullscreen() {
                 <DropdownMenuRadioItem v-for="d in DEVICES" :key="d.id" :value="d.id">
                   <component :is="d.icon" />
                   {{ d.label }}
-                  <span v-if="DEVICE_WIDTH[d.id]" class="text-muted-foreground ml-auto pl-3 text-xs">
-                    {{ DEVICE_WIDTH[d.id] }}px
+                  <span class="text-muted-foreground ml-auto pl-3 text-xs">
+                    {{ DEVICE_WIDTH[d.id] ? `${DEVICE_WIDTH[d.id]}px` : `${DESKTOP_MIN_WIDTH}px+` }}
                   </span>
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
@@ -393,7 +473,8 @@ function toggleFullscreen() {
         </div>
       </TooltipProvider>
 
-      <div class="bg-muted/30 flex min-h-0 flex-1 justify-center overflow-auto">
+      <div class="relative flex min-h-0 flex-1 flex-col">
+      <div ref="viewport" class="bg-muted/30 flex min-h-0 flex-1 justify-center overflow-auto">
         <div
           v-if="state === 'crashed'"
           class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
@@ -401,9 +482,15 @@ function toggleFullscreen() {
         >
           <p>The dev server crashed{{ store.message[projectId] ? `: ${store.message[projectId]}` : "." }}</p>
           <p v-if="store.error" class="text-destructive">{{ store.error }}</p>
-          <Button :disabled="store.restarting" @click="store.restart(projectId)">
-            {{ store.restarting ? "Restarting…" : "Restart dev server" }}
-          </Button>
+          <div class="flex gap-2">
+            <Button :disabled="store.restarting" @click="store.restart(projectId)">
+              {{ store.restarting ? "Restarting…" : "Restart dev server" }}
+            </Button>
+            <Button variant="outline" data-testid="fix-crash" @click="store.fixCrash(projectId)">
+              <Sparkles />
+              Fix with agent
+            </Button>
+          </div>
         </div>
         <div
           v-else-if="state === 'starting'"
@@ -425,22 +512,62 @@ function toggleFullscreen() {
           </p>
           <Button variant="outline" size="sm" @click="forceFrame = true">Try anyway</Button>
         </div>
-        <iframe
+        <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
+        <div
           v-else
-          ref="frame"
-          :key="`${projectId}:${store.reloadNonce}`"
-          :src="startHref"
-          title="Site preview"
-          class="h-full border-0"
-          :class="store.dark ? 'bg-neutral-950' : 'bg-white'"
-          :style="{
-            width: width ? `${width}px` : '100%',
-            // An iframe's `color-scheme` sets `prefers-color-scheme` inside the framed page.
-            colorScheme: store.dark ? 'dark' : 'light',
-          }"
-          data-testid="preview-frame"
-          @load="onLoad"
-        />
+          class="h-full shrink-0 overflow-hidden"
+          :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
+        >
+          <iframe
+            ref="frame"
+            :key="`${projectId}:${store.reloadNonce}`"
+            :src="startHref"
+            title="Site preview"
+            class="h-full origin-top-left border-0"
+            :class="store.dark ? 'bg-neutral-950' : 'bg-white'"
+            :style="{
+              width: fit.width ? `${fit.width}px` : '100%',
+              ...(zoomed ? { height: `${fit.height}px`, transform: `scale(${fit.scale})` } : {}),
+              // An iframe's `color-scheme` sets `prefers-color-scheme` inside the framed page.
+              colorScheme: store.dark ? 'dark' : 'light',
+            }"
+            data-testid="preview-frame"
+            @load="onLoad"
+          />
+        </div>
+      </div>
+
+      <div
+        v-if="agentBusy"
+        class="bg-background/95 text-muted-foreground pointer-events-none absolute top-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-sm"
+        role="status"
+        data-testid="agent-busy"
+      >
+        <LoaderCircle class="size-3.5 animate-spin" />
+        Agent is working…
+      </div>
+
+      <div
+        v-if="pageError && state === 'ready'"
+        class="bg-background absolute inset-x-3 bottom-3 flex items-start gap-3 rounded-lg border p-3 text-sm shadow-lg"
+        role="alert"
+        data-testid="page-error"
+      >
+        <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
+        <div class="min-w-0 flex-1">
+          <p class="font-medium">
+            {{ pageError.kind === "build" ? "This page failed to build" : "This page threw an error" }}
+          </p>
+          <p class="text-muted-foreground line-clamp-2 font-mono text-xs break-words">{{ pageError.message }}</p>
+        </div>
+        <Button size="sm" data-testid="fix-page-error" @click="fixPageError">
+          <Sparkles />
+          Fix with agent
+        </Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Dismiss error" @click="pageError = null">
+          <X />
+        </Button>
+      </div>
       </div>
     </div>
   </div>

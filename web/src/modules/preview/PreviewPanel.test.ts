@@ -10,6 +10,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
 import PreviewPanel from "./PreviewPanel.vue";
 import { usePreviewStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
+import { useAgentOutboxStore } from "@/modules/terminal/outbox";
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
@@ -104,6 +105,23 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("reopens the last visited path for the project", async () => {
+    const w = mountPanel();
+    localStorage.setItem("workbench.preview.path.site-1", "/pricing/?plan=pro");
+    w.unmount();
+    hDaemon.daemon = createFakeDaemon();
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const again = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready" } });
+    expect(again.find("iframe").attributes("src")).toBe(
+      "http://127.0.0.1:7800/preview/site-1/pricing/?plan=pro",
+    );
+    expect((again.find("[data-testid='preview-address']").element as HTMLInputElement).value).toBe(
+      "/pricing/?plan=pro",
+    );
+    again.unmount();
+  });
+
   it("reflects devserver.status on the status dot and reloads when ready", async () => {
     const w = mountPanel("starting");
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("starting");
@@ -136,6 +154,41 @@ describe("PreviewPanel", () => {
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
     expect(w.find("iframe").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("shows when the agent is working, seeded from the terminal status", async () => {
+    const terminalStatus = vi.fn(async () => ({ running: true, provider: "claude", busy: true }));
+    const w = mountPanel("ready", { terminalStatus });
+    await flushPromises();
+    expect(terminalStatus).toHaveBeenCalledWith("site-1");
+    expect(w.find("[data-testid='agent-busy']").exists()).toBe(true);
+    hDaemon.daemon.emit({ type: "terminal.busy", projectId: "site-1", busy: false });
+    await flushPromises();
+    expect(w.find("[data-testid='agent-busy']").exists()).toBe(false);
+    hDaemon.daemon.emit({ type: "terminal.busy", projectId: "site-1", busy: true });
+    await flushPromises();
+    expect(w.find("[data-testid='agent-busy']").exists()).toBe(true);
+    hDaemon.daemon.emit({ type: "terminal.exited", projectId: "site-1", code: 0 });
+    await flushPromises();
+    expect(w.find("[data-testid='agent-busy']").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("offers to have the agent fix a crashed dev server", async () => {
+    const w = mountPanel("ready");
+    hDaemon.daemon.emit({
+      type: "devserver.status",
+      projectId: "site-1",
+      state: "crashed",
+      message: "Cannot find module 'astro'",
+    });
+    await flushPromises();
+    await w.find("[data-testid='fix-crash']").trigger("click");
+    const [message] = useAgentOutboxStore().messages;
+    expect(message).toMatchObject({ kind: "text" });
+    expect(message && "text" in message && message.text).toContain("Cannot find module 'astro'");
+    expect(message && "submit" in message).toBe(false);
     w.unmount();
   });
 

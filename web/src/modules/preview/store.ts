@@ -6,6 +6,7 @@ import type { DevserverState } from "@/core/types";
 import { errorMessage } from "@workbench/utils";
 import { useAgentOutboxStore } from "@/modules/terminal/outbox";
 import type { PickedElement } from "./elementPicker";
+import { crashPrompt, pageErrorPrompt, type PageError } from "./pageErrors";
 
 export type Device = "desktop" | "tablet" | "mobile";
 
@@ -34,6 +35,8 @@ export const usePreviewStore = defineStore("preview", () => {
   const error = ref<string | null>(null);
   /** Element-picker mode in the preview frame. */
   const picking = ref(false);
+  /** Whether each project's agent is working on a request, from `terminal.busy` events. */
+  const agentBusy = ref<Record<string, boolean>>({});
 
   function setDevice(next: Device) {
     device.value = next;
@@ -54,6 +57,25 @@ export const usePreviewStore = defineStore("preview", () => {
   function pick(element: PickedElement) {
     outbox.send({ kind: "element", element });
     picking.value = false;
+  }
+
+  /** Put a fix request for a page error in the agent's input, to edit before sending. */
+  function fixPageError(error: PageError, path: string) {
+    outbox.send({ kind: "text", text: pageErrorPrompt(error, path) });
+  }
+
+  function fixCrash(projectId: string) {
+    outbox.send({ kind: "text", text: crashPrompt(message.value[projectId]) });
+  }
+
+  /** Seed the agent's busy state for a project (events keep it current afterwards). */
+  async function loadAgentBusy(projectId: string) {
+    try {
+      const s = await daemon.api.terminalStatus(projectId);
+      agentBusy.value[projectId] ??= s.running && s.busy === true;
+    } catch {
+      // No banner is the safe default.
+    }
   }
 
   function reload() {
@@ -85,12 +107,21 @@ export const usePreviewStore = defineStore("preview", () => {
   function resync() {
     status.value = {};
     message.value = {};
+    const projects = Object.keys(agentBusy.value);
+    agentBusy.value = {};
+    projects.forEach((id) => void loadAgentBusy(id));
     reload();
   }
 
   const offs = [
     daemon.onReconnected(resync),
     daemon.on("events.lagged", resync),
+    daemon.on("terminal.busy", (e) => {
+      agentBusy.value[e.projectId] = e.busy;
+    }),
+    daemon.on("terminal.exited", (e) => {
+      agentBusy.value[e.projectId] = false;
+    }),
     daemon.on("devserver.status", (e) => {
       const before = status.value[e.projectId];
       status.value[e.projectId] = e.state;
@@ -111,11 +142,15 @@ export const usePreviewStore = defineStore("preview", () => {
     restarting,
     error,
     picking,
+    agentBusy,
     setDevice,
     toggleRtl,
     toggleDark,
     setPicking,
     pick,
+    fixPageError,
+    fixCrash,
+    loadAgentBusy,
     reload,
     seed,
     restart,
