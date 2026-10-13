@@ -378,6 +378,62 @@ async fn shutdown_kills_all() {
     assert_eq!(m.status("p2"), None);
 }
 
+/// The next `terminal.busy` event for `project`: its `busy` flag.
+async fn busy_event(rx: &mut broadcast::Receiver<Arc<str>>, project: &str) -> bool {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let text = tokio::time::timeout(left, rx.recv())
+            .await
+            .expect("timed out waiting for terminal.busy")
+            .expect("event bus closed");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if v["type"] == "terminal.busy" && v["projectId"] == project {
+            return v["busy"].as_bool().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn lone_enter_is_busy_until_turn_end() {
+    let (_lock, m, events) = manager();
+    let dir = tempfile::tempdir().unwrap();
+    start_fake(&m, "p1", dir.path()).await;
+    let mut a = m.attach("p1").unwrap();
+    read_until(&mut a.rx, &a.replay, "FAKE-CLI READY").await;
+    let mut ev = events.subscribe();
+    // Typed text, then Enter as its own keystroke (how xterm sends it).
+    m.write("p1", b"hi".to_vec()).unwrap();
+    assert!(!m.busy("p1"));
+    m.write("p1", b"\r".to_vec()).unwrap();
+    assert!(busy_event(&mut ev, "p1").await);
+    assert!(m.busy("p1"));
+    m.set_idle("p1");
+    assert!(!busy_event(&mut ev, "p1").await);
+    assert!(!m.busy("p1"));
+    m.kill("p1").await;
+}
+
+#[tokio::test]
+async fn busy_ends_when_output_goes_quiet() {
+    let (_lock, _, events) = manager();
+    let config = Config {
+        hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
+        ..Default::default()
+    };
+    let m = TerminalManager::with_quiet_idle(Arc::new(config), events.clone(), Duration::from_millis(300));
+    let dir = tempfile::tempdir().unwrap();
+    start_fake(&m, "p1", dir.path()).await;
+    let mut a = m.attach("p1").unwrap();
+    read_until(&mut a.rx, &a.replay, "FAKE-CLI READY").await;
+    let mut ev = events.subscribe();
+    m.write("p1", b"\r".to_vec()).unwrap();
+    assert!(busy_event(&mut ev, "p1").await);
+    assert!(!busy_event(&mut ev, "p1").await);
+    assert!(!m.busy("p1"));
+    m.kill("p1").await;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP / WebSocket (daemon routes)
 

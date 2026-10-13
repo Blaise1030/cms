@@ -12,6 +12,11 @@
 //! - a waiter on `child.wait()` that broadcasts [`Output::Exit`], forgets the session and
 //!   emits `terminal.exited { projectId, code }`.
 //!
+//! Each session also tracks whether the agent is working ([`TerminalManager::busy`]), published
+//! as `terminal.busy { projectId, busy }`: busy from a lone Enter (a submitted request) until
+//! the turn-end hook ([`TerminalManager::set_idle`]), the exit, or the output going quiet.
+//! Agent CLIs animate a spinner while they work, and Cursor has no turn-end hook.
+//!
 //! Terminal modes set by bytes trimmed off the ring's front are tracked ([`modes`]) and
 //! prefixed to the replay. `portable-pty` makes the child a session (and process-group)
 //! leader. That process-group id is recorded at spawn. [`TerminalManager::kill`] and the
@@ -26,7 +31,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
@@ -52,6 +57,11 @@ const BROADCAST_CAPACITY: usize = 1024;
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// How long the waiter lets the reader drain the child's last output before `Exit`.
 const DRAIN_WAIT: Duration = Duration::from_millis(200);
+
+/// Busy ends once the PTY has been silent this long (no hook, or Enter on an empty prompt).
+const QUIET_IDLE: Duration = Duration::from_secs(15);
+/// How often a busy session checks for quiet.
+const QUIET_POLL: Duration = Duration::from_millis(500);
 
 static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
@@ -101,6 +111,14 @@ impl Ring {
     }
 }
 
+/// Whether the agent is working on a request; see the module docs.
+struct Activity {
+    busy: bool,
+    /// Bumped each time busy starts, so a stale quiet watcher stands down.
+    turn: u64,
+    last_output: Instant,
+}
+
 struct Session {
     provider: String,
     token: String,
@@ -112,6 +130,7 @@ struct Session {
     /// Dropped by the waiter after `child.wait()` so the reader thread unblocks.
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     ring: Mutex<Ring>,
+    activity: Mutex<Activity>,
     /// Flips to `true` once the waiter has reaped the child and forgotten the session.
     done: watch::Receiver<bool>,
 }
@@ -120,6 +139,7 @@ struct Inner {
     config: Arc<Config>,
     events: EventBus,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
+    quiet_idle: Duration,
 }
 
 /// Owns every project's terminal. Cheap to clone.
@@ -130,11 +150,17 @@ pub struct TerminalManager {
 
 impl TerminalManager {
     pub fn new(config: Arc<Config>, events: EventBus) -> Self {
+        Self::with_quiet_idle(config, events, QUIET_IDLE)
+    }
+
+    /// [`Self::new`] with a custom quiet period ending busy (tests).
+    pub fn with_quiet_idle(config: Arc<Config>, events: EventBus, quiet_idle: Duration) -> Self {
         Self {
             inner: Arc::new(Inner {
                 config,
                 events,
                 sessions: Mutex::new(HashMap::new()),
+                quiet_idle,
             }),
         }
     }
@@ -183,12 +209,63 @@ impl TerminalManager {
         Ok(ring.attach())
     }
 
-    /// Queue bytes for the PTY's input.
+    /// Queue bytes for the PTY's input. A lone Enter submits a request: the agent is busy.
     pub fn write(&self, project_id: &str, bytes: Vec<u8>) -> Result<(), ApiError> {
-        self.require(project_id)?
+        let session = self.require(project_id)?;
+        let submit = bytes == b"\r";
+        session
             .input
             .send(bytes)
-            .map_err(|_| ApiError::io("terminal input is closed"))
+            .map_err(|_| ApiError::io("terminal input is closed"))?;
+        if submit {
+            self.mark_busy(project_id, &session);
+        }
+        Ok(())
+    }
+
+    /// Whether the project's agent is working on a request.
+    pub fn busy(&self, project_id: &str) -> bool {
+        self.get(project_id)
+            .is_some_and(|s| s.activity.lock().unwrap().busy)
+    }
+
+    /// The agent finished its turn. No-op if no terminal is live or it was not busy.
+    pub fn set_idle(&self, project_id: &str) {
+        let Some(session) = self.get(project_id) else {
+            return;
+        };
+        if std::mem::take(&mut session.activity.lock().unwrap().busy) {
+            emit_busy(&self.inner, project_id, false);
+        }
+    }
+
+    /// Start busy and watch for the output going quiet (or the exit) to end it.
+    fn mark_busy(&self, project_id: &str, session: &Arc<Session>) {
+        let turn = {
+            let mut a = session.activity.lock().unwrap();
+            if a.busy {
+                return;
+            }
+            a.busy = true;
+            a.turn += 1;
+            a.last_output = Instant::now();
+            a.turn
+        };
+        emit_busy(&self.inner, project_id, true);
+        let (s, inner, id) = (session.clone(), self.inner.clone(), project_id.to_string());
+        std::thread::spawn(move || loop {
+            std::thread::sleep(QUIET_POLL);
+            let mut a = s.activity.lock().unwrap();
+            if !a.busy || a.turn != turn {
+                return;
+            }
+            if *s.done.borrow() || a.last_output.elapsed() >= inner.quiet_idle {
+                a.busy = false;
+                drop(a);
+                emit_busy(&inner, &id, false);
+                return;
+            }
+        });
     }
 
     pub fn resize(&self, project_id: &str, cols: u16, rows: u16) -> Result<(), ApiError> {
@@ -336,6 +413,11 @@ impl TerminalManager {
                 tx: broadcast::channel(BROADCAST_CAPACITY).0,
                 exited: false,
             }),
+            activity: Mutex::new(Activity {
+                busy: false,
+                turn: 0,
+                last_output: Instant::now(),
+            }),
             done,
         });
 
@@ -346,6 +428,7 @@ impl TerminalManager {
             while let Ok(n @ 1..) = reader.read(&mut buf) {
                 // Only the append and the broadcast happen under the lock.
                 s.ring.lock().unwrap().append(&buf[..n]);
+                s.activity.lock().unwrap().last_output = Instant::now();
             }
             let _ = drained_tx.send(());
         });
@@ -395,6 +478,12 @@ fn forget(inner: &Inner, project_id: &str, session: &Arc<Session>) {
     {
         sessions.remove(project_id);
     }
+}
+
+fn emit_busy(inner: &Inner, project_id: &str, busy: bool) {
+    inner
+        .events
+        .emit("terminal.busy", json!({ "projectId": project_id, "busy": busy }));
 }
 
 fn no_terminal(project_id: &str) -> ApiError {

@@ -25,6 +25,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "checkpoint.blocked": { projectId: "string", reason: "string" },
   "changes.updated": { projectId: "string" },
   "terminal.turn": { projectId: "string" },
+  "terminal.busy": { projectId: "string" },
   "events.lagged": { missed: "number" },
 };
 

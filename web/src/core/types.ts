@@ -266,6 +266,13 @@ export interface TerminalTurnEvent {
   projectId: string;
 }
 
+/** The agent started (a request was submitted) or stopped working on a request. */
+export interface TerminalBusyEvent {
+  type: "terminal.busy";
+  projectId: string;
+  busy: boolean;
+}
+
 /** The daemon finished a Get latest that had skipped the current change (agent went idle). */
 export interface ChangesUpdatedEvent {
   type: "changes.updated";
@@ -289,6 +296,7 @@ export type DaemonEvent =
   | CheckpointBlockedEvent
   | ChangesUpdatedEvent
   | TerminalTurnEvent
+  | TerminalBusyEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];

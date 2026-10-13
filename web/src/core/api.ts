@@ -251,7 +251,7 @@ export function createApi(
     stopTerminal: (project: string) =>
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
-      json<{ running: boolean; provider?: string; sessionId?: string | null }>(
+      json<{ running: boolean; provider?: string; sessionId?: string | null; busy?: boolean }>(
         "GET",
         `/api/terminal/${enc(project)}`,
       ),
