@@ -65,7 +65,8 @@ One Cloudflare Worker (static assets) serves `site/dist`. Unknown paths under `/
   - allows request header `Access-Control-Request-Private-Network` on preflight, and
   - responds with `Access-Control-Allow-Private-Network: true`
   (Chrome Private Network Access, required for a public HTTPS page to call loopback).
-- **Startup output** (`src/lib.rs`) prints the hosted link `<origin>/app/#t=<token>` when an
+- **Startup output** (`src/lib.rs`) prints the hosted link
+  `<origin>/app/?daemon=http://<bound>#t=<token>` (so a non-default `--port` works) when an
   origin is configured, and always the local link `<ui_url or http://bound>/app/?t=<token>`.
 - Host / WS-origin checks in `src/auth.rs` are unchanged; they already admit the configured
   origin.
