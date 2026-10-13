@@ -1,6 +1,12 @@
-# Cloudflare Pages configuration (static Astro build -> ./dist).
-# Rename `name` to your Pages project; it must match CLOUDFLARE_PAGES_PROJECT in CI
-# (defaults to this value).
+# Cloudflare Workers configuration: the static Astro build (./dist) served as Workers static
+# assets, no Worker script. Rename `name` to your Worker; it must match CLOUDFLARE_WORKER_NAME in
+# CI (defaults to this value). Production: https://<name>.<subdomain>.workers.dev; each branch
+# gets a preview at https://<branch alias>-<name>.<subdomain>.workers.dev.
 name = "astro-marketing"
-pages_build_output_dir = "./dist"
 compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = true
+
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"

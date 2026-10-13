@@ -9,16 +9,21 @@ npm run dev     # local dev server
 npm run build   # static build into ./dist
 ```
 
-## Deploys (Cloudflare Pages)
+## Deploys (Cloudflare Workers)
 
-`.github/workflows/deploy.yml` builds the site and deploys `dist/` to Cloudflare Pages:
+`.github/workflows/deploy.yml` builds the site and deploys `dist/` to Cloudflare Workers as static
+assets (no Worker script; `wrangler.toml` points `[assets]` at `./dist`):
 
-- **Push to `main`** → production deploy.
-- **Pull request** (opened, updated, reopened, marked ready) → preview deploy of the PR head
-  commit (`wrangler pages deploy --branch=<head branch>`; the name is sanitised by
-  `.github/scripts/pages-branch.sh` so it can't inject into the deploy command). The workflow then:
+- **Push to `main`** → production deploy (`wrangler deploy`), served at
+  `https://<worker>.<subdomain>.workers.dev`.
+- **Pull request** (opened, updated, reopened, marked ready) → preview of the PR head commit
+  (`wrangler versions upload --preview-alias=<alias>`). The alias comes from the head branch
+  (`content/launch-week` → `content-launch-week`), made safe and short enough by
+  `.github/scripts/preview-alias.sh`, so every branch keeps one stable preview URL:
+  `https://<alias>-<worker>.<subdomain>.workers.dev`. Previews never touch production. The
+  workflow then:
   - records a GitHub **deployment** for the PR head commit and sets its status to `success`
-    with `environment_url` = the preview URL (or `failure` if the deploy failed);
+    with `environment_url` = the preview URL (or `failure` if the upload failed);
   - posts one **sticky PR comment** with the preview link, updated on every push.
 
   The CMS workbench reads that deployment to show a **Preview** link beside the PR status
@@ -26,11 +31,12 @@ npm run build   # static build into ./dist
 
 ### One-time setup
 
-1. Create a Cloudflare Pages project (Direct Upload) and set `name` in `wrangler.toml` to it.
+1. Set `name` in `wrangler.toml` to your Worker's name (the first deploy creates it). Keep
+   `workers_dev` and `preview_urls` on: preview URLs live on `workers.dev`.
 2. In the GitHub repo, **Settings → Secrets and variables → Actions**:
-   - secret `CLOUDFLARE_API_TOKEN` — API token with the *Cloudflare Pages: Edit* permission;
+   - secret `CLOUDFLARE_API_TOKEN` — API token with the *Workers Scripts: Edit* permission;
    - secret `CLOUDFLARE_ACCOUNT_ID`;
-   - variable `CLOUDFLARE_PAGES_PROJECT` (optional; defaults to `astro-marketing`).
+   - variable `CLOUDFLARE_WORKER_NAME` (optional; defaults to `astro-marketing`).
 
 The job asks for its own token permissions (`contents: read`, `deployments: write`,
 `pull-requests: write`); nothing else needs enabling. Pull requests from forks get no secrets,
