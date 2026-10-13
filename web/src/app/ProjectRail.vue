@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { Code, FileText, History, House, MonitorPlay } from "@lucide/vue";
+import { Code, FileText, History, House, MonitorPlay, Palette } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
@@ -13,6 +13,7 @@ const active = computed(() => projectTabFromRoute(route.name));
 const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "preview", label: "Preview", icon: MonitorPlay },
   { id: "content", label: "Content", icon: FileText },
+  { id: "design", label: "Design", icon: Palette },
   { id: "code", label: "Code", icon: Code },
   { id: "history", label: "History", icon: History },
 ];

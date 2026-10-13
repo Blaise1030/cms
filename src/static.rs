@@ -181,6 +181,7 @@ mod tests {
             "package.json",
             "package-lock.json",
             "AGENTS.md",
+            "DESIGN.md",
             "README.md",
             ".gitignore",
             ".github/workflows/deploy.yml",

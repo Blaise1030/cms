@@ -353,3 +353,10 @@ export interface ContentImageUpload { clientId: string; alt: string; filename: s
 export interface SavedContentEntry extends ContentEntry {
   images?: Record<string, { path: string; link: string }>;
 }
+/** The project's root `DESIGN.md` frontmatter; unknown keys are kept as-is. */
+export type DesignTokens = Record<string, unknown>;
+/** `exists: false` carries a `starter` to offer instead of a file. */
+export interface DesignDoc {
+  exists: boolean; tokens: DesignTokens; body: string; hash?: string; branch: string;
+  starter?: { tokens: DesignTokens; body: string };
+}

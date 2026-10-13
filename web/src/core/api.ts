@@ -12,6 +12,8 @@ import {
   type ContentEntryDelete,
   type ContentImpact,
   type ContentVersion,
+  type DesignDoc,
+  type DesignTokens,
   type FileVersion,
   type Change,
   type ChangesUpdate,
@@ -195,6 +197,10 @@ export function createApi(
       json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
     deleteContentEntry: (body: ContentEntryDelete) =>
       json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
+    design: (project: string) => json<DesignDoc>("GET", "/api/design", { query: { project } }),
+    /** Omit `hash` to create the file; the daemon refuses a stale hash or changed branch with 409. */
+    saveDesign: (body: { project: string; branch: string; hash?: string; tokens: DesignTokens; body: string }) =>
+      json<DesignDoc>("PUT", "/api/design", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

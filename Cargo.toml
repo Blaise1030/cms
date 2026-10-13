@@ -22,7 +22,7 @@ libc = "0.2"
 rand = "0.10.3"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude", "mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "sync", "rt", "time", "io-util"] }
 tower-http = { version = "0.7.1", features = ["cors"] }
 notify = "8.2.0"

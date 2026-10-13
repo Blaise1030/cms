@@ -41,7 +41,15 @@ describe("router", () => {
     expect(projectTabFromRoute("project-preview")).toBe("preview");
     expect(projectTabFromRoute("project-code")).toBe("code");
     expect(projectTabFromRoute("project-history")).toBe("history");
+    expect(projectTabFromRoute("project-design")).toBe("design");
     expect(projectTabFromRoute("home")).toBe("preview");
+  });
+
+  it("resolves the design tab", () => {
+    const r = router().resolve("/p/x/design");
+    expect(r.name).toBe("project-design");
+    expect(r.params.id).toBe("x");
+    expect(projectPath("x", "design")).toBe("/p/x/design");
   });
 
   it("redirects unknown paths home", async () => {

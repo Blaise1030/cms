@@ -263,7 +263,7 @@ pub async fn read_entry(
     ))
 }
 /// The checked-out branch name (empty when detached).
-async fn current_branch(project_root: &Path) -> Result<String, ApiError> {
+pub(crate) async fn current_branch(project_root: &Path) -> Result<String, ApiError> {
     let output = tokio::process::Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(project_root)

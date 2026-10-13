@@ -436,9 +436,9 @@ fn mode_of(path: &Path) -> Result<u32, ApiError> {
 
 /// Undo log for applied file-system steps, replayed in reverse on failure.
 #[derive(Default)]
-pub(super) struct Journal(pub(super) Vec<Undo>);
+pub(crate) struct Journal(pub(crate) Vec<Undo>);
 
-pub(super) enum Undo {
+pub(crate) enum Undo {
     /// Restore `bytes` at `path` (a file that was overwritten or removed).
     Write {
         path: PathBuf,
@@ -455,7 +455,7 @@ pub(super) enum Undo {
 
 impl Journal {
     /// Roll back and return `error`, extended with every rollback step that failed.
-    pub(super) fn fail(self, error: ApiError) -> ApiError {
+    pub(crate) fn fail(self, error: ApiError) -> ApiError {
         let mut failures = vec![];
         for step in self.0.into_iter().rev() {
             let (path, result) = match step {

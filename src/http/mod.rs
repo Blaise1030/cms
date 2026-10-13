@@ -3,6 +3,7 @@
 pub mod changes;
 pub mod checkpoints;
 pub mod content;
+pub mod design;
 pub mod devserver;
 pub mod error;
 pub mod events;
@@ -35,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/content/entries", get(content::entries))
         .route("/api/content/entry/rename", post(content::rename))
         .route("/api/content/entry/impact", post(content::impact))
+        .route("/api/design", get(design::get).put(design::put))
         .route("/api/content/history", get(history::list))
         .route("/api/content/history/{sha}", get(history::version))
         .route(

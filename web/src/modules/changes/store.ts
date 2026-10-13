@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/errors";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
+import { useDesignStore } from "@/modules/design/store";
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -81,6 +82,7 @@ export const useChangesStore = defineStore("changes", () => {
     await Promise.all([
       useFilesStore().refresh(),
       branch ? useContentStore().refreshForBranch(branch) : undefined,
+      branch ? useDesignStore().refreshForBranch(branch) : undefined,
     ]);
     usePreviewStore().reload();
   }

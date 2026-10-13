@@ -3,10 +3,11 @@ import HomePage from "@/app/HomePage.vue";
 import ProjectPage from "@/app/ProjectPage.vue";
 import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
 import ContentPanel from "@/modules/content/ContentPanel.vue";
+import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "code" | "history";
+export type ProjectTab = "preview" | "content" | "design" | "code" | "history";
 
 const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };
 
@@ -30,6 +31,12 @@ export const routes: RouteRecordRaw[] = [
           collection: (r.params.collection as string) || undefined,
           entry: (r.params.entry as string) || undefined,
         }),
+      },
+      {
+        path: "design",
+        name: "project-design",
+        component: DesignPanel,
+        props: (r) => ({ projectId: r.params.id as string }),
       },
       {
         path: "code/:path(.*)?",
@@ -68,6 +75,7 @@ export function codePath(id: string, path?: string | null) {
 
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
   if (name === "project-content") return "content";
+  if (name === "project-design") return "design";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
   return "preview";

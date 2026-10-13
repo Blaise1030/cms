@@ -93,6 +93,7 @@ async fn create_copies_template_inits_git_and_returns_id_and_port() {
         "package.json",
         "package-lock.json",
         "AGENTS.md",
+        "DESIGN.md",
         ".gitignore",
         "astro.config.mjs",
         "src/content.config.ts",

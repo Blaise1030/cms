@@ -5,6 +5,7 @@ pub mod changes;
 pub mod config;
 pub mod conflict_preview;
 pub mod content;
+pub mod design;
 pub mod devserver;
 pub mod error;
 pub mod events;
