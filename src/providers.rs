@@ -16,14 +16,17 @@
 //! # Hook mechanics (verified 2026-10-10 against claude 2.1.296, codex-cli 0.162.1,
 //! opencode v2.0.25)
 //!
-//! - Cursor CLI: `--force` and `--trust` when auto-approve is on. No turn-end hook.
+//! - Cursor CLI: `--force` and `--trust` when auto-approve is on. No turn-end hook. No
+//!   system-prompt flag: the git guide goes in a git-excluded `.cursor/rules/*.mdc` rule
+//!   (rule loading not exercised at runtime here).
 //! - Claude: `--settings <json>` adds a `Stop` command hook; `--dangerously-skip-permissions`
 //!   auto-approves.
 //! - Codex: `-c notify=[exe,"hook","turn-end"]` fires with NO `--dangerously-bypass-hook-trust`.
 //!   Verified by one `codex exec -c 'notify=["n.sh","hook","turn-end"]' "say ok"`: the script ran
 //!   and received `hook turn-end <json payload>` (codex appends the payload as the last arg).
 //!   Hook trust applies to hooks.json hooks, not `notify`. Open question: hooks.json trust
-//!   was not exercised, so the bypass flag is not appended.
+//!   was not exercised, so the bypass flag is not appended. The git guide goes in
+//!   `-c developer_instructions=...` (verified 2026-10-13: `codex exec` obeyed it).
 //! - OpenCode: the installed binary reads `OPENCODE_CONFIG_DIR` (replaces the global config
 //!   dir; this daemon never reads or writes `~/.config/opencode`). Each project gets its own
 //!   directory `{state_dir}/{project_id}/opencode`, so one project's `auto_approve` cannot
@@ -162,9 +165,9 @@ export default {{
     )
 }
 
-/// Appended to Claude's system prompt: Claude manages changes (branches) and syncing itself,
-/// in the shape the app lists them (`content/*` + branch description as the title).
-pub const CLAUDE_GIT_GUIDE: &str = r#"# Changes and syncing (this project is edited through a no-code app)
+/// Given to every agent in [`gets_git_guide`] so it manages changes (branches) and syncing
+/// itself, in the shape the app lists them (`content/*` + branch description as the title).
+pub const GIT_GUIDE: &str = r#"# Changes and syncing (this project is edited through a no-code app)
 
 The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I started a new draft called Pricing page", "I brought in the latest version of the site") — never ask them to run git.
 
@@ -176,6 +179,54 @@ A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its huma
 - Get the latest / sync with main: commit pending work, then `git fetch origin main && git merge origin/main` (just `git merge main` without a remote). If it conflicts, resolve it keeping the intent of both sides, run nothing destructive, and ask the user in plain words when the right result is unclear.
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
 - The app also commits your work automatically at the end of each turn; that is expected."#;
+
+/// Agents that receive [`GIT_GUIDE`] and so may start on `main`: they branch before editing.
+/// Claude via `--append-system-prompt`, Codex via `developer_instructions`, Cursor via the
+/// project rule [`write_cursor_rule`] writes.
+pub fn gets_git_guide(provider_id: &str) -> bool {
+    matches!(provider_id, "claude" | "codex" | "cursor")
+}
+
+/// Where [`write_cursor_rule`] puts [`GIT_GUIDE`], relative to the project.
+pub const CURSOR_RULE_PATH: &str = ".cursor/rules/workbench-changes.mdc";
+
+/// Cursor CLI has no system-prompt flag but loads `.cursor/rules/*.mdc`: write the guide as
+/// an always-applied rule, and list it in `.git/info/exclude` so it never lands in a commit.
+pub fn write_cursor_rule(project_dir: &Path) -> std::io::Result<()> {
+    let rule = project_dir.join(CURSOR_RULE_PATH);
+    if let Some(parent) = rule.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        &rule,
+        format!(
+            "---\ndescription: How to start changes and sync in this app\n\
+             alwaysApply: true\n---\n{GIT_GUIDE}\n"
+        ),
+    )?;
+    let git = project_dir.join(".git");
+    if !git.is_dir() {
+        return Ok(());
+    }
+    let info = git.join("info");
+    std::fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
+    let line = format!("/{CURSOR_RULE_PATH}");
+    let current = match std::fs::read_to_string(&exclude) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    if !current.lines().any(|l| l.trim() == line) {
+        let sep = if current.is_empty() || current.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        std::fs::write(&exclude, format!("{current}{sep}{line}\n"))?;
+    }
+    Ok(())
+}
 
 /// Resolve the argv/env for launching `provider`, injecting its turn-end hook.
 /// `hook_exe` is the daemon executable (`<exe> hook turn-end`). For OpenCode this writes
@@ -211,7 +262,7 @@ pub fn launch_spec(
             argv.push("--settings".into());
             argv.push(settings.to_string());
             argv.push("--append-system-prompt".into());
-            argv.push(CLAUDE_GIT_GUIDE.into());
+            argv.push(GIT_GUIDE.into());
             match session {
                 AgentSession::Fresh => {}
                 AgentSession::Assign(id) => argv.extend(["--session-id".into(), id.clone()]),
@@ -229,6 +280,10 @@ pub fn launch_spec(
             let exe_json = serde_json::to_string(&*exe).unwrap_or_default();
             argv.push("-c".into());
             argv.push(format!(r#"notify=[{exe_json},"hook","turn-end"]"#));
+            // A JSON string is a valid TOML basic string, which is what `-c` parses.
+            let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
+            argv.push("-c".into());
+            argv.push(format!("developer_instructions={guide}"));
             if auto_approve {
                 argv.push("--dangerously-bypass-approvals-and-sandbox".into());
             }
@@ -356,7 +411,7 @@ mod tests {
     fn codex_resume_is_a_subcommand_with_the_id_last() {
         let argv = session_argv("codex", AgentSession::Resume("t1".into()));
         assert_eq!(argv[..3], ["codex", "resume", "-c"]);
-        assert_eq!(argv[4..], ["--dangerously-bypass-approvals-and-sandbox", "t1"]);
+        assert_eq!(argv[6..], ["--dangerously-bypass-approvals-and-sandbox", "t1"]);
         assert_eq!(session_argv("codex", AgentSession::Assign("t1".into()))[1], "-c");
     }
 
@@ -379,7 +434,7 @@ mod tests {
     fn claude_gets_stop_hook_settings() {
         let s = spec("claude", "/x/it's", false, Path::new("/nope"));
         assert_eq!(s.argv.len(), 5);
-        assert_eq!(s.argv[3..], ["--append-system-prompt", CLAUDE_GIT_GUIDE]);
+        assert_eq!(s.argv[3..], ["--append-system-prompt", GIT_GUIDE]);
         assert_eq!(
             (s.argv[0].as_str(), s.argv[1].as_str()),
             ("claude", "--settings")
@@ -403,9 +458,42 @@ mod tests {
     #[test]
     fn codex_gets_notify_override() {
         let s = spec("codex", "/x/work bench", false, Path::new("/nope"));
-        assert_eq!(s.argv.len(), 3);
+        assert_eq!(s.argv.len(), 5);
         assert_eq!(s.argv[1], "-c");
         assert_eq!(s.argv[2], r#"notify=["/x/work bench","hook","turn-end"]"#);
+    }
+
+    #[test]
+    fn codex_gets_git_guide_as_developer_instructions() {
+        let s = spec("codex", "/x", false, Path::new("/nope"));
+        assert_eq!(s.argv[3], "-c");
+        let value = s.argv[4].strip_prefix("developer_instructions=").unwrap();
+        assert_eq!(serde_json::from_str::<String>(value).unwrap(), GIT_GUIDE);
+    }
+
+    #[test]
+    fn guided_agents_are_the_ones_given_the_guide() {
+        for id in ["claude", "codex", "cursor"] {
+            assert!(gets_git_guide(id), "{id}");
+        }
+        assert!(!gets_git_guide("opencode"));
+        assert!(!gets_git_guide("fake"));
+    }
+
+    #[test]
+    fn cursor_rule_is_written_and_git_excluded_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git/info")).unwrap();
+        std::fs::write(dir.path().join(".git/info/exclude"), "# keep\n*.log").unwrap();
+        write_cursor_rule(dir.path()).unwrap();
+        write_cursor_rule(dir.path()).unwrap();
+
+        let rule = std::fs::read_to_string(dir.path().join(CURSOR_RULE_PATH)).unwrap();
+        assert!(rule.starts_with("---\n"), "{rule}");
+        assert!(rule.contains("alwaysApply: true"), "{rule}");
+        assert!(rule.contains(GIT_GUIDE));
+        let exclude = std::fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude, format!("# keep\n*.log\n/{CURSOR_RULE_PATH}\n"));
     }
 
     #[test]

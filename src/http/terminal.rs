@@ -142,8 +142,15 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
             (provider, session, record)
         }
     };
-    // Claude starts changes itself (see `CLAUDE_GIT_GUIDE`); other agents need one first.
-    if provider.id != "claude" {
+    // Agents given `GIT_GUIDE` start changes themselves; other agents need one first.
+    let mut guided = providers::gets_git_guide(&provider.id);
+    if provider.id == "cursor" {
+        if let Err(e) = providers::write_cursor_rule(&project.dir) {
+            eprintln!("workbench: cannot write the Cursor git guide rule: {e}");
+            guided = false;
+        }
+    }
+    if !guided {
         checkpoints::require_change(&state, &req.project).await?;
     }
     let launch = providers::launch_spec(
@@ -207,7 +214,7 @@ fn uuid_v4() -> String {
     format!("{}-{}-{}-{}-{}", &s[..8], &s[8..12], &s[12..16], &s[16..20], &s[20..])
 }
 
-/// `GET /api/terminal/{project}` → `{ running, provider?, sessionId? }`.
+/// `GET /api/terminal/{project}` → `{ running, provider?, sessionId?, busy? }`.
 pub async fn status(
     State(state): State<AppState>,
     Path(project): Path<String>,
@@ -217,6 +224,7 @@ pub async fn status(
             "running": true,
             "provider": provider,
             "sessionId": state.terminals.history_id(&project),
+            "busy": state.terminals.busy(&project),
         }))),
         None => Ok(Json(json!({ "running": false }))),
     }
@@ -422,6 +430,7 @@ pub async fn turn_end(
     let lock = turn_end_lock(&req.project);
     let _guard = lock.lock().await;
     record_turn(&state, &req);
+    state.terminals.set_idle(&req.project);
     // The agent may have started or switched changes this turn.
     state.events.emit("terminal.turn", json!({ "projectId": req.project }));
 
