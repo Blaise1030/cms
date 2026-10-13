@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { ContentVersion, FileVersion } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 
 export const useContentHistoryStore = defineStore("contentHistory", () => {
   const daemon = useDaemon();

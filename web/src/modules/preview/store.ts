@@ -1,8 +1,10 @@
 import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
+import { useLocalStorage } from "@vueuse/core";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
+import { useAgentOutboxStore } from "@/modules/terminal/outbox";
 import type { PickedElement } from "./elementPicker";
 
 export type Device = "desktop" | "tablet" | "mobile";
@@ -16,8 +18,13 @@ export const DEVICE_WIDTH: Record<Device, number | null> = {
 
 export const usePreviewStore = defineStore("preview", () => {
   const daemon = useDaemon();
+  const outbox = useAgentOutboxStore();
 
   const device = ref<Device>("desktop");
+  /** Force right-to-left layout in the preview. */
+  const rtl = ref(false);
+  /** Preview in dark mode (`prefers-color-scheme: dark` and a `dark` class on `<html>`). */
+  const dark = useLocalStorage("workbench.preview.dark", false);
   /** Bumping this remounts the iframe. */
   const reloadNonce = ref(0);
   /** Live dev-server state per project, from `devserver.status` events. */
@@ -27,11 +34,17 @@ export const usePreviewStore = defineStore("preview", () => {
   const error = ref<string | null>(null);
   /** Element-picker mode in the preview frame. */
   const picking = ref(false);
-  /** The last element picked, waiting for the chat composer to take it. */
-  const picked = ref<PickedElement | null>(null);
 
   function setDevice(next: Device) {
     device.value = next;
+  }
+
+  function toggleRtl() {
+    rtl.value = !rtl.value;
+  }
+
+  function toggleDark() {
+    dark.value = !dark.value;
   }
 
   function setPicking(on: boolean) {
@@ -39,15 +52,8 @@ export const usePreviewStore = defineStore("preview", () => {
   }
 
   function pick(element: PickedElement) {
-    picked.value = element;
+    outbox.send({ kind: "element", element });
     picking.value = false;
-  }
-
-  /** Hand the pending pick to its consumer (the composer), clearing it. */
-  function takePicked(): PickedElement | null {
-    const element = picked.value;
-    picked.value = null;
-    return element;
   }
 
   function reload() {
@@ -97,17 +103,19 @@ export const usePreviewStore = defineStore("preview", () => {
 
   return {
     device,
+    rtl,
+    dark,
     reloadNonce,
     status,
     message,
     restarting,
     error,
     picking,
-    picked,
     setDevice,
+    toggleRtl,
+    toggleDark,
     setPicking,
     pick,
-    takePicked,
     reload,
     seed,
     restart,

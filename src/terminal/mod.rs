@@ -19,6 +19,7 @@
 //! an explicit kill). They never `kill` the pid: after `wait` it may already belong to
 //! another process.
 
+pub mod history;
 mod modes;
 
 use std::collections::{HashMap, VecDeque};
@@ -103,6 +104,8 @@ impl Ring {
 struct Session {
     provider: String,
     token: String,
+    /// The [`history`] record this session belongs to.
+    history_id: Mutex<Option<String>>,
     /// Process-group id captured at spawn, while the leader was still alive.
     pgid: Option<libc::pid_t>,
     input: mpsc::Sender<Vec<u8>>,
@@ -202,6 +205,19 @@ impl TerminalManager {
                 pixel_height: 0,
             })
             .map_err(|e| ApiError::io(format!("failed to resize terminal: {e}")))
+    }
+
+    /// Tie the live session to its [`history`] record. No-op if no terminal is live.
+    pub fn set_history_id(&self, project_id: &str, id: &str) {
+        if let Some(s) = self.get(project_id) {
+            *s.history_id.lock().unwrap() = Some(id.to_string());
+        }
+    }
+
+    /// The live session's [`history`] record id.
+    pub fn history_id(&self, project_id: &str) -> Option<String> {
+        self.get(project_id)
+            .and_then(|s| s.history_id.lock().unwrap().clone())
     }
 
     /// Whether `token` is the live session's hook token (constant-time compare).
@@ -310,6 +326,7 @@ impl TerminalManager {
         let session = Arc::new(Session {
             provider: provider.to_string(),
             token,
+            history_id: Mutex::new(None),
             pgid,
             input,
             master: Mutex::new(Some(pair.master)),
@@ -353,9 +370,11 @@ impl TerminalManager {
                 let _ = ring.tx.send(Output::Exit(code));
             }
             forget(&inner, &id, &s);
-            inner
-                .events
-                .emit("terminal.exited", json!({ "projectId": id, "code": code }));
+            let session_id = s.history_id.lock().unwrap().clone();
+            inner.events.emit(
+                "terminal.exited",
+                json!({ "projectId": id, "code": code, "sessionId": session_id }),
+            );
             let _ = done_tx.send(true);
         });
 
@@ -421,6 +440,13 @@ fn signal_group(pgid: Option<libc::pid_t>, signal: libc::c_int) {
     unsafe {
         libc::killpg(pgid, signal);
     }
+}
+
+/// `argv` run the way terminals are, through the user's login shell (for its PATH).
+pub fn login_command(argv: &[String], cwd: &Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(user_shell());
+    cmd.arg("-lc").arg(exec_line(argv)).current_dir(cwd);
+    cmd
 }
 
 /// `exec` followed by each argument single-quoted for `sh`.

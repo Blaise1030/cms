@@ -13,6 +13,7 @@ import { useChangesStore } from "@/modules/changes/store";
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
+  localStorage.clear();
   hDaemon.daemon = createFakeDaemon(api);
   // Default to the embedded topology (page and daemon share an origin).
   hDaemon.daemon.config.value = { origin: window.location.origin };
@@ -21,21 +22,18 @@ function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api =
 }
 
 describe("PreviewPanel", () => {
-  it("shows the active change's PR status in the browser bar", async () => {
+  it("leaves the PR status out of the browser bar (it lives behind the share button)", async () => {
     const w = mountPanel();
-    expect(w.find("[data-testid='pr-status']").exists()).toBe(false);
     useChangesStore().status = {
       number: 3,
       url: "https://github.com/acme/site/pull/3",
-      state: "open",
+      state: "draft",
       checks: "passing",
       previewUrl: "https://lw.pages.dev",
     };
     await flushPromises();
-    expect(w.find("[data-testid='pr-status']").text()).toBe("Open · Checks passing");
-    expect(w.find("[data-testid='preview-deploy-link']").attributes("href")).toBe(
-      "https://lw.pages.dev",
-    );
+    expect(w.find("[data-testid='pr-status']").exists()).toBe(false);
+    expect(w.find("[data-testid='ready-for-review']").exists()).toBe(false);
     w.unmount();
   });
 
@@ -67,6 +65,21 @@ describe("PreviewPanel", () => {
     store.setDevice("mobile");
     await flushPromises();
     expect(width()).toBe("390px");
+    w.unmount();
+  });
+
+  it("toggles RTL and dark mode for the frame", async () => {
+    const w = mountPanel();
+    const store = usePreviewStore();
+    const iframe = () => w.find("iframe").element as HTMLIFrameElement;
+    const trigger = () => w.find("[data-testid='preview-appearance']");
+    expect(iframe().style.colorScheme).toBe("light");
+    expect(trigger().attributes("data-variant")).toBe("ghost");
+    store.toggleDark();
+    await flushPromises();
+    expect(iframe().style.colorScheme).toBe("dark");
+    expect(trigger().attributes("data-variant")).toBe("secondary");
+    expect(localStorage.getItem("workbench.preview.dark")).toBe("true");
     w.unmount();
   });
 

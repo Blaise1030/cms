@@ -10,13 +10,13 @@ const { entry } = Astro.props;
 const { Content } = await render(entry);
 ---
 <Base title={entry.data.title} description={entry.data.description}>
-  <article class="content-page">
-    <a href={href("/blog/")}>Back to Blog</a>
-    <h1>{entry.data.title}</h1>
-    <p>{entry.data.description}</p>
-    <time datetime={entry.data.pubDate}>{entry.data.pubDate}</time>
-    {entry.data.coverImage && <Image class="cover-image" src={entry.data.coverImage} alt={entry.data.coverAlt!} />}
-    {entry.data.tags.length > 0 && <p>{entry.data.tags.join(", ")}</p>}
-    <div class="article-body"><Content /></div>
+  <article class="mx-auto max-w-5xl px-8 py-12">
+    <a class="text-sm hover:underline" href={href("/blog/")}>Back to Blog</a>
+    <h1 class="mt-4 text-4xl font-bold tracking-tight">{entry.data.title}</h1>
+    <p class="mt-2 text-lg text-neutral-600 dark:text-neutral-400">{entry.data.description}</p>
+    <time class="mt-2 block text-sm text-neutral-500" datetime={entry.data.pubDate}>{entry.data.pubDate}</time>
+    {entry.data.coverImage && <Image class="mt-6 h-auto max-w-full rounded-xl" src={entry.data.coverImage} alt={entry.data.coverAlt!} />}
+    {entry.data.tags.length > 0 && <p class="mt-4 text-sm text-neutral-500">{entry.data.tags.join(", ")}</p>}
+    <div class="prose mt-8 max-w-3xl dark:prose-invert prose-img:h-auto prose-img:max-w-full"><Content /></div>
   </article>
 </Base>

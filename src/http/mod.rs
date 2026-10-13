@@ -86,6 +86,12 @@ pub fn router(state: AppState) -> Router {
             get(terminal::status).delete(terminal::stop),
         )
         .route("/api/terminal/{project}/ws", get(terminal::ws))
+        .route("/api/terminal/{project}/sessions", get(terminal::sessions))
+        .route(
+            "/api/terminal/{project}/attachments",
+            post(terminal::attach)
+                .layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
+        )
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))

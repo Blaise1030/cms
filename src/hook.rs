@@ -28,6 +28,18 @@ pub fn summary_from_payload(payload: &str) -> Option<String> {
         })
 }
 
+/// The CLI's conversation id from a hook payload: `thread-id` (Codex), else `session_id`
+/// (Claude, OpenCode plugin).
+pub fn session_id_from_payload(payload: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    ["thread-id", "session_id"]
+        .iter()
+        .find_map(|k| v.get(k)?.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 fn read_stdin() -> String {
     let stdin = std::io::stdin();
     if stdin.is_terminal() {
@@ -54,7 +66,10 @@ pub async fn turn_end(payload_arg: Option<String>) -> ExitCode {
             .unwrap_or_default(),
     };
     let summary = summary_from_payload(&payload);
-    let body = serde_json::json!({"project": project, "token": token, "summary": summary});
+    let mut body = serde_json::json!({"project": project, "token": token, "summary": summary});
+    if let Some(id) = session_id_from_payload(&payload) {
+        body["sessionId"] = id.into();
+    }
     let endpoint = format!("{}/api/terminal/turn-end", url.trim_end_matches('/'));
     let result = async {
         let client = reqwest::Client::builder()
@@ -106,7 +121,18 @@ mod tests {
     fn garbage_payload_is_none() {
         for p in ["not json", "", "[]"] {
             assert_eq!(summary_from_payload(p), None, "{p:?}");
+            assert_eq!(session_id_from_payload(p), None, "{p:?}");
         }
+    }
+
+    #[test]
+    fn session_id_from_codex_thread_or_session_id() {
+        assert_eq!(
+            session_id_from_payload(r#"{"thread-id":"t1","session_id":"s1"}"#),
+            Some("t1".into())
+        );
+        assert_eq!(session_id_from_payload(r#"{"session_id":"s1"}"#), Some("s1".into()));
+        assert_eq!(session_id_from_payload(r#"{"session_id":" "}"#), None);
     }
 
     fn clear_env() {

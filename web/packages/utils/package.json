@@ -1,0 +1,14 @@
+{
+  "name": "@workbench/utils",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./highlight": "./src/highlight.ts"
+  },
+  "dependencies": {
+    "shiki": "^4.4.3"
+  }
+}

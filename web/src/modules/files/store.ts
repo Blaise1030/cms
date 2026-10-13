@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { FileContent } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 
 const REFRESH_DELAY_MS = 250;
 

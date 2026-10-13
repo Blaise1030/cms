@@ -51,9 +51,6 @@ pub struct SavedEntry {
     pub images: BTreeMap<String, images::SavedImage>,
 }
 
-/// Page slugs owned by template routes.
-const RESERVED_PAGES: &[&str] = &["blog", "help"];
-
 pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
     let mut map = LOCKS
@@ -94,7 +91,7 @@ pub(crate) async fn require_content_change(root: &Path, opened: &str) -> Result<
     Ok(active.branch)
 }
 
-pub(super) fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError> {
+pub(super) fn validate_slug(slug: &str) -> Result<(), ApiError> {
     let valid = !slug.is_empty()
         && slug.len() <= 100
         && slug.split('-').all(|part| {
@@ -107,9 +104,6 @@ pub(super) fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError
         return Err(invalid_slug(
             "Slugs use lowercase letters, digits, and single hyphens",
         ));
-    }
-    if collection == "pages" && RESERVED_PAGES.contains(&slug) {
-        return Err(invalid_slug(&format!("\"{slug}\" is a reserved page slug")));
     }
     Ok(())
 }
@@ -340,7 +334,7 @@ pub(super) fn duplicate_slug(c: &catalog::ContentCollection, id: &str) -> ApiErr
         .with_reason("duplicate_slug")
 }
 
-/// Refusal for the singleton `site` and the required `pages/home` entry.
+/// Refusal to create, rename or delete a singleton collection's entry.
 pub(super) fn protected(message: String) -> ApiError {
     ApiError::badreq(message).with_reason("protected_entry")
 }
@@ -377,7 +371,7 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
             if c.singleton.is_some() {
                 return Err(protected(format!("{} is update-only", c.name)));
             }
-            validate_slug(&c.name, slug)?;
+            validate_slug(slug)?;
             (slug.clone(), true)
         }
         SaveTarget::Update { id, .. } => {

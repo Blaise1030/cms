@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { ArrowLeft, ChevronRight, GitCommitVertical, RotateCcw } from "@lucide/vue";
+import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import { historyPath } from "@/router";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -23,15 +25,16 @@ import {
   StepperSeparator,
 } from "@/components/ui/stepper";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { useCheckpointsStore } from "./store";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("./ChangedFilesTree.vue"));
 const DiffView = defineAsyncComponent(() => import("./DiffView.vue"));
 
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; sha?: string }>();
 const store = useCheckpointsStore();
+const router = useRouter();
 
 const confirming = ref(false);
 const diffs = ref<HTMLElement | null>(null);
@@ -42,12 +45,17 @@ const isCurrent = computed(() => !!selected.value && list.value[0]?.sha === sele
 
 watch(
   () => props.projectId,
-  (id) => {
-    void store.select(id, null);
-    void store.load(id);
-  },
+  (id) => void store.load(id),
   { immediate: true },
 );
+// The URL names the open checkpoint; without one, the timeline shows.
+watch(
+  () => [props.projectId, props.sha ?? null] as const,
+  ([id, sha]) => void store.select(id, sha),
+  { immediate: true },
+);
+
+const open = (sha?: string) => router.push(historyPath(props.projectId, sha));
 
 const short = (sha: string) => sha.slice(0, 7);
 const when = (ts: number) => new Date(ts * 1000).toLocaleString();
@@ -76,6 +84,7 @@ async function restore() {
   if (!target) return;
   try {
     await store.restore(props.projectId, target.sha);
+    void router.replace(historyPath(props.projectId));
     toast.success(`Restored ${short(target.sha)}`);
   } catch (e) {
     toast.error(`Restore failed: ${errorMessage(e)}`);
@@ -97,7 +106,7 @@ async function restore() {
                 size="icon-sm"
                 class="self-start"
                 aria-label="Back to timeline"
-                @click="store.select(projectId, null)"
+                @click="open()"
               >
                 <ArrowLeft />
               </Button>
@@ -232,7 +241,7 @@ async function restore() {
                 size="sm"
                 class="hover:bg-accent/60 min-w-0 flex-1 flex-nowrap px-2.5 text-left"
                 data-testid="checkpoint-item"
-                @click="store.select(projectId, cp.sha)"
+                @click="open(cp.sha)"
               >
                 <ItemContent class="min-w-0 gap-0.5">
                   <ItemTitle class="w-full text-base">

@@ -116,7 +116,7 @@ describe("DesignPanel", () => {
   it("invalid frontmatter shows the read-only message", async () => {
     const { ApiError } = await import("@/core/api");
     const details = [{ path: ["source"], message: "---\n: [\n---\nbody\n" }];
-    const { w } = await setup({ design: vi.fn(async () => { throw new ApiError("INVALID", "bad yaml at line 2", 422, { reason: "invalid_design", details }); }) });
+    const { w } = await setup({ design: vi.fn(async () => { throw new ApiError("BADREQ", "bad yaml at line 2", 400, { reason: "invalid_design", details }); }) });
     const msg = button(w, "design-invalid");
     expect(msg.text()).toContain("DESIGN.md has invalid frontmatter. Ask the agent to fix it.");
     expect(msg.text()).toContain("bad yaml at line 2");

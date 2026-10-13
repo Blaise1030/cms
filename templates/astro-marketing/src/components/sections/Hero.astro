@@ -1,14 +1,18 @@
 ---
 import { href } from "../../lib/href";
-const { data, id, Content } = Astro.props;
 ---
 
-<section class="section center" id={id}>
-  <h1>{data.headline}</h1>
-  {data.subheadline && <p>{data.subheadline}</p>}
-  <p>
-    <a class="button primary" href={href(data.cta.href)}>{data.cta.label}</a>
-    {data.secondaryCta && <a class="button" href={href(data.secondaryCta.href)}>{data.secondaryCta.label}</a>}
+<section class="mx-auto max-w-5xl px-8 py-24 text-center" id="hero">
+  <h1 class="text-4xl font-bold tracking-tight sm:text-6xl">Launch your story, not your backlog</h1>
+  <p class="mx-auto mt-6 max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
+    Acme turns a rough idea into a polished marketing site in minutes.
   </p>
-  <Content />
+  <p class="mt-8 flex flex-wrap justify-center gap-4">
+    <a
+      class="inline-block rounded-lg border border-neutral-900 bg-neutral-900 px-5 py-2.5 font-semibold text-white dark:border-white dark:bg-white dark:text-neutral-900"
+      href={href("#pricing")}>Get started</a
+    >
+    <a class="inline-block rounded-lg border border-current px-5 py-2.5 font-semibold" href={href("#features")}>See features</a>
+  </p>
+  <p class="mt-8 text-neutral-600 dark:text-neutral-400">Trusted by makers who would rather be shipping.</p>
 </section>

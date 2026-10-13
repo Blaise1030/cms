@@ -7,18 +7,23 @@ import {
   Maximize2,
   Minimize2,
   Monitor,
+  Moon,
   MousePointerClick,
+  PilcrowRight,
   RotateCw,
   Smartphone,
+  Sun,
   Tablet,
 } from "@lucide/vue";
 import { useEventListener } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -26,10 +31,10 @@ import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import PrStatusPill from "@/modules/changes/PrStatusPill.vue";
-import ReadyForReviewButton from "@/modules/changes/ReadyForReviewButton.vue";
+import { frameHref, framePath } from "@workbench/utils";
 import { attachPicker, describeElement } from "./elementPicker";
-import { frameHref, framePath, useFrameHistory } from "./frameHistory";
+import { applyFrameAppearance } from "./frameAppearance";
+import { useFrameHistory } from "./frameHistory";
 import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 
 const props = defineProps<{ projectId: string; devserver?: DevserverState }>();
@@ -124,7 +129,19 @@ function onLoad() {
   win.addEventListener("popstate", sync);
   win.addEventListener("hashchange", sync);
   win.document.addEventListener("astro:page-load", sync);
+  syncAppearance();
+  // Astro's router copies the next page's `<html>` attributes over ours.
+  win.document.addEventListener("astro:after-swap", () => syncAppearance(true));
 }
+
+// --- RTL / dark mode -----------------------------------------------------------------------------
+
+function syncAppearance(fresh = false) {
+  const doc = frameWindow()?.document;
+  if (doc) applyFrameAppearance(doc, { rtl: store.rtl, dark: store.dark }, fresh);
+}
+
+watch(() => [store.rtl, store.dark], () => syncAppearance());
 
 // --- Element picker ----------------------------------------------------------------------------
 
@@ -197,7 +214,7 @@ function toggleFullscreen() {
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
     <div ref="shell" class="bg-background flex min-h-0 flex-1 flex-col overflow-hidden">
       <TooltipProvider>
-        <div class="bg-muted/40 flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
+        <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
@@ -267,9 +284,7 @@ function toggleFullscreen() {
             </div>
           </form>
 
-          <PrStatusPill />
           <CleanupChangeButton :project-id="projectId" />
-          <ReadyForReviewButton />
 
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
@@ -296,6 +311,43 @@ function toggleFullscreen() {
                   </span>
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                :variant="store.rtl || store.dark ? 'secondary' : 'ghost'"
+                size="icon-sm"
+                aria-label="Appearance"
+                data-testid="preview-appearance"
+              >
+                <Moon v-if="store.dark" />
+                <Sun v-else />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="bottom" :to="isFullscreen ? shell ?? undefined : undefined">
+              <DropdownMenuRadioGroup
+                :model-value="store.dark ? 'dark' : 'light'"
+                @update:model-value="($event === 'dark') !== store.dark && store.toggleDark()"
+              >
+                <DropdownMenuRadioItem value="light" data-testid="preview-light">
+                  <Sun />
+                  Light
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="dark" data-testid="preview-dark">
+                  <Moon />
+                  Dark
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                :model-value="store.rtl"
+                data-testid="preview-rtl"
+                @update:model-value="store.toggleRtl()"
+              >
+                <PilcrowRight />
+                Right-to-left
+              </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Tooltip>
@@ -379,8 +431,13 @@ function toggleFullscreen() {
           :key="`${projectId}:${store.reloadNonce}`"
           :src="startHref"
           title="Site preview"
-          class="h-full border-0 bg-white"
-          :style="{ width: width ? `${width}px` : '100%' }"
+          class="h-full border-0"
+          :class="store.dark ? 'bg-neutral-950' : 'bg-white'"
+          :style="{
+            width: width ? `${width}px` : '100%',
+            // An iframe's `color-scheme` sets `prefers-color-scheme` inside the framed page.
+            colorScheme: store.dark ? 'dark' : 'light',
+          }"
           data-testid="preview-frame"
           @load="onLoad"
         />

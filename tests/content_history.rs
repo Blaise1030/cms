@@ -48,8 +48,8 @@ async fn project(tmp: &Path) -> (axum::Router, std::path::PathBuf) {
     (http::router(st), dir)
 }
 
-const HERO: &str = "src/content/sections/hero.mdx";
-const HERO2: &str = "src/content/sections/hero2.mdx";
+const WELCOME: &str = "src/content/blog/en/welcome.md";
+const WELCOME2: &str = "src/content/blog/en/welcome2.md";
 
 fn append(dir: &Path, path: &str, text: &str) {
     let file = dir.join(path);
@@ -63,18 +63,18 @@ async fn file_log_lists_commits_touching_path_newest_first() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;
     git_cli(&dir, &["checkout", "-b", "content/x"]);
-    append(&dir, HERO, "\nOne.\n");
+    append(&dir, WELCOME, "\nOne.\n");
     git::checkpoint(&dir, "one").await.unwrap().unwrap();
     append(&dir, "README.md", "\nOther.\n");
     git::checkpoint(&dir, "other").await.unwrap().unwrap();
-    append(&dir, HERO, "\nTwo.\n");
+    append(&dir, WELCOME, "\nTwo.\n");
     git::checkpoint(&dir, "two").await.unwrap().unwrap();
 
-    let log = git::file_log(&dir, HERO).await.unwrap();
+    let log = git::file_log(&dir, WELCOME).await.unwrap();
     assert_eq!(log[0].summary, "two");
     assert_eq!(log[1].summary, "one");
     assert!(log.iter().all(|v| v.summary != "other"));
-    assert!(log.iter().all(|v| v.path == HERO));
+    assert!(log.iter().all(|v| v.path == WELCOME));
 }
 
 #[tokio::test]
@@ -83,10 +83,10 @@ async fn file_log_marks_main_commits_published() {
     let (_app, dir) = project(tmp.path()).await;
     let scaffold = git_cli(&dir, &["rev-parse", "main"]);
     git_cli(&dir, &["checkout", "-b", "content/x"]);
-    append(&dir, HERO, "\nDraft.\n");
+    append(&dir, WELCOME, "\nDraft.\n");
     let draft = git::checkpoint(&dir, "draft").await.unwrap().unwrap();
 
-    let log = git::file_log(&dir, HERO).await.unwrap();
+    let log = git::file_log(&dir, WELCOME).await.unwrap();
     let find = |sha: &str| log.iter().find(|v| v.sha == sha).unwrap();
     assert!(!find(&draft.sha).published);
     assert!(find(&scaffold).published);
@@ -96,16 +96,16 @@ async fn file_log_marks_main_commits_published() {
 async fn file_log_follows_renames_and_file_at_reads_old_path() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;
-    append(&dir, HERO, "\nBefore the move.\n");
+    append(&dir, WELCOME, "\nBefore the move.\n");
     git::checkpoint(&dir, "before").await.unwrap().unwrap();
-    git_cli(&dir, &["mv", HERO, HERO2]);
+    git_cli(&dir, &["mv", WELCOME, WELCOME2]);
     git::checkpoint(&dir, "moved").await.unwrap().unwrap();
 
-    let log = git::file_log(&dir, HERO2).await.unwrap();
+    let log = git::file_log(&dir, WELCOME2).await.unwrap();
     assert_eq!(log[0].summary, "moved");
-    assert_eq!(log[0].path, HERO2);
+    assert_eq!(log[0].path, WELCOME2);
     let old = log.iter().find(|v| v.summary == "before").unwrap();
-    assert_eq!(old.path, HERO);
+    assert_eq!(old.path, WELCOME);
     assert!(git::file_at(&dir, &old.sha, &old.path)
         .await
         .unwrap()
@@ -116,9 +116,9 @@ async fn file_log_follows_renames_and_file_at_reads_old_path() {
 async fn file_log_is_empty_for_untracked_file() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;
-    std::fs::write(dir.join("src/content/sections/new.mdx"), "new\n").unwrap();
+    std::fs::write(dir.join("src/content/blog/en/new.md"), "new\n").unwrap();
     assert_eq!(
-        git::file_log(&dir, "src/content/sections/new.mdx")
+        git::file_log(&dir, "src/content/blog/en/new.md")
             .await
             .unwrap(),
         vec![]
@@ -129,14 +129,14 @@ async fn file_log_is_empty_for_untracked_file() {
 async fn file_log_skips_deletion_commits() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;
-    append(&dir, HERO, "\nFirst life.\n");
+    append(&dir, WELCOME, "\nFirst life.\n");
     git::checkpoint(&dir, "first").await.unwrap().unwrap();
-    std::fs::remove_file(dir.join(HERO)).unwrap();
+    std::fs::remove_file(dir.join(WELCOME)).unwrap();
     git::checkpoint(&dir, "deleted").await.unwrap().unwrap();
-    append(&dir, HERO, "Second life.\n");
+    append(&dir, WELCOME, "Second life.\n");
     git::checkpoint(&dir, "recreated").await.unwrap().unwrap();
 
-    let log = git::file_log(&dir, HERO).await.unwrap();
+    let log = git::file_log(&dir, WELCOME).await.unwrap();
     assert_eq!(log[0].summary, "recreated");
     assert!(log.iter().all(|v| v.summary != "deleted"));
     for v in &log {
@@ -166,7 +166,7 @@ async fn file_at_rejects_option_and_parent_paths() {
 async fn file_at_rejects_non_hex_sha() {
     let tmp = tempfile::tempdir().unwrap();
     let (_app, dir) = project(tmp.path()).await;
-    let err = git::file_at(&dir, "HEAD~1", HERO).await.unwrap_err();
+    let err = git::file_at(&dir, "HEAD~1", WELCOME).await.unwrap_err();
     assert_eq!(err.http_status(), 400);
 }
 
@@ -215,14 +215,14 @@ async fn content_project(tmp: &Path) -> (axum::Router, std::path::PathBuf, Strin
     (app, dir, id)
 }
 
-fn set_headline(dir: &Path, headline: &str) {
-    let file = dir.join(HERO);
+fn set_title(dir: &Path, title: &str) {
+    let file = dir.join(WELCOME);
     let text = std::fs::read_to_string(&file).unwrap();
     let text = text
         .lines()
         .map(|l| {
-            if l.starts_with("headline:") {
-                format!("headline: {headline}")
+            if l.starts_with("title:") {
+                format!("title: {title}")
             } else {
                 l.to_string()
             }
@@ -237,19 +237,19 @@ fn history_uri(id: &str, entry: &str, sha: Option<&str>) -> String {
         Some(sha) => format!("/api/content/history/{sha}"),
         None => "/api/content/history".to_string(),
     };
-    format!("{base}?project={id}&collection=sections&id={entry}")
+    format!("{base}?project={id}&collection=blog&id={entry}")
 }
 
 #[tokio::test]
 async fn history_endpoint_lists_versions() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir, id) = content_project(tmp.path()).await;
-    set_headline(&dir, "Edited");
-    git::checkpoint(&dir, "edit hero").await.unwrap().unwrap();
+    set_title(&dir, "Edited");
+    git::checkpoint(&dir, "edit welcome").await.unwrap().unwrap();
 
-    let (s, v) = call(&app, req("GET", &history_uri(&id, "hero", None), None)).await;
+    let (s, v) = call(&app, req("GET", &history_uri(&id, "welcome", None), None)).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["versions"][0]["summary"], "edit hero");
+    assert_eq!(v["versions"][0]["summary"], "edit welcome");
     assert!(v["versions"][0].get("published").is_some(), "{v}");
 }
 
@@ -257,24 +257,24 @@ async fn history_endpoint_lists_versions() {
 async fn version_endpoint_returns_parsed_old_content() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir, id) = content_project(tmp.path()).await;
-    set_headline(&dir, "Old");
+    set_title(&dir, "Old");
     let old = git::checkpoint(&dir, "old").await.unwrap().unwrap();
-    set_headline(&dir, "New");
+    set_title(&dir, "New");
     git::checkpoint(&dir, "new").await.unwrap().unwrap();
 
     let short = &old.sha[..10];
     let (s, v) = call(
         &app,
-        req("GET", &history_uri(&id, "hero", Some(short)), None),
+        req("GET", &history_uri(&id, "welcome", Some(short)), None),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["sha"], old.sha);
-    assert_eq!(v["path"], HERO);
-    assert_eq!(v["fields"]["headline"], "Old");
+    assert_eq!(v["path"], WELCOME);
+    assert_eq!(v["fields"]["title"], "Old");
     assert_eq!(v["parseable"], true);
     assert!(v["source"].as_str().unwrap().contains("Old"));
-    assert!(v["body"].as_str().unwrap().contains("Trusted by makers"));
+    assert!(v["body"].as_str().unwrap().contains("We're glad you're here"));
 }
 
 #[tokio::test]
@@ -286,7 +286,7 @@ async fn version_endpoint_404s_for_commit_not_touching_entry() {
 
     let (s, v) = call(
         &app,
-        req("GET", &history_uri(&id, "hero", Some(&other.sha)), None),
+        req("GET", &history_uri(&id, "welcome", Some(&other.sha)), None),
     )
     .await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
@@ -296,32 +296,32 @@ async fn version_endpoint_404s_for_commit_not_touching_entry() {
 async fn version_endpoint_returns_old_content_after_rename() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir, id) = content_project(tmp.path()).await;
-    set_headline(&dir, "Before rename");
+    set_title(&dir, "Before rename");
     let before = git::checkpoint(&dir, "before").await.unwrap().unwrap();
 
-    let entry_uri = format!("/api/content/entry?project={id}&collection=sections&id=hero");
+    let entry_uri = format!("/api/content/entry?project={id}&collection=blog&id=welcome");
     let (s, entry) = call(&app, req("GET", &entry_uri, None)).await;
     assert_eq!(s, StatusCode::OK, "{entry}");
-    let body = json!({"project":id,"collection":"sections","id":"hero","slug":"hero2",
+    let body = json!({"project":id,"collection":"blog","id":"welcome","slug":"welcome2",
         "branch":entry["branch"],"hash":entry["hash"]});
     let (s, v) = call(&app, req("POST", "/api/content/entry/rename", Some(body))).await;
     assert_eq!(s, StatusCode::OK, "{v}");
 
     let (s, v) = call(
         &app,
-        req("GET", &history_uri(&id, "hero2", Some(&before.sha)), None),
+        req("GET", &history_uri(&id, "welcome2", Some(&before.sha)), None),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["path"], HERO);
-    assert_eq!(v["fields"]["headline"], "Before rename");
+    assert_eq!(v["path"], WELCOME);
+    assert_eq!(v["fields"]["title"], "Before rename");
 }
 
 #[tokio::test]
 async fn history_requires_collection_and_id() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, _dir, id) = content_project(tmp.path()).await;
-    let uri = format!("/api/content/history?project={id}&collection=sections");
+    let uri = format!("/api/content/history?project={id}&collection=blog");
     let (s, v) = call(&app, req("GET", &uri, None)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
 }

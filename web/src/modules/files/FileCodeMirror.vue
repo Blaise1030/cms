@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { useTheme } from "@/lib/theme";
 import { languageForPath } from "./language";
 
 const props = defineProps<{ code: string; path: string }>();
 
+const theme = useTheme();
 const host = ref<HTMLElement | null>(null);
 let view: EditorView | null = null;
+const themeSlot = new Compartment();
+
+function colorTheme() {
+  return theme.resolved.value === "dark" ? oneDark : syntaxHighlighting(defaultHighlightStyle);
+}
 
 function extensions() {
   const lang = languageForPath(props.path);
@@ -17,9 +25,9 @@ function extensions() {
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
     EditorView.lineWrapping,
-    oneDark,
+    themeSlot.of(colorTheme()),
     ...(lang ? [lang] : []),
-    // After oneDark so we strip its framed chrome and match the app background.
+    // After the color theme so we strip its framed chrome and match the app background.
     EditorView.theme({
       "&": {
         height: "100%",
@@ -76,6 +84,7 @@ function mount() {
 
 onMounted(mount);
 watch(() => [props.code, props.path] as const, mount);
+watch(theme.resolved, () => view?.dispatch({ effects: themeSlot.reconfigure(colorTheme()) }));
 onBeforeUnmount(() => {
   view?.destroy();
   view = null;
@@ -85,7 +94,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="host"
-    class="file-codemirror h-full min-h-0 w-full overflow-hidden"
+    class="file-codemirror bg-background h-full min-h-0 w-full overflow-hidden"
     data-testid="file-content"
   />
 </template>

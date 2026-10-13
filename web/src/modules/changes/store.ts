@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
@@ -189,17 +189,31 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /** Refresh every view after a Get latest (ours, or one the daemon finished later). */
+  async function applyUpdate(id: string, result: ChangesUpdate) {
+    await refreshTreeAndPreview();
+    // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
+    await Promise.all([load(id), list(id).catch(() => undefined)]);
+    const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
+    if (first) await openConflict(id, result.conflictSessions![first.branch]!);
+  }
+
+  /** Re-read the active change (the agent may have started or switched one); refresh every
+   *  view when it moved. */
+  async function followActive(id: string) {
+    const before = active.value?.branch;
+    await load(id);
+    if (projectId.value !== id || active.value?.branch === before) return;
+    await Promise.all([refreshTreeAndPreview(active.value?.branch ?? "main"), list(id).catch(() => undefined)]);
+  }
+
   /** Get latest: pull `main` and merge it into every open change, then refresh every view. */
   async function getLatest(id: string): Promise<ChangesUpdate> {
     updating.value = true;
     error.value = null;
     try {
       const result = await daemon.api.updateChanges(id);
-      await refreshTreeAndPreview();
-      // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
-      await Promise.all([load(id), list(id).catch(() => undefined)]);
-      const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
-      if (first) await openConflict(id, result.conflictSessions![first.branch]!);
+      await applyUpdate(id, result);
       return result;
     } catch (e) {
       error.value = errorMessage(e);
@@ -332,10 +346,7 @@ export const useChangesStore = defineStore("changes", () => {
       }
       return result.prUrl;
     } catch (e) {
-      if (
-        e instanceof ApiError &&
-        (e.isUnauthorized || e.code === "UNAUTH" || e.status === 401)
-      ) {
+      if (e instanceof ApiError && e.needsGithubSignIn) {
         needsSignIn.value = true;
         error.value = null;
       } else {
@@ -372,10 +383,7 @@ export const useChangesStore = defineStore("changes", () => {
         }
       }
     } catch (e) {
-      if (
-        e instanceof ApiError &&
-        (e.isUnauthorized || e.code === "UNAUTH" || e.status === 401)
-      ) {
+      if (e instanceof ApiError && e.needsGithubSignIn) {
         needsSignIn.value = true;
       }
       throw e;
@@ -412,6 +420,8 @@ export const useChangesStore = defineStore("changes", () => {
     create,
     switchTo,
     getLatest,
+    applyUpdate,
+    followActive,
     loadConflicts,
     openConflict,
     chooseConflict,

@@ -116,6 +116,8 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
+  /** The current change, left as is because a terminal is running. */
+  skipped?: Change | null;
   /** Branch → resolution session. Older daemons may omit this field. */
   conflictSessions?: Record<string, string>;
   /** Conflicts the visual resolver cannot safely open. */
@@ -230,12 +232,46 @@ export interface TerminalExitedEvent {
   type: "terminal.exited";
   projectId: string;
   code: number | null;
+  /** The history record of the session that ended. */
+  sessionId?: string | null;
+}
+
+/** A terminal session's history record changed (title, resumability). */
+export interface TerminalSessionEvent {
+  type: "terminal.session";
+  projectId: string;
+  sessionId: string;
+}
+
+/** A past or live agent session, from `GET /api/terminal/{project}/sessions`. */
+export interface TerminalSession {
+  id: string;
+  provider: string;
+  title?: string | null;
+  /** Unix milliseconds. */
+  createdAt: number;
+  updatedAt: number;
+  resumable: boolean;
 }
 
 export interface CheckpointBlockedEvent {
   type: "checkpoint.blocked";
   projectId: string;
   reason: string;
+}
+
+/** An agent turn ended; it may have started or switched changes. */
+export interface TerminalTurnEvent {
+  type: "terminal.turn";
+  projectId: string;
+}
+
+/** The daemon finished a Get latest that had skipped the current change (agent went idle). */
+export interface ChangesUpdatedEvent {
+  type: "changes.updated";
+  projectId: string;
+  result?: ChangesUpdate;
+  error?: string;
 }
 
 /** Emitted when this client's subscription fell behind and events were dropped. */
@@ -249,7 +285,10 @@ export type DaemonEvent =
   | CheckpointCreatedEvent
   | FsChangeEvent
   | TerminalExitedEvent
+  | TerminalSessionEvent
   | CheckpointBlockedEvent
+  | ChangesUpdatedEvent
+  | TerminalTurnEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];

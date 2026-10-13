@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 const schemas = createCollectionSchemas({ z });
-const bundled = new Set(['site', 'pages', 'sections', 'blog', 'helpDocs']);
+const bundled = new Set(['blog', 'helpDocs']);
 const list = () => Object.entries(collectionRegistry).map(([name, definition]) => ({ name, ...definition, supportedForEditing: bundled.has(name) }));
 /** A limited projection of live Zod schemas, never a validation schema. */
 export function describeSchema(schema) {

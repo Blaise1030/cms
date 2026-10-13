@@ -48,12 +48,11 @@ function showInUrl() {
   const e = store.entry;
   void router.replace(contentPath(props.projectId, e?.collection ?? store.selectedCollection, e?.id));
 }
-/** `site` is update-only and `pages/home` is required: neither can be renamed or deleted. */
-function removable(collection: string, id: string) {
-  const c = store.collections.find(x => x.name === collection);
-  return !c?.singleton && !(collection === "pages" && id === "home");
+/** A singleton's entry is update-only: it cannot be renamed or deleted. */
+function removable(collection: string) {
+  return !store.collections.find(x => x.name === collection)?.singleton;
 }
-const canRemove = computed(() => !!store.entry && !!store.descriptor && removable(store.entry.collection, store.entry.id));
+const canRemove = computed(() => !!store.entry && !!store.descriptor && removable(store.entry.collection));
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -123,7 +122,20 @@ async function loadEntries(name: string) {
     if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
   } catch { /* the collection keeps the list it last showed */ }
 }
-watch(() => store.collections, collections => { for (const c of collections) void loadEntries(c.name); });
+/** Collections the helper could not describe are left out of the tree and reported once in a toast. */
+const validCollections = computed(() => store.collections.filter(c => !c.reason));
+let reportedInvalid = "";
+watch(() => store.collections, collections => {
+  const invalid = collections.filter(c => c.reason);
+  const key = `${props.projectId}:${invalid.map(c => c.name).join(",")}`;
+  if (invalid.length && key !== reportedInvalid) {
+    toast.warning(`${invalid.length === 1 ? "1 collection is" : `${invalid.length} collections are`} hidden`, {
+      description: `${invalid.map(c => c.name).join(", ")}: ${[...new Set(invalid.map(c => c.reason))].join(" ")}`,
+    });
+  }
+  reportedInvalid = key;
+});
+watch(validCollections, collections => { for (const c of collections) void loadEntries(c.name); });
 const treeSelected = computed(() => (store.entry ? entryTreePath(store.entry.collection, store.entry.id) : null));
 function openEntry(collection: string, id: string) {
   void router.push(contentPath(props.projectId, collection, id));
@@ -173,7 +185,7 @@ function treeActions(target: TreeTarget): TreeAction[] {
     { id: "copy-link", label: "Copy link", icon: Link, run: () => void copy(new URL(contentPath(props.projectId, name, id), location.origin).href, "Link") },
   ];
   if (path) actions.push({ id: "copy-path", label: "Copy file path", icon: Copy, run: () => void copy(path, "File path") });
-  if (removable(name, id)) actions.push(
+  if (removable(name)) actions.push(
     "separator",
     { id: "rename", label: "Rename…", icon: Pencil, disabled: !!pending, hint: pending, run: () => void lifecycleFor("rename", name, id) },
     { id: "delete", label: "Delete", icon: Trash2, destructive: true, disabled: !!pending, hint: pending, run: () => void lifecycleFor("delete", name, id) },
@@ -238,7 +250,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
           <SidebarGroup class="min-h-0 flex-1">
             <SidebarGroupLabel>Collections</SidebarGroupLabel>
             <SidebarGroupContent class="min-h-0 flex-1">
-              <ContentTree :storage-key="`content:${projectId}`" :collections="store.collections" :entries="treeEntries" :selected="treeSelected" :actions="treeActions" @open="openEntry" />
+              <ContentTree :storage-key="`content:${projectId}`" :collections="validCollections" :entries="treeEntries" :selected="treeSelected" :actions="treeActions" @open="openEntry" />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
@@ -274,7 +286,6 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <div class="px-4">
         <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
         <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
-        <p v-for="collection in store.collections.filter(c => c.reason && (!store.selectedCollection || c.name === store.selectedCollection))" :key="collection.name" class="mb-2 text-xs text-muted-foreground">{{ collection.name }}: {{ collection.reason }}</p>
         <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
           <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
           <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>

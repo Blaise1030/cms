@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
+import CommandPalette from "@/app/CommandPalette.vue";
 import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
 import { Toaster } from "@/components/ui/sonner";
 import { useDaemon } from "@/core/daemon";
+import { useTheme } from "@/lib/theme";
 import { useProjectsStore } from "@/modules/projects/store";
 
 const daemon = useDaemon();
 const projects = useProjectsStore();
+const theme = useTheme();
 
 // Keep the offline screen up (with a spinner) while a manual retry is in flight, instead of
 // flashing the app back in.
@@ -36,15 +39,16 @@ onBeforeUnmount(() => daemon.stop());
 <template>
   <DaemonUnreachable
     v-if="showOffline"
-    class="dark bg-background text-foreground"
+    class="bg-background text-foreground"
     :origin="daemon.config.value.origin"
     :reason="daemon.reason.value"
     :connecting="retrying"
     @retry="retry"
     @connect="connect"
   />
-  <div v-else class="dark bg-background text-foreground h-svh overflow-hidden">
+  <div v-else class="bg-background text-foreground h-svh overflow-hidden">
     <RouterView />
-    <Toaster />
+    <CommandPalette />
+    <Toaster :theme="theme.resolved.value" />
   </div>
 </template>

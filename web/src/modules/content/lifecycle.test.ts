@@ -145,12 +145,8 @@ it("resumes a rename on the new change after Create Change", async () => {
   expect(store.entry?.id).toBe("hello");
 });
 
-it("offers no rename or delete for the site singleton or the home page", async () => {
+it("offers no rename or delete for a singleton", async () => {
   await setup({}, site, entry({ collection: "site", id: "site", kind: "json", body: "" }));
-  expect(w.find('[data-testid="content-rename"]').exists()).toBe(false);
-  expect(w.find('[data-testid="content-delete"]').exists()).toBe(false);
-  mounted.splice(0).forEach(x => x.unmount());
-  await setup({}, { ...blog, name: "pages", kind: "json" }, entry({ collection: "pages", id: "home", kind: "json", body: "" }));
   expect(w.find('[data-testid="content-rename"]').exists()).toBe(false);
   expect(w.find('[data-testid="content-delete"]').exists()).toBe(false);
 });

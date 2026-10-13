@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDaemon } from "@/core/daemon";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import DeviceCodeDialog from "./DeviceCodeDialog.vue";
 import { useGithubStore } from "./store";
 
@@ -59,9 +59,12 @@ async function signOut() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent :side="rail ? 'right' : 'bottom'" align="end">
-        <DropdownMenuItem v-if="gh.source === 'cli'" disabled>
-          Signed in with GitHub CLI (gh)
-        </DropdownMenuItem>
+        <template v-if="gh.source === 'cli'">
+          <DropdownMenuItem disabled>Signed in with GitHub CLI (gh)</DropdownMenuItem>
+          <DropdownMenuItem v-if="gh.deviceFlow" data-testid="github-sign-in" @select="gh.signIn()">
+            <LogIn /> Sign in with GitHub for pull requests
+          </DropdownMenuItem>
+        </template>
         <DropdownMenuItem v-else @select="signOut"><LogOut /> Sign out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

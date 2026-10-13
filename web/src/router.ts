@@ -45,10 +45,10 @@ export const routes: RouteRecordRaw[] = [
         props: (r) => ({ projectId: r.params.id as string, path: (r.params.path as string) || undefined }),
       },
       {
-        path: "history",
+        path: "history/:sha?",
         name: "project-history",
         component: CheckpointsPanel,
-        props: (r) => ({ projectId: r.params.id as string }),
+        props: (r) => ({ projectId: r.params.id as string, sha: (r.params.sha as string) || undefined }),
       },
     ],
   },
@@ -71,6 +71,11 @@ export function contentPath(id: string, collection?: string | null, entry?: stri
 export function codePath(id: string, path?: string | null) {
   const base = projectPath(id, "code");
   return path ? `${base}/${segments(path)}` : base;
+}
+
+export function historyPath(id: string, sha?: string | null) {
+  const base = projectPath(id, "history");
+  return sha ? `${base}/${encodeURIComponent(sha)}` : base;
 }
 
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {

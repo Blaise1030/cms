@@ -36,6 +36,36 @@ const TERM_GRACE: Duration = Duration::from_secs(3);
 /// Output lines kept for crash messages.
 const TAIL_LINES: usize = 20;
 const TAIL_CHARS: usize = 800;
+/// How often a running npm dev server checks whether its packages changed.
+const DEPS_POLL: Duration = Duration::from_secs(3);
+/// Fingerprint of the manifests `npm install` last ran against.
+const DEPS_MARKER: &str = "node_modules/.workbench-deps";
+
+/// Fingerprint of `package.json` + `package-lock.json`; `None` without a `package.json`.
+fn deps_fingerprint(dir: &std::path::Path) -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let manifest = std::fs::read(dir.join("package.json")).ok()?;
+    let lock = std::fs::read(dir.join("package-lock.json")).unwrap_or_default();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    manifest.hash(&mut h);
+    lock.hash(&mut h);
+    Some(format!("{:016x}", h.finish()))
+}
+
+/// The packages changed since the last install (a sync, a change switch, the agent's git work).
+fn deps_stale(dir: &std::path::Path) -> bool {
+    let Some(now) = deps_fingerprint(dir) else {
+        return false;
+    };
+    std::fs::read_to_string(dir.join(DEPS_MARKER)).map_or(true, |m| m.trim() != now)
+}
+
+/// Record the manifests a successful `npm install` in `dir` ran against.
+pub(crate) fn record_deps(dir: &std::path::Path) {
+    if let Some(fp) = deps_fingerprint(dir) {
+        let _ = std::fs::write(dir.join(DEPS_MARKER), fp);
+    }
+}
 
 /// What the supervisor needs to build the dev-server command.
 #[derive(Debug, Clone)]
@@ -234,6 +264,8 @@ impl Shared {
 enum Outcome {
     /// We were asked to stop.
     Stopped,
+    /// The packages changed under a running server: reinstall and start again (not a crash).
+    DepsChanged,
     /// The server failed to start or exited. `stable`: it had been ready for a while.
     Died { message: String, stable: bool },
 }
@@ -251,7 +283,14 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                 shared
                     .set_state(&id, DevserverStatus::Starting, port, None)
                     .await;
-                run_once(&shared, &id, project.dir, port, &mut stop).await
+                let npm = matches!(shared.opts.launcher, Launcher::Npm);
+                match npm && deps_stale(&project.dir) {
+                    true => match crate::projects::npm_install(&project.dir).await {
+                        Ok(()) => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                        Err(e) => Outcome::Died { message: e.message, stable: false },
+                    },
+                    false => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                }
             }
             Err(e) if e.code == ErrorCode::Enoent => return,
             Err(e) => Outcome::Died {
@@ -261,6 +300,7 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         };
         let (message, stable) = match outcome {
             Outcome::Stopped => return,
+            Outcome::DepsChanged => continue,
             Outcome::Died { message, stable } => (message, stable),
         };
         if stable {
@@ -368,12 +408,21 @@ async fn run_once(
     let mut tail = Tail::default();
     let mut ready_at: Option<Instant> = None;
     let mut port = port;
+    let watch_deps = matches!(shared.opts.launcher, Launcher::Npm);
+    let mut deps_tick = tokio::time::interval(DEPS_POLL);
+    deps_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let outcome = loop {
         tokio::select! {
             biased;
             _ = &mut *stop => {
                 terminate(&mut child, &guard).await;
                 break Outcome::Stopped;
+            }
+            _ = deps_tick.tick(), if watch_deps => {
+                if deps_stale(&dir) {
+                    terminate(&mut child, &guard).await;
+                    break Outcome::DepsChanged;
+                }
             }
             status = child.wait() => {
                 // Kill stragglers so the pipes close, then collect the last output.
@@ -566,6 +615,23 @@ mod tests {
                 "--ignore-lock"
             ]
         );
+    }
+
+    #[test]
+    fn deps_go_stale_when_the_manifests_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(!deps_stale(dir), "no package.json: nothing to install");
+        std::fs::write(dir.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        assert!(deps_stale(dir), "never installed");
+        std::fs::create_dir_all(dir.join("node_modules")).unwrap();
+        record_deps(dir);
+        assert!(!deps_stale(dir));
+        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        assert!(deps_stale(dir), "lockfile changed");
+        record_deps(dir);
+        std::fs::write(dir.join("package.json"), r#"{"dependencies":{"x":"1"}}"#).unwrap();
+        assert!(deps_stale(dir), "manifest changed");
     }
 
     #[test]

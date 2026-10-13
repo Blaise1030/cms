@@ -2,20 +2,51 @@ import type { AnyExtension, JSONContent } from "@tiptap/core";
 import { Editor, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
-import { Markdown, type MarkdownManager } from "@tiptap/markdown";
+import { OrderedList } from "@tiptap/extension-list";
+import { TableKit } from "@tiptap/extension-table";
+import { Markdown, MarkdownManager } from "@tiptap/markdown";
+
+/**
+ * Tiptap writes every `&` in text as `&amp;`, so "Voice & Tone" saved as "Voice &amp; Tone" and
+ * failed the round-trip check. A bare `&` is literal in CommonMark; only one that would read as an
+ * entity needs escaping. Code text comes back unchanged and is left alone.
+ */
+type EncodeText = (text: string, node: unknown, parent: unknown) => string;
+const encodeProto = MarkdownManager.prototype as unknown as { encodeTextForMarkdown: EncodeText };
+const encodeText = encodeProto.encodeTextForMarkdown;
+encodeProto.encodeTextForMarkdown = function (this: MarkdownManager, text, node, parent) {
+  const out = encodeText.call(this, text, node, parent);
+  return out === text ? out : out.replace(/&amp;(?!#\d+;|#x[\da-f]+;|[a-z][a-z\d]*;)/gi, "&");
+};
 
 /**
  * The rich editor's node set: StarterKit without underline (no Markdown syntax) or the trailing
- * empty paragraph (it would add blank lines to the output), plus images,
+ * empty paragraph (it would add blank lines to the output), plus images and GFM tables,
  * read and written through the official `@tiptap/markdown` extension.
  */
 export function markdownExtensions(resolveImage?: (src: string) => string): AnyExtension[] {
   return [
-    StarterKit.configure({ underline: false, trailingNode: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
+    StarterKit.configure({ underline: false, trailingNode: false, orderedList: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
+    NumericOrderedList,
+    TableKit.configure({ table: { resizable: false } }),
     resolveImage ? SafeImage.configure({ resolveSrc: resolveImage }) : SafeImage,
     Markdown,
   ];
 }
+
+/**
+ * Ordered lists that start only at a numeric marker. Tiptap also reads letter markers, so a
+ * paragraph like "No. Meta restricts…" became a list and serialized as "1. Meta restricts…".
+ */
+const NumericOrderedList = OrderedList.extend({
+  markdownTokenizer: {
+    ...OrderedList.config.markdownTokenizer!,
+    tokenize(src, tokens, lexer) {
+      if (!/^\s*\d+[.)]\s/.test(src)) return undefined;
+      return OrderedList.config.markdownTokenizer!.tokenize.call(this, src, tokens, lexer);
+    },
+  },
+});
 
 /**
  * The project path an entry-relative image link points at (`../../../assets/x.png` from
@@ -68,10 +99,11 @@ const SafeImage = Image.extend<{ resolveSrc: ((src: string) => string) | null } 
 /** marked token types the configured extensions parse and serialize without loss. */
 const SUPPORTED_TOKENS = new Set([
   "space", "paragraph", "text", "heading", "list", "list_item", "blockquote", "code",
-  "codespan", "strong", "em", "del", "link", "image", "br", "hr", "escape",
+  "codespan", "strong", "em", "del", "link", "image", "br", "hr", "escape", "table",
 ]);
 
-interface Token { type: string; raw?: string; text?: string; task?: boolean; tokens?: Token[]; items?: Token[] }
+type Cell = { tokens: Token[] };
+interface Token { type: string; raw?: string; text?: string; task?: boolean; tokens?: Token[]; items?: Token[]; header?: Cell[]; rows?: Cell[][] }
 
 let manager: MarkdownManager | null = null;
 /** A detached editor gives the same flattened extension set and Markdown manager the rich editor uses. */
@@ -94,6 +126,8 @@ function supportedTokens(tokens: Token[] | undefined): boolean {
     // Entities are decoded on parse and re-encoded differently on output.
     if (token.type === "text" && /&(#\d+|#x[\da-f]+|[a-z][a-z\d]*);/i.test(token.raw ?? "")) return false;
     if (!supportedTokens(token.tokens) || !supportedTokens(token.items)) return false;
+    const cells = [...(token.header ?? []), ...(token.rows ?? []).flat()];
+    if (!cells.every(cell => supportedTokens(cell.tokens))) return false;
   }
   return true;
 }

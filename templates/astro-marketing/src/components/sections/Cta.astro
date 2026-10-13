@@ -1,10 +1,11 @@
 ---
 import { href } from "../../lib/href";
-const { data, id, Content } = Astro.props;
 ---
 
-<section class="section center" id={id}>
-  <h2>{data.heading}</h2>
-  <Content />
-  <a class="button primary" href={href(data.cta.href)}>{data.cta.label}</a>
+<section class="mx-auto max-w-5xl px-8 py-16 text-center" id="cta">
+  <h2 class="mb-6 text-3xl font-bold tracking-tight">Ready to launch?</h2>
+  <a
+    class="inline-block rounded-lg border border-neutral-900 bg-neutral-900 px-5 py-2.5 font-semibold text-white dark:border-white dark:bg-white dark:text-neutral-900"
+    href={href("#pricing")}>Get started today</a
+  >
 </section>

@@ -1,29 +1,31 @@
 # Agent guide — Astro marketing site
 
-Static Astro site. All copy and structure live in content files; components only render them.
+Static Astro site. The landing page, navigation and footer are written directly in code; Blog and Help articles live in Markdown content collections.
 
 ## Content model
 
-- `src/content.config.ts` — zod schemas for three collections:
-  - `site` ← `src/content/site.json`: `name`, `description`, `nav[]`, `footer`, `socials[]`.
-  - `pages` ← `src/content/pages/*.json`: `title`, `description`, `sections[]` (ordered list of section ids).
-  - `sections` ← `src/content/sections/*.mdx`: one file per section instance. Frontmatter is a discriminated union on `type`: `hero | features | pricing | testimonials | faq | cta | logos`. The MDX body is optional supporting copy.
-- A section id is its file name without the extension (`sections/faq.mdx` → `faq`). A page renders the sections it lists, in order; a section that is not listed is not shown.
+- `src/content.config.ts` wires the collections defined in `src/content-schemas.mjs`:
+  - `blog` ← `src/content/blog/en/*.md`: `title`, `description`, `pubDate` (`YYYY-MM-DD`), optional `coverImage` + `coverAlt`, `tags[]`, `relatedPosts[]`.
+  - `helpDocs` ← `src/content/helpDocs/en/*.md`: `title`, `description`, `section`, `order`.
 
 ## File map
 
-- `src/pages/index.astro` — renders `pages/home.json` and its sections.
-- `src/layouts/Base.astro` — header (from `site.nav`), footer, global styles.
-- `src/components/sections/*.astro` — one component per section `type`; `index.ts` maps `type` → component.
+- `src/site.ts` — site name, header `nav`, footer text/links and socials.
+- `src/pages/index.astro` — the landing page: renders the section components in order.
+- `src/components/sections/*.astro` — one component per landing-page section (`Hero`, `Logos`, `Features`, `Testimonials`, `Pricing`, `Faq`, `Cta`). Each holds its own copy; its root `<section id>` is the anchor used by nav links (`#features`, `#pricing`, …).
+- `src/pages/blog/`, `src/pages/help/` — index and article routes for the collections.
+- `src/layouts/Base.astro` — header and footer (from `src/site.ts`); imports `src/styles/global.css`.
+- `src/styles/global.css` — Tailwind CSS v4 entry (`@import "tailwindcss"` plus the typography plugin). Theme tokens go in an `@theme` block here; there is no `tailwind.config.js`.
 - `src/lib/href.ts` — base-aware link helper.
 - `astro.config.mjs` — reads `PUBLIC_BASE` (default `/`) for `base` and the HMR socket path (needed for the live preview proxy). Keep both. Do not hard-code absolute paths; use `import.meta.env.BASE_URL` or `href()`.
 
 ## Conventions
 
-- Content edits: edit the JSON/MDX under `src/content/`. Do not put copy in components.
-- New section instance: add `src/content/sections/<id>.mdx` and add `<id>` to `sections` in `pages/home.json`.
-- New section type: add a schema variant to `sectionSchema` in `src/content.config.ts`, add a component in `src/components/sections/`, and register it in `components/sections/index.ts`.
-- New page: add `src/content/pages/<slug>.json` and a route in `src/pages/`.
+- Landing-page copy: edit the section component directly. Nav, footer and socials: edit `src/site.ts`.
+- New landing-page section: add a component in `src/components/sections/` and render it in `src/pages/index.astro`.
+- New page: add an `.astro` route in `src/pages/` wrapped in `Base`.
+- Blog posts and help docs: add or edit Markdown under `src/content/blog/en/` and `src/content/helpDocs/en/`.
+- Styling: use Tailwind utility classes in components (with `dark:` variants for dark mode). Wrap rendered Markdown bodies in `prose dark:prose-invert`. Avoid `<style>` blocks.
 - `DESIGN.md` is the design source of truth. When you change styles, update both `DESIGN.md` and the `@theme` block in `src/styles/global.css` (create it if missing).
 - Keep the dev server (`npm run dev`) running as-is; it is managed externally. Edits hot-reload in the live preview — just save the files and stop. Do **not** run `npm run build` (or `astro build`) after ordinary content/component edits; a full build is only for deploy or when the user explicitly asks to verify the production build.
 

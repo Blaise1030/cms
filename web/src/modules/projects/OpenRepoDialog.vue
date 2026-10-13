@@ -18,7 +18,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { useGithubStore } from "@/modules/github/store";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";

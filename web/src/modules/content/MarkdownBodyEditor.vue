@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { Extension, type Range } from "@tiptap/core";
+import { Extension, getMarkRange, type Range } from "@tiptap/core";
 import { Editor, EditorContent } from "@tiptap/vue-3";
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import { EditorState } from "@codemirror/state";
 import { Placeholder } from "@tiptap/extensions";
 import type { ResolvedPos } from "@tiptap/pm/model";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { EditorView, placeholder } from "@codemirror/view";
 import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import { Bold, ChevronDown, Code, GripVertical, Heading, ImagePlus, Italic, Link, List, ListOrdered, Quote, RemoveFormatting, SquareCode } from "@lucide/vue";
 import { canRoundTrip, markdownExtensions } from "./markdown";
 import ImageDialog, { IMAGE_REGISTRY, markdownImage, type PendingImage } from "./ImageDialog.vue";
+import LinkPopover from "./LinkPopover.vue";
+import { keySound, loadPack, playSample, typesText, useTypingSound } from "@/lib/typingSound";
 
 /**
  * Body editor for Markdown/MDX entries. `body` is the draft body and `original` the loaded one.
@@ -83,13 +85,65 @@ function dragOver(event: DragEvent) { if (event.dataTransfer?.types?.includes("F
 function insertImage(editor: Editor, range?: Range) {
   requestImage(null, image => insertRich(editor, image, range));
 }
+type LinkCard = { top: number; left: number; href?: string; editing: boolean; askText: boolean };
+const link = ref<LinkCard | null>(null);
+const linkCard = ref<InstanceType<typeof LinkPopover> | null>(null);
+const LINK_WIDTH = 320;
+/** Under the start of the link (or selection), kept inside the editor column. */
+function linkPosition(editor: Editor) {
+  const host = bubbleHost.value;
+  if (!host) return { top: 0, left: 0 };
+  const { state } = editor;
+  const type = state.schema.marks.link!;
+  const from = getMarkRange(state.selection.$from, type)?.from ?? state.selection.from;
+  const box = host.getBoundingClientRect();
+  try {
+    const at = editor.view.coordsAtPos(from);
+    const left = Math.min(at.left - box.left, host.clientWidth - LINK_WIDTH);
+    return { top: at.bottom - box.top + 6, left: Math.max(left, 0) };
+  } catch {
+    return { top: 0, left: 0 };
+  }
+}
+/** Show the link under the cursor; an open edit stays until applied or cancelled. */
+function syncLink(editor: Editor) {
+  if (link.value?.editing) return;
+  link.value = editor.isActive("link")
+    ? { href: editor.getAttributes("link").href as string | undefined, editing: false, askText: false, ...linkPosition(editor) }
+    : null;
+}
+/** Edit the link under the cursor, link the selection, or add a new link at the cursor. */
 function insertLink(editor: Editor, range?: Range) {
-  const href = window.prompt("Link URL")?.trim();
-  if (!href) return;
+  if (range) editor.chain().focus().deleteRange(range).run();
+  const href = editor.isActive("link") ? (editor.getAttributes("link").href as string | undefined) : undefined;
+  bubble.value = null;
+  link.value = { href, editing: true, askText: !href && editor.state.selection.empty, ...linkPosition(editor) };
+}
+function editLink() { if (link.value) link.value = { ...link.value, editing: true, askText: false }; }
+function closeLink() {
+  link.value = null;
+  richEditor.value?.commands.focus();
+}
+function applyLink({ href, text }: { href: string; text: string }) {
+  const editor = richEditor.value, card = link.value;
+  if (!editor || !card) return;
+  link.value = null;
   const chain = editor.chain().focus();
-  if (range) chain.deleteRange(range);
-  if (range || editor.state.selection.empty) chain.insertContent({ type: "text", text: href, marks: [{ type: "link", attrs: { href } }] }).run();
+  if (card.askText) chain.insertContent({ type: "text", text: text || href, marks: [{ type: "link", attrs: { href } }] }).run();
   else chain.extendMarkRange("link").setLink({ href }).run();
+  placeBubble(editor); syncLink(editor);
+}
+function removeLink() {
+  const editor = richEditor.value; if (!editor) return;
+  link.value = null;
+  editor.chain().focus().extendMarkRange("link").unsetLink().run();
+  placeBubble(editor);
+}
+/** Focus leaving the card for anywhere but the editor drops an unfinished edit. */
+function linkFocusOut(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (linkCard.value?.root?.contains(next) || richEditor.value?.view.dom.contains(next))) return;
+  link.value = null;
 }
 
 type Action = { id: string; label: string; icon: typeof Bold; run: (editor: Editor, range?: Range) => void };
@@ -185,6 +239,8 @@ function clampBubble() {
 }
 function editorBlurred(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
+  if (next && linkCard.value?.root?.contains(next)) { bubble.value = null; return; }
+  if (!link.value?.editing) link.value = null;
   if (next && bubbleEl.value?.contains(next)) return;
   bubble.value = null;
 }
@@ -259,6 +315,34 @@ const BlockMove = Extension.create({
   },
 });
 
+const typingSound = useTypingSound();
+/** Release samples for keys still held down, by `KeyboardEvent.code`. */
+const heldKeys = new Map<string, AudioBuffer>();
+const TypingSound = Extension.create({
+  name: "typingSound",
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      props: {
+        handleKeyDown: (_view, event) => {
+          const pack = typingSound.setting.value;
+          if (pack === "off" || !typesText(event)) return false;
+          const release = keySound(pack, event.key);
+          if (release) heldKeys.set(event.code, release);
+          return false;
+        },
+        handleDOMEvents: {
+          keyup: (_view, event) => {
+            const release = heldKeys.get(event.code);
+            heldKeys.delete(event.code);
+            if (release) playSample(release);
+            return false;
+          },
+        },
+      },
+    })];
+  },
+});
+
 const HANDLE_GUTTER = 28;
 const handle = ref<{ top: number; pos: number; el: HTMLElement } | null>(null);
 let draggingBlock = false;
@@ -300,10 +384,12 @@ function dragBlock(event: DragEvent) {
 function dragBlockEnd() { draggingBlock = false; handle.value = null; }
 
 // ---- Modes ---------------------------------------------------------------------------------
-function destroyRich() { richEditor.value?.destroy(); richEditor.value = null; slash.value = null; bubble.value = null; handle.value = null; }
+function destroyRich() { richEditor.value?.destroy(); richEditor.value = null; slash.value = null; bubble.value = null; handle.value = null; link.value = null; }
 function destroyRaw() { rawView?.destroy(); rawView = null; }
 function mountRich() {
   destroyRich();
+  // Fetch the pack now so the first keystroke isn't silent.
+  if (typingSound.setting.value !== "off") loadPack(typingSound.setting.value).catch(() => {});
   // The serializer drops the final newline(s); keep the file's own ending after an edit.
   const ending = /\n*$/.exec(text)![0];
   // Loading content does not fire `onUpdate`; only the writer's transactions do.
@@ -312,13 +398,14 @@ function mountRich() {
       ...markdownExtensions(props.resolveImage),
       SlashCommands,
       BlockMove,
+      TypingSound,
       Placeholder.configure({ placeholder: ({ editor }) => (editor.isEmpty ? "Start writing, or type / for commands…" : "Type / for commands…") }),
     ],
     content: text,
     contentType: "markdown",
     onUpdate: ({ editor }) => edited(editor.getMarkdown().replace(/\n+$/, "") + ending),
     onTransaction: () => { revision.value++; },
-    onSelectionUpdate: ({ editor }) => placeBubble(editor as Editor),
+    onSelectionUpdate: ({ editor }) => { placeBubble(editor as Editor); syncLink(editor as Editor); },
     onBlur: ({ event }) => editorBlurred(event),
   });
 }
@@ -431,6 +518,20 @@ defineExpose({ richEditor: () => richEditor.value, mode, setMode });
           <component :is="action.icon" class="size-4" />
         </button>
       </div>
+      <LinkPopover
+        v-if="link"
+        ref="linkCard"
+        class="absolute z-20"
+        :style="{ top: `${link.top}px`, left: `${link.left}px` }"
+        :href="link.href"
+        :editing="link.editing"
+        :ask-text="link.askText"
+        @apply="applyLink"
+        @remove="removeLink"
+        @edit="editLink"
+        @cancel="closeLink"
+        @focusout="linkFocusOut"
+      />
       <ul v-if="slash && slash.items.length" class="absolute z-10 w-48 rounded-md border bg-popover p-1 text-sm shadow" :style="{ top: `${slash.top}px`, left: `${slash.left}px` }" role="listbox" data-testid="slash-menu">
         <li v-for="(item, index) in slash.items" :key="item.id" role="option" :aria-selected="index === slash.active" data-testid="slash-item" class="flex cursor-pointer items-center gap-2 rounded px-2 py-1" :class="{ 'bg-muted': index === slash.active }" @mousedown.prevent="slash.command(item)"><component :is="item.icon" class="size-4 shrink-0 text-muted-foreground" />{{ item.label }}</li>
       </ul>
@@ -453,6 +554,11 @@ defineExpose({ richEditor: () => richEditor.value, mode, setMode });
 .content-rich :deep(code) { font-family: var(--font-mono, ui-monospace, monospace); }
 .content-rich :deep(a) { text-decoration: underline; }
 .content-rich :deep(img) { max-width: 100%; }
+.content-rich :deep(table) { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 14px; line-height: 1.5; }
+.content-rich :deep(th), .content-rich :deep(td) { border: 1px solid var(--border); padding: 0.375rem 0.625rem; vertical-align: top; }
+.content-rich :deep(th) { background: var(--muted); font-weight: 600; text-align: left; }
+.content-rich :deep(td p), .content-rich :deep(th p) { margin: 0; }
+.content-rich :deep(.selectedCell) { background: color-mix(in oklch, var(--primary) 15%, transparent); }
 .content-rich :deep(.is-empty)::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted-foreground); }
 .content-rich :deep(p), .content-rich :deep(blockquote), .content-rich :deep(pre) { margin: 0.5rem 0; }
 .content-rich :deep(h1), .content-rich :deep(h2), .content-rich :deep(h3) { margin: 1.25rem 0 0.5rem; }

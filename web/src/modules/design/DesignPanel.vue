@@ -40,7 +40,8 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
       <Button type="button" data-testid="design-create" @click="store.create()">Create design</Button>
     </div>
     <template v-else-if="store.doc">
-      <header class="flex h-11 shrink-0 items-center gap-1 bg-background px-2">
+      <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
+        <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
         <h2 class="truncate px-1 text-sm font-medium">DESIGN.md</h2>
         <p class="truncate text-xs text-muted-foreground">{{ store.doc.branch }}</p>
         <div class="ml-auto flex shrink-0 items-center gap-1">
@@ -49,7 +50,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
           <Button type="button" size="sm" data-testid="design-apply" :disabled="store.dirty || !store.doc.exists" :title="store.dirty ? 'Save your changes first' : undefined" @click="askAgentToApplyDesign()">Apply to site</Button>
         </div>
       </header>
-      <div class="min-h-0 flex-1 overflow-auto">
+      <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
         <div class="px-4">
           <p v-if="store.error" role="alert" class="text-sm text-destructive" data-testid="design-error">{{ store.error }}</p>
           <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="design-needs-change">
@@ -67,7 +68,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         </div>
         <div class="@container flex min-h-full">
           <div class="flex min-h-full w-full flex-col @3xl:flex-row">
-            <aside class="min-w-0 px-4 pt-6 pb-4 @3xl:order-2 @3xl:w-80 @3xl:shrink-0" data-testid="design-side">
+            <aside class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" data-testid="design-side">
               <DesignTokensForm :model-value="store.draftTokens" @update:model-value="store.setTokens" />
             </aside>
             <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">

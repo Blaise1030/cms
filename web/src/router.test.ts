@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { codePath, contentPath, projectPath, projectTabFromRoute, routes } from "./router";
+import { codePath, contentPath, historyPath, projectPath, projectTabFromRoute, routes } from "./router";
 
 const router = () => createRouter({ history: createMemoryHistory(), routes });
 
@@ -35,6 +35,12 @@ describe("router", () => {
     const file = router().resolve(codePath("site", "src/a b.md"));
     expect(file.name).toBe("project-code");
     expect(file.params.path).toBe("src/a b.md");
+
+    expect(historyPath("site", "abc123")).toBe("/p/site/history/abc123");
+    const checkpoint = router().resolve(historyPath("site", "abc123"));
+    expect(checkpoint.name).toBe("project-history");
+    expect(checkpoint.params.sha).toBe("abc123");
+    expect(historyPath("site")).toBe("/p/site/history");
   });
 
   it("maps route names to tabs", () => {

@@ -47,6 +47,23 @@ pub struct Provider {
     pub command: Vec<String>,
 }
 
+/// Which agent conversation a launch belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSession {
+    /// A new conversation whose id the CLI picks (reported later by the hook, if at all).
+    Fresh,
+    /// A new conversation with this id: Claude `--session-id`, Cursor `--resume` of a chat
+    /// made by `create-chat`.
+    Assign(String),
+    /// Continue this conversation.
+    Resume(String),
+}
+
+/// Whether the provider's conversations can be resumed by id.
+pub fn can_resume(provider_id: &str) -> bool {
+    matches!(provider_id, "cursor" | "claude" | "codex" | "opencode")
+}
+
 /// What to spawn: full argv plus extra environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
@@ -145,21 +162,42 @@ export default {{
     )
 }
 
+/// Appended to Claude's system prompt: Claude manages changes (branches) and syncing itself,
+/// in the shape the app lists them (`content/*` + branch description as the title).
+pub const CLAUDE_GIT_GUIDE: &str = r#"# Changes and syncing (this project is edited through a no-code app)
+
+The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I started a new draft called Pricing page", "I brought in the latest version of the site") — never ask them to run git.
+
+A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its human title is stored with `git config branch.<branch>.description "<Title>"`. The app lists these as the user's changes.
+
+- Never edit or commit on `main`. Before editing while on `main`, start a change.
+- Start a change: commit any pending work on the current change first (`git add -A && git commit -m "<summary>"`), then branch from the latest main — `git fetch origin main && git checkout -b content/<slug> origin/main` when an `origin` remote exists, otherwise `git checkout -b content/<slug> main` — and set its description. Pick a short title from what the user asked for; if the slug exists, add `-2`, `-3`, ….
+- Do a new, unrelated request in a new change; keep follow-ups on the current one.
+- Get the latest / sync with main: commit pending work, then `git fetch origin main && git merge origin/main` (just `git merge main` without a remote). If it conflicts, resolve it keeping the intent of both sides, run nothing destructive, and ask the user in plain words when the right result is unclear.
+- Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
+- The app also commits your work automatically at the end of each turn; that is expected."#;
+
 /// Resolve the argv/env for launching `provider`, injecting its turn-end hook.
 /// `hook_exe` is the daemon executable (`<exe> hook turn-end`). For OpenCode this writes
 /// the plugin (and permission config) under `{state_dir}/{project_id}/opencode` on every call.
+/// `session` is ignored by providers that cannot take it (see [`can_resume`]).
 pub fn launch_spec(
     provider: &Provider,
     hook_exe: &Path,
     auto_approve: bool,
     state_dir: &Path,
     project_id: &str,
+    session: &AgentSession,
 ) -> LaunchSpec {
     let exe = hook_exe.to_string_lossy();
     let mut argv = provider.command.clone();
     let mut env = Vec::new();
     match provider.id.as_str() {
         "cursor" => {
+            if let AgentSession::Assign(id) | AgentSession::Resume(id) = session {
+                argv.push("--resume".into());
+                argv.push(id.clone());
+            }
             if auto_approve {
                 argv.push("--force".into());
                 argv.push("--trust".into());
@@ -172,19 +210,37 @@ pub fn launch_spec(
             }]}]}});
             argv.push("--settings".into());
             argv.push(settings.to_string());
+            argv.push("--append-system-prompt".into());
+            argv.push(CLAUDE_GIT_GUIDE.into());
+            match session {
+                AgentSession::Fresh => {}
+                AgentSession::Assign(id) => argv.extend(["--session-id".into(), id.clone()]),
+                AgentSession::Resume(id) => argv.extend(["--resume".into(), id.clone()]),
+            }
             if auto_approve {
                 argv.push("--dangerously-skip-permissions".into());
             }
         }
         "codex" => {
+            // `codex resume [OPTIONS] <id>`: the subcommand right after the base argv.
+            if let AgentSession::Resume(_) = session {
+                argv.push("resume".into());
+            }
             let exe_json = serde_json::to_string(&*exe).unwrap_or_default();
             argv.push("-c".into());
             argv.push(format!(r#"notify=[{exe_json},"hook","turn-end"]"#));
             if auto_approve {
                 argv.push("--dangerously-bypass-approvals-and-sandbox".into());
             }
+            if let AgentSession::Resume(id) = session {
+                argv.push(id.clone());
+            }
         }
         "opencode" => {
+            if let AgentSession::Resume(id) = session {
+                argv.push("--session".into());
+                argv.push(id.clone());
+            }
             let dir = state_dir.join(project_id).join("opencode");
             match write_opencode_config(&dir, &exe, auto_approve) {
                 Ok(()) => env.push((
@@ -269,7 +325,45 @@ mod tests {
         }
     }
     fn spec(id: &str, exe: &str, auto: bool, dir: &Path) -> LaunchSpec {
-        launch_spec(&p(id), Path::new(exe), auto, dir, "p")
+        launch_spec(&p(id), Path::new(exe), auto, dir, "p", &AgentSession::Fresh)
+    }
+
+    fn session_argv(id: &str, session: AgentSession) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        launch_spec(&p(id), Path::new("/x"), true, dir.path(), "p", &session).argv
+    }
+
+    #[test]
+    fn claude_assigns_or_resumes_its_session() {
+        let new = session_argv("claude", AgentSession::Assign("u1".into()));
+        assert_eq!(new[5..], ["--session-id", "u1", "--dangerously-skip-permissions"]);
+        let resumed = session_argv("claude", AgentSession::Resume("u1".into()));
+        assert_eq!(resumed[5..], ["--resume", "u1", "--dangerously-skip-permissions"]);
+        assert_eq!(session_argv("claude", AgentSession::Fresh).len(), 6);
+    }
+
+    #[test]
+    fn cursor_resumes_assigned_and_past_chats() {
+        for s in [AgentSession::Assign("c1".into()), AgentSession::Resume("c1".into())] {
+            assert_eq!(
+                session_argv("cursor", s),
+                ["cursor", "--resume", "c1", "--force", "--trust"]
+            );
+        }
+    }
+
+    #[test]
+    fn codex_resume_is_a_subcommand_with_the_id_last() {
+        let argv = session_argv("codex", AgentSession::Resume("t1".into()));
+        assert_eq!(argv[..3], ["codex", "resume", "-c"]);
+        assert_eq!(argv[4..], ["--dangerously-bypass-approvals-and-sandbox", "t1"]);
+        assert_eq!(session_argv("codex", AgentSession::Assign("t1".into()))[1], "-c");
+    }
+
+    #[test]
+    fn opencode_resumes_with_session_flag() {
+        let argv = session_argv("opencode", AgentSession::Resume("o1".into()));
+        assert_eq!(argv, ["opencode", "--session", "o1"]);
     }
 
     #[test]
@@ -284,7 +378,8 @@ mod tests {
     #[test]
     fn claude_gets_stop_hook_settings() {
         let s = spec("claude", "/x/it's", false, Path::new("/nope"));
-        assert_eq!(s.argv.len(), 3);
+        assert_eq!(s.argv.len(), 5);
+        assert_eq!(s.argv[3..], ["--append-system-prompt", CLAUDE_GIT_GUIDE]);
         assert_eq!(
             (s.argv[0].as_str(), s.argv[1].as_str()),
             ("claude", "--settings")
@@ -329,7 +424,8 @@ mod tests {
     #[test]
     fn opencode_writes_plugin_and_sets_config_env() {
         let dir = tempfile::tempdir().unwrap();
-        let s = launch_spec(&p("opencode"), Path::new("/x/wb"), true, dir.path(), "alpha");
+        let fresh = &AgentSession::Fresh;
+        let s = launch_spec(&p("opencode"), Path::new("/x/wb"), true, dir.path(), "alpha", fresh);
         assert_eq!(s.argv, ["opencode"]);
         let cfg = dir.path().join("alpha").join("opencode");
         assert_ne!(cfg, dir.path().join("opencode"));
@@ -348,12 +444,12 @@ mod tests {
             r#"{"permission":"allow"}"#
         );
         // A second project without auto-approve must not delete the first project's file.
-        let other = launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "beta");
+        let other = launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "beta", fresh);
         let beta = dir.path().join("beta").join("opencode");
         assert_eq!(other.env[0].1, beta.to_string_lossy().into_owned());
         assert!(cfg.join("opencode.json").exists());
         assert!(!beta.join("opencode.json").exists());
-        launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "alpha");
+        launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "alpha", fresh);
         assert!(!cfg.join("opencode.json").exists());
         assert!(!dir.path().join("opencode").join("opencode.json").exists());
     }
@@ -369,6 +465,7 @@ mod tests {
             true,
             Path::new("/nope"),
             "p",
+            &AgentSession::Resume("x".into()),
         );
         assert_eq!(s.argv, ["/bin/a", "-v"]);
         assert!(s.env.is_empty());
@@ -380,7 +477,7 @@ mod tests {
         let f = dir.path().join("agents.json");
         std::fs::write(&f, r#"{"claude":["npx","claude"]}"#).unwrap();
         let provs = load(Some(&f)).unwrap();
-        let s = launch_spec(&provs[0], Path::new("/x"), false, dir.path(), "p");
+        let s = launch_spec(&provs[0], Path::new("/x"), false, dir.path(), "p", &AgentSession::Fresh);
         assert_eq!(&s.argv[..3], ["npx", "claude", "--settings"]);
     }
 }

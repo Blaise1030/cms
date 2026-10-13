@@ -3,7 +3,7 @@ import { computed, onScopeDispose, ref, shallowRef } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
 import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, ContentVersion, FieldDescriptor } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { diffDraft, cloneValue } from "./draft";
 import { startingFields } from "./create";
 import type { PendingImage } from "./ImageDialog.vue";

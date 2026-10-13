@@ -120,7 +120,11 @@ async fn branch_exists(dir: &Path, name: &str) -> Result<bool, ApiError> {
 pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     let title = display_title(raw_title)?;
     let base = branch_name(raw_title)?;
-    ensure_clean(dir, "starting a new change").await?;
+    let on_main = current_branch(dir).await? == "main";
+    // Edits made on `main` move into the new change; edits on another change must be saved.
+    if !on_main {
+        ensure_clean(dir, "starting a new change").await?;
+    }
     let start = if has_remote(dir, "origin").await? {
         run(dir, &["fetch", "origin", "main"]).await?;
         "origin/main"
@@ -128,7 +132,15 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
         "main"
     };
     let branch = unique_branch(dir, &base).await?;
-    run(dir, &["checkout", "-b", &branch, start]).await?;
+    if let Err(e) = run(dir, &["checkout", "-b", &branch, start]).await {
+        return Err(if on_main && is_dirty(dir).await? {
+            ApiError::conflict(
+                "Your unsaved edits clash with the latest main — checkpoint or discard them before starting a new change",
+            )
+        } else {
+            e
+        });
+    }
     run(
         dir,
         &["config", &format!("branch.{branch}.description"), &title],
@@ -141,6 +153,16 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     })
 }
 
+async fn current_branch(dir: &Path) -> Result<String, ApiError> {
+    Ok(run(dir, &["branch", "--show-current"]).await?.trim().to_string())
+}
+
+/// Tracked files have uncommitted modifications.
+pub async fn is_dirty(dir: &Path) -> Result<bool, ApiError> {
+    let status = run(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
+    Ok(!status.trim().is_empty())
+}
+
 async fn has_remote(dir: &Path, name: &str) -> Result<bool, ApiError> {
     Ok(run(dir, &["remote", "get-url", name]).await.is_ok())
 }
@@ -149,8 +171,7 @@ async fn has_remote(dir: &Path, name: &str) -> Result<bool, ApiError> {
 async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     // Ignore untracked (e.g. `node_modules` / build output from preview); those do not
     // block checkout and are not what "checkpoint first" means.
-    let status = run(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
-    if !status.trim().is_empty() {
+    if is_dirty(dir).await? {
         return Err(ApiError::conflict(format!(
             "Uncommitted changes — checkpoint or discard them before {action}"
         )));
@@ -318,6 +339,9 @@ pub struct Update {
     pub updated: Vec<Change>,
     /// Change branches whose merge with `main` conflicts; left exactly as they were.
     pub conflicts: Vec<Change>,
+    /// The checked-out branch needed the latest but was left as it is because a terminal is
+    /// working in the checkout ([`get_latest_leaving_checkout`]).
+    pub skipped: Option<Change>,
 }
 
 /// `git merge-tree --write-tree` (how merges are computed without a checkout) needs 2.38+.
@@ -352,11 +376,31 @@ pub fn check_git_version(version: &str) -> Result<(), ApiError> {
 /// in one atomic `update-ref` transaction and, last, the checked-out branch fast-forwards.
 /// Any failure before that leaves `main` and every change branch where they were.
 pub async fn get_latest(dir: &Path, env: &[(String, String)]) -> Result<Update, ApiError> {
+    get_latest_impl(dir, env, false).await
+}
+
+/// [`get_latest`] without touching the working tree: the checked-out branch is left as it is
+/// (reported in [`Update::skipped`] when it needed the latest), everything else moves by ref.
+/// For while a terminal is editing the checkout.
+pub async fn get_latest_leaving_checkout(
+    dir: &Path,
+    env: &[(String, String)],
+) -> Result<Update, ApiError> {
+    get_latest_impl(dir, env, true).await
+}
+
+async fn get_latest_impl(
+    dir: &Path,
+    env: &[(String, String)],
+    leave_checkout: bool,
+) -> Result<Update, ApiError> {
     check_git_version(&run(dir, &["--version"]).await?)?;
     // Serialise with checkpoints/restore on the same repo.
     let lock = crate::git::lock_for(dir);
     let _guard = lock.lock().await;
-    ensure_clean(dir, "getting the latest").await?;
+    if !leave_checkout {
+        ensure_clean(dir, "getting the latest").await?;
+    }
     let current = run(dir, &["branch", "--show-current"])
         .await?
         .trim()
@@ -395,12 +439,24 @@ pub async fn get_latest(dir: &Path, env: &[(String, String)]) -> Result<Update, 
         };
         match planned {
             Planned::UpToDate => {}
+            _ if leave_checkout && branch == current => update.skipped = Some(change().await),
             Planned::Conflict => update.conflicts.push(change().await),
             Planned::Advance(target) => {
                 plan.push(RefMove::new(&branch, &tip, &target));
                 update.updated.push(change().await);
             }
         }
+    }
+
+    if leave_checkout && plan.iter().any(|m| m.branch == current) {
+        // Only `main` can still be here: the checked-out branch was skipped above.
+        plan.retain(|m| m.branch != current);
+        update.main_updated = false;
+        update.skipped = Some(Change {
+            branch: current.clone(),
+            title: branch_title(dir, &current).await,
+            last_edited: None,
+        });
     }
 
     apply(dir, &current, &plan).await?;

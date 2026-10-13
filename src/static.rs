@@ -188,9 +188,8 @@ mod tests {
             "wrangler.toml",
             "astro.config.mjs",
             "src/content.config.ts",
-            "src/content/site.json",
-            "src/content/pages/home.json",
-            "src/content/sections/hero.mdx",
+            "src/site.ts",
+            "src/content/blog/en/welcome.md",
             "src/pages/index.astro",
         ] {
             assert!(paths.iter().any(|p| p == want), "missing {want}: {paths:?}");

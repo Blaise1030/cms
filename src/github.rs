@@ -605,6 +605,16 @@ impl GithubAuth {
     /// Run `gh` without a terminal, with a deadline. Only exit status, stdout and stderr
     /// come back; callers must not log stdout.
     async fn run_gh(&self, args: &[&str], secs: u64) -> Result<GhOutput, GhFail> {
+        self.run_gh_input(args, secs, None).await
+    }
+
+    /// [`Self::run_gh`] with `input` written to gh's stdin.
+    async fn run_gh_input(
+        &self,
+        args: &[&str],
+        secs: u64,
+        input: Option<&[u8]>,
+    ) -> Result<GhOutput, GhFail> {
         let fail = |missing: bool, msg: String| GhFail {
             missing,
             err: ApiError::github(msg),
@@ -616,11 +626,23 @@ impl GithubAuth {
         cmd.args(args)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let out = match tokio::time::timeout(Duration::from_secs(secs), cmd.output()).await {
+        let run = async {
+            let mut child = cmd.spawn()?;
+            if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+                use tokio::io::AsyncWriteExt;
+                stdin.write_all(bytes).await?;
+            }
+            child.wait_with_output().await
+        };
+        let out = match tokio::time::timeout(Duration::from_secs(secs), run).await {
             Ok(Ok(o)) => o,
             Ok(Err(e)) => {
                 let missing = e.kind() == std::io::ErrorKind::NotFound;
@@ -966,26 +988,17 @@ impl GithubAuth {
         repo: &str,
         head_branch: &str,
     ) -> Result<Option<PullRequest>, ApiError> {
-        let token = self.token().await.ok_or_else(not_signed_in)?;
         let owner = repo
             .split_once('/')
             .map(|(o, _)| o)
             .ok_or_else(|| ApiError::badreq(format!("not a GitHub repository: {repo:?}")))?;
-        let url = format!(
-            "{}/repos/{repo}/pulls?head={}:{}&state=open",
-            self.api(),
-            urlencode(owner),
-            urlencode(head_branch)
-        );
-        let res = self
-            .http
-            .get(url)
-            .bearer_auth(&token)
-            .header(ACCEPT, GITHUB_JSON)
-            .send()
-            .await
-            .map_err(unreachable)?;
-        let pulls: Vec<ApiPull> = parse_github(res, self, &token).await?;
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?head={}:{}&state=open",
+                urlencode(owner),
+                urlencode(head_branch)
+            ))
+            .await?;
         Ok(pulls.into_iter().next().map(PullRequest::from))
     }
 
@@ -997,24 +1010,19 @@ impl GithubAuth {
         title: &str,
         body: &str,
     ) -> Result<PullRequest, ApiError> {
-        let token = self.token().await.ok_or_else(not_signed_in)?;
-        let res = self
-            .http
-            .post(format!("{}/repos/{repo}/pulls", self.api()))
-            .bearer_auth(&token)
-            .header(ACCEPT, GITHUB_JSON)
-            .header(CONTENT_TYPE, "application/json")
-            .json(&serde_json::json!({
-                "title": title,
-                "head": head_branch,
-                "base": "main",
-                "draft": true,
-                "body": body,
-            }))
-            .send()
-            .await
-            .map_err(unreachable)?;
-        let pull: ApiPull = parse_github(res, self, &token).await?;
+        let pull: ApiPull = self
+            .api_json(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/pulls"),
+                Some(&serde_json::json!({
+                    "title": title,
+                    "head": head_branch,
+                    "base": "main",
+                    "draft": true,
+                    "body": body,
+                })),
+            )
+            .await?;
         Ok(PullRequest::from(pull))
     }
 
@@ -1056,29 +1064,49 @@ impl GithubAuth {
         if node_id.is_empty() {
             return Err(ApiError::github(format!("{WHAT}: no pull request id")));
         }
-        let token = self.token().await.ok_or_else(not_signed_in)?;
-        let res = self
-            .http
-            .post(graphql_url(self.api()))
-            .bearer_auth(&token)
-            .header(CONTENT_TYPE, "application/json")
-            .json(&serde_json::json!({
-                "query": MARK_READY_MUTATION,
-                "variables": { "id": node_id },
-            }))
-            .send()
-            .await
-            .map_err(unreachable)?;
-        let status = res.status();
-        let body = res.bytes().await.map_err(unreachable)?;
+        let payload = serde_json::json!({
+            "query": MARK_READY_MUTATION,
+            "variables": { "id": node_id },
+        });
+        let (status, body) = match self.token().await {
+            Some(token) => {
+                let res = self
+                    .http
+                    .post(graphql_url(self.api()))
+                    .bearer_auth(&token)
+                    .header(CONTENT_TYPE, "application/json")
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(unreachable)?;
+                let status = res.status();
+                let body = res.bytes().await.map_err(unreachable)?.to_vec();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    let _ = self.sign_out_if_token(&token).await;
+                    return Err(ApiError::unauth(
+                        "your GitHub session expired — sign in again",
+                    ));
+                }
+                (status, body)
+            }
+            None => {
+                let out = self.gh_api("POST", "graphql", Some(&payload)).await?;
+                let graphql_errors = || {
+                    serde_json::from_slice::<ApiGraphql>(&out.stdout)
+                        .is_ok_and(|b| !b.errors.is_empty())
+                };
+                match (out.code, gh_http_status(&out.stderr)) {
+                    (Some(0), _) => (reqwest::StatusCode::OK, out.stdout),
+                    _ if out.logged_out() => return Err(self.gh_api_error(out).await),
+                    (_, Some(status)) => (status, out.stdout),
+                    // GraphQL errors: gh exits 1 with the response on stdout.
+                    (_, None) if graphql_errors() => (reqwest::StatusCode::OK, out.stdout),
+                    _ => return Err(self.gh_api_error(out).await),
+                }
+            }
+        };
         let excerpt =
             |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            let _ = self.sign_out_if_token(&token).await;
-            return Err(ApiError::unauth(
-                "your GitHub session expired — sign in again",
-            ));
-        }
         if status == reqwest::StatusCode::FORBIDDEN {
             return Err(ApiError::sandbox(
                 "You don't have permission to mark this pull request ready for review",
@@ -1275,16 +1303,71 @@ impl GithubAuth {
     }
 
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
-        let token = self.token().await.ok_or_else(not_signed_in)?;
-        let res = self
-            .http
-            .get(format!("{}{path}", self.api()))
-            .bearer_auth(&token)
-            .header(ACCEPT, GITHUB_JSON)
-            .send()
+        self.api_json(reqwest::Method::GET, path, None).await
+    }
+
+    /// A REST call to `path` with the session token, else through `gh api` when only the
+    /// GitHub CLI is logged in.
+    async fn api_json<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, ApiError> {
+        if let Some(token) = self.token().await {
+            let mut req = self
+                .http
+                .request(method, format!("{}{path}", self.api()))
+                .bearer_auth(&token)
+                .header(ACCEPT, GITHUB_JSON);
+            if let Some(body) = body {
+                req = req.json(body);
+            }
+            let res = req.send().await.map_err(unreachable)?;
+            return parse_github(res, self, &token).await;
+        }
+        let out = self.gh_api(method.as_str(), path, body).await?;
+        if out.code != Some(0) {
+            return Err(self.gh_api_error(out).await);
+        }
+        serde_json::from_slice(&out.stdout)
+            .map_err(|_| ApiError::github("unexpected response from the GitHub CLI"))
+    }
+
+    /// `gh api --method {method} {path}`, with `body` as the JSON request body.
+    async fn gh_api(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<GhOutput, ApiError> {
+        if self.cli_state().await.user.is_none() {
+            return Err(not_signed_in());
+        }
+        let input = body.map(|b| b.to_string().into_bytes());
+        let mut args = vec!["api", "--method", method, path];
+        if input.is_some() {
+            args.extend(["--input", "-"]);
+        }
+        self.run_gh_input(&args, 30, input.as_deref())
             .await
-            .map_err(unreachable)?;
-        parse_github(res, self, &token).await
+            .map_err(|f| f.err.with_status(502))
+    }
+
+    /// The error for a failed `gh api`: GitHub's HTTP status (from gh's stderr) is mapped
+    /// like a direct API response; a logged-out gh drops the cached login.
+    async fn gh_api_error(&self, out: GhOutput) -> ApiError {
+        if out.logged_out() {
+            *self.cli.lock().await = None;
+            return not_signed_in();
+        }
+        match gh_http_status(&out.stderr) {
+            Some(status) => github_error(status, &out.stdout),
+            None => {
+                let tail: String = out.stderr.chars().take(300).collect();
+                ApiError::github(format!("GitHub CLI: {tail}")).with_status(502)
+            }
+        }
     }
 
     /// Branch protection of `main` on `owner/name`, from the classic protection endpoint
@@ -1443,22 +1526,32 @@ async fn parse_github<T: DeserializeOwned>(
             "your GitHub session expired — sign in again",
         ));
     }
-    if status == reqwest::StatusCode::FORBIDDEN {
-        return Err(ApiError::sandbox("You don't have push access"));
-    }
-    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
-        let text: String = String::from_utf8_lossy(&body).chars().take(200).collect();
-        return Err(ApiError::conflict(format!(
-            "GitHub could not open the pull request: {text}"
-        )));
-    }
     if !status.is_success() {
-        let text: String = String::from_utf8_lossy(&body).chars().take(300).collect();
-        return Err(ApiError::github(format!(
-            "GitHub returned {status}: {text}"
-        )));
+        return Err(github_error(status, &body));
     }
     serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
+}
+
+/// A failed (non-401) GitHub API response: 403 and 422 get their own [`ApiError`] codes.
+fn github_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return ApiError::sandbox("You don't have push access");
+    }
+    if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+        let text: String = String::from_utf8_lossy(body).chars().take(200).collect();
+        return ApiError::conflict(format!(
+            "GitHub could not open the pull request: {text}"
+        ));
+    }
+    let text: String = String::from_utf8_lossy(body).chars().take(300).collect();
+    ApiError::github(format!("GitHub returned {status}: {text}"))
+}
+
+/// The HTTP status in a failed `gh api`'s stderr, e.g. `gh: Not Found (HTTP 404)`.
+fn gh_http_status(stderr: &str) -> Option<reqwest::StatusCode> {
+    let rest = &stderr[stderr.find("(HTTP ")? + "(HTTP ".len()..];
+    let code: u16 = rest.get(..3)?.parse().ok()?;
+    reqwest::StatusCode::from_u16(code).ok()
 }
 
 fn unreachable(e: reqwest::Error) -> ApiError {
@@ -1466,7 +1559,9 @@ fn unreachable(e: reqwest::Error) -> ApiError {
 }
 
 pub fn not_signed_in() -> ApiError {
-    ApiError::github("sign in with GitHub first").with_status(400)
+    ApiError::github("sign in with GitHub first")
+        .with_status(400)
+        .with_reason("github_sign_in")
 }
 
 /// `owner/name` with GitHub's allowed characters; returns it trimmed.
@@ -2026,6 +2121,97 @@ mod tests {
         assert_eq!(sent["head"], "content/launch-week");
         assert_eq!(sent["base"], "main");
         stop();
+    }
+
+    /// A logged-in fake `gh`: `api user` answers Ada; other calls log their args to
+    /// `gh.calls`, their stdin to `gh.stdin`, and run `rest`.
+    fn gh_with_api(dir: &Path, rest: &str) -> GithubAuth {
+        let gh = write_gh(
+            dir,
+            &format!(
+                r#"if [ "$1 $2" = "api user" ]; then {OK_GH}; exit 0; fi
+echo "$@" >> "$0.calls"
+cat > "$0.stdin"
+{rest}"#
+            ),
+        );
+        let cfg = GithubConfig {
+            gh_path: gh,
+            git_global_config: Some(dir.join("none")),
+            ..GithubConfig::default()
+        };
+        GithubAuth::open(cfg, dir)
+    }
+
+    #[tokio::test]
+    async fn without_a_session_pull_requests_go_through_gh() {
+        let dir = tmp_dir("ghpr");
+        let auth = gh_with_api(
+            &dir,
+            r#"case "$*" in
+  *pulls\?head=*) printf '[]' ;;
+  *) printf '%s' '{"number":7,"html_url":"https://github.com/acme/site/pull/7","title":"X","draft":true}' ;;
+esac"#,
+        );
+        assert!(auth
+            .find_pr("acme/site", "content/x")
+            .await
+            .unwrap()
+            .is_none());
+        let pr = auth
+            .create_draft_pr("acme/site", "content/x", "X", "Preview of change: X")
+            .await
+            .unwrap();
+        assert_eq!(pr.number, 7);
+
+        let calls = std::fs::read_to_string(dir.join("gh.calls")).unwrap();
+        assert!(calls.contains(
+            "api --method GET /repos/acme/site/pulls?head=acme:content%2Fx&state=open"
+        ));
+        assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
+        let sent: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("gh.stdin")).unwrap()).unwrap();
+        assert_eq!(sent["head"], "content/x");
+        assert_eq!(sent["base"], "main");
+        assert_eq!(sent["draft"], true);
+    }
+
+    #[tokio::test]
+    async fn gh_api_http_errors_map_like_direct_responses() {
+        let dir = tmp_dir("gh422");
+        let auth = gh_with_api(
+            &dir,
+            r#"printf '{"message":"Validation Failed"}'; echo 'gh: Validation Failed (HTTP 422)' >&2; exit 1"#,
+        );
+        let err = auth
+            .create_draft_pr("acme/site", "content/x", "X", "b")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Conflict);
+    }
+
+    #[tokio::test]
+    async fn without_a_session_mark_ready_goes_through_gh_graphql() {
+        let dir = tmp_dir("ghready");
+        let auth = gh_with_api(
+            &dir,
+            r#"printf '%s' '{"data":{"markPullRequestReadyForReview":{"pullRequest":{"isDraft":false}}}}'"#,
+        );
+        auth.mark_ready_mutation("PR_1").await.unwrap();
+        let calls = std::fs::read_to_string(dir.join("gh.calls")).unwrap();
+        assert!(calls.contains("api --method POST graphql --input -"));
+        let sent: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("gh.stdin")).unwrap()).unwrap();
+        assert_eq!(sent["variables"]["id"], "PR_1");
+    }
+
+    #[test]
+    fn gh_http_status_reads_gh_error_suffix() {
+        assert_eq!(
+            gh_http_status("gh: Not Found (HTTP 404)"),
+            Some(reqwest::StatusCode::NOT_FOUND)
+        );
+        assert_eq!(gh_http_status("dial tcp: i/o timeout"), None);
     }
 
     #[tokio::test]

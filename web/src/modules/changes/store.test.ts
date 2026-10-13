@@ -232,6 +232,18 @@ describe("changes store", () => {
     expect(store.error).toBeNull();
   });
 
+  it("share without an app sign-in (gh only) sets needsSignIn without error text", async () => {
+    const store = setup({
+      shareChange: vi.fn(async () => {
+        throw new ApiError("GITHUB_ERR", "sign in with GitHub first", 400, { reason: "github_sign_in" });
+      }),
+    });
+    store.active = { branch: "content/x", title: "X" };
+    await expect(store.share("site", "content/x")).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsSignIn).toBe(true);
+    expect(store.error).toBeNull();
+  });
+
   describe("PR status", () => {
     const draft = {
       number: 1,

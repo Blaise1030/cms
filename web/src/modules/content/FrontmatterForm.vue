@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TagInput } from "@/components/ui/tag-input";
 import type { FieldDescriptor } from "@/core/types";
-import { humanize, humanizeLower } from "@/lib/text";
+import { humanize, humanizeLower } from "@workbench/utils";
 import ImageDialog, { ACCEPTED_IMAGES, IMAGE_REGISTRY, type PendingImage } from "./ImageDialog.vue";
 import { REFERENCE_ENTRIES } from "./references";
 

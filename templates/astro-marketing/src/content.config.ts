@@ -9,9 +9,6 @@ const collection = (name: keyof typeof collectionRegistry) => defineCollection({
   schema: (context) => createCollectionSchemas({ z, ...context })[name],
 });
 export const collections = {
-  site: collection("site"),
-  pages: collection("pages"),
-  sections: collection("sections"),
   blog: collection("blog"),
   helpDocs: collection("helpDocs"),
 };

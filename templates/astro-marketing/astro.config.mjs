@@ -1,4 +1,5 @@
 import mdx from "@astrojs/mdx";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
 // The workbench dev server proxies the site under /preview/{id}/.
@@ -9,6 +10,7 @@ export default defineConfig({
   base,
   integrations: [mdx()],
   vite: {
+    plugins: [tailwindcss()],
     server: {
       // Astro keeps Vite's own base at "/", so without this the HMR socket would connect to
       // the proxy root instead of the /preview/{id}/ prefix. clientPort makes the browser

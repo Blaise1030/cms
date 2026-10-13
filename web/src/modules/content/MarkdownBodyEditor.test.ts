@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { EditorView } from "@codemirror/view";
 import MarkdownBodyEditor from "./MarkdownBodyEditor.vue";
-import { canRoundTrip } from "./markdown";
+import { Editor } from "@tiptap/core";
+import { canRoundTrip, markdownExtensions } from "./markdown";
 
 type Change = { body: string; dirty: boolean };
 const mounted: VueWrapper[] = [];
@@ -53,6 +54,9 @@ describe("canRoundTrip", () => {
     "- one\n- two\n\n1. first\n2. second\n",
     "> quoted\n\n```ts\nconst a = { b: 1 };\n```\n",
     "![A cat](./cat.png)\n",
+    "| a | **b** |\n| :- | -: |\n| 1 | [two](https://x.test) |\n",
+    "Is it allowed?\n\nNo. Meta restricts it.\n\nA. Yes, sometimes.\n",
+    "## Voice & Tone\n\nFish & chips, R&D.\n",
     "",
   ])("accepts supported Markdown %#", source => expect(canRoundTrip(source)).toBe(true));
 
@@ -64,12 +68,19 @@ describe("canRoundTrip", () => {
     ["MDX import", "import Chart from '../Chart.astro';\n\nText\n"],
     ["MDX export", "export const meta = {};\n\nText\n"],
     ["MDX expression", "Total: {props.count}\n"],
-    ["table", "| a | b |\n| - | - |\n| 1 | 2 |\n"],
+    ["HTML in a table cell", "| a | b |\n| - | - |\n| <b>1</b> | 2 |\n"],
     ["reference link", "See [docs][d].\n\n[d]: https://x.test\n"],
     ["footnote", "Claim[^1].\n\n[^1]: Source.\n"],
     ["entity", "Fish &amp; chips\n"],
     ["task list", "- [ ] todo\n"],
   ])("rejects %s", (_name, source) => expect(canRoundTrip(source)).toBe(false));
+
+  it("writes a bare ampersand as-is, and escapes one that would read as an entity", () => {
+    const md = new Editor({ extensions: markdownExtensions() }).markdown!;
+    const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    expect(md.serialize(doc("R&D & more"))).toBe("R&D & more");
+    expect(md.serialize(doc("Type &amp; or &#38;"))).toBe("Type &amp;amp; or &amp;#38;");
+  });
 });
 
 describe("MarkdownBodyEditor", () => {
@@ -129,12 +140,70 @@ describe("MarkdownBodyEditor", () => {
     expect(last(w)).toEqual({ body: "Hello", dirty: true });
   });
 
-  it("selection menu link asks for a URL", async () => {
-    vi.stubGlobal("prompt", vi.fn(() => "https://x.test"));
+  /** Type into a field of the open link dialog. */
+  async function fillLink(field: "url" | "text", value: string) {
+    const input = document.body.querySelector(`[data-testid="link-${field}"]`) as HTMLInputElement;
+    input.value = value; input.dispatchEvent(new Event("input"));
+    await flushPromises();
+  }
+  const linkButton = (name: string) => document.body.querySelector(`[data-testid="link-${name}"]`) as HTMLButtonElement | null;
+
+  it("shows the link card when the cursor is on a link, and hides it off the link", async () => {
+    const w = await render("See [docs](https://x.test) here");
+    expect(w.find('[data-testid="link-popover"]').exists()).toBe(false);
+    editorOf(w).commands.setTextSelection(7); await flushPromises();
+    expect(w.get('[data-testid="link-open"]').attributes("href")).toBe("https://x.test");
+    expect(w.find('[data-testid="link-url"]').exists()).toBe(false);
+    editorOf(w).commands.setTextSelection(2); await flushPromises();
+    expect(w.find('[data-testid="link-popover"]').exists()).toBe(false);
+    expect(changes(w)).toEqual([]);
+  });
+
+  it("link card Edit switches to the URL field and Escape cancels", async () => {
+    const w = await render("See [docs](https://x.test) here");
+    editorOf(w).commands.setTextSelection(7); await flushPromises();
+    await w.get('[data-testid="link-edit"]').trigger("click"); await flushPromises();
+    expect((w.get('[data-testid="link-url"]').element as HTMLInputElement).value).toBe("https://x.test");
+    await w.get('[data-testid="link-url"]').trigger("keydown", { key: "Escape" }); await flushPromises();
+    expect(w.find('[data-testid="link-popover"]').exists()).toBe(false);
+    expect(changes(w)).toEqual([]);
+  });
+
+  it("selection menu link asks for a URL in a popover", async () => {
     const w = await render("Hello");
     await selectAll(w);
     await w.get('[data-testid="body-tool-link"]').trigger("click"); await flushPromises();
+    expect(linkButton("apply")!.disabled).toBe(true);
+    expect(document.body.querySelector('[data-testid="link-text"]')).toBeNull();
+    await fillLink("url", "https://x.test");
+    linkButton("apply")!.click(); await flushPromises();
     expect(last(w)?.body).toBe("[Hello](https://x.test)");
+  });
+
+  it("link popover edits and removes an existing link", async () => {
+    const w = await render("[Hello](https://old.test)");
+    await selectAll(w);
+    await w.get('[data-testid="body-tool-link"]').trigger("click"); await flushPromises();
+    expect((document.body.querySelector('[data-testid="link-url"]') as HTMLInputElement).value).toBe("https://old.test");
+    await fillLink("url", "https://new.test");
+    linkButton("apply")!.click(); await flushPromises();
+    expect(last(w)?.body).toBe("[Hello](https://new.test)");
+    expect(w.get('[data-testid="link-open"]').attributes("href")).toBe("https://new.test");
+
+    linkButton("remove")!.click(); await flushPromises();
+    expect(last(w)?.body).toBe("Hello");
+  });
+
+  it("slash link with no selection asks for the link text too", async () => {
+    const w = await render("Hi ");
+    editorOf(w).chain().focus().setTextSelection(4).insertContent("/").run(); await flushPromises();
+    (document.body.querySelector('[data-testid="slash-item"]:nth-child(4)') as HTMLElement)
+      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+    await fillLink("url", "https://x.test");
+    await fillLink("text", "docs");
+    linkButton("apply")!.click(); await flushPromises();
+    expect(last(w)?.body).toBe("Hi [docs](https://x.test)");
   });
 
   /** Put the cursor at the end of the text node `text`. */

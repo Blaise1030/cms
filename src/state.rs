@@ -1,5 +1,6 @@
 //! Shared application state.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -35,6 +36,8 @@ pub struct AppState {
     pub conflict_previews: Arc<ConflictPreviewManager>,
     /// Serializes Get latest through session creation as one operation.
     pub conflict_updates: Arc<Mutex<()>>,
+    /// Projects whose Get latest skipped the checked-out change while a terminal was live.
+    pub pending_latest: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -103,6 +106,7 @@ impl AppState {
             conflicts: Arc::new(ConflictSessions::new()),
             conflict_previews: Arc::new(ConflictPreviewManager::new()),
             conflict_updates: Arc::new(Mutex::new(())),
+            pending_latest: Arc::default(),
         }
     }
 }
