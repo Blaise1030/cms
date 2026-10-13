@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
@@ -40,7 +41,7 @@ import { useCheckpointsStore } from "./store";
 const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-x\n+y\n";
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
-function mountPanel() {
+async function mountPanel(start = "/p/p/history") {
   api = {
     listCheckpoints: vi.fn(async () => [
       { sha: "aaaaaaa111", summary: "checkpoint: initial", author: "Ada", ts: 100 },
@@ -51,10 +52,18 @@ function mountPanel() {
   };
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
-  return mount(CheckpointsPanel, {
-    props: { projectId: "p" },
-    attachTo: document.body,
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: "/p/:id/history/:sha?",
+        component: CheckpointsPanel,
+        props: (r) => ({ projectId: r.params.id as string, sha: (r.params.sha as string) || undefined }),
+      },
+    ],
   });
+  await router.push(start);
+  return mount(RouterView, { global: { plugins: [router] }, attachTo: document.body });
 }
 
 const byText = (text: string) =>
@@ -67,7 +76,7 @@ afterEach(() => {
 
 describe("CheckpointsPanel", () => {
   it("shows the timeline newest first", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     const items = w.findAll("[data-testid='checkpoint-item']");
     expect(items.map((i) => i.text())).toEqual([
@@ -81,8 +90,24 @@ describe("CheckpointsPanel", () => {
     w.unmount();
   });
 
+  it("groups the timeline by day", async () => {
+    const w = await mountPanel();
+    await flushPromises();
+    expect(w.findAll("[data-testid='checkpoint-day']")).toHaveLength(1);
+    h.daemon.emit({
+      type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: new",
+      author: "Grace", ts: Math.floor(Date.now() / 1000),
+    });
+    await flushPromises();
+    expect(w.findAll("[data-testid='checkpoint-day']").map((d) => d.text())).toEqual([
+      "Today",
+      expect.stringContaining("1970"),
+    ]);
+    w.unmount();
+  });
+
   it("prepends checkpoint.created events", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     h.daemon.emit({
       type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: new",
@@ -95,7 +120,7 @@ describe("CheckpointsPanel", () => {
   });
 
   it("reloads the timeline on events.lagged and reconnect", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     api.listCheckpoints!.mockResolvedValueOnce([
       { sha: "ddddddd444", summary: "checkpoint: missed", author: "Workbench", ts: 300 },
@@ -111,7 +136,7 @@ describe("CheckpointsPanel", () => {
   });
 
   it("opens a diff for the clicked checkpoint", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.findAll("[data-testid='checkpoint-item']")[1]!.trigger("click");
     await flushPromises();
@@ -119,11 +144,24 @@ describe("CheckpointsPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='diff-stub']").exists()).toBe(true));
     expect(w.find("[data-testid='diff-stub']").text()).toBe("a.txt");
     expect(w.find("[data-testid='tree-stub']").text()).toBe("a.txt:modified");
+    expect(w.vm.$route.path).toBe("/p/p/history/aaaaaaa111");
+    w.unmount();
+  });
+
+  it("opens the checkpoint named in the URL and goes back to the timeline", async () => {
+    const w = await mountPanel("/p/p/history/bbbbbbb222");
+    await flushPromises();
+    expect(api.checkpointDiff).toHaveBeenCalledWith("p", "bbbbbbb222");
+    expect(w.find("[data-testid='timeline']").exists()).toBe(false);
+    await w.find("[aria-label='Back to timeline']").trigger("click");
+    await flushPromises();
+    expect(w.vm.$route.path).toBe("/p/p/history");
+    expect(w.find("[data-testid='timeline']").exists()).toBe(true);
     w.unmount();
   });
 
   it("restores only after confirming in the dialog", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.findAll("[data-testid='checkpoint-item']")[1]!.trigger("click");
     await flushPromises();
@@ -143,12 +181,13 @@ describe("CheckpointsPanel", () => {
     // Timeline is reloaded and the detail view closes.
     expect(api.listCheckpoints).toHaveBeenCalledTimes(2);
     expect(useCheckpointsStore().selectedSha).toBeNull();
+    expect(w.vm.$route.path).toBe("/p/p/history");
     expect(w.find("[data-testid='timeline']").exists()).toBe(true);
     w.unmount();
   });
 
   it("disables restore for the current checkpoint", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.findAll("[data-testid='checkpoint-item']")[0]!.trigger("click");
     await flushPromises();

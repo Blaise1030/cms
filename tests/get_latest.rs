@@ -110,6 +110,33 @@ async fn fast_forwards_main() {
 }
 
 #[tokio::test]
+async fn leaving_checkout_skips_the_active_change_and_tolerates_dirty_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let first = change_with_edit(&work, "First", "first.md", "one\n").await;
+    let active = change_with_edit(&work, "Second", "second.md", "two\n").await;
+    let active_before = rev(&work, &active);
+    std::fs::write(work.join("second.md"), "agent mid-edit\n").unwrap();
+    let remote_main = push_to_remote_main(tmp.path(), "news.md", "fresh\n");
+
+    let update = changes::get_latest_leaving_checkout(&work, &[])
+        .await
+        .unwrap();
+
+    assert!(update.main_updated);
+    assert_eq!(branches(&update.updated), vec![first.clone()]);
+    assert_eq!(update.skipped.map(|c| c.branch), Some(active.clone()));
+    assert_eq!(rev(&work, "main"), remote_main);
+    assert!(is_ancestor(&work, &remote_main, &first));
+    assert_eq!(rev(&work, &active), active_before);
+    assert!(!work.join("news.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(work.join("second.md")).unwrap(),
+        "agent mid-edit\n"
+    );
+}
+
+#[tokio::test]
 async fn merges_main_into_each_change_as_the_user() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
@@ -321,10 +348,14 @@ async fn http_update_route() {
     );
     assert_eq!(body["conflicts"], json!([]));
 
-    // Dirty tree → 409 with a message.
+    // Leftover edits are checkpointed onto the change first.
     std::fs::write(dir.join("first.md"), "unsaved\n").unwrap();
     let (s, body) = post(&app, "/api/changes/update", json!({ "project": info.id })).await;
-    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(
+        git_cli(&dir, &["log", "-1", "--format=%s"]),
+        "checkpoint: Saved edits"
+    );
 
     let (s, _) = post(&app, "/api/changes/update", json!({})).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);

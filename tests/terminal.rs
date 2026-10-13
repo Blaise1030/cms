@@ -599,7 +599,7 @@ mod http {
     }
 
     #[tokio::test]
-    async fn get_latest_refused_while_terminal_is_live() {
+    async fn get_latest_runs_while_terminal_is_live() {
         let env = http_env(false).await;
         start_terminal(&env).await;
         let (s, v) = call_http(
@@ -609,12 +609,7 @@ mod http {
             Some(json!({ "project": env.project })),
         )
         .await;
-        assert_eq!(s, StatusCode::CONFLICT, "{v}");
-        assert_eq!(v["error"]["code"], "CONFLICT");
-        assert_eq!(
-            v["error"]["message"],
-            "A terminal is running — stop it before getting the latest"
-        );
+        assert_eq!(s, StatusCode::OK, "{v}");
 
         let (s, v) = call_http(
             &env,
@@ -743,6 +738,85 @@ mod http {
     }
 
     #[tokio::test]
+    async fn new_change_saves_edits_left_on_the_previous_change() {
+        let env = http_env(false).await;
+        let new_change = |title: &str| {
+            call_http(
+                &env,
+                "POST",
+                "/api/changes",
+                Some(json!({ "project": env.project, "title": title })),
+            )
+        };
+        let (s, v) = new_change("First").await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        let tracked = git_cli(&env.dir, &["ls-files"]);
+        let file = tracked.lines().next().unwrap();
+        std::fs::write(env.dir.join(file), "left over\n").unwrap();
+
+        let (s, v) = new_change("Second").await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        assert_eq!(
+            git_cli(&env.dir, &["log", "-1", "--format=%s", "content/first"]),
+            "checkpoint: Saved edits"
+        );
+        assert_eq!(git_cli(&env.dir, &["status", "--porcelain", "--untracked-files=no"]), "");
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn skipped_change_catches_up_at_turn_end() {
+        let env = http_env(true).await;
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/changes",
+            Some(json!({ "project": env.project, "title": "Landing" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        let branch = v["branch"].as_str().unwrap().to_string();
+        let wt = env.root.join("main-wt");
+        git_cli(&env.dir, &["worktree", "add", wt.to_str().unwrap(), "main"]);
+        std::fs::write(wt.join("news.md"), "fresh\n").unwrap();
+        git_cli(&wt, &["add", "news.md"]);
+        git_cli(&wt, &["commit", "-m", "news"]);
+        git_cli(&env.dir, &["worktree", "remove", wt.to_str().unwrap()]);
+
+        let mut ev = env.events.subscribe();
+        start_terminal(&env).await;
+        let token = hook_token_from_ws(&env).await;
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/changes/update",
+            Some(json!({ "project": env.project })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["skipped"]["branch"], branch);
+        assert!(!env.dir.join("news.md").exists());
+
+        let (s, _) = post_turn_end(&env, json!({ "project": env.project, "token": token })).await;
+        assert_eq!(s, StatusCode::OK);
+        let deadline = Instant::now() + TIMEOUT;
+        let mut updated = None;
+        while Instant::now() < deadline && updated.is_none() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Ok(text)) = tokio::time::timeout(left, ev.recv()).await {
+                let v: Value = serde_json::from_str(&text).unwrap();
+                if v["type"] == "changes.updated" && v["projectId"] == env.project {
+                    updated = Some(v);
+                }
+            }
+        }
+        let updated = updated.expect("changes.updated not seen");
+        assert_eq!(updated["result"]["updated"][0]["branch"], branch, "{updated}");
+        assert!(env.dir.join("news.md").exists());
+        env.server.abort();
+    }
+
+    #[tokio::test]
     async fn turn_end_without_changes_makes_no_commit() {
         let env = http_env(true).await;
         start_terminal(&env).await;
@@ -756,6 +830,88 @@ mod http {
         assert_eq!(s, StatusCode::OK);
         assert_eq!(v["committed"], false);
         assert_eq!(git_cli(&env.dir, &["rev-parse", "HEAD"]), before);
+        env.server.abort();
+    }
+
+    #[tokio::test]
+    async fn sessions_are_recorded_and_titled_by_turn_end() {
+        let env = http_env(true).await;
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": env.project, "provider": "fake" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let id = v["sessionId"].as_str().unwrap().to_string();
+        let (_, status) = call_http(&env, "GET", &format!("/api/terminal/{}", env.project), None).await;
+        assert_eq!(status["sessionId"], id.as_str());
+
+        let token = hook_token_from_ws(&env).await;
+        let (s, _) = post_turn_end(
+            &env,
+            json!({ "project": env.project, "token": token, "summary": "Add a pricing page\nmore", "sessionId": "agent-1" }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        let sessions_path = format!("/api/terminal/{}/sessions", env.project);
+        let (s, v) = call_http(&env, "GET", &sessions_path, None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let list = v["sessions"].as_array().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["id"], id.as_str());
+        assert_eq!(list[0]["provider"], "fake");
+        assert_eq!(list[0]["title"], "Add a pricing page");
+        // `fake` is not a provider the daemon knows how to resume.
+        assert_eq!(list[0]["resumable"], false);
+
+        call_http(&env, "DELETE", &format!("/api/terminal/{}", env.project), None).await;
+        let (s, v) = call_http(
+            &env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": env.project, "provider": "fake", "resume": id })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+        let (s, _) = call_http(
+            &env,
+            "POST",
+            "/api/terminal",
+            Some(json!({ "project": env.project, "provider": "fake", "resume": "nope" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        env.server.abort();
+    }
+
+    fn attachment_req(project: &str, content_type: &str, bytes: &'static [u8]) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/terminal/{project}/attachments"))
+            .header(header::HOST, "localhost")
+            .header(header::AUTHORIZATION, format!("Bearer {AUTH_TOKEN}"))
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(bytes))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn attachment_is_saved_outside_the_project() {
+        let env = http_env(false).await;
+        let (s, v) = call(&app(&env), attachment_req(&env.project, "image/png", b"png-bytes")).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let path = PathBuf::from(v["path"].as_str().unwrap());
+        assert!(path.is_absolute(), "{}", path.display());
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+        assert!(!path.starts_with(&env.dir), "{}", path.display());
+        assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
+
+        let (s, _) = call(&app(&env), attachment_req(&env.project, "text/plain", b"hi")).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let (s, _) = call(&app(&env), attachment_req("nope", "image/png", b"x")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
         env.server.abort();
     }
 
@@ -807,6 +963,8 @@ mod http {
         .await;
         assert_eq!(s, StatusCode::OK, "{v}");
         git_cli(&gh_dir, &["checkout", "main"]);
+        let tracked = git_cli(&gh_dir, &["ls-files"]);
+        std::fs::write(gh_dir.join(tracked.lines().next().unwrap()), "edited on main\n").unwrap();
         let mut ws = ws_connect_for_project(&env, &gh.id).await;
         let token = hook_token_from_ws_stream(&mut ws).await;
         let mut ev = env.events.subscribe();

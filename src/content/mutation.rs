@@ -51,10 +51,7 @@ pub struct SavedEntry {
     pub images: BTreeMap<String, images::SavedImage>,
 }
 
-/// Page slugs owned by template routes.
-const RESERVED_PAGES: &[&str] = &["blog", "help"];
-
-pub(super) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
+pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<StdMutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
     let mut map = LOCKS
         .get_or_init(Default::default)
@@ -71,14 +68,14 @@ pub(super) fn invalid_slug(message: &str) -> ApiError {
     ApiError::badreq(message).with_reason("invalid_slug")
 }
 
-pub(super) fn stale() -> ApiError {
+pub(crate) fn stale() -> ApiError {
     ApiError::conflict("The entry changed since it was opened; reload to compare")
         .with_reason("stale_content")
 }
 
 /// Content edits always need an active change, for GitHub and local-only projects alike.
 /// Returns the current branch, which must be the one the editor opened.
-pub(super) async fn require_content_change(root: &Path, opened: &str) -> Result<String, ApiError> {
+pub(crate) async fn require_content_change(root: &Path, opened: &str) -> Result<String, ApiError> {
     let Some(active) = changes::active(root).await? else {
         return Err(ApiError::change_required(
             "Start a change first — content cannot be edited on main",
@@ -94,7 +91,7 @@ pub(super) async fn require_content_change(root: &Path, opened: &str) -> Result<
     Ok(active.branch)
 }
 
-pub(super) fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError> {
+pub(super) fn validate_slug(slug: &str) -> Result<(), ApiError> {
     let valid = !slug.is_empty()
         && slug.len() <= 100
         && slug.split('-').all(|part| {
@@ -107,9 +104,6 @@ pub(super) fn validate_slug(collection: &str, slug: &str) -> Result<(), ApiError
         return Err(invalid_slug(
             "Slugs use lowercase letters, digits, and single hyphens",
         ));
-    }
-    if collection == "pages" && RESERVED_PAGES.contains(&slug) {
-        return Err(invalid_slug(&format!("\"{slug}\" is a reserved page slug")));
     }
     Ok(())
 }
@@ -164,7 +158,7 @@ pub(super) enum Leaf {
 /// Resolve `rel` under the canonical root, refusing any symlink or non-directory parent
 /// and a final component that is a symlink or not a regular file. Missing components are
 /// allowed.
-pub(super) fn resolve(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
+pub(crate) fn resolve(root: &Path, rel: &str) -> Result<PathBuf, ApiError> {
     resolve_as(root, rel, Leaf::File)
 }
 
@@ -233,7 +227,7 @@ fn create_parents(root: &Path, rel: &str, created: &mut Vec<PathBuf>) -> Result<
 }
 
 /// Write `bytes` through a same-directory temporary file and atomic rename.
-pub(super) fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(), ApiError> {
+pub(crate) fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(), ApiError> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let name = target.file_name().unwrap().to_string_lossy();
     let tmp = target.with_file_name(format!(
@@ -287,7 +281,7 @@ fn render(kind: &str, fields: &Map<String, Value>, body: &str) -> Result<String,
     Ok(format!("---\n{yaml}---\n{body}"))
 }
 
-pub(super) fn read_current(target: &Path) -> Result<String, ApiError> {
+pub(crate) fn read_current(target: &Path) -> Result<String, ApiError> {
     let bytes = std::fs::read(target)?;
     if bytes.len() as u64 > crate::fs::MAX_FILE_BYTES {
         return Err(ApiError::badreq("content entry is too large"));
@@ -296,7 +290,7 @@ pub(super) fn read_current(target: &Path) -> Result<String, ApiError> {
 }
 
 /// The registered project's directory.
-pub(super) async fn project_root(state: &AppState, project: &str) -> Result<PathBuf, ApiError> {
+pub(crate) async fn project_root(state: &AppState, project: &str) -> Result<PathBuf, ApiError> {
     state
         .projects
         .get(project)
@@ -340,13 +334,13 @@ pub(super) fn duplicate_slug(c: &catalog::ContentCollection, id: &str) -> ApiErr
         .with_reason("duplicate_slug")
 }
 
-/// Refusal for the singleton `site` and the required `pages/home` entry.
+/// Refusal to create, rename or delete a singleton collection's entry.
 pub(super) fn protected(message: String) -> ApiError {
     ApiError::badreq(message).with_reason("protected_entry")
 }
 
 /// Announce a created checkpoint so History refreshes.
-pub(super) fn emit_checkpoint(state: &AppState, project: &str, cp: Option<git::Checkpoint>) {
+pub(crate) fn emit_checkpoint(state: &AppState, project: &str, cp: Option<git::Checkpoint>) {
     if let Some(cp) = cp {
         state.events.emit(
             "checkpoint.created",
@@ -377,7 +371,7 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
             if c.singleton.is_some() {
                 return Err(protected(format!("{} is update-only", c.name)));
             }
-            validate_slug(&c.name, slug)?;
+            validate_slug(slug)?;
             (slug.clone(), true)
         }
         SaveTarget::Update { id, .. } => {

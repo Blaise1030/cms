@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useGithubStore } from "@/modules/github/store";
 import NewProjectDialog from "./NewProjectDialog.vue";

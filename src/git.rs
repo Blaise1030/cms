@@ -4,7 +4,7 @@
 //! settle/quiet-period logic lives with them. All operations on the same project
 //! directory are serialised so a restore can never interleave with a checkpoint.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
@@ -150,6 +150,10 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
         .trim()
         .is_empty()
     {
+        return Ok(None);
+    }
+    // A merge the agent is still resolving: committing now would seal in conflict markers.
+    if run(dir, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).await.is_ok() {
         return Ok(None);
     }
     let summary = clean_summary(summary);
@@ -425,6 +429,86 @@ pub async fn diff(dir: &Path, sha: &str) -> Result<String, ApiError> {
         ],
     )
     .await
+}
+
+/// One commit in a file's history. `path` is the file's name at that commit (it differs from
+/// the requested path across renames); `published` means the commit is reachable from `main`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileVersion {
+    pub sha: String,
+    pub summary: String,
+    pub author: String,
+    pub ts: i64,
+    pub path: String,
+    pub published: bool,
+}
+
+/// Commits on the current branch that touched `path` (following renames), newest first.
+pub async fn file_log(dir: &Path, path: &str) -> Result<Vec<FileVersion>, ApiError> {
+    if run(dir, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .is_err()
+    {
+        return Ok(Vec::new());
+    }
+    let out = run(
+        dir,
+        &[
+            "log",
+            "--follow",
+            "--diff-filter=d",
+            "--name-only",
+            "--format=%x1e%H%x1f%ct%x1f%an%x1f%s",
+            "--",
+            path,
+        ],
+    )
+    .await?;
+    let unpublished: Option<HashSet<String>> =
+        match run(dir, &["rev-parse", "--verify", "--quiet", "main"]).await {
+            Ok(_) => Some(
+                run(dir, &["rev-list", "HEAD", "^main"])
+                    .await?
+                    .lines()
+                    .map(str::to_string)
+                    .collect(),
+            ),
+            Err(_) => None,
+        };
+    Ok(out
+        .split('\u{1e}')
+        .filter_map(|record| {
+            let mut lines = record.lines();
+            let mut it = lines.next()?.splitn(4, '\u{1f}');
+            let sha = it.next()?.to_string();
+            let ts = it.next()?.parse().ok()?;
+            let author = it.next()?.to_string();
+            let subject = it.next().unwrap_or("");
+            let summary = subject
+                .strip_prefix(CHECKPOINT_PREFIX)
+                .unwrap_or(subject)
+                .to_string();
+            let path = lines.find(|l| !l.is_empty())?.to_string();
+            let published = unpublished.as_ref().is_some_and(|set| !set.contains(&sha));
+            Some(FileVersion {
+                sha,
+                summary,
+                author,
+                ts,
+                path,
+                published,
+            })
+        })
+        .collect())
+}
+
+/// Contents of `path` as of commit `sha`.
+pub async fn file_at(dir: &Path, sha: &str, path: &str) -> Result<String, ApiError> {
+    if path.starts_with('-') || path.split('/').any(|s| s == "..") {
+        return Err(ApiError::badreq("invalid path"));
+    }
+    let full = resolve(dir, sha).await?;
+    run(dir, &["show", &format!("{full}:{path}")]).await
 }
 
 /// Restore the working tree to `sha`: `git reset --hard <sha> && git clean -fd`.

@@ -12,9 +12,9 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 #[derive(Deserialize)]
 pub struct ContentQuery {
-    project: String,
-    collection: Option<String>,
-    id: Option<String>,
+    pub(crate) project: String,
+    pub(crate) collection: Option<String>,
+    pub(crate) id: Option<String>,
 }
 pub async fn collections(
     State(state): State<AppState>,

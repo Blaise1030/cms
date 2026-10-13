@@ -6,15 +6,15 @@ const docs = (await getCollection("helpDocs")).sort((a, b) => a.data.section.loc
 const sections = [...new Set(docs.map((doc) => doc.data.section))];
 ---
 <Base title="Help" description="Guides and answers to help you get started.">
-  <section class="content-page">
-    <h1>Help</h1>
+  <section class="mx-auto max-w-5xl px-8 py-12">
+    <h1 class="mb-8 text-4xl font-bold tracking-tight">Help</h1>
     {docs.length === 0 ? <p>No help docs yet. Check back soon for guides and answers.</p> : sections.map((section) => (
-      <section>
-        <h2>{section}</h2>
-        <div class="grid">{docs.filter((doc) => doc.data.section === section).map((doc) => (
-          <article class="card">
-            <h3><a href={href(`/help/${doc.id}/`)}>{doc.data.title}</a></h3>
-            <p>{doc.data.description}</p>
+      <section class="mb-10">
+        <h2 class="mb-4 text-2xl font-semibold">{section}</h2>
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-6">{docs.filter((doc) => doc.data.section === section).map((doc) => (
+          <article class="rounded-xl border border-neutral-400/30 p-5">
+            <h3 class="text-lg font-semibold"><a class="hover:underline" href={href(`/help/${doc.id}/`)}>{doc.data.title}</a></h3>
+            <p class="mt-2">{doc.data.description}</p>
           </article>
         ))}</div>
       </section>

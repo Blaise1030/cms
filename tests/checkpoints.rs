@@ -76,7 +76,7 @@ async fn project(tmp: &Path) -> (axum::Router, std::path::PathBuf) {
     (http::router(st), dir)
 }
 
-const HERO: &str = "src/content/sections/hero.mdx";
+const WELCOME: &str = "src/content/blog/en/welcome.md";
 
 #[tokio::test]
 async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
@@ -89,7 +89,7 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
     assert_eq!(git_cli(&dir, &["rev-list", "--count", "HEAD"]), "1");
 
     // dirty (modified + new + deleted) → one commit
-    std::fs::write(dir.join(HERO), "changed\n").unwrap();
+    std::fs::write(dir.join(WELCOME), "changed\n").unwrap();
     std::fs::write(dir.join("src/new.txt"), "new\n").unwrap();
     std::fs::remove_file(dir.join("AGENTS.md")).unwrap();
     let cp = git::checkpoint(&dir, "  Update hero\nmore detail")
@@ -126,10 +126,33 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
 }
 
 #[tokio::test]
+async fn no_checkpoint_while_a_merge_is_unresolved() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_app, dir) = project(tmp.path()).await;
+    git_cli(&dir, &["checkout", "-b", "content/a"]);
+    std::fs::write(dir.join(WELCOME), "ours\n").unwrap();
+    git::checkpoint(&dir, "ours").await.unwrap().unwrap();
+    git_cli(&dir, &["checkout", "main"]);
+    std::fs::write(dir.join(WELCOME), "theirs\n").unwrap();
+    git::checkpoint(&dir, "theirs").await.unwrap().unwrap();
+    git_cli(&dir, &["checkout", "content/a"]);
+    let merge = std::process::Command::new("git")
+        .args(["merge", "main"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!merge.status.success(), "expected a conflict");
+    let head = git_cli(&dir, &["rev-parse", "HEAD"]);
+
+    assert_eq!(git::checkpoint(&dir, "turn end").await.unwrap(), None);
+    assert_eq!(git_cli(&dir, &["rev-parse", "HEAD"]), head);
+}
+
+#[tokio::test]
 async fn log_and_diff_endpoints_match_git() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir) = project(tmp.path()).await;
-    std::fs::write(dir.join(HERO), "changed\n").unwrap();
+    std::fs::write(dir.join(WELCOME), "changed\n").unwrap();
     let cp = git::checkpoint(&dir, "Edit hero").await.unwrap().unwrap();
 
     let (s, body) = call(&app, req("GET", "/api/checkpoints?project=site", None)).await;
@@ -161,7 +184,7 @@ async fn log_and_diff_endpoints_match_git() {
         .starts_with("text/plain"));
     let diff = String::from_utf8(bytes).unwrap();
     assert!(
-        diff.starts_with("diff --git a/src/content/sections/hero.mdx"),
+        diff.starts_with("diff --git a/src/content/blog/en/welcome.md"),
         "{diff}"
     );
     assert!(diff.contains("+changed"));
@@ -189,14 +212,14 @@ async fn log_and_diff_endpoints_match_git() {
 async fn restore_resets_files_and_cleans_untracked() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir) = project(tmp.path()).await;
-    let original = std::fs::read_to_string(dir.join(HERO)).unwrap();
+    let original = std::fs::read_to_string(dir.join(WELCOME)).unwrap();
     let base = git_cli(&dir, &["rev-parse", "HEAD"]);
 
-    std::fs::write(dir.join(HERO), "changed\n").unwrap();
+    std::fs::write(dir.join(WELCOME), "changed\n").unwrap();
     git::checkpoint(&dir, "Edit hero").await.unwrap().unwrap();
 
     // more dirt: modified tracked, untracked file + dir, deleted file, plus an ignored file
-    std::fs::write(dir.join(HERO), "dirty\n").unwrap();
+    std::fs::write(dir.join(WELCOME), "dirty\n").unwrap();
     std::fs::create_dir_all(dir.join("scratch/deep")).unwrap();
     std::fs::write(dir.join("scratch/deep/x.txt"), "x").unwrap();
     std::fs::remove_file(dir.join("AGENTS.md")).unwrap();
@@ -215,7 +238,7 @@ async fn restore_resets_files_and_cleans_untracked() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["restored"], base);
     assert_eq!(git_cli(&dir, &["rev-parse", "HEAD"]), base);
-    assert_eq!(std::fs::read_to_string(dir.join(HERO)).unwrap(), original);
+    assert_eq!(std::fs::read_to_string(dir.join(WELCOME)).unwrap(), original);
     assert!(dir.join("AGENTS.md").is_file());
     assert!(!dir.join("scratch").exists());
     assert_eq!(git_cli(&dir, &["status", "--porcelain"]), "");
@@ -333,32 +356,32 @@ async fn tree_and_file_reads() {
         &app,
         req(
             "GET",
-            "/api/tree?project=site&path=src/content/sections",
+            "/api/tree?project=site&path=src/content/blog/en",
             None,
         ),
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    let hero = v["entries"]
+    let welcome = v["entries"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["name"] == "hero.mdx")
+        .find(|e| e["name"] == "welcome.md")
         .unwrap();
-    assert_eq!(hero["kind"], "file");
-    assert_eq!(hero["path"], HERO);
-    assert!(hero["size"].as_u64().unwrap() > 0);
+    assert_eq!(welcome["kind"], "file");
+    assert_eq!(welcome["path"], WELCOME);
+    assert!(welcome["size"].as_u64().unwrap() > 0);
 
     let (s, v) = call(
         &app,
-        req("GET", &format!("/api/file?project=site&path={HERO}"), None),
+        req("GET", &format!("/api/file?project=site&path={WELCOME}"), None),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["binary"], false);
     assert_eq!(
         v["content"].as_str().unwrap(),
-        std::fs::read_to_string(dir.join(HERO)).unwrap()
+        std::fs::read_to_string(dir.join(WELCOME)).unwrap()
     );
 
     let (_, v) = call(

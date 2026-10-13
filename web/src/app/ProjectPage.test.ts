@@ -7,9 +7,11 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useChangesStore } from "@/modules/changes/store";
+import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useTerminalStore } from "@/modules/terminal/store";
 import { routes } from "@/router";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn() }));
+const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn(), openChat: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { error: h.toastError } }));
 
@@ -27,13 +29,15 @@ const project = (id: string): Project => ({
 // The page's children have their own tests; stubs keep this one about routing.
 const stubs = {
   Shell: {
+    props: ["showChat", "chatDetached"],
+    methods: { openChat: () => h.openChat() },
     template:
-      "<div><slot name='menubar' /><slot name='workspace' /><slot name='chat' /></div>",
+      "<div data-testid='shell' :data-chat-detached='chatDetached' :data-show-chat='showChat'><slot name='menubar' /><slot name='workspace' /><slot name='chat' /></div>",
   },
   EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
   TerminalPanel: {
-    props: ["projectId", "autoApprove"],
+    props: ["projectId"],
     template: "<div data-testid='chat'>{{ projectId }}</div>",
   },
   GithubAccount: true,
@@ -53,7 +57,10 @@ async function mountAt(path: string) {
   return w;
 }
 
-beforeEach(() => h.toastError.mockClear());
+beforeEach(() => {
+  h.toastError.mockClear();
+  h.openChat.mockClear();
+});
 
 describe("ProjectPage", () => {
   it("shows the project named by the route", async () => {
@@ -61,6 +68,37 @@ describe("ProjectPage", () => {
     expect(w.find("[data-testid='workspace']").text()).toBe("a");
     expect(w.find("[data-testid='chat']").text()).toBe("a");
     expect(router.currentRoute.value.path).toBe("/p/a/preview");
+  });
+
+  it("collapses the chat column while the agent panel floats", async () => {
+    const w = await mountAt("/p/a");
+    expect(w.find("[data-testid='shell']").attributes("data-chat-detached")).toBe("false");
+    useTerminalStore().floating = true;
+    await flushPromises();
+    expect(w.find("[data-testid='shell']").attributes("data-chat-detached")).toBe("true");
+  });
+
+  it("shows the agent beside the design editor", async () => {
+    const w = await mountAt("/p/a/design");
+    expect(w.find("[data-testid='shell']").attributes("data-show-chat")).toBe("true");
+  });
+
+  it("opens the agent when something is sent to it, even from a tab that hides it", async () => {
+    const w = await mountAt("/p/a/history");
+    const shell = () => w.find("[data-testid='shell']");
+    expect(shell().attributes("data-show-chat")).toBe("false");
+
+    useAgentOutboxStore().send({ kind: "text", text: "Restore this version", submit: true });
+    useAgentOutboxStore().drain();
+    await flushPromises();
+
+    expect(shell().attributes("data-show-chat")).toBe("true");
+    expect(h.openChat).toHaveBeenCalled();
+
+    await router.push("/p/a/preview");
+    await router.push("/p/a/history");
+    await flushPromises();
+    expect(shell().attributes("data-show-chat")).toBe("false");
   });
 
   it("sends an unknown project id home with a toast", async () => {

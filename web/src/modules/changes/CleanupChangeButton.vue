@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { useChangesStore } from "./store";
 
 const props = defineProps<{ projectId: string }>();

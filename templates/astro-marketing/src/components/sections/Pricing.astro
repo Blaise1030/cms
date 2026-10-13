@@ -1,18 +1,37 @@
 ---
 import { href } from "../../lib/href";
-const { data, id, Content } = Astro.props;
+
+const plans = [
+  {
+    name: "Starter",
+    price: "$0",
+    period: "forever",
+    features: ["One site", "Community support"],
+    cta: { label: "Start free", href: "#" },
+    highlighted: false,
+  },
+  {
+    name: "Pro",
+    price: "$19",
+    period: "per month",
+    features: ["Unlimited sites", "Custom domain", "Priority support"],
+    cta: { label: "Go Pro", href: "#" },
+    highlighted: true,
+  },
+];
 ---
 
-<section class="section" id={id}>
-  <h2>{data.heading}</h2>
-  <Content />
-  <div class="grid">
-    {data.plans.map((p) => (
-      <div class:list={["card", { highlighted: p.highlighted }]}>
-        <h3>{p.name}</h3>
-        <p><strong>{p.price}</strong> {p.period}</p>
-        <ul>{p.features.map((f) => <li>{f}</li>)}</ul>
-        <a class="button" href={href(p.cta.href)}>{p.cta.label}</a>
+<section class="mx-auto max-w-5xl px-8 py-16" id="pricing">
+  <h2 class="mb-6 text-3xl font-bold tracking-tight">Simple, honest pricing</h2>
+  <div class="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-6">
+    {plans.map((p) => (
+      <div class:list={["flex flex-col rounded-xl border p-5", p.highlighted ? "border-current" : "border-neutral-400/30"]}>
+        <h3 class="text-lg font-semibold">{p.name}</h3>
+        <p class="mt-2"><strong class="text-3xl font-bold">{p.price}</strong> {p.period}</p>
+        <ul class="my-4 flex-1 list-disc space-y-1 pl-5">{p.features.map((f) => <li>{f}</li>)}</ul>
+        <a class="inline-block rounded-lg border border-current px-5 py-2.5 text-center font-semibold" href={href(p.cta.href)}>
+          {p.cta.label}
+        </a>
       </div>
     ))}
   </div>

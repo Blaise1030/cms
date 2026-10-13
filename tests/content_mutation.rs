@@ -282,24 +282,6 @@ async fn create_and_update_succeed_on_active_change_with_scoped_checkpoints() {
     assert!(cleared["fields"].get("coverAlt").is_none());
     assert_eq!(cleared["body"], "## Hello\n");
     assert_eq!(git_cli(&e.dir, &["status", "--porcelain"]), "");
-
-    // JSON: site update preserves formatting of untouched keys.
-    let site = read(&e, "site", "site").await;
-    let (s, saved) = call(
-        &e.app,
-        "PUT",
-        "/api/content/entry",
-        Some(json!({"project":e.id,"collection":"site","id":"site","branch":branch,"hash":site["hash"],"fields":{"name":"Acme Two"}})),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{saved}");
-    assert_eq!(
-        saved["source"],
-        site["source"]
-            .as_str()
-            .unwrap()
-            .replace("\"Acme\"", "\"Acme Two\"")
-    );
 }
 
 #[tokio::test]
@@ -345,7 +327,7 @@ async fn stale_hash_and_changed_branch_reject_without_writes() {
 }
 
 #[tokio::test]
-async fn duplicate_invalid_and_reserved_slugs_reject() {
+async fn duplicate_and_invalid_slugs_reject() {
     let e = env(true).await;
     let branch = git_cli(&e.dir, &["branch", "--show-current"]);
     let base = head(&e.dir);
@@ -379,26 +361,6 @@ async fn duplicate_invalid_and_reserved_slugs_reject() {
         assert_eq!(s, StatusCode::BAD_REQUEST, "{slug}: {v}");
         assert_eq!(v["error"]["reason"], "invalid_slug", "{slug}");
     }
-    let page = json!({"title":"Blog","description":"Reserved","sections":[]});
-    for slug in ["blog", "help"] {
-        let (s, v) = call(
-            &e.app,
-            "POST",
-            "/api/content/entry",
-            Some(post(&e, &branch, "pages", slug, page.clone(), "")),
-        )
-        .await;
-        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-        assert_eq!(v["error"]["reason"], "invalid_slug");
-    }
-    let (s, v) = call(
-        &e.app,
-        "POST",
-        "/api/content/entry",
-        Some(post(&e, &branch, "site", "other", json!({}), "")),
-    )
-    .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
     let (s, v) = call(
         &e.app,
         "POST",
@@ -462,21 +424,21 @@ async fn symlink_escapes_reject_without_writing_outside() {
     let e = env(true).await;
     let branch = git_cli(&e.dir, &["branch", "--show-current"]);
     let outside = tempfile::tempdir().unwrap();
-    let secret = "{\"title\":\"T\",\"description\":\"D\",\"sections\":[]}\n";
-    std::fs::write(outside.path().join("secret.json"), secret).unwrap();
+    let secret = "---\ntitle: T\ndescription: D\npubDate: \"2026-10-11\"\n---\n";
+    std::fs::write(outside.path().join("secret.md"), secret).unwrap();
     let hash = format!("{:x}", Sha256::digest(secret.as_bytes()));
 
     // Entry file symlinked outside the project.
     std::os::unix::fs::symlink(
-        outside.path().join("secret.json"),
-        e.dir.join("src/content/pages/evil.json"),
+        outside.path().join("secret.md"),
+        e.dir.join("src/content/blog/en/evil.md"),
     )
     .unwrap();
     let (s, v) = call(
         &e.app,
         "PUT",
         "/api/content/entry",
-        Some(json!({"project":e.id,"collection":"pages","id":"evil","branch":branch,"hash":hash,"fields":{"title":"Owned"}})),
+        Some(json!({"project":e.id,"collection":"blog","id":"evil","branch":branch,"hash":hash,"fields":{"title":"Owned"}})),
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
@@ -505,14 +467,14 @@ async fn symlink_escapes_reject_without_writing_outside() {
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
 
     assert_eq!(
-        std::fs::read_to_string(outside.path().join("secret.json")).unwrap(),
+        std::fs::read_to_string(outside.path().join("secret.md")).unwrap(),
         secret
     );
     let names: Vec<_> = std::fs::read_dir(outside.path())
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
-    assert_eq!(names, vec![std::ffi::OsString::from("secret.json")]);
+    assert_eq!(names, vec![std::ffi::OsString::from("secret.md")]);
 }
 
 #[tokio::test]
@@ -576,22 +538,22 @@ async fn unrelated_staged_and_unstaged_changes_survive_a_save() {
 async fn dangling_and_empty_references_are_refused_without_writes() {
     let e = env(true).await;
     let branch = git_cli(&e.dir, &["branch", "--show-current"]);
-    let home = read(&e, "pages", "home").await;
-    let before = std::fs::read(e.dir.join("src/content/pages/home.json")).unwrap();
-    for (sections, path, needle) in [
-        (json!(["hero", "faqs"]), json!(["sections", 1]), "faqs"),
-        (json!(["hero", ""]), json!(["sections", 1]), "Choose"),
+    let welcome = read(&e, "blog", "welcome").await;
+    let before = std::fs::read(e.dir.join(WELCOME)).unwrap();
+    for (related, needle) in [
+        (json!(["welcome", "missing-post"]), "missing-post"),
+        (json!(["welcome", ""]), "Choose"),
     ] {
         let (s, v) = call(
             &e.app,
             "PUT",
             "/api/content/entry",
-            Some(json!({"project":e.id,"collection":"pages","id":"home","branch":branch,"hash":home["hash"],"fields":{"sections":sections}})),
+            Some(json!({"project":e.id,"collection":"blog","id":"welcome","branch":branch,"hash":welcome["hash"],"fields":{"relatedPosts":related}})),
         )
         .await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
         assert_eq!(v["error"]["reason"], "invalid_schema");
-        assert_eq!(v["error"]["details"][0]["path"], path, "{v}");
+        assert_eq!(v["error"]["details"][0]["path"], json!(["relatedPosts", 1]), "{v}");
         assert!(
             v["error"]["details"][0]["message"]
                 .as_str()
@@ -599,10 +561,7 @@ async fn dangling_and_empty_references_are_refused_without_writes() {
                 .contains(needle),
             "{v}"
         );
-        assert_eq!(
-            std::fs::read(e.dir.join("src/content/pages/home.json")).unwrap(),
-            before
-        );
+        assert_eq!(std::fs::read(e.dir.join(WELCOME)).unwrap(), before);
     }
     // A new entry is checked too: relatedPosts must name existing posts.
     let mut fields = post_fields();
@@ -633,7 +592,7 @@ async fn dangling_and_empty_references_are_refused_without_writes() {
         &e.app,
         "PUT",
         "/api/content/entry",
-        Some(json!({"project":e.id,"collection":"pages","id":"home","branch":branch,"hash":home["hash"],"fields":{"sections":["hero","faq"]}})),
+        Some(json!({"project":e.id,"collection":"blog","id":"welcome","branch":branch,"hash":welcome["hash"],"fields":{"relatedPosts":["related"]}})),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");

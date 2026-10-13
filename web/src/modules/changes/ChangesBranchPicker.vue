@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
 import { PR_STATE_LABEL } from "./prStatus";
 import { useChangesStore } from "./store";
@@ -82,9 +82,9 @@ function onNewChange() {
         class="h-7 max-w-56 gap-1 px-2 text-xs"
         data-testid="changes-menu"
       >
-        <GitBranch class="size-3.5 shrink-0 opacity-70" />
+        <GitBranch class="size-4 shrink-0 opacity-70" />
         <span class="truncate" data-testid="active-change">{{ triggerLabel }}</span>
-        <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
+        <ChevronsUpDown class="size-3.5 shrink-0 opacity-50" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent
@@ -151,5 +151,10 @@ function onNewChange() {
     </DropdownMenuContent>
   </DropdownMenu>
 
-  <NewChangeDialog v-model:open="showNewChange" :project-id="projectId" />
+  <NewChangeDialog
+    v-model:open="showNewChange"
+    :project-id="projectId"
+    via-agent
+    description="The agent starts it from the latest version of the site."
+  />
 </template>

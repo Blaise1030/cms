@@ -50,6 +50,28 @@ export interface Checkpoint {
   ts: number;
 }
 
+/** A commit that touched one content entry's file, newest first. */
+export interface FileVersion {
+  sha: string;
+  summary: string;
+  author: string;
+  /** Unix seconds. */
+  ts: number;
+  /** The entry's path at that commit (it may have been renamed since). */
+  path: string;
+  published: boolean;
+}
+
+/** One content entry as it was at a commit. */
+export interface ContentVersion {
+  sha: string;
+  path: string;
+  source: string;
+  fields: Record<string, unknown>;
+  body: string;
+  parseable: boolean;
+}
+
 /** Active content-change branch. */
 export interface Change {
   branch: string;
@@ -94,6 +116,8 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
+  /** The current change, left as is because a terminal is running. */
+  skipped?: Change | null;
   /** Branch → resolution session. Older daemons may omit this field. */
   conflictSessions?: Record<string, string>;
   /** Conflicts the visual resolver cannot safely open. */
@@ -208,12 +232,46 @@ export interface TerminalExitedEvent {
   type: "terminal.exited";
   projectId: string;
   code: number | null;
+  /** The history record of the session that ended. */
+  sessionId?: string | null;
+}
+
+/** A terminal session's history record changed (title, resumability). */
+export interface TerminalSessionEvent {
+  type: "terminal.session";
+  projectId: string;
+  sessionId: string;
+}
+
+/** A past or live agent session, from `GET /api/terminal/{project}/sessions`. */
+export interface TerminalSession {
+  id: string;
+  provider: string;
+  title?: string | null;
+  /** Unix milliseconds. */
+  createdAt: number;
+  updatedAt: number;
+  resumable: boolean;
 }
 
 export interface CheckpointBlockedEvent {
   type: "checkpoint.blocked";
   projectId: string;
   reason: string;
+}
+
+/** An agent turn ended; it may have started or switched changes. */
+export interface TerminalTurnEvent {
+  type: "terminal.turn";
+  projectId: string;
+}
+
+/** The daemon finished a Get latest that had skipped the current change (agent went idle). */
+export interface ChangesUpdatedEvent {
+  type: "changes.updated";
+  projectId: string;
+  result?: ChangesUpdate;
+  error?: string;
 }
 
 /** Emitted when this client's subscription fell behind and events were dropped. */
@@ -227,7 +285,10 @@ export type DaemonEvent =
   | CheckpointCreatedEvent
   | FsChangeEvent
   | TerminalExitedEvent
+  | TerminalSessionEvent
   | CheckpointBlockedEvent
+  | ChangesUpdatedEvent
+  | TerminalTurnEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];
@@ -330,4 +391,11 @@ export interface ContentImageUpload { clientId: string; alt: string; filename: s
 /** A saved entry; a save with images also says where each one went, by client ID. */
 export interface SavedContentEntry extends ContentEntry {
   images?: Record<string, { path: string; link: string }>;
+}
+/** The project's root `DESIGN.md` frontmatter; unknown keys are kept as-is. */
+export type DesignTokens = Record<string, unknown>;
+/** `exists: false` carries a `starter` to offer instead of a file. */
+export interface DesignDoc {
+  exists: boolean; tokens: DesignTokens; body: string; hash?: string; branch: string;
+  starter?: { tokens: DesignTokens; body: string };
 }

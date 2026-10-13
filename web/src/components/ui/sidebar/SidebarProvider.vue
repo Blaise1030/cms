@@ -10,9 +10,12 @@ const props = withDefaults(defineProps<{
   defaultOpen?: boolean
   open?: boolean
   class?: HTMLAttributes["class"]
+  /** Embedded sidebars (the content editor) leave Cmd/Ctrl+B to the rich text editor. */
+  shortcut?: boolean
 }>(), {
   defaultOpen: !defaultDocument?.cookie.includes(`${SIDEBAR_COOKIE_NAME}=false`),
   open: undefined,
+  shortcut: true,
 })
 
 const emits = defineEmits<{
@@ -44,6 +47,7 @@ function toggleSidebar() {
 }
 
 useEventListener("keydown", (event: KeyboardEvent) => {
+  if (!props.shortcut) return
   if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
     event.preventDefault()
     toggleSidebar()

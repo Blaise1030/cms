@@ -1,13 +1,20 @@
 ---
-const { data, id, Content } = Astro.props;
+const features = [
+  { title: "Fast by default", description: "Static pages that load instantly on any device." },
+  { title: "Easy to edit", description: "Change copy in plain files; the layout takes care of itself." },
+  { title: "Ready to deploy", description: "Build once and publish anywhere static sites are hosted." },
+];
 ---
 
-<section class="section" id={id}>
-  <h2>{data.heading}</h2>
-  <Content />
-  <div class="grid">
-    {data.items.map((i) => (
-      <div class="card"><h3>{i.title}</h3><p>{i.description}</p></div>
+<section class="mx-auto max-w-5xl px-8 py-16" id="features">
+  <h2 class="mb-6 text-3xl font-bold tracking-tight">Everything you need to launch</h2>
+  <p class="mb-6">Three reasons teams pick Acme.</p>
+  <div class="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-6">
+    {features.map((f) => (
+      <div class="rounded-xl border border-neutral-400/30 p-5">
+        <h3 class="mb-2 text-lg font-semibold">{f.title}</h3>
+        <p>{f.description}</p>
+      </div>
     ))}
   </div>
 </section>

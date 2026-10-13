@@ -1,22 +1,20 @@
 ---
-import { getEntry, render } from "astro:content";
-import { sectionComponents } from "../components/sections";
+import Cta from "../components/sections/Cta.astro";
+import Faq from "../components/sections/Faq.astro";
+import Features from "../components/sections/Features.astro";
+import Hero from "../components/sections/Hero.astro";
+import Logos from "../components/sections/Logos.astro";
+import Pricing from "../components/sections/Pricing.astro";
+import Testimonials from "../components/sections/Testimonials.astro";
 import Base from "../layouts/Base.astro";
-
-const page = (await getEntry("pages", "home"))!.data;
-const rendered = await Promise.all(
-  page.sections.map(async (id) => {
-    const entry = await getEntry("sections", id);
-    if (!entry) throw new Error(`pages/home.json references missing section "${id}"`);
-    const { Content } = await render(entry);
-    return { id, data: entry.data, Content };
-  }),
-);
 ---
 
-<Base title={page.title} description={page.description}>
-  {rendered.map(({ id, data, Content }) => {
-    const Section = sectionComponents[data.type] as any;
-    return <Section id={id} data={data} Content={Content} />;
-  })}
+<Base title="Acme — Ship your product story faster" description="Acme helps small teams launch a beautiful marketing site in minutes.">
+  <Hero />
+  <Logos />
+  <Features />
+  <Testimonials />
+  <Pricing />
+  <Faq />
+  <Cta />
 </Base>

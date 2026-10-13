@@ -4,6 +4,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { defineComponent, h } from "vue";
+import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 
 const hDaemon = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
@@ -48,7 +49,7 @@ import { useFilesStore } from "./store";
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
-function mountPanel() {
+async function mountPanel(start = "/p/p/code") {
   api = {
     tree: vi.fn(async (_p: string, path: string) =>
       path === ""
@@ -72,7 +73,20 @@ function mountPanel() {
   };
   hDaemon.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
-  return mount(FilesPanel, { props: { projectId: "p" }, attachTo: document.body });
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: "/p/:id/code/:path(.*)?",
+        component: FilesPanel,
+        props: (r) => ({ projectId: r.params.id as string, path: (r.params.path as string) || undefined }),
+      },
+      { path: "/other", component: { template: "<p>Other</p>" } },
+    ],
+  });
+  await router.push(start);
+  await router.isReady();
+  return mount(RouterView, { global: { plugins: [router] }, attachTo: document.body });
 }
 
 beforeEach(() => localStorage.clear());
@@ -83,7 +97,7 @@ afterEach(() => {
 
 describe("FilesPanel", () => {
   it("walks the tree into flat paths for the Pierre file tree", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     expect(api.tree).toHaveBeenCalledWith("p", "");
     expect(api.tree).toHaveBeenCalledWith("p", "src");
@@ -94,7 +108,7 @@ describe("FilesPanel", () => {
   });
 
   it("shows file contents read-only", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.find("[data-testid='tree-index.astro']").trigger("click");
     await flushPromises();
@@ -106,8 +120,23 @@ describe("FilesPanel", () => {
     w.unmount();
   });
 
+  it("puts the selected file in the URL and opens the file named there", async () => {
+    const w = await mountPanel();
+    await flushPromises();
+    await w.find("[data-testid='tree-src/hero.mdx']").trigger("click");
+    await flushPromises();
+    expect(w.vm.$route.path).toBe("/p/p/code/src/hero.mdx");
+    w.unmount();
+
+    const reloaded = await mountPanel("/p/p/code/src/hero.mdx");
+    await flushPromises();
+    expect(api.file).toHaveBeenCalledWith("p", "src/hero.mdx");
+    expect(reloaded.find("[data-testid='file-content']").text()).toContain("# Hello");
+    reloaded.unmount();
+  });
+
   it("explains binary files instead of rendering them", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     useFilesStore().paths = ["logo.png"];
     await flushPromises();
@@ -118,7 +147,7 @@ describe("FilesPanel", () => {
   });
 
   it("refreshes the tree and open file on events.lagged", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.find("[data-testid='tree-index.astro']").trigger("click");
     await flushPromises();
@@ -131,7 +160,7 @@ describe("FilesPanel", () => {
   });
 
   it("refreshes the tree and open file on fs.change (debounced)", async () => {
-    const w = mountPanel();
+    const w = await mountPanel();
     await flushPromises();
     await w.find("[data-testid='tree-index.astro']").trigger("click");
     await flushPromises();

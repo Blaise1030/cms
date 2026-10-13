@@ -54,8 +54,46 @@ pub async fn create(
         ))
     })?;
     let dir = project_dir(&state, &req.project).await?;
+    save_edits(&state, &req.project, &dir, true).await?;
     let change = changes::create(&dir, &req.title).await?;
     Ok((StatusCode::CREATED, Json(change_json(&change))))
+}
+
+/// Checkpoint leftover edits onto the change they were made on, so moving to another change
+/// doesn't stop on them. Edits on `main` are left alone when `carry_main` (a new change takes
+/// them) and on GitHub projects (never committed to `main`). Not while a terminal is live: the
+/// agent may be mid-edit.
+async fn save_edits(
+    state: &AppState,
+    project_id: &str,
+    dir: &std::path::Path,
+    carry_main: bool,
+) -> Result<(), ApiError> {
+    if state.terminals.status(project_id).is_some() || !changes::is_dirty(dir).await? {
+        return Ok(());
+    }
+    let on_change = changes::active(dir).await?.is_some();
+    let local_only = state
+        .projects
+        .get(project_id)
+        .await
+        .is_some_and(|p| p.repo.is_none());
+    if !on_change && (carry_main || !local_only) {
+        return Ok(());
+    }
+    if let Some(cp) = crate::git::checkpoint(dir, "Saved edits").await? {
+        state.events.emit(
+            "checkpoint.created",
+            json!({
+                "projectId": project_id,
+                "sha": cp.sha,
+                "summary": cp.summary,
+                "author": cp.author,
+                "ts": cp.ts,
+            }),
+        );
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -122,6 +160,7 @@ pub async fn switch(
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let dir = project_dir(&state, &req.project).await?;
+    save_edits(&state, &req.project, &dir, false).await?;
     let change = changes::switch(&dir, &branch).await?;
     Ok(Json(change_json(&change)))
 }
@@ -214,23 +253,45 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-/// `conflict` while that project's terminal is live — git must not run under the CLI.
+/// While that project's terminal is live the checkout is left alone (`skipped`) — git must not
+/// rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
 pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
+    let leave_checkout = state.terminals.status(&req.project).is_some();
+    Ok(Json(run_update(&state, &req.project, leave_checkout).await?))
+}
+
+/// Finish a Get latest that skipped the checked-out change, now that nothing is editing it
+/// (turn end, terminal stopped). Emits `changes.updated` with the result or the error.
+pub async fn finish_pending_update(state: AppState, project_id: String) {
+    let pending = state.pending_latest.lock().unwrap().remove(&project_id);
+    if !pending {
+        return;
+    }
+    let payload = match run_update(&state, &project_id, false).await {
+        Ok(result) => json!({ "projectId": project_id, "result": result }),
+        Err(e) => json!({ "projectId": project_id, "error": e.message }),
+    };
+    state.events.emit("changes.updated", payload);
+}
+
+async fn run_update(
+    state: &AppState,
+    project_id: &str,
+    leave_checkout: bool,
+) -> Result<Value, ApiError> {
     let project = state
         .projects
-        .get(&req.project)
+        .get(project_id)
         .await
-        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
-    if state.terminals.status(&req.project).is_some() {
-        return Err(ApiError::conflict(
-            "A terminal is running — stop it before getting the latest",
-        ));
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project_id}")))?;
+    if !leave_checkout {
+        save_edits(state, project_id, &project.dir, false).await?;
     }
     let _update_guard = state.conflict_updates.lock().await;
-    if !state.conflicts.list(&req.project).await.is_empty() {
+    if !state.conflicts.list(project_id).await.is_empty() {
         return Err(ApiError::conflict(
             "Finish or abandon the open conflict before running Get latest again",
         ));
@@ -241,7 +302,19 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
     } else {
         Vec::new()
     };
-    let result = changes::get_latest(&project.dir, &env).await?;
+    let result = if leave_checkout {
+        changes::get_latest_leaving_checkout(&project.dir, &env).await?
+    } else {
+        changes::get_latest(&project.dir, &env).await?
+    };
+    {
+        let mut pending = state.pending_latest.lock().unwrap();
+        if result.skipped.is_some() {
+            pending.insert(project_id.to_string());
+        } else {
+            pending.remove(project_id);
+        }
+    }
     let mut value = serde_json::to_value(&result).map_err(|e| ApiError::io(e.to_string()))?;
     let incoming_ref = if result.main_diverged {
         "refs/remotes/origin/main"
@@ -254,7 +327,7 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
     for change in &result.conflicts {
         match state
             .conflicts
-            .start(&project.dir, &req.project, &change.branch, &incoming)
+            .start(&project.dir, project_id, &change.branch, &incoming)
             .await
         {
             Ok(session) => {
@@ -267,7 +340,7 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
     }
     value["conflictSessions"] = Value::Object(sessions);
     value["conflictErrors"] = Value::Object(errors);
-    Ok(Json(value))
+    Ok(value)
 }
 
 async fn project_session(

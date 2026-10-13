@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
-import { createRouter, createMemoryHistory, RouterView } from "vue-router";
+import { RouterView } from "vue-router";
+import { contentRouter } from "@/test/contentRouter";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
@@ -8,7 +9,7 @@ import { ApiError } from "@/core/api";
 import type { FieldDescriptor } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-import ContentPanel from "./ContentPanel.vue";
+vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
 import { slugify, startingFields, today } from "./create";
@@ -64,8 +65,7 @@ async function setup(api: Record<string, unknown> = {}, collections: object[] = 
   });
   setActivePinia(createPinia());
   if (branch) useChangesStore().active = { branch, title: "X" };
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: ContentPanel, props: { projectId: "p" } }] });
-  await router.push("/"); await router.isReady();
+  const router = await contentRouter();
   w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body });
   await flushPromises();
   return w;

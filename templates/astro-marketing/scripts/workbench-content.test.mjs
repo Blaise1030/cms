@@ -11,16 +11,13 @@ function helper(request) {
   return JSON.parse(run.stdout);
 }
 const post = {title:'Post',description:'Description',pubDate:'2026-10-11'};
-test('describe identifies dates, image controls, references and section variants', () => {
+test('describe identifies dates, image controls and references', () => {
   const {collections} = helper({op:'describe'});
   assert.deepEqual(collections.map(({name,loader})=>({name,loader})), helper({op:'list'}).collections.map(({name,loader})=>({name,loader})));
   const blog = collections.find(c=>c.name==='blog').fields;
   assert.equal(blog.properties.pubDate.type,'date');
   assert.equal(blog.properties.coverImage.type,'image');
   assert.equal(blog.properties.relatedPosts.items.collection,'blog');
-  assert.equal(collections.find(c=>c.name==='pages').fields.properties.sections.items.collection,'sections');
-  assert.equal(collections.find(c=>c.name==='sections').fields.discriminator,'type');
-  assert.equal(collections.find(c=>c.name==='sections').fields.variants.length,7);
 });
 test('validate uses live schemas and returns defaults and precise issue paths', () => {
   const schemas = createCollectionSchemas({z});
@@ -38,11 +35,6 @@ test('patch changes YAML values while retaining quotes, comments, CRLF and body 
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{title:'New'}}).source,source.replace("'Old'","'New'"));
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{title:'Old'}}).source,source);
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{},body:'Changed\n'}).source,source.slice(0,source.indexOf('\r\nBody')-0)+'Changed\n');
-});
-test('patch preserves unrelated nested JSON formatting and escaped key spelling', () => {
-  const source='{\r\n  "na\\u006de" : "Acme",\r\n  "footer": { "text" : "Old", "links": [] },\r\n  "nav" : [],\r\n  "description": "Kept"\r\n}\r\n';
-  assert.equal(helper({op:'patch',collection:'site',source,fields:{footer:{text:'New',links:[]}}}).source,source.replace('"Old"','"New"'));
-  assert.equal(helper({op:'patch',collection:'site',source,fields:{name:'Acme'}}).source,source);
 });
 test('unknown transforms and custom refinements are read-only descriptors', async () => {
   const module = await import('./workbench-content.mjs');
@@ -66,10 +58,10 @@ test('patch validates the complete merged candidate before returning source', ()
   assert.notEqual(run.status,0);
   assert.match(run.stderr,/pubDate/);
 });
-test('YAML insertion and nested edits preserve untouched nodes', () => {
-  const source='---\ntype: hero\nheadline: "Hello" # retain\ncta:\n  label: \'Old\' # label\n  href: /start # retain\n---\n<Widget />\n';
-  assert.equal(helper({op:'patch',collection:'sections',source,fields:{cta:{label:'New',href:'/start'}}}).source,source.replace("'Old'","'New'"));
-  const inserted=helper({op:'patch',collection:'sections',source,fields:{subheadline:'Added'}}).source;
+test('YAML insertion and edits preserve untouched nodes', () => {
+  const source='---\ntitle: "Hello" # retain\ndescription: \'Old\' # label\npubDate: 2026-10-11 # retain\n---\n<Widget />\n';
+  assert.equal(helper({op:'patch',collection:'blog',source,fields:{description:'New'}}).source,source.replace("'Old'","'New'"));
+  const inserted=helper({op:'patch',collection:'blog',source,fields:{coverAlt:'Added'}}).source;
   assert.ok(inserted.includes(source.slice(0,source.indexOf('---\n<Widget'))));
   assert.ok(inserted.endsWith('---\n<Widget />\n'));
 });
@@ -127,8 +119,6 @@ test('patch unset removes optional top-level fields while preserving surrounding
   const source="---\r\ntitle: 'Post' # keep\r\ndescription: Kept\r\npubDate: 2026-10-11\r\ncoverImage: ./cover.png\r\ncoverAlt: Cover\r\ntags: [one] # tags\r\n---\r\nBody\r\n";
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{},unset:['coverImage','coverAlt']}).source,source.replace('coverImage: ./cover.png\r\ncoverAlt: Cover\r\n',''));
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{},unset:['missing']}).source,source);
-  const json='{\n  "name": "Acme",\n  "description": "Kept",\n  "nav" : [],\n  "footer": { "text": "F" },\n  "socials": []\n}\n';
-  assert.equal(helper({op:'patch',collection:'site',source:json,fields:{},unset:['socials']}).source,'{\n  "name": "Acme",\n  "description": "Kept",\n  "nav" : [],\n  "footer": { "text": "F" }\n}\n');
 });
 test('patch unset validates the candidate and rejects malformed or overlapping names', () => {
   const source='---\ntitle: Post\ndescription: Kept\npubDate: 2026-10-11\n---\nBody';
@@ -143,47 +133,6 @@ test('patch unset validates the candidate and rejects malformed or overlapping n
     assert.match(run.stderr,pattern);
     assert.equal(run.stdout,'');
   }
-});
-test('adding and removing a site nav link preserves the surrounding JSON bytes', async () => {
-  const {readFileSync}=await import('node:fs');
-  const source=readFileSync(new URL('src/content/site.json',root),'utf8');
-  const site=JSON.parse(source);
-  const added=helper({op:'patch',collection:'site',source,fields:{nav:[...site.nav,{label:'Docs',href:'/docs/'}]}}).source;
-  assert.equal(added,source.replace('{ "label": "Help", "href": "/help/" }','{ "label": "Help", "href": "/help/" },\n    { "label": "Docs", "href": "/docs/" }'));
-  assert.equal(helper({op:'patch',collection:'site',source:added,fields:{nav:site.nav}}).source,source);
-  const removed=helper({op:'patch',collection:'site',source,fields:{nav:site.nav.filter(link=>link.label!=='FAQ')}}).source;
-  assert.equal(removed,source.replace('    { "label": "FAQ", "href": "#faq" },\n',''));
-  const first=helper({op:'patch',collection:'site',source,fields:{nav:site.nav.slice(1)}}).source;
-  assert.equal(first,source.replace('    { "label": "Features", "href": "#features" },\n',''));
-  const last=helper({op:'patch',collection:'site',source,fields:{nav:site.nav.slice(0,-1)}}).source;
-  assert.equal(last,source.replace(',\n    { "label": "Help", "href": "/help/" }',''));
-});
-test('adding and removing a page section preserves the surrounding JSON bytes', async () => {
-  const {readFileSync}=await import('node:fs');
-  const source=readFileSync(new URL('src/content/pages/home.json',root),'utf8');
-  const page=JSON.parse(source);
-  const added=helper({op:'patch',collection:'pages',source,fields:{sections:[...page.sections,'hero']}}).source;
-  assert.equal(added,source.replace('"cta"]','"cta", "hero"]'));
-  const removed=helper({op:'patch',collection:'pages',source,fields:{sections:page.sections.filter(s=>s!=='pricing')}}).source;
-  assert.equal(removed,source.replace('"pricing", ',''));
-  const inserted=helper({op:'patch',collection:'pages',source,fields:{sections:['cta',...page.sections]}}).source;
-  assert.equal(inserted,source.replace('["hero"','["cta", "hero"'));
-  const pretty='{\n  "title": "T",\n  "description": "D",\n  "sections": [\n    "hero"\n  ]\n}\n';
-  assert.equal(helper({op:'patch',collection:'pages',source:pretty,fields:{sections:['hero','faq']}}).source,pretty.replace('"hero"\n','"hero",\n    "faq"\n'));
-  assert.equal(helper({op:'patch',collection:'pages',source:pretty,fields:{sections:[]}}).source,pretty.replace('[\n    "hero"\n  ]','[]'));
-  const empty='{\n  "title": "T",\n  "description": "D",\n  "sections": []\n}\n';
-  assert.equal(helper({op:'patch',collection:'pages',source:empty,fields:{sections:['hero']}}).source,empty.replace('[]','["hero"]'));
-});
-test('adding and removing a YAML FAQ item keeps block style and surrounding bytes', async () => {
-  const {readFileSync}=await import('node:fs');
-  const source=readFileSync(new URL('src/content/sections/faq.mdx',root),'utf8');
-  const item={question:'Is there a free plan?',answer:'Yes.'};
-  const added=helper({op:'patch',collection:'sections',source,fields:{items:[{question:'Can I change the design?',answer:'Yes. Everything is driven by files in the content folder and simple components.'},{question:'Where can I host it?',answer:'Anywhere that serves static files, including Cloudflare Pages.'},item]}}).source;
-  assert.equal(added,source.replace('Cloudflare Pages.\n','Cloudflare Pages.\n  - question: Is there a free plan?\n    answer: Yes.\n'));
-  const removed=helper({op:'patch',collection:'sections',source,fields:{items:[{question:'Where can I host it?',answer:'Anywhere that serves static files, including Cloudflare Pages.'}]}}).source;
-  assert.equal(removed,source.replace('  - question: Can I change the design?\n    answer: Yes. Everything is driven by files in the content folder and simple components.\n',''));
-  const back=helper({op:'patch',collection:'sections',source:added,fields:{items:[{question:'Can I change the design?',answer:'Yes. Everything is driven by files in the content folder and simple components.'},{question:'Where can I host it?',answer:'Anywhere that serves static files, including Cloudflare Pages.'}]}}).source;
-  assert.equal(back,source);
 });
 test('YAML block and flow tag lists gain and lose items in their own style', () => {
   const block='---\ntitle: Post\ndescription: D\npubDate: "2026-10-11"\ntags:\n  - news\n  - launch\nrelatedPosts: []\n---\nBody';

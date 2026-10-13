@@ -726,7 +726,7 @@ fn allocate_port(inner: &Inner) -> Result<u16, ApiError> {
     Err(ApiError::io("could not allocate an unused port"))
 }
 
-async fn npm_install(dir: &Path) -> Result<(), ApiError> {
+pub(crate) async fn npm_install(dir: &Path) -> Result<(), ApiError> {
     let child = Command::new("npm")
         .args(["install", "--no-audit", "--no-fund", "--no-progress"])
         .current_dir(dir)
@@ -744,6 +744,7 @@ async fn npm_install(dir: &Path) -> Result<(), ApiError> {
             tail(&String::from_utf8_lossy(&out.stderr))
         )));
     }
+    crate::devserver::record_deps(dir);
     Ok(())
 }
 

@@ -68,17 +68,16 @@ pub(crate) fn supported(c: &ContentCollection) -> bool {
         && !path
             .components()
             .any(|v| matches!(v, std::path::Component::ParentDir))
-        && matches!(
-            (c.kind.as_str(), pattern),
-            ("json", "*.json" | "site.json") | ("markdown", "*.md") | ("mdx", "*.mdx")
-        )
+        && match (c.kind.as_str(), pattern) {
+            ("json", p) => p == "*.json" || (!p.contains('*') && p.ends_with(".json")),
+            ("markdown", p) => p == "*.md",
+            ("mdx", p) => p == "*.mdx",
+            _ => false,
+        }
 }
 /// Known bundled paths are used only to expose raw, read-only files after helper failure.
 fn fallback(reason: String) -> Vec<ContentCollection> {
     [
-        ("site", "src/content", "site.json", "json", Some("site")),
-        ("pages", "src/content/pages", "*.json", "json", None),
-        ("sections", "src/content/sections", "*.mdx", "mdx", None),
         ("blog", "src/content/blog/en", "*.md", "markdown", None),
         (
             "helpDocs",
@@ -122,10 +121,8 @@ fn finish(
     describe_error: Option<&ApiError>,
 ) -> Vec<ContentCollection> {
     for c in &mut collections {
-        c.editable = matches!(
-            c.name.as_str(),
-            "site" | "pages" | "sections" | "blog" | "helpDocs"
-        ) && c.supported_for_editing
+        c.editable = matches!(c.name.as_str(), "blog" | "helpDocs")
+            && c.supported_for_editing
             && supported(c)
             && !c.fields.is_null()
             && !required_unsupported(&c.fields);
@@ -263,7 +260,7 @@ pub async fn read_entry(
     ))
 }
 /// The checked-out branch name (empty when detached).
-async fn current_branch(project_root: &Path) -> Result<String, ApiError> {
+pub(crate) async fn current_branch(project_root: &Path) -> Result<String, ApiError> {
     let output = tokio::process::Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(project_root)

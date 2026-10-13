@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";
 

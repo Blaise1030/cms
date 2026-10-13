@@ -91,7 +91,6 @@ fn asset_dir(collection: &str, id: &str) -> String {
 /// Public URL of an entry under the bundled template routes, when it has one.
 fn public_url(collection: &str, id: &str) -> Option<String> {
     match collection {
-        "pages" if id != "home" => Some(format!("/{id}")),
         "blog" => Some(format!("/blog/{id}")),
         "helpDocs" => Some(format!("/help/{id}")),
         _ => None,
@@ -407,13 +406,10 @@ pub async fn inspect_impact(
         .impact)
 }
 
-/// The singleton and the required home page cannot be renamed or deleted.
-fn guard_lifecycle(c: &catalog::ContentCollection, id: &str, verb: &str) -> Result<(), ApiError> {
+/// A singleton's entry cannot be renamed or deleted.
+fn guard_lifecycle(c: &catalog::ContentCollection, verb: &str) -> Result<(), ApiError> {
     if c.singleton.is_some() {
         return Err(m::protected(format!("{} cannot be {verb}", c.name)));
-    }
-    if c.name == "pages" && id == "home" {
-        return Err(m::protected(format!("pages/home cannot be {verb}")));
     }
     Ok(())
 }
@@ -436,9 +432,9 @@ fn mode_of(path: &Path) -> Result<u32, ApiError> {
 
 /// Undo log for applied file-system steps, replayed in reverse on failure.
 #[derive(Default)]
-pub(super) struct Journal(pub(super) Vec<Undo>);
+pub(crate) struct Journal(pub(crate) Vec<Undo>);
 
-pub(super) enum Undo {
+pub(crate) enum Undo {
     /// Restore `bytes` at `path` (a file that was overwritten or removed).
     Write {
         path: PathBuf,
@@ -455,7 +451,7 @@ pub(super) enum Undo {
 
 impl Journal {
     /// Roll back and return `error`, extended with every rollback step that failed.
-    pub(super) fn fail(self, error: ApiError) -> ApiError {
+    pub(crate) fn fail(self, error: ApiError) -> ApiError {
         let mut failures = vec![];
         for step in self.0.into_iter().rev() {
             let (path, result) = match step {
@@ -529,9 +525,9 @@ pub async fn rename_entry(
     let collections = catalog::list_collections(&root).await?;
     let c = m::editable_in(&collections, &request.collection)?;
     let (id, slug) = (request.id.as_str(), request.slug.as_str());
-    guard_lifecycle(&c, id, "renamed")?;
+    guard_lifecycle(&c, "renamed")?;
     m::validate_id(id)?;
-    m::validate_slug(&c.name, slug)?;
+    m::validate_slug(slug)?;
     if slug == id {
         return Err(m::invalid_slug("Choose a different slug"));
     }
@@ -686,7 +682,7 @@ pub async fn delete_entry(state: &AppState, request: DeleteEntry) -> Result<(), 
     let collections = catalog::list_collections(&root).await?;
     let c = m::editable_in(&collections, &request.collection)?;
     let id = request.id.as_str();
-    guard_lifecycle(&c, id, "deleted")?;
+    guard_lifecycle(&c, "deleted")?;
     m::validate_id(id)?;
     let rel = m::entry_path(&c, id)?;
     let source = m::read_current(&m::resolve(&root, &rel)?)?;

@@ -8,8 +8,8 @@
    and **Open from GitHub** lists your repositories.
 
 No OAuth App or client id is needed, and Workbench never stores your token: it runs
-`gh api …` for your profile and repositories, and git asks `gh auth git-credential` for
-credentials when cloning. Commits are authored with your global git name and email
+`gh api …` for your profile, repositories and pull requests (Share preview, Ready for review,
+PR status), and git asks `gh auth git-credential` for credentials when cloning and pushing. Commits are authored with your global git name and email
 (`git config --global user.name` / `user.email`) when set, otherwise your GitHub name and
 noreply address. There is no Sign out in this mode; use `gh auth logout`. (A
 logged-in `gh` is re-checked about once a minute, a logged-out one every few seconds.)

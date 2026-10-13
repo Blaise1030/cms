@@ -15,7 +15,6 @@ use workbench::{changes, http};
 const WELCOME: &str = "src/content/blog/en/welcome.md";
 const HELLO: &str = "src/content/blog/en/hello.md";
 const LAUNCH: &str = "src/content/blog/en/launch.md";
-const HOME: &str = "src/content/pages/home.json";
 const COVER: &str = "src/assets/blog/welcome/cover.png";
 const DIAGRAM: &str = "src/assets/blog/welcome/diagram.png";
 
@@ -241,32 +240,6 @@ fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 #[tokio::test]
-async fn site_and_home_are_protected_from_create_rename_and_delete() {
-    let e = env(true).await;
-    let before = snapshot(&e.dir);
-    let base = head(&e.dir);
-    let (s, v) = call(
-        &e.app,
-        "POST",
-        "/api/content/entry",
-        Some(json!({"project":e.id,"collection":"site","slug":"other","branch":e.branch,"fields":{}})),
-    )
-    .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-    assert_eq!(v["error"]["reason"], "protected_entry");
-    for (collection, id) in [("site", "site"), ("pages", "home")] {
-        let (s, v) = rename(&e, collection, id, "renamed").await;
-        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-        assert_eq!(v["error"]["reason"], "protected_entry", "{v}");
-        let (s, v) = delete(&e, collection, id).await;
-        assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-        assert_eq!(v["error"]["reason"], "protected_entry", "{v}");
-    }
-    assert_eq!(snapshot(&e.dir), before);
-    assert_eq!(head(&e.dir), base);
-}
-
-#[tokio::test]
 async fn rename_and_delete_require_an_active_change() {
     let e = env(false).await;
     let before = snapshot(&e.dir);
@@ -292,13 +265,6 @@ async fn impact_reports_schema_references_owned_assets_and_prose_links() {
         v["proseLinks"],
         json!([{"collection":"blog","id":"launch","path":LAUNCH,"url":"/blog/welcome","line":8}])
     );
-    let v = impact(&e, "sections", "hero").await;
-    assert_eq!(
-        v["references"],
-        json!([{"collection":"pages","id":"home","path":HOME,"field":"sections"}])
-    );
-    assert_eq!(v["assets"], json!([]));
-    assert_eq!(v["proseLinks"], json!([]));
 }
 
 #[tokio::test]
@@ -391,44 +357,6 @@ async fn rename_rewrites_references_and_owned_assets_in_one_reversible_checkpoin
 }
 
 #[tokio::test]
-async fn section_rename_rewrites_page_sections_and_new_sections_stay_unlisted() {
-    let e = env(true).await;
-    let home = std::fs::read_to_string(e.dir.join(HOME)).unwrap();
-    let (s, v) = call(
-        &e.app,
-        "POST",
-        "/api/content/entry",
-        Some(
-            json!({"project":e.id,"collection":"sections","slug":"extra","branch":e.branch,
-            "fields":{"type":"cta","heading":"More","cta":{"label":"Go","href":"/"}},"body":""}),
-        ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    // A new section is invisible until a page lists its ID.
-    assert_eq!(std::fs::read_to_string(e.dir.join(HOME)).unwrap(), home);
-    assert_eq!(
-        impact(&e, "sections", "extra").await["references"],
-        json!([])
-    );
-
-    let (s, v) = rename(&e, "sections", "hero", "intro").await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(
-        std::fs::read_to_string(e.dir.join(HOME)).unwrap(),
-        home.replace("\"hero\"", "\"intro\"")
-    );
-    assert_eq!(
-        committed(&e.dir),
-        vec![
-            HOME,
-            "src/content/sections/hero.mdx",
-            "src/content/sections/intro.mdx"
-        ]
-    );
-}
-
-#[tokio::test]
 async fn delete_refuses_referenced_entries_and_removes_entry_and_assets_reversibly() {
     let e = env(true).await;
     let before = snapshot(&e.dir);
@@ -437,9 +365,6 @@ async fn delete_refuses_referenced_entries_and_removes_entry_and_assets_reversib
     assert_eq!(s, StatusCode::CONFLICT, "{v}");
     assert_eq!(v["error"]["reason"], "entry_referenced");
     assert_eq!(v["error"]["details"][0]["id"], "launch");
-    let (s, v) = delete(&e, "sections", "hero").await;
-    assert_eq!(s, StatusCode::CONFLICT, "{v}");
-    assert_eq!(v["error"]["reason"], "entry_referenced");
     assert_eq!(snapshot(&e.dir), before);
     assert_eq!(head(&e.dir), base);
 
@@ -587,25 +512,7 @@ async fn rename_rejects_stale_branch_duplicate_and_invalid_slugs() {
         assert_eq!(s, StatusCode::BAD_REQUEST, "{slug}: {v}");
         assert_eq!(v["error"]["reason"], "invalid_slug", "{slug}: {v}");
     }
-    // `blog` and `help` are reserved page slugs.
-    let (s, v) = call(
-        &e.app,
-        "POST",
-        "/api/content/entry",
-        Some(
-            json!({"project":e.id,"collection":"pages","slug":"about","branch":e.branch,
-            "fields":{"title":"About","description":"About us","sections":[]}}),
-        ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
-    let (s, v) = rename(&e, "pages", "about", "help").await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-    assert_eq!(v["error"]["reason"], "invalid_slug");
-    // The page create above is the only change.
-    let mut after = snapshot(&e.dir);
-    after.retain(|(p, _)| p != "src/content/pages/about.json");
-    assert_eq!(after, before);
+    assert_eq!(snapshot(&e.dir), before);
 }
 
 #[tokio::test]

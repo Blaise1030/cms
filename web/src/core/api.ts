@@ -11,6 +11,10 @@ import {
   type ContentEntryRename,
   type ContentEntryDelete,
   type ContentImpact,
+  type ContentVersion,
+  type DesignDoc,
+  type DesignTokens,
+  type FileVersion,
   type Change,
   type ChangesUpdate,
   type ConflictCandidate,
@@ -28,6 +32,7 @@ import {
   type GithubStatus,
   type Health,
   type Project,
+  type TerminalSession,
   type Tree,
 } from "./types";
 
@@ -58,6 +63,11 @@ export class ApiError extends Error {
 
   get isUnauthorized(): boolean {
     return this.code === "UNAUTH" || this.status === 401;
+  }
+
+  /** GitHub needs (re-)sign-in: an expired session, or a call that needs this app's own sign-in. */
+  get needsGithubSignIn(): boolean {
+    return this.isUnauthorized || this.reason === "github_sign_in";
   }
 }
 
@@ -126,14 +136,19 @@ export function createApi(
 ) {
   const cfg = typeof config === "function" ? config : () => config;
 
-  async function send(method: string, path: string, opts: { query?: Query; body?: unknown; form?: FormData } = {}) {
+  type SendOpts = { query?: Query; body?: unknown; form?: FormData; blob?: Blob };
+
+  async function send(method: string, path: string, opts: SendOpts = {}) {
     const { origin, token } = cfg();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     const init: RequestInit = { method, headers };
     // The browser sets the multipart Content-Type with its boundary.
     if (opts.form) init.body = opts.form;
-    else if (opts.body !== undefined) {
+    else if (opts.blob) {
+      headers["Content-Type"] = opts.blob.type;
+      init.body = opts.blob;
+    } else if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
@@ -149,7 +164,7 @@ export function createApi(
     return res;
   }
 
-  async function json<T>(method: string, path: string, opts?: { query?: Query; body?: unknown; form?: FormData }) {
+  async function json<T>(method: string, path: string, opts?: SendOpts) {
     const res = await send(method, path, opts);
     try {
       return (await res.json()) as T;
@@ -167,6 +182,11 @@ export function createApi(
       (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    contentHistory: async (project: string, collection: string, id: string): Promise<FileVersion[]> =>
+      (await json<{versions: FileVersion[]}>("GET", "/api/content/history", {query:{project,collection,id}})).versions,
+    /** 404 when `sha` is no longer in the entry's history. */
+    contentVersion: (project: string, collection: string, id: string, sha: string) =>
+      json<ContentVersion>("GET", `/api/content/history/${enc(sha)}`, {query:{project,collection,id}}),
     /** JSON without images; with images, multipart: a JSON `entry` part plus one part per image named by its client ID. */
     updateContentEntry: (body: ContentEntryUpdate, images: ContentImageUpload[] = []) => {
       if (!images.length) return json<SavedContentEntry>("PUT", "/api/content/entry", { body });
@@ -188,6 +208,10 @@ export function createApi(
       json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
     deleteContentEntry: (body: ContentEntryDelete) =>
       json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
+    design: (project: string) => json<DesignDoc>("GET", "/api/design", { query: { project } }),
+    /** Omit `hash` to create the file; the daemon refuses a stale hash or changed branch with 409. */
+    saveDesign: (body: { project: string; branch: string; hash?: string; tokens: DesignTokens; body: string }) =>
+      json<DesignDoc>("PUT", "/api/design", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>
@@ -219,12 +243,28 @@ export function createApi(
           "/api/terminal/providers",
         )
       ).providers,
-    startTerminal: (project: string, provider: string) =>
-      json<{ running: true }>("POST", "/api/terminal", { body: { project, provider } }),
+    /** Start a new session, or `resume` a past one (its provider wins over `provider`). */
+    startTerminal: (project: string, provider: string, resume?: string) =>
+      json<{ running: true; sessionId?: string }>("POST", "/api/terminal", {
+        body: resume ? { project, provider, resume } : { project, provider },
+      }),
     stopTerminal: (project: string) =>
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
-      json<{ running: boolean; provider?: string }>("GET", `/api/terminal/${enc(project)}`),
+      json<{ running: boolean; provider?: string; sessionId?: string | null }>(
+        "GET",
+        `/api/terminal/${enc(project)}`,
+      ),
+    terminalSessions: async (project: string): Promise<TerminalSession[]> =>
+      (
+        await json<{ sessions: TerminalSession[] }>(
+          "GET",
+          `/api/terminal/${enc(project)}/sessions`,
+        )
+      ).sessions,
+    /** Save an image for the agent; resolves to an absolute path on the daemon's machine. */
+    attachTerminalImage: async (project: string, image: Blob): Promise<string> =>
+      (await json<{ path: string }>("POST", `/api/terminal/${enc(project)}/attachments`, { blob: image })).path,
     createChange: (project: string, title: string) =>
       json<Change>("POST", "/api/changes", { body: { project, title } }),
     listChanges: async (project: string): Promise<Change[]> =>

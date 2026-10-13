@@ -93,13 +93,12 @@ async fn create_copies_template_inits_git_and_returns_id_and_port() {
         "package.json",
         "package-lock.json",
         "AGENTS.md",
+        "DESIGN.md",
         ".gitignore",
         "astro.config.mjs",
         "src/content.config.ts",
-        "src/content/site.json",
-        "src/content/pages/home.json",
-        "src/content/sections/hero.mdx",
-        "src/content/sections/pricing.mdx",
+        "src/site.ts",
+        "src/content/blog/en/welcome.md",
         "src/pages/index.astro",
         "src/components/sections/Hero.astro",
     ] {
@@ -114,7 +113,7 @@ async fn create_copies_template_inits_git_and_returns_id_and_port() {
     assert_eq!(git(&dir, &["rev-list", "--count", "HEAD"]), "1");
     assert_eq!(git(&dir, &["status", "--porcelain"]), "");
     assert_eq!(git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
-    assert!(git(&dir, &["ls-files"]).contains("src/content/sections/hero.mdx"));
+    assert!(git(&dir, &["ls-files"]).contains("src/content/blog/en/welcome.md"));
 
     // appears in the list with the same shape
     let (status, list) = call(&app, req("GET", "/api/projects", None)).await;

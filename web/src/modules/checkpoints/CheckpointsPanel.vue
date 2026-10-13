@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { ArrowLeft, ChevronRight, GitCommitVertical, RotateCcw } from "@lucide/vue";
+import { useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import { historyPath } from "@/router";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -14,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Stepper,
@@ -22,15 +25,16 @@ import {
   StepperSeparator,
 } from "@/components/ui/stepper";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage } from "@workbench/utils";
 import { useCheckpointsStore } from "./store";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("./ChangedFilesTree.vue"));
 const DiffView = defineAsyncComponent(() => import("./DiffView.vue"));
 
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; sha?: string }>();
 const store = useCheckpointsStore();
+const router = useRouter();
 
 const confirming = ref(false);
 const diffs = ref<HTMLElement | null>(null);
@@ -41,15 +45,31 @@ const isCurrent = computed(() => !!selected.value && list.value[0]?.sha === sele
 
 watch(
   () => props.projectId,
-  (id) => {
-    void store.select(id, null);
-    void store.load(id);
-  },
+  (id) => void store.load(id),
+  { immediate: true },
+);
+// The URL names the open checkpoint; without one, the timeline shows.
+watch(
+  () => [props.projectId, props.sha ?? null] as const,
+  ([id, sha]) => void store.select(id, sha),
   { immediate: true },
 );
 
+const open = (sha?: string) => router.push(historyPath(props.projectId, sha));
+
 const short = (sha: string) => sha.slice(0, 7);
 const when = (ts: number) => new Date(ts * 1000).toLocaleString();
+const time = (ts: number) => new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const day = (ts: number) => new Date(ts * 1000).toDateString();
+function dayLabel(ts: number) {
+  const today = new Date();
+  if (day(ts) === today.toDateString()) return "Today";
+  today.setDate(today.getDate() - 1);
+  if (day(ts) === today.toDateString()) return "Yesterday";
+  return new Date(ts * 1000).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+/** A day heading goes above the newest checkpoint of each day. */
+const startsDay = (i: number) => i === 0 || day(list.value[i]!.ts) !== day(list.value[i - 1]!.ts);
 
 /** Scroll a file's diff into view when it is picked in the changed-files tree. */
 function reveal(path: string) {
@@ -64,6 +84,7 @@ async function restore() {
   if (!target) return;
   try {
     await store.restore(props.projectId, target.sha);
+    void router.replace(historyPath(props.projectId));
     toast.success(`Restored ${short(target.sha)}`);
   } catch (e) {
     toast.error(`Restore failed: ${errorMessage(e)}`);
@@ -85,7 +106,7 @@ async function restore() {
                 size="icon-sm"
                 class="self-start"
                 aria-label="Back to timeline"
-                @click="store.select(projectId, null)"
+                @click="open()"
               >
                 <ArrowLeft />
               </Button>
@@ -137,29 +158,39 @@ async function restore() {
       >
         No file changes in this checkpoint.
       </p>
-      <div v-else-if="store.diff" class="flex min-h-0 flex-1">
-        <aside class="flex h-full w-60 shrink-0 flex-col overflow-hidden px-1 pt-1">
-          <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
-        </aside>
-        <ScrollArea class="bg-background min-h-0 flex-1">
-          <div ref="diffs" class="flex flex-col gap-3 p-3">
-            <section
-              v-for="file in store.diff.files"
-              :key="file.path"
-              :data-path="file.path"
-              class="flex scroll-mt-3 flex-col gap-1.5"
-            >
-              <template v-if="file.binary">
-                <div class="flex items-center justify-between gap-2 font-mono text-xs">
-                  <span class="truncate">{{ file.path }}</span>
-                </div>
-                <p class="text-muted-foreground text-xs">Binary file changed.</p>
-              </template>
-              <DiffView v-else :diff="file.meta" />
-            </section>
-          </div>
-        </ScrollArea>
-      </div>
+      <ResizablePanelGroup
+        v-else-if="store.diff"
+        direction="horizontal"
+        auto-save-id="checkpoint-files-sidebar"
+        class="min-h-0 flex-1"
+      >
+        <ResizablePanel id="checkpoint-files-tree" :default-size="20" :min-size="12" :max-size="45">
+          <aside class="flex h-full flex-col overflow-hidden px-1 pt-1">
+            <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+          </aside>
+        </ResizablePanel>
+        <ResizableHandle with-handle class="bg-transparent" />
+        <ResizablePanel id="checkpoint-diffs" :default-size="80" :min-size="40">
+          <ScrollArea class="bg-background h-full min-h-0">
+            <div ref="diffs" class="flex flex-col gap-3 p-3">
+              <section
+                v-for="file in store.diff.files"
+                :key="file.path"
+                :data-path="file.path"
+                class="flex scroll-mt-3 flex-col gap-1.5"
+              >
+                <template v-if="file.binary">
+                  <div class="flex items-center justify-between gap-2 font-mono text-xs">
+                    <span class="truncate">{{ file.path }}</span>
+                  </div>
+                  <p class="text-muted-foreground text-xs">Binary file changed.</p>
+                </template>
+                <DiffView v-else :diff="file.meta" />
+              </section>
+            </div>
+          </ScrollArea>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </template>
 
     <template v-else>
@@ -180,20 +211,27 @@ async function restore() {
             class="flex w-full flex-col gap-0"
             data-testid="timeline"
           >
-            <StepperItem
-              v-for="(cp, i) in list"
-              :key="cp.sha"
-              :step="i + 1"
-              class="relative w-full items-center gap-2"
+            <template v-for="(cp, i) in list" :key="cp.sha">
+            <h3
+              v-if="startsDay(i)"
+              class="text-muted-foreground px-1 pb-1 text-xs font-medium"
+              :class="{ 'pt-4': i > 0 }"
+              data-testid="checkpoint-day"
             >
-              <!-- Runs from just below this node to just above the next one: rows are equal
-                   height (single-line title and meta), so the next centre is one row down. -->
+              {{ dayLabel(cp.ts) }}
+            </h3>
+            <StepperItem
+              :step="i + 1"
+              class="relative w-full items-start gap-2"
+            >
+              <!-- Nodes sit 13px down (the item's border and top padding) to line up with the title;
+                   the line runs from 4px below this node to 4px above the next row's node. -->
               <StepperSeparator
-                v-if="i < list.length - 1"
-                class="bg-border absolute top-[calc(50%+16px)] bottom-[calc(16px-50%)] left-[11.5px] w-px"
+                v-if="i < list.length - 1 && !startsDay(i + 1)"
+                class="bg-border absolute top-[41px] -bottom-[9px] left-[11.5px] w-px"
               />
               <StepperIndicator
-                class="bg-muted text-muted-foreground size-6 shrink-0 group-data-[state=active]:bg-primary"
+                class="bg-muted text-muted-foreground mt-[13px] size-6 shrink-0 group-data-[state=active]:bg-primary"
               >
                 <GitCommitVertical class="size-3.5" />
               </StepperIndicator>
@@ -203,14 +241,14 @@ async function restore() {
                 size="sm"
                 class="hover:bg-accent/60 min-w-0 flex-1 flex-nowrap px-2.5 text-left"
                 data-testid="checkpoint-item"
-                @click="store.select(projectId, cp.sha)"
+                @click="open(cp.sha)"
               >
                 <ItemContent class="min-w-0 gap-0.5">
                   <ItemTitle class="w-full text-base">
                     <span class="truncate">{{ cp.summary }}</span>
                   </ItemTitle>
                   <ItemDescription class="text-xs">
-                    <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ when(cp.ts) }}
+                    <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ time(cp.ts) }}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -219,6 +257,7 @@ async function restore() {
                 </ItemActions>
               </Item>
             </StepperItem>
+            </template>
           </Stepper>
         </div>
       </ScrollArea>

@@ -12,17 +12,14 @@ async fn template_catalog_and_raw_entries() {
             .iter()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        ["site", "pages", "sections", "blog", "helpDocs"]
+        ["blog", "helpDocs"]
     );
     assert!(collections.iter().all(|c| c.editable));
     assert_eq!(
-        serde_json::to_value(&collections).unwrap()[3]["fields"]["properties"]["pubDate"]["type"],
+        serde_json::to_value(&collections).unwrap()[0]["fields"]["properties"]["pubDate"]["type"],
         "date"
     );
     for (collection, id, path) in [
-        ("site", "site", "src/content/site.json"),
-        ("pages", "home", "src/content/pages/home.json"),
-        ("sections", "hero", "src/content/sections/hero.mdx"),
         ("blog", "welcome", "src/content/blog/en/welcome.md"),
         (
             "helpDocs",

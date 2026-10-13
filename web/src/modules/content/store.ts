@@ -2,8 +2,8 @@ import { defineStore } from "pinia";
 import { computed, onScopeDispose, ref, shallowRef } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
-import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, FieldDescriptor } from "@/core/types";
-import { errorMessage } from "@/lib/errors";
+import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, ContentVersion, FieldDescriptor } from "@/core/types";
+import { errorMessage } from "@workbench/utils";
 import { diffDraft, cloneValue } from "./draft";
 import { startingFields } from "./create";
 import type { PendingImage } from "./ImageDialog.vue";
@@ -73,6 +73,11 @@ export const useContentStore = defineStore("content", () => {
   const richBody = computed(() => !!entry.value && entry.value.kind === "markdown" && RICH_BODY_COLLECTIONS.includes(entry.value.collection));
   /** Body text from the body editor; it only reports real edits, so opening an entry never dirties it. */
   function setBody(body: string) { draftBody.value = body; }
+  /** Put an earlier version into the draft; nothing is written until Save. */
+  function restoreVersion(v: ContentVersion) {
+    draftFields.value = cloneValue(v.fields);
+    if (entry.value?.kind !== "json") setBody(v.body);
+  }
   const pending = computed(() => entry.value ? diffDraft(entry.value, draftFields.value, draftBody.value, descriptor.value) : null);
   const dirty = computed(() => !!entry.value && (draftSource.value !== entry.value.source || !!pending.value?.changed || usedImages.value.length > 0));
   function clearSaveState() { saveError.value = null; fieldErrors.value = {}; conflict.value = null; needsChange.value = false; current.value = null; }
@@ -392,5 +397,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
 });

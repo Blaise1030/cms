@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createRouter, createMemoryHistory, RouterView } from "vue-router";
+import { RouterView } from "vue-router";
+import { contentRouter } from "@/test/contentRouter";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
@@ -8,7 +9,7 @@ import { ApiError } from "@/core/api";
 import { EditorView } from "@codemirror/view";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-import ContentPanel from "./ContentPanel.vue";
+vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 
 const collection = { name: "blog", kind: "markdown", editable: true, reason: null, fields: { type: "object", required: true, properties: {
@@ -23,8 +24,7 @@ async function setup(api: Record<string, unknown> = {}, loaded = entry()) {
     contentEntry: async () => loaded, updateContentEntry: vi.fn(async () => entry({ hash: "h2" })), ...api,
   });
   setActivePinia(createPinia());
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: ContentPanel, props: { projectId: "p" } }] });
-  await router.push("/"); await router.isReady();
+  const router = await contentRouter();
   w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body }); mounted.push(w);
   await flushPromises();
   await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
@@ -37,8 +37,12 @@ async function setup(api: Record<string, unknown> = {}, loaded = entry()) {
 beforeEach(() => { document.body.innerHTML = ""; });
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); });
 /** Replace the body through the editor's Raw Markdown view, as a writer would. */
+async function setMode(which: "rich" | "raw") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (w.findComponent({ name: "MarkdownBodyEditor" }).vm as any).setMode(which); await flushPromises();
+}
 async function typeBody(text: string) {
-  if (w.find('[data-testid="body-mode-raw"]').exists()) { await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises(); }
+  await setMode("raw");
   const view = EditorView.findFromDOM(w.get('[data-testid="body-raw"] .cm-editor').element as HTMLElement)!;
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: "input.type" });
   await flushPromises();
@@ -67,7 +71,7 @@ it("makes no mutation call when nothing changed, including after reverting an ed
   await setup();
   await w.get('[data-testid="field-title"]').setValue("X");
   await w.get('[data-testid="field-title"]').setValue("Welcome");
-  expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeDefined();
+  expect(w.find('[data-testid="content-save"]').exists()).toBe(false);
   await expect(useContentStore().saveDraft()).resolves.toMatchObject({ id: "welcome" });
   expect(update()).not.toHaveBeenCalled();
 });
@@ -170,8 +174,8 @@ it("keeps the draft and reports the new branch when the resumed save conflicts",
 it("opens and toggles a Blog body without dirtying the draft, then saves a body edit", async () => {
   await setup({}, entry({ body: "Intro\n\n* one\n" }));
   expect(w.find('[data-testid="body-rich"]').exists()).toBe(true);
-  await w.get('[data-testid="body-mode-raw"]').trigger("click"); await flushPromises();
-  await w.get('[data-testid="body-mode-rich"]').trigger("click"); await flushPromises();
+  await setMode("raw");
+  await setMode("rich");
   expect(useContentStore().dirty).toBe(false);
   expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
   await typeBody("Intro\n\n* one\n* two\n");
@@ -183,7 +187,7 @@ it("opens and toggles a Blog body without dirtying the draft, then saves a body 
 it("keeps section MDX bodies raw-only", async () => {
   const sections = { ...collection, name: "sections", kind: "mdx" };
   await setup({ listContentCollections: async () => [sections] }, entry({ collection: "sections", id: "hero", kind: "mdx", body: "Plain text\n" }));
-  expect(w.find('[data-testid="body-mode-rich"]').exists()).toBe(false);
+  expect(w.find('[data-testid="body-rich"]').exists()).toBe(false);
   expect(w.find('[data-testid="body-raw"]').exists()).toBe(true);
   expect(useContentStore().dirty).toBe(false);
 });

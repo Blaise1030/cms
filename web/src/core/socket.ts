@@ -21,7 +21,10 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "checkpoint.created": { projectId: "string", sha: "string", summary: "string" },
   "fs.change": { projectId: "string", path: "string", kind: "string" },
   "terminal.exited": { projectId: "string", code: "nullable-number" },
+  "terminal.session": { projectId: "string", sessionId: "string" },
   "checkpoint.blocked": { projectId: "string", reason: "string" },
+  "changes.updated": { projectId: "string" },
+  "terminal.turn": { projectId: "string" },
   "events.lagged": { missed: "number" },
 };
 
