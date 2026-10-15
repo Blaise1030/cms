@@ -38,7 +38,10 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await terminalCheckpoint(workbench, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-first-change\n");
 
-  // Second (newer) change + different edit.
+  // Second (newer) change + different edit. "Newest first" compares commit times in whole
+  // seconds, so its commits must land in a later second than the first change's.
+  const firstAt = Number(git(projectDir, ["log", "-1", "--format=%ct", "content/first-change"]));
+  await expect.poll(() => Math.floor(Date.now() / 1000)).toBeGreaterThan(firstAt);
   await startChange(workbench, "New post: Second change");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Second change");
