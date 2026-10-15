@@ -13,6 +13,14 @@ use tauri::{Manager, RunEvent, WebviewWindowBuilder};
 use supervisor::Supervisor;
 use updater::Updates;
 
+/// Tells pages in the title-bar-less main window to clear the traffic lights and mark drag
+/// regions (`web/src/lib/desktop.ts`). Runs before page scripts, on every navigation.
+const DESKTOP_MARKER: &str = r#"(() => {
+  const mark = () => { document.documentElement.dataset.desktop = "macos"; };
+  if (document.documentElement) mark();
+  else document.addEventListener("DOMContentLoaded", mark);
+})();"#;
+
 pub fn run() {
     #[cfg(feature = "update-e2e")]
     update_e2e::init();
@@ -46,6 +54,7 @@ pub fn run() {
                 .ok_or("no main window in tauri.conf.json")?;
             let handle = app.handle().clone();
             let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .initialization_script(DESKTOP_MARKER)
                 .on_new_window(move |url, _| links::on_new_window(&handle, url))
                 .on_page_load(|window, payload| {
                     if payload.event() == PageLoadEvent::Finished {
@@ -97,6 +106,23 @@ mod update_e2e_gate_tests {
 }
 
 #[cfg(test)]
+mod main_window_tests {
+    #[test]
+    fn main_window_has_no_title_bar_but_keeps_the_traffic_lights() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let windows = config["app"]["windows"].as_array().expect("windows");
+        let main = windows
+            .iter()
+            .find(|w| w["label"] == "main")
+            .expect("main window");
+        assert_eq!(main["titleBarStyle"], "Overlay");
+        assert_eq!(main["hiddenTitle"], true);
+        assert_eq!(main["decorations"], serde_json::Value::Null);
+    }
+}
+
+#[cfg(test)]
 mod ipc_acl_tests {
     use tauri::ipc::{CallbackFn, InvokeBody};
     use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
@@ -129,6 +155,15 @@ mod ipc_acl_tests {
     }
 
     fn invoke_from(label: &str, cmd: &str, url: &str) -> Result<String, serde_json::Value> {
+        respond(label, cmd, url).map(|body| body.deserialize::<String>().expect("string response"))
+    }
+
+    /// `Err` with the ACL's refusal, or `Ok` if the command ran (whatever it returned).
+    fn respond(
+        label: &str,
+        cmd: &str,
+        url: &str,
+    ) -> Result<tauri::ipc::InvokeResponseBody, serde_json::Value> {
         let app = mock_builder()
             .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![
@@ -154,7 +189,104 @@ mod ipc_acl_tests {
                 invoke_key: INVOKE_KEY.to_string(),
             },
         )
-        .map(|body| body.deserialize::<String>().expect("string response"))
+    }
+
+    fn refused(label: &str, cmd: &str, url: &str) -> bool {
+        match respond(label, cmd, url) {
+            Ok(_) => false,
+            Err(err) => err.as_str().unwrap_or_default().contains("not allowed"),
+        }
+    }
+
+    const START_DRAGGING: &str = "plugin:window|start_dragging";
+    const DAEMON: &str = "http://127.0.0.1:51234/";
+
+    fn capabilities() -> Vec<(std::path::PathBuf, serde_json::Value)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        std::fs::read_dir(&dir)
+            .expect("capabilities dir")
+            .map(|entry| {
+                let path = entry.expect("entry").path();
+                let json = std::fs::read_to_string(&path).expect("read");
+                (path, serde_json::from_str(&json).expect("capability JSON"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn main_window_can_be_dragged_from_daemon_and_bundled_pages() {
+        for url in [
+            DAEMON,
+            "http://127.0.0.1:51234/p/site/preview",
+            "tauri://localhost/splash.html",
+            "tauri://localhost/error.html",
+            "tauri://localhost/update.html",
+        ] {
+            assert!(respond("main", START_DRAGGING, url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn daemon_origin_gets_no_other_window_control() {
+        for cmd in [
+            "plugin:window|internal_toggle_maximize",
+            "plugin:window|close",
+            "plugin:window|set_title",
+            "plugin:window|set_size",
+            "plugin:webview|create_webview_window",
+            "plugin:event|emit",
+        ] {
+            assert!(refused("main", cmd, DAEMON), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn only_the_loopback_daemon_origin_can_drag() {
+        for url in [
+            "http://localhost:51234/",
+            "http://127.0.0.2:51234/",
+            "https://127.0.0.1:51234/",
+            "https://example.com/",
+        ] {
+            assert!(refused("main", START_DRAGGING, url), "{url}");
+        }
+    }
+
+    #[test]
+    fn secondary_windows_cannot_be_dragged_by_their_pages() {
+        let label = crate::links::secondary_label(1);
+        for url in [DAEMON, "http://127.0.0.1:51234/preview/site/"] {
+            assert!(refused(&label, START_DRAGGING, url), "{url}");
+        }
+    }
+
+    #[test]
+    fn daemon_window_drag_capability_grants_only_start_dragging_to_main() {
+        let (_, capability) = capabilities()
+            .into_iter()
+            .find(|(path, _)| path.ends_with("daemon-window-drag.json"))
+            .expect("daemon-window-drag.json");
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert!(capability["webviews"].is_null());
+        assert_eq!(capability["local"], serde_json::json!(false));
+        assert_eq!(
+            capability["remote"],
+            serde_json::json!({ "urls": ["http://127.0.0.1:*"] })
+        );
+        assert_eq!(
+            capability["permissions"],
+            serde_json::json!(["core:window:allow-start-dragging"])
+        );
+    }
+
+    #[test]
+    fn no_other_capability_grants_remote_access() {
+        for (path, capability) in capabilities() {
+            if path.ends_with("daemon-window-drag.json") {
+                continue;
+            }
+            assert!(capability["remote"].is_null(), "{}", path.display());
+        }
     }
 
     #[test]
@@ -197,12 +329,7 @@ mod ipc_acl_tests {
 
     #[test]
     fn no_capability_grants_updater_permissions() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
-        for entry in std::fs::read_dir(&dir).expect("capabilities dir") {
-            let path = entry.expect("entry").path();
-            let capability: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).expect("read"))
-                    .expect("capability JSON");
+        for (path, capability) in capabilities() {
             let permissions = capability["permissions"].as_array().expect("permissions");
             for permission in permissions {
                 let id = permission

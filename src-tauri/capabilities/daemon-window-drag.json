@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "daemon-window-drag",
+  "description": "The main window has no title bar, so the daemon's web UI moves it from its `data-tauri-drag-region` top bars. Only start-dragging: no double-click zoom, no other window control, no app commands. Preview windows (`preview-<n>`) are not listed.",
+  "local": false,
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "windows": ["main"],
+  "permissions": ["core:window:allow-start-dragging"]
+}

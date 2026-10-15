@@ -128,4 +128,22 @@ describe("ProjectsGrid", () => {
     expect(api.deleteProject).not.toHaveBeenCalled();
     w.unmount();
   });
+
+  it("drags the macOS desktop window from a strip along the top, and only there", async () => {
+    const browser = mountGrid();
+    await flushPromises();
+    expect(browser.find("[data-tauri-drag-region]").exists()).toBe(false);
+    browser.unmount();
+
+    document.documentElement.dataset.desktop = "macos";
+    try {
+      const desktop = mountGrid();
+      await flushPromises();
+      expect(desktop.findAll("[data-tauri-drag-region]")).toHaveLength(1);
+      expect(desktop.get("[data-testid='window-drag-strip']").attributes("data-tauri-drag-region")).toBe("");
+      desktop.unmount();
+    } finally {
+      delete document.documentElement.dataset.desktop;
+    }
+  });
 });

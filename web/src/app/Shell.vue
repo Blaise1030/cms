@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, useSlots, watch } from "vue";
 import { BotMessageSquare } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -7,6 +7,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { isMacDesktop } from "@/lib/desktop";
 
 const props = withDefaults(
   defineProps<{
@@ -16,6 +17,11 @@ const props = withDefaults(
   }>(),
   { showChat: true, chatDetached: false },
 );
+
+// The traffic lights end ~80px from the window's left edge; the 56px project rail covers most of that.
+const slots = useSlots();
+const macDesktop = isMacDesktop();
+const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7" : "pr-3 pl-20";
 
 const chatPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
 const chatOpen = ref(true);
@@ -53,7 +59,11 @@ watch(
           :min-size="showChat ? 30 : 100"
         >
           <div class="flex h-full min-h-0 flex-col overflow-hidden">
-            <header class="bg-background flex h-11 shrink-0 items-center gap-3 px-3">
+            <header
+              :class="['bg-background flex h-11 shrink-0 items-center gap-3', topBarPadding]"
+              :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
+              data-testid="top-bar"
+            >
               <div class="flex min-w-0 flex-1 items-center gap-3">
                 <slot name="menubar" />
               </div>

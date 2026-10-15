@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project } from "@/core/types";
+import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@workbench/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useGithubStore } from "@/modules/github/store";
@@ -44,6 +45,7 @@ const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
 const store = useProjectsStore();
 const gh = useGithubStore();
+const macDesktop = isMacDesktop();
 
 const STATUS_DOT: Record<Project["devserver"], string> = {
   starting: "bg-amber-500 animate-pulse",
@@ -83,6 +85,7 @@ function open(project: Project) {
 
 <template>
   <div class="relative h-full overflow-y-auto">
+    <div v-if="macDesktop" class="fixed inset-x-0 top-0 h-11" data-tauri-drag-region data-testid="window-drag-strip" />
     <div class="absolute top-3 right-3">
       <GithubAccount />
     </div>
