@@ -22,11 +22,22 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
+/** A row of the Content tree (`blog/` for the collection, `blog/welcome` for an entry). */
+const treeRow = (page: Page, treePath: string) =>
+  page.getByTestId("content-tree").locator(`[data-item-path="${treePath}"]`);
+
 async function openBlog(page: Page) {
   await page.getByTestId("workspace-tab-content").click();
   await expect(page.getByTestId("content-panel")).toBeVisible();
-  await page.getByTestId("content-collection").filter({ hasText: /^blog/ }).click();
+  const blog = treeRow(page, "blog/");
+  await expect(blog).toBeVisible();
+  // The tree remembers open folders across reloads; clicking an open one closes it.
+  if ((await blog.getAttribute("aria-expanded")) !== "true") await blog.click();
 }
+
+/** The entry header's tooltip names the open file and the branch it is bound to. */
+const entryBinding = (page: Page, file: string, branch: string) =>
+  page.getByTestId("content-panel").getByTitle(`${file} · ${branch}`);
 
 /** Go to `route` in the preview frame through the address bar. */
 async function previewAt(page: Page, route: string) {
@@ -72,21 +83,18 @@ test("content editor saves a blog article with an image on a change branch and p
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("active-change")).toHaveText("main");
 
-  // An existing article opens clean and stays clean through rich → raw → rich.
+  // An existing article opens clean in the rich editor.
   await openBlog(page);
-  await page.getByTestId("content-entry").filter({ hasText: /^welcome$/ }).click();
+  await treeRow(page, "blog/welcome").click();
   await expect(page.getByTestId("body-rich")).toBeVisible();
-  await page.getByTestId("body-mode-raw").click();
-  await expect(page.getByTestId("body-raw")).toBeVisible();
-  await page.getByTestId("body-mode-rich").click();
-  await expect(page.getByTestId("body-rich")).toBeVisible();
-  await expect(page.getByTestId("content-save")).toBeDisabled();
+  await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
   await expect(page.getByTestId("content-rename")).toBeEnabled();
   await expect(page.getByTestId("content-lifecycle-blocked")).toHaveCount(0);
 
   // Create the article from the Content view. On main that asks for a change first and then
   // resumes the create on the new change branch.
-  await page.getByTestId("content-create").click();
+  await treeRow(page, "blog/").click({ button: "right" });
+  await page.getByTestId("content-tree-create").click();
   await page.getByTestId("content-create-title").fill(TITLE);
   await expect(page.getByTestId("content-create-slug")).toHaveValue("spring-launch-notes");
   await page.getByTestId("content-create-slug").fill(SLUG);
@@ -97,11 +105,12 @@ test("content editor saves a blog article with an image on a change branch and p
   await expect(page.getByTestId("active-change")).toHaveText("Spring launch");
   const branch = git(projectDir, ["branch", "--show-current"]);
   expect(branch).toBe("content/spring-launch");
-  const article = page.getByTestId("content-entry").filter({ hasText: new RegExp(`^${SLUG}$`) });
+  const article = treeRow(page, `blog/${SLUG}`);
   await expect(article).toBeVisible();
-  await expect(page.getByTestId("content-panel")).toContainText(`src/content/blog/en/${SLUG}.md · ${branch}`);
+  await expect(entryBinding(page, `src/content/blog/en/${SLUG}.md`, branch)).toBeAttached();
   await expect(page.getByTestId("field-title")).toHaveValue(TITLE);
-  await expect(page.getByTestId("field-pubDate")).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
+  // The date picker shows the pre-filled publish date, e.g. "Oct 15, 2026".
+  await expect(page.getByTestId("field-pubDate")).toHaveText(/^\s*[A-Z][a-z]{2} \d{1,2}, \d{4}\s*$/);
   expect(fs.existsSync(path.join(projectDir, `src/content/blog/en/${SLUG}.md`))).toBe(true);
   expect(git(projectDir, ["status", "--porcelain", "--untracked-files=no"])).toBe("");
 
@@ -109,7 +118,8 @@ test("content editor saves a blog article with an image on a change branch and p
   await page.getByTestId("body-rich").locator(".ProseMirror").click();
   await page.keyboard.type("We shipped the spring launch.");
   await page.keyboard.press("Enter");
-  await page.getByTestId("body-tool-image").click();
+  await page.keyboard.type("/");
+  await page.getByTestId("slash-item").filter({ hasText: "Image" }).click();
   await page.getByTestId("image-file").setInputFiles({
     name: "team.png",
     mimeType: "image/png",
@@ -120,8 +130,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await page.getByTestId("image-alt").fill(ALT);
   await page.getByTestId("image-insert").click();
   await saveAndExpect(page, 200);
-  await expect(page.getByTestId("content-save")).toHaveText("Save");
-  await expect(page.getByTestId("content-save")).toBeDisabled();
+  await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
   await expect(page.getByTestId("content-save-error")).toHaveCount(0);
 
   // On disk: the asset sits in the entry's asset folder and the article links it relatively.
@@ -155,23 +164,39 @@ test("content editor saves a blog article with an image on a change branch and p
   const welcome = "src/content/blog/en/welcome.md";
   const welcomeOnMain = git(projectDir, ["show", `main:${welcome}`]);
   await page.getByTestId("workspace-tab-content").click();
-  await page.getByTestId("content-entry").filter({ hasText: /^welcome$/ }).click();
+  await treeRow(page, "blog/welcome").click();
   const titleInput = page.getByTestId("field-title");
   // Wait for the entry to load before typing, or the edit lands in the previous entry's form.
-  await expect(page.getByTestId("content-panel")).toContainText(`${welcome} · ${branch}`);
+  await expect(entryBinding(page, welcome, branch)).toBeAttached();
   await expect(titleInput).toHaveValue("Welcome to the blog");
   await titleInput.fill("Welcome, drafted on the change");
   await expect(page.getByTestId("content-save")).toBeEnabled();
 
+  // The Changes menu hands "New change" to the agent and only lists changes with work of their
+  // own, so the second change is branched from main with git (as the agent's guide does), given
+  // one commit, and switched to through the menu.
+  const otherTip = git(projectDir, [
+    "-c",
+    "user.name=Agent",
+    "-c",
+    "user.email=agent@example.com",
+    "commit-tree",
+    "main^{tree}",
+    "-p",
+    "main",
+    "-m",
+    "Start Other idea",
+  ]);
+  git(projectDir, ["branch", "content/other-idea", otherTip]);
+  git(projectDir, ["config", "branch.content/other-idea.description", "Other idea"]);
   await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await createChangeInDialog(page, "New post: Other idea");
+  await page.getByTestId("change-item").filter({ hasText: "Other idea" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Other idea");
   const other = git(projectDir, ["branch", "--show-current"]);
   expect(other).toBe("content/other-idea");
   await expect(article).toHaveCount(0);
   await expect(titleInput).toHaveValue("Welcome, drafted on the change");
-  await expect(page.getByTestId("content-panel")).toContainText(`${welcome} · ${branch}`);
+  await expect(entryBinding(page, welcome, branch)).toBeAttached();
   await expect(page.getByTestId("content-panel")).toContainText("Content changed on disk");
   await saveAndExpect(page, 409);
   await expect(page.getByTestId("content-conflict")).toBeVisible();
@@ -189,8 +214,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await expect(titleInput).toHaveValue("Welcome, drafted on the change");
   await expect(page.getByTestId("content-panel")).not.toContainText("Content changed on disk");
   await saveAndExpect(page, 200);
-  await expect(page.getByTestId("content-save")).toHaveText("Save");
-  await expect(page.getByTestId("content-save")).toBeDisabled();
+  await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
   await expect(page.getByTestId("content-conflict")).toHaveCount(0);
   expect(fs.readFileSync(path.join(projectDir, welcome), "utf8")).toContain(
     'title: "Welcome, drafted on the change"',
@@ -204,7 +228,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("main");
   await openBlog(page);
-  await expect(page.getByTestId("content-entry").filter({ hasText: /^welcome$/ })).toBeVisible();
+  await expect(treeRow(page, "blog/welcome")).toBeVisible();
   await expect(article).toHaveCount(0);
   // The home page still renders on main once the dev server has caught up with the checkout.
   await previewAt(page, "/");
@@ -227,7 +251,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await page.getByTestId("workspace-tab-content").click();
   await expect(article).toBeVisible();
   await article.click();
-  await expect(page.getByTestId("content-panel")).toContainText(`src/content/blog/en/${SLUG}.md · ${branch}`);
+  await expect(entryBinding(page, `src/content/blog/en/${SLUG}.md`, branch)).toBeAttached();
   await expectLoaded(page.getByTestId("body-rich").getByAltText(ALT));
-  await expect(page.getByTestId("content-save")).toBeDisabled();
+  await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
 });
