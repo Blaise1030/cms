@@ -84,11 +84,15 @@ mod ipc_acl_tests {
     }
 
     fn invoke(cmd: &str, url: &str) -> Result<String, serde_json::Value> {
+        invoke_from("main", cmd, url)
+    }
+
+    fn invoke_from(label: &str, cmd: &str, url: &str) -> Result<String, serde_json::Value> {
         let app = mock_builder()
             .invoke_handler(tauri::generate_handler![collect_logs, retry_daemon, unlisted])
             .build(tauri::generate_context!(test = true))
             .expect("mock app");
-        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+        let webview = WebviewWindowBuilder::new(&app, label, Default::default())
             .build()
             .expect("mock window");
         get_ipc_response(
@@ -117,6 +121,16 @@ mod ipc_acl_tests {
     fn daemon_origin_cannot_invoke_shell_commands() {
         for cmd in ["collect_logs", "retry_daemon"] {
             assert!(invoke(cmd, "http://127.0.0.1:51234/").is_err(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn secondary_windows_cannot_invoke_shell_commands() {
+        let label = crate::links::secondary_label(1);
+        for cmd in ["collect_logs", "retry_daemon"] {
+            for url in ["http://127.0.0.1:51234/preview/site/", "tauri://localhost/error.html"] {
+                assert!(invoke_from(&label, cmd, url).is_err(), "{cmd} from {url}");
+            }
         }
     }
 

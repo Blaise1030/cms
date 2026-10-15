@@ -1,13 +1,15 @@
 //! New-window requests from the webview (`target=_blank` links, `window.open`). Without a
-//! handler WebKit drops them, so install pages and GitHub links would do nothing. No new
-//! webview is ever allowed (WebKit would build one sharing the IPC bridge, in a window Tauri
-//! does not track): the running daemon's own pages open in the main window, other web pages
-//! in the default browser.
+//! handler WebKit drops them, so install pages and GitHub links would do nothing. WebKit is
+//! never allowed to build the window itself (it would share the opener's IPC bridge, in a
+//! window Tauri does not track): the running daemon's own pages (e.g. a preview opened in a
+//! new tab) open in a fresh Tauri window that no capability grants IPC, other web pages in
+//! the default browser.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Manager, Url, Wry};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, Wry};
 
 use crate::logs;
 use crate::supervisor::Supervisor;
@@ -15,15 +17,23 @@ use crate::supervisor::Supervisor;
 #[derive(Debug, PartialEq, Eq)]
 pub enum NewWindow {
     Browser,
-    Main,
+    Secondary,
     Deny,
+}
+
+/// Window label for the `n`th secondary window. Capabilities only name `main`, so these get
+/// no IPC.
+pub fn secondary_label(n: u64) -> String {
+    format!("preview-{n}")
 }
 
 /// `daemon` is the running daemon's base URL, `None` while it is down or restarting. Only
 /// its exact origin counts; other loopback ports (e.g. a dev server) are ordinary web pages.
 pub fn classify(url: &Url, daemon: Option<&Url>) -> NewWindow {
     match url.scheme() {
-        "http" | "https" if daemon.is_some_and(|d| d.origin() == url.origin()) => NewWindow::Main,
+        "http" | "https" if daemon.is_some_and(|d| d.origin() == url.origin()) => {
+            NewWindow::Secondary
+        }
         "http" | "https" => NewWindow::Browser,
         _ => NewWindow::Deny,
     }
@@ -35,13 +45,8 @@ pub fn on_new_window(app: &AppHandle, url: Url) -> NewWindowResponse<Wry> {
         .and_then(|s| s.handle())
         .and_then(|h| Url::parse(&h.base_url).ok());
     match classify(&url, daemon.as_ref()) {
-        NewWindow::Main => {
-            // Navigating from inside WebKit's new-window callback would re-enter it.
-            let app = app.clone();
-            std::thread::spawn(move || {
-                let label = url.path().to_owned();
-                crate::supervisor::navigate_main(&app, url, &label);
-            });
+        NewWindow::Secondary => {
+            open_secondary(app, url);
             NewWindowResponse::Deny
         }
         NewWindow::Browser => {
@@ -53,6 +58,29 @@ pub fn on_new_window(app: &AppHandle, url: Url) -> NewWindowResponse<Wry> {
             NewWindowResponse::Deny
         }
     }
+}
+
+/// Built off WebKit's new-window callback, which a synchronous window build would re-enter.
+/// The default data store is shared, so the daemon's session cookie still applies.
+fn open_secondary(app: &AppHandle, url: Url) {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let label = secondary_label(NEXT.fetch_add(1, Ordering::Relaxed));
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let handler_app = app.clone();
+        let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+            .title("Workbench")
+            .inner_size(1200.0, 800.0)
+            .on_new_window(move |url, _| on_new_window(&handler_app, url))
+            .on_document_title_changed(|window, title| {
+                let _ = window.set_title(&title);
+            })
+            .build();
+        match built {
+            Ok(_) => logs::shell(&format!("opened window {label}")),
+            Err(e) => logs::shell(&format!("could not open window {label}: {e}")),
+        }
+    });
 }
 
 /// `classify` only passes `http(s)` URLs here, so `open` cannot read the argument as a flag.
@@ -93,13 +121,19 @@ mod tests {
     }
 
     #[test]
-    fn daemon_pages_open_in_the_main_window() {
+    fn daemon_pages_open_in_a_secondary_window() {
         for url in [
             "http://127.0.0.1:51234/preview/site/",
             "http://127.0.0.1:51234/api/docs/branch-protection",
         ] {
-            assert_eq!(class(url, Some(DAEMON)), NewWindow::Main, "{url}");
+            assert_eq!(class(url, Some(DAEMON)), NewWindow::Secondary, "{url}");
         }
+    }
+
+    #[test]
+    fn secondary_labels_are_unique_and_never_main() {
+        assert_eq!(secondary_label(1), "preview-1");
+        assert_ne!(secondary_label(1), secondary_label(2));
     }
 
     #[test]
