@@ -104,13 +104,17 @@ async fn check(app: &AppHandle) {
     match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
             logs::shell(&format!("update {} downloaded", update.version));
-            let mut state = updates.state();
-            state.pending = Some(Pending {
-                update,
-                bytes: Arc::new(bytes),
-            });
-            state.delivered = false;
-            state.deferral_logged = false;
+            {
+                let mut state = updates.state();
+                state.pending = Some(Pending {
+                    update,
+                    bytes: Arc::new(bytes),
+                });
+                state.delivered = false;
+                state.deferral_logged = false;
+            }
+            #[cfg(feature = "update-e2e")]
+            crate::update_e2e::downloaded(app);
         }
         Err(e) => logs::shell(&format!("update download failed: {e}")),
     }

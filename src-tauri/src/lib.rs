@@ -3,6 +3,8 @@ mod commands;
 pub mod links;
 pub mod logs;
 pub mod supervisor;
+#[cfg(feature = "update-e2e")]
+mod update_e2e;
 mod updater;
 
 use tauri::webview::PageLoadEvent;
@@ -12,6 +14,8 @@ use supervisor::Supervisor;
 use updater::Updates;
 
 pub fn run() {
+    #[cfg(feature = "update-e2e")]
+    update_e2e::init();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -60,6 +64,8 @@ pub fn run() {
                 }
             });
             updater::start(app.handle());
+            #[cfg(feature = "update-e2e")]
+            update_e2e::start(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -72,6 +78,22 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod update_e2e_gate_tests {
+    #[test]
+    fn update_e2e_hooks_are_not_in_default_builds() {
+        assert!(!cfg!(feature = "update-e2e"));
+    }
+
+    #[test]
+    fn release_workflow_never_enables_update_e2e() {
+        let workflow = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.github/workflows/release.yml");
+        let workflow = std::fs::read_to_string(workflow).expect("release.yml");
+        assert!(!workflow.contains("update-e2e"));
+    }
 }
 
 #[cfg(test)]

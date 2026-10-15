@@ -11,6 +11,10 @@ publish = false
 [lib]
 name = "workbench_desktop_lib"
 
+[features]
+# Test-only hooks for scripts/update-e2e.sh. Never enable in release builds.
+update-e2e = []
+
 [build-dependencies]
 tauri-build = { version = "=2.7.3", features = [] }
 

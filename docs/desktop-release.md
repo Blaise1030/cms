@@ -86,6 +86,30 @@ is on. Output lands in `src-tauri/target/release/bundle/macos/` (`Workbench.app`
 `Workbench.app.tar.gz`, `Workbench.app.tar.gz.sig`). Local builds are unsigned unless the
 `APPLE_*` variables are set too; never distribute an unsigned build.
 
+## Local updater end-to-end test
+
+`src-tauri/scripts/update-e2e.sh` exercises the whole update path on one Mac without
+publishing anything. It builds 0.0.1 (N) and 0.0.2 (N+1) under the test bundle id
+`com.workbench.desktop.updatetest`, so it can run next to a real Workbench. The builds go to
+`/tmp/wb-update-e2e` (~2 GB) with the non-default `update-e2e` cargo feature and a loopback
+update endpoint. The script installs N in `/tmp/wb-update-e2e/Applications` and serves N+1
+from a local `latest.json`. It then checks that N, while a terminal session is busy,
+downloads and verifies the update but doesn't apply it; that once the session goes idle N
+stops its daemon (exit 0, PTY children reaped), installs N+1 and relaunches; and that N+1's
+daemon comes up healthy.
+
+```sh
+pnpm -C web build && src-tauri/scripts/stage-sidecar.sh   # once
+src-tauri/scripts/update-e2e.sh                            # PASS/FAIL lines; exit 1 on any FAIL
+UPDATE_E2E_SKIP_BUILD=1 src-tauri/scripts/update-e2e.sh    # rerun without rebuilding
+rm -rf /tmp/wb-update-e2e                                  # afterwards
+```
+
+It needs the updater key files in `~/.tauri` (it signs N+1 like CI does). The `update-e2e`
+feature only adds test hooks (temp `HOME`, a log file, auto-applying through the same path as
+**Restart to update**). Release builds never enable it, and a unit test checks `release.yml`
+doesn't either. This doesn't replace the signed, notarized check below.
+
 ## Pending: first end-to-end update test
 
 Not yet done; it needs the Apple secrets and two real releases. Use a test version pair (N, N+1):
