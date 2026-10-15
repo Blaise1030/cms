@@ -108,6 +108,7 @@ mod ipc_acl_tests {
 
     fn invoke_from(label: &str, cmd: &str, url: &str) -> Result<String, serde_json::Value> {
         let app = mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![
                 collect_logs,
                 retry_daemon,
@@ -158,13 +159,39 @@ mod ipc_acl_tests {
 
     #[test]
     fn no_webview_can_drive_the_updater_plugin() {
+        // The plugin is registered in the mock app, so only the ACL can refuse.
         for cmd in [
             "plugin:updater|check",
             "plugin:updater|download_and_install",
             "plugin:updater|install",
         ] {
             for url in ["tauri://localhost/update.html", "http://127.0.0.1:51234/"] {
-                assert!(invoke(cmd, url).is_err(), "{cmd} from {url}");
+                let err = invoke(cmd, url).expect_err(cmd);
+                let message = err.as_str().unwrap_or_default();
+                assert!(message.contains("not allowed"), "{cmd} from {url}: {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_capability_grants_updater_permissions() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        for entry in std::fs::read_dir(&dir).expect("capabilities dir") {
+            let path = entry.expect("entry").path();
+            let capability: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).expect("read"))
+                    .expect("capability JSON");
+            let permissions = capability["permissions"].as_array().expect("permissions");
+            for permission in permissions {
+                let id = permission
+                    .as_str()
+                    .or_else(|| permission["identifier"].as_str())
+                    .unwrap_or_default();
+                assert!(
+                    !id.starts_with("updater:"),
+                    "{} grants {id}",
+                    path.display()
+                );
             }
         }
     }
