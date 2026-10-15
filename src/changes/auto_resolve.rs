@@ -5,6 +5,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::conflicts;
+use crate::error::ApiError;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
@@ -96,8 +97,12 @@ When you are done, write exactly one of these JSON objects to {}:\n\
     out
 }
 
-pub async fn stage_and_verify(worktree: &Path, tip: &str, incoming: &str) -> Result<(), Failure> {
-    let fail = |_| Failure::AgentFailed;
+pub async fn stage_and_verify(
+    worktree: &Path,
+    tip: &str,
+    incoming: &str,
+    conflicted: &[String],
+) -> Result<(), Failure> {
     let head = conflicts::text(worktree, &["rev-parse", "HEAD"])
         .await
         .map_err(fail)?;
@@ -115,33 +120,61 @@ pub async fn stage_and_verify(worktree: &Path, tip: &str, incoming: &str) -> Res
     )
     .await
     .map_err(fail)?;
-    let (status, _, _) = conflicts::git(
-        worktree,
-        &[
+    if !conflicted.is_empty() {
+        let mut args = vec![
+            "--literal-pathspecs",
             "grep",
             "--cached",
             "-l",
             "-E",
             "^(<<<<<<< |=======$|>>>>>>> )",
-        ],
+            "--",
+        ];
+        args.extend(conflicted.iter().map(String::as_str));
+        let (status, _, stderr) = conflicts::git(worktree, &args, &[], None)
+            .await
+            .map_err(fail)?;
+        match status {
+            1 => {}
+            0 => return Err(Failure::AgentFailed),
+            _ => {
+                return Err(fail(ApiError::git(format!(
+                    "git grep failed: {}",
+                    String::from_utf8_lossy(&stderr).trim()
+                ))))
+            }
+        }
+    }
+    let raw = conflicts::checked(
+        worktree,
+        &["diff", "--cached", "--raw", "-z", "--no-renames", tip],
         &[],
         None,
     )
     .await
     .map_err(fail)?;
-    if status != 1 {
-        return Err(Failure::AgentFailed);
-    }
-    let raw = conflicts::text(worktree, &["diff", "--cached", "--raw", tip])
+    let raw = String::from_utf8_lossy(&raw);
+    let mut fields = raw.split('\0');
+    while let (Some(header), Some(path)) = (fields.next(), fields.next()) {
+        if header.split_whitespace().nth(1) != Some("120000") {
+            continue;
+        }
+        let entry = conflicts::text(
+            worktree,
+            &["--literal-pathspecs", "ls-tree", incoming, "--", path],
+        )
         .await
         .map_err(fail)?;
-    let symlink = raw
-        .lines()
-        .any(|line| line.split_whitespace().nth(1) == Some("120000"));
-    if symlink {
-        return Err(Failure::AgentFailed);
+        if !entry.starts_with("120000 ") {
+            return Err(Failure::AgentFailed);
+        }
     }
     Ok(())
+}
+
+fn fail(e: ApiError) -> Failure {
+    eprintln!("workbench: auto-resolve verification failed ({e})");
+    Failure::AgentFailed
 }
 
 #[cfg(test)]
@@ -312,12 +345,14 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
-    /// Repo mid-merge with a conflict in `page.md`; returns (dir, tip, incoming).
-    fn conflicted() -> (tempfile::TempDir, String, String) {
+    /// Repo mid-merge with a conflict in `page.md`; `live` adds extra files on the incoming side.
+    /// Returns (dir, tip, incoming).
+    fn conflicted_with(live: impl Fn(&Path)) -> (tempfile::TempDir, String, String) {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         sh(dir, &["init", "-q", "-b", "main"]);
         std::fs::write(dir.join("page.md"), "title: base\n").unwrap();
+        std::fs::write(dir.join("notes.md"), "Notes\n=======\n").unwrap();
         sh(dir, &["add", "."]);
         sh(dir, &["commit", "-qm", "base"]);
         sh(dir, &["checkout", "-qb", "draft"]);
@@ -326,7 +361,9 @@ mod tests {
         let tip = sh(dir, &["rev-parse", "HEAD"]);
         sh(dir, &["checkout", "-q", "main"]);
         std::fs::write(dir.join("page.md"), "title: live\n").unwrap();
-        sh(dir, &["commit", "-qam", "live"]);
+        live(dir);
+        sh(dir, &["add", "-A"]);
+        sh(dir, &["commit", "-qm", "live"]);
         let incoming = sh(dir, &["rev-parse", "HEAD"]);
         sh(dir, &["checkout", "-q", "draft"]);
         sh(dir, &["merge", "--no-commit", "--no-ff", &incoming]);
@@ -335,17 +372,32 @@ mod tests {
         (tmp, tip, incoming)
     }
 
+    fn conflicted() -> (tempfile::TempDir, String, String) {
+        conflicted_with(|_| {})
+    }
+
     fn resolve(dir: &Path) {
         std::fs::write(dir.join("page.md"), "title: draft and live\n").unwrap();
+    }
+
+    async fn verify(dir: &Path, tip: &str, incoming: &str) -> Result<(), Failure> {
+        stage_and_verify(dir, tip, incoming, &["page.md".to_string()]).await
     }
 
     #[tokio::test]
     async fn verify_rejects_markers() {
         let (tmp, tip, incoming) = conflicted();
         assert_eq!(
-            stage_and_verify(tmp.path(), &tip, &incoming).await,
+            verify(tmp.path(), &tip, &incoming).await,
             Err(Failure::AgentFailed)
         );
+    }
+
+    #[tokio::test]
+    async fn verify_ignores_markers_outside_conflicted_files() {
+        let (tmp, tip, incoming) = conflicted();
+        resolve(tmp.path());
+        assert_eq!(verify(tmp.path(), &tip, &incoming).await, Ok(()));
     }
 
     #[tokio::test]
@@ -354,7 +406,7 @@ mod tests {
         resolve(tmp.path());
         sh(tmp.path(), &["commit", "-qam", "agent"]);
         assert_eq!(
-            stage_and_verify(tmp.path(), &tip, &incoming).await,
+            verify(tmp.path(), &tip, &incoming).await,
             Err(Failure::AgentFailed)
         );
     }
@@ -365,9 +417,18 @@ mod tests {
         resolve(tmp.path());
         std::os::unix::fs::symlink("/etc/passwd", tmp.path().join("link")).unwrap();
         assert_eq!(
-            stage_and_verify(tmp.path(), &tip, &incoming).await,
+            verify(tmp.path(), &tip, &incoming).await,
             Err(Failure::AgentFailed)
         );
+    }
+
+    #[tokio::test]
+    async fn verify_allows_symlink_from_incoming() {
+        let (tmp, tip, incoming) = conflicted_with(|dir| {
+            std::os::unix::fs::symlink("page.md", dir.join("link")).unwrap();
+        });
+        resolve(tmp.path());
+        assert_eq!(verify(tmp.path(), &tip, &incoming).await, Ok(()));
     }
 
     #[tokio::test]
@@ -376,7 +437,7 @@ mod tests {
         resolve(tmp.path());
         std::fs::create_dir(tmp.path().join("node_modules")).unwrap();
         std::fs::write(tmp.path().join("node_modules/x.js"), "<<<<<<< x\n").unwrap();
-        assert_eq!(stage_and_verify(tmp.path(), &tip, &incoming).await, Ok(()));
+        assert_eq!(verify(tmp.path(), &tip, &incoming).await, Ok(()));
         let staged = sh(tmp.path(), &["diff", "--cached", "--name-only", &tip]);
         assert_eq!(staged, "page.md");
     }
