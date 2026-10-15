@@ -1,5 +1,6 @@
 mod busy;
 mod commands;
+mod drag;
 pub mod links;
 pub mod logs;
 pub mod supervisor;
@@ -93,7 +94,8 @@ pub fn run() {
 mod update_e2e_gate_tests {
     #[test]
     fn update_e2e_hooks_are_not_in_default_builds() {
-        assert!(!cfg!(feature = "update-e2e"));
+        let update_e2e_enabled = cfg!(feature = "update-e2e");
+        assert!(!update_e2e_enabled);
     }
 
     #[test]
@@ -158,8 +160,18 @@ mod ipc_acl_tests {
         respond(label, cmd, url).map(|body| body.deserialize::<String>().expect("string response"))
     }
 
-    /// `Err` with the ACL's refusal, or `Ok` if the command ran (whatever it returned).
     fn respond(
+        label: &str,
+        cmd: &str,
+        url: &str,
+    ) -> Result<tauri::ipc::InvokeResponseBody, serde_json::Value> {
+        respond_after(&[], label, cmd, url)
+    }
+
+    /// `Err` with the ACL's refusal, or `Ok` if the command ran (whatever it returned).
+    /// `daemons` are the base URLs the supervisor has published so far, in order.
+    fn respond_after(
+        daemons: &[&str],
         label: &str,
         cmd: &str,
         url: &str,
@@ -174,6 +186,9 @@ mod ipc_acl_tests {
             ])
             .build(tauri::generate_context!(test = true))
             .expect("mock app");
+        for base_url in daemons {
+            crate::drag::allow_daemon_origin(&app, base_url).expect("grant");
+        }
         let webview = WebviewWindowBuilder::new(&app, label, Default::default())
             .build()
             .expect("mock window");
@@ -191,14 +206,15 @@ mod ipc_acl_tests {
         )
     }
 
-    fn refused(label: &str, cmd: &str, url: &str) -> bool {
-        match respond(label, cmd, url) {
+    fn refused_after(daemons: &[&str], label: &str, cmd: &str, url: &str) -> bool {
+        match respond_after(daemons, label, cmd, url) {
             Ok(_) => false,
             Err(err) => err.as_str().unwrap_or_default().contains("not allowed"),
         }
     }
 
     const START_DRAGGING: &str = "plugin:window|start_dragging";
+    const DAEMON_BASE: &str = "http://127.0.0.1:51234";
     const DAEMON: &str = "http://127.0.0.1:51234/";
 
     fn capabilities() -> Vec<(std::path::PathBuf, serde_json::Value)> {
@@ -214,20 +230,64 @@ mod ipc_acl_tests {
     }
 
     #[test]
-    fn main_window_can_be_dragged_from_daemon_and_bundled_pages() {
-        for url in [
-            DAEMON,
-            "http://127.0.0.1:51234/p/site/preview",
-            "tauri://localhost/splash.html",
-            "tauri://localhost/error.html",
-            "tauri://localhost/update.html",
-        ] {
-            assert!(respond("main", START_DRAGGING, url).is_ok(), "{url}");
+    fn bundled_pages_can_drag_the_main_window() {
+        for page in ["splash.html", "error.html", "update.html"] {
+            let url = format!("tauri://localhost/{page}");
+            assert!(respond("main", START_DRAGGING, &url).is_ok(), "{page}");
         }
     }
 
     #[test]
-    fn daemon_origin_gets_no_other_window_control() {
+    fn the_published_daemon_origin_can_drag_the_main_window() {
+        for url in [DAEMON, "http://127.0.0.1:51234/p/site/preview?x=1#y"] {
+            assert!(
+                refused_after(&[], "main", START_DRAGGING, url),
+                "{url} before publish"
+            );
+            assert!(
+                respond_after(&[DAEMON_BASE], "main", START_DRAGGING, url).is_ok(),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restarted_daemon_on_a_new_port_can_drag() {
+        let restarted = "http://127.0.0.1:51300/";
+        assert!(refused_after(
+            &[DAEMON_BASE],
+            "main",
+            START_DRAGGING,
+            restarted
+        ));
+        assert!(respond_after(
+            &[DAEMON_BASE, "http://127.0.0.1:51300"],
+            "main",
+            START_DRAGGING,
+            restarted
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn other_origins_in_the_main_window_cannot_drag() {
+        for url in [
+            "http://127.0.0.1:4321/",
+            "http://127.0.0.1:5123/",
+            "http://localhost:51234/",
+            "http://127.0.0.2:51234/",
+            "https://127.0.0.1:51234/",
+            "https://example.com/",
+        ] {
+            assert!(
+                refused_after(&[DAEMON_BASE], "main", START_DRAGGING, url),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_daemon_origin_gets_no_other_window_control() {
         for cmd in [
             "plugin:window|internal_toggle_maximize",
             "plugin:window|close",
@@ -236,19 +296,13 @@ mod ipc_acl_tests {
             "plugin:webview|create_webview_window",
             "plugin:event|emit",
         ] {
-            assert!(refused("main", cmd, DAEMON), "{cmd}");
+            assert!(refused_after(&[DAEMON_BASE], "main", cmd, DAEMON), "{cmd}");
         }
-    }
-
-    #[test]
-    fn only_the_loopback_daemon_origin_can_drag() {
-        for url in [
-            "http://localhost:51234/",
-            "http://127.0.0.2:51234/",
-            "https://127.0.0.1:51234/",
-            "https://example.com/",
-        ] {
-            assert!(refused("main", START_DRAGGING, url), "{url}");
+        for cmd in SHELL_COMMANDS {
+            assert!(
+                respond_after(&[DAEMON_BASE], "main", cmd, DAEMON).is_err(),
+                "{cmd}"
+            );
         }
     }
 
@@ -256,35 +310,16 @@ mod ipc_acl_tests {
     fn secondary_windows_cannot_be_dragged_by_their_pages() {
         let label = crate::links::secondary_label(1);
         for url in [DAEMON, "http://127.0.0.1:51234/preview/site/"] {
-            assert!(refused(&label, START_DRAGGING, url), "{url}");
+            assert!(
+                refused_after(&[DAEMON_BASE], &label, START_DRAGGING, url),
+                "{url}"
+            );
         }
     }
 
     #[test]
-    fn daemon_window_drag_capability_grants_only_start_dragging_to_main() {
-        let (_, capability) = capabilities()
-            .into_iter()
-            .find(|(path, _)| path.ends_with("daemon-window-drag.json"))
-            .expect("daemon-window-drag.json");
-        assert_eq!(capability["windows"], serde_json::json!(["main"]));
-        assert!(capability["webviews"].is_null());
-        assert_eq!(capability["local"], serde_json::json!(false));
-        assert_eq!(
-            capability["remote"],
-            serde_json::json!({ "urls": ["http://127.0.0.1:*"] })
-        );
-        assert_eq!(
-            capability["permissions"],
-            serde_json::json!(["core:window:allow-start-dragging"])
-        );
-    }
-
-    #[test]
-    fn no_other_capability_grants_remote_access() {
+    fn no_static_capability_grants_remote_access() {
         for (path, capability) in capabilities() {
-            if path.ends_with("daemon-window-drag.json") {
-                continue;
-            }
             assert!(capability["remote"].is_null(), "{}", path.display());
         }
     }

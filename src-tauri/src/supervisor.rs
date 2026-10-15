@@ -186,6 +186,9 @@ impl Control {
     }
 
     fn publish(self: &Arc<Self>, app: &AppHandle, info: ReadyInfo) -> DaemonHandle {
+        if let Err(e) = crate::drag::allow_daemon_origin(app, &info.base_url) {
+            logs::shell(&format!("window dragging unavailable: {e}"));
+        }
         navigate(app, &info);
         *lock(&self.current) = Some(info.clone());
         DaemonHandle {
