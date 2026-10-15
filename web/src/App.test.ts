@@ -10,7 +10,7 @@ const h = vi.hoisted(() => ({ daemon: null as unknown }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import App from "./App.vue";
-import { dismissSetup } from "./app/setup";
+import { SETUP_WAIT_MS, dismissSetup } from "./app/setup";
 
 const complete: SetupStatus = {
   git: true,
@@ -20,8 +20,8 @@ const complete: SetupStatus = {
   projectsDir: "/p",
 };
 
-function mountWith(status: SetupStatus) {
-  const setupStatus = vi.fn(async () => status);
+function mountWith(status: SetupStatus | (() => Promise<SetupStatus>)) {
+  const setupStatus = vi.fn(typeof status === "function" ? status : async () => status);
   h.daemon = {
     ...createFakeDaemon({
       setupStatus,
@@ -56,12 +56,39 @@ describe("App setup gate", () => {
     expect(w.find("[data-testid='shell']").exists()).toBe(true);
   });
 
-  it("skips the check once dismissed", async () => {
+  it("holds the shell back while the check is in flight", async () => {
+    const { w } = mountWith(() => new Promise<SetupStatus>(() => {}));
+    await flushPromises();
+    expect(w.find("[data-testid='setup-pending']").exists()).toBe(true);
+    expect(w.find("[data-testid='shell']").exists()).toBe(false);
+    expect(w.find("[data-testid='setup-check']").exists()).toBe(false);
+  });
+
+  it("goes to the shell when the check fails", async () => {
+    const { w } = mountWith(async () => {
+      throw new Error("boom");
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='shell']").exists()).toBe(true);
+    expect(w.text()).not.toContain("boom");
+  });
+
+  it("goes to the shell when the check takes too long", async () => {
+    vi.useFakeTimers();
+    try {
+      const { w } = mountWith(() => new Promise<SetupStatus>(() => {}));
+      await vi.advanceTimersByTimeAsync(SETUP_WAIT_MS);
+      expect(w.find("[data-testid='shell']").exists()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens the shell immediately once dismissed", () => {
     dismissSetup();
     const { w, setupStatus } = mountWith({ ...complete, gh: false });
-    await flushPromises();
-    expect(setupStatus).not.toHaveBeenCalled();
     expect(w.find("[data-testid='shell']").exists()).toBe(true);
+    expect(setupStatus).not.toHaveBeenCalled();
   });
 
   it("remembers the dismissal and opens the shell", async () => {

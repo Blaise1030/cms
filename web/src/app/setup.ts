@@ -2,6 +2,9 @@ import type { SetupStatus } from "@/core/types";
 
 const DISMISSED_KEY = "cms:setup-dismissed";
 
+/** Longest the shell waits for the first setup status before opening anyway. */
+export const SETUP_WAIT_MS = 8000;
+
 /** Something the app needs is missing: git, the GitHub CLI, a GitHub sign-in, or every agent. */
 export function setupIncomplete(s: SetupStatus): boolean {
   return !s.git || !s.gh || !s.githubSignedIn || !s.providers.some((p) => p.available);

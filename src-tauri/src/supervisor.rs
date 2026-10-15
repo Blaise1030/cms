@@ -178,6 +178,7 @@ impl Control {
     }
 
     fn stop_current(&self) {
+        *lock(&self.current) = None;
         let running = lock(&self.child).running.take();
         if let Some(running) = running {
             terminate(running);
@@ -463,7 +464,7 @@ fn show_page(app: &AppHandle, page: &str, message: Option<&str>) {
 }
 
 /// `label` is what gets logged instead of the URL, which may carry the token.
-fn navigate_main(app: &AppHandle, url: Url, label: &str) {
+pub(crate) fn navigate_main(app: &AppHandle, url: Url, label: &str) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         logs::shell("main window missing, cannot navigate");
         return;

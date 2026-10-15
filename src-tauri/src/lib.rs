@@ -33,8 +33,9 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .cloned()
                 .ok_or("no main window in tauri.conf.json")?;
+            let handle = app.handle().clone();
             let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
-                .on_new_window(|url, _| links::on_new_window(url))
+                .on_new_window(move |url, _| links::on_new_window(&handle, url))
                 .build()?;
             match window.url() {
                 Ok(url) => logs::shell(&format!("main window showing {url}")),
