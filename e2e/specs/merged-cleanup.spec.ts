@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { terminalCheckpoint } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { expect, openPrMenu, test } from "../fixtures/workbench";
 
 const BRANCH = "content/merged-post";
 const FILE = "merged-post.md";
@@ -45,10 +45,8 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // A change with its own file, shared as a draft PR.
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Merged post");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New post: Merged post");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Merged post");
   await terminalCheckpoint(workbench, "edit the notes");
   fs.writeFileSync(path.join(projectDir, FILE), CONTENT);
@@ -56,8 +54,10 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
   git(projectDir, ["commit", "-m", "checkpoint: merged post"]);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
+  await openPrMenu(page);
   await expect(page.getByTestId("pr-status")).toHaveText("Draft");
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("cleanup-change")).toHaveCount(0);
 
   // The PR is merged on GitHub.
@@ -65,8 +65,10 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
   github.setPrStatus({ draft: false, state: "closed", merged: true });
   await page.reload();
 
+  await openPrMenu(page);
   const pill = page.getByTestId("pr-status");
   await expect(pill).toHaveText("Merged", { timeout: 30_000 });
+  await page.keyboard.press("Escape");
   const cleanup = page.getByTestId("cleanup-change");
   await expect(cleanup).toBeVisible();
   await expect(cleanup).toHaveText(/Clean up/);

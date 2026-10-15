@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
-import { terminalCheckpoint } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { expect, openPrMenu, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -17,10 +17,8 @@ async function startChangeAndCheckpoint(
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill(title);
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, title);
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
   await terminalCheckpoint(workbench, "edit the notes");
@@ -35,11 +33,13 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
 
   await page.getByTestId("share-preview").click();
 
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
+  await openPrMenu(page);
   await expect(page.getByTestId("pr-link")).toHaveAttribute(
     "href",
     "https://github.com/acme/site/pull/1",
   );
+  await page.keyboard.press("Escape");
 
   expect(git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"])).toBe(
     git(projectDir, ["rev-parse", "content/launch-week"]),
@@ -67,6 +67,8 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
     .toBe(localTip);
 
   expect(github.pullsPosts()).toHaveLength(1);
+  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  await openPrMenu(page);
   await expect(page.getByTestId("pr-link")).toHaveAttribute(
     "href",
     "https://github.com/acme/site/pull/1",

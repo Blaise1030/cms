@@ -1,19 +1,16 @@
+import { startChange } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 test("terminal shows the CLI and checkpoints a turn", async ({ page, workbench }) => {
   const { origin, token, projectId } = workbench;
 
   await page.goto(`${origin}/?t=${token}`);
+  await startChange(workbench, "New post: Terminal e2e");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
-
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Terminal e2e");
-  await page.getByRole("button", { name: "Create change" }).click();
   await expect(page.getByTestId("active-change")).toHaveText("Terminal e2e");
 
-  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
   await page.getByTestId("terminal-start").click();
 
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
@@ -33,13 +30,10 @@ test("terminal shows the CLI and checkpoints a turn", async ({ page, workbench }
 test("terminal leaves CLI output visible after exit", async ({ page, workbench }) => {
   const { origin, token, projectId } = workbench;
   await page.goto(`${origin}/?t=${token}`);
+  await startChange(workbench, "Terminal exit");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible();
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("Terminal exit");
-  await page.getByRole("button", { name: "Create change" }).click();
-  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY");
 

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { api } from "../fixtures/daemon";
+import { api, startChange } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -15,7 +15,7 @@ async function terminalEdit(page: import("@playwright/test").Page, line: string)
 }
 
 async function startFakeTerminal(page: import("@playwright/test").Page) {
-  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
 }
@@ -33,14 +33,12 @@ test("GitHub project on main prompts Start a change, then runs on the new branch
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("terminal-panel")).toBeVisible();
 
-  await page.getByTestId("terminal-provider").selectOption("fake");
+  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
   await page.getByTestId("terminal-start").click();
   await expect(page.getByTestId("terminal-error")).toContainText("Start a change first");
 
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Launch week");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New post: Launch week");
+  await page.reload();
 
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
   await expect

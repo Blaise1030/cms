@@ -1,4 +1,4 @@
-import { terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 async function startChangeAndCheckpoint(
@@ -10,10 +10,8 @@ async function startChangeAndCheckpoint(
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Launch week");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New post: Launch week");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
   await terminalCheckpoint(workbench, "edit the notes");
@@ -28,7 +26,7 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
   await startChangeAndCheckpoint(page, workbench);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
 
   const hint = page.getByTestId("protection-hint");
   await expect(hint).toBeVisible();
@@ -53,7 +51,7 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
 
   // Sharing again on the same project does not bring the hint back.
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   // Dismissed: the daemon no longer asks GitHub at all.
@@ -65,7 +63,7 @@ test("protected main: no hint after share", async ({ page, workbench }) => {
   await startChangeAndCheckpoint(page, workbench);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   expect(workbench.github.protectionGets()).toBeGreaterThan(0);
@@ -80,7 +78,7 @@ test("main protected by a ruleset requiring PRs: no hint after share", async ({
   await startChangeAndCheckpoint(page, workbench);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   expect(workbench.github.protectionGets()).toBeGreaterThan(0);
