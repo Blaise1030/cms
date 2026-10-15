@@ -669,7 +669,7 @@ describe("changes store auto-resolve", () => {
     expect(store.syncStatus?.error).toBe("Your AI assistant isn't available.");
   });
 
-  it("startSync surfaces the start error", async () => {
+  it("startSync shows a plain sentence for a start error", async () => {
     const store = setupSync({
       startAutoResolve: vi.fn(async () => {
         throw new ApiError("CONFLICT", "already running", 409);
@@ -680,7 +680,68 @@ describe("changes store auto-resolve", () => {
     await store.startSync("site", "s1");
 
     expect(store.syncStatus?.state).toBe("failed");
-    expect(store.syncStatus?.error).toMatch(/already running/);
+    expect(store.syncStatus?.error).toBe("Couldn't start combining. Please try again.");
+  });
+
+  it("sync_errors_are_plain", async () => {
+    const raw = "conflict session expired or not found";
+    const fail = (status: number) =>
+      vi.fn(async () => {
+        throw new ApiError(status === 400 ? "BADREQ" : "ENOENT", raw, status);
+      });
+    const seen: string[] = [];
+
+    let store = setupSync({ startAutoResolve: fail(400) });
+    useTerminalStore().provider = "fake";
+    await store.startSync("site", "s1");
+    expect(store.syncStatus?.error).toBe("Your AI assistant isn't available.");
+    seen.push(store.syncStatus!.error!);
+
+    store = setupSync({ startAutoResolve: fail(404), answerAutoResolve: fail(404), cancelAutoResolve: fail(404) });
+    useTerminalStore().provider = "fake";
+    await store.startSync("site", "s1");
+    expect(store.syncStatus?.error).toBe("Couldn't start combining. Please try again.");
+    seen.push(store.syncStatus!.error!);
+
+    store.syncStatus = status("needs_input");
+    await store.answerSync("site", { q1: "A" });
+    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
+    seen.push(store.syncStatus!.error!);
+    store.syncStatus = status("resolving");
+    await store.stopSync("site");
+    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
+
+    store.syncStatus = status("done");
+    await store.stopSync("site");
+    expect(store.syncStatus?.error).toBeNull();
+
+    store = setupSync({
+      listConflicts: vi.fn(async () => [{ id: "s1", branch: "content/a" }]),
+      autoResolveStatus: fail(404),
+    });
+    await store.loadConflicts("site");
+    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
+
+    for (const s of seen) {
+      expect(s).not.toMatch(/conflict|merge|branch|\bmain\b/i);
+      expect(s).not.toContain(raw);
+    }
+  });
+
+  it("retry_after_draft_moved_resyncs", async () => {
+    const startAutoResolve = vi.fn(async () => ({ started: true }));
+    const updateChanges = vi.fn(async () => ({ ...conflictResult, conflictSessions: { "content/a": "s2" } }));
+    const store = setupSync({ startAutoResolve, updateChanges });
+    useTerminalStore().provider = "fake";
+    store.syncSessionId = "s1";
+    store.syncStatus = { ...status("failed"), error: "Your draft changed while combining. Please sync again." };
+
+    await store.retrySync("site");
+
+    expect(updateChanges).toHaveBeenCalledWith("site");
+    expect(startAutoResolve).not.toHaveBeenCalledWith("site", "s1", "fake");
+    expect(startAutoResolve).toHaveBeenCalledWith("site", "s2", "fake");
+    expect(store.syncSessionId).toBe("s2");
   });
 
   it("onAutoResolve_done_refreshes", async () => {

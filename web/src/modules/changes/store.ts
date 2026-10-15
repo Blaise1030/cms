@@ -9,6 +9,12 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useTerminalStore } from "@/modules/terminal/store";
+import { getLatest as syncAgain } from "./getLatest";
+
+const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
+const SYNC_START_FAILED = "Couldn't start combining. Please try again.";
+const SYNC_REQUEST_FAILED = "Something went wrong. Please try again.";
+const SYNC_DRAFT_MOVED = "Your draft changed while combining. Please sync again.";
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -214,21 +220,23 @@ export const useChangesStore = defineStore("changes", () => {
     syncStatus.value = { sessionId, state: "preparing", stage: "", questions: [], summary: null, error: null };
     const provider = useTerminalStore().provider;
     if (!provider) {
-      syncFailed(sessionId, "Your AI assistant isn't available.");
+      syncFailed(sessionId, SYNC_UNAVAILABLE);
       return;
     }
     try {
       await daemon.api.startAutoResolve(id, sessionId, provider);
     } catch (e) {
-      if (syncSessionId.value === sessionId) syncFailed(sessionId, errorMessage(e));
+      if (syncSessionId.value !== sessionId) return;
+      syncFailed(sessionId, e instanceof ApiError && e.status === 400 ? SYNC_UNAVAILABLE : SYNC_START_FAILED);
     }
   }
 
-  /** A failed answer/stop shows on the open status; once done the job is gone (404), so ignore it. */
-  function syncRequestFailed(sessionId: string, e: unknown) {
+  /** A failed answer/stop shows on the open status; once done the job is gone (404), so ignore it.
+   *  Daemon text is never shown: it talks about git. */
+  function syncRequestFailed(sessionId: string) {
     const current = syncStatus.value;
     if (syncSessionId.value !== sessionId || !current || current.state === "done") return;
-    syncStatus.value = { ...current, error: errorMessage(e) };
+    syncStatus.value = { ...current, error: SYNC_REQUEST_FAILED };
   }
 
   async function answerSync(id: string, answers: Record<string, string>) {
@@ -236,8 +244,8 @@ export const useChangesStore = defineStore("changes", () => {
     if (!sessionId) return;
     try {
       await daemon.api.answerAutoResolve(id, sessionId, answers);
-    } catch (e) {
-      syncRequestFailed(sessionId, e);
+    } catch {
+      syncRequestFailed(sessionId);
     }
   }
 
@@ -246,13 +254,20 @@ export const useChangesStore = defineStore("changes", () => {
     if (!sessionId) return;
     try {
       await daemon.api.cancelAutoResolve(id, sessionId);
-    } catch (e) {
-      syncRequestFailed(sessionId, e);
+    } catch {
+      syncRequestFailed(sessionId);
     }
   }
 
+  /** A moved draft makes the old session's result useless: sync again for a fresh one. */
   async function retrySync(id: string) {
-    if (syncSessionId.value) await startSync(id, syncSessionId.value);
+    if (!syncSessionId.value) return;
+    if (syncStatus.value?.error === SYNC_DRAFT_MOVED) {
+      closeSync();
+      await syncAgain(id);
+      return;
+    }
+    await startSync(id, syncSessionId.value);
   }
 
   function closeSync() {
@@ -326,8 +341,8 @@ export const useChangesStore = defineStore("changes", () => {
     try {
       const current = await daemon.api.autoResolveStatus(id, sessionId);
       if (syncSessionId.value === sessionId) syncStatus.value = current;
-    } catch (e) {
-      if (syncSessionId.value === sessionId) syncFailed(sessionId, errorMessage(e));
+    } catch {
+      if (syncSessionId.value === sessionId) syncFailed(sessionId, SYNC_REQUEST_FAILED);
     }
   }
 
