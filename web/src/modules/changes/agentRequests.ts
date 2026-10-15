@@ -7,13 +7,6 @@ function ask(text: string, sent: string) {
   toast.info(sent);
 }
 
-export function askAgentToGetLatest() {
-  ask(
-    "Bring the latest version of the site (main) into my current change.",
-    "Asked the agent to get the latest",
-  );
-}
-
 export function askAgentForNewChange(title: string) {
   ask(`Start a new change called "${title.trim()}".`, `Asked the agent to start "${title.trim()}"`);
 }

@@ -67,7 +67,7 @@ const offBlocked = daemon.on("checkpoint.blocked", (e) => {
 const offUpdated = daemon.on("changes.updated", (e) => {
   if (e.projectId !== props.id) return;
   if (e.error || !e.result) {
-    toast.error(e.error ?? "Couldn't sync with main");
+    toast.error(e.error ?? "Couldn't sync with the live site");
     return;
   }
   report(e.result);
