@@ -118,6 +118,41 @@ describe("SyncDialog", () => {
     expect(api.answerAutoResolve).toHaveBeenCalledWith("site", "s1", { q1: "Mine", q2: "$11 for now" });
   });
 
+  it("new_question_round_starts_empty", async () => {
+    const questions = [{ id: "q1", text: "Which headline should stay?", options: ["Mine", "Theirs"] }];
+    const store = await mountWith({ state: "needs_input", questions });
+    await find("sync-question").find("[data-testid='sync-other']").setValue("Keep both");
+    await click("sync-continue");
+    expect(api.answerAutoResolve).toHaveBeenCalledWith("site", "s1", { q1: "Keep both" });
+    expect(api.answerAutoResolve).toHaveBeenCalledTimes(1);
+
+    store.syncStatus = { ...store.syncStatus!, state: "resolving" };
+    await flushPromises();
+    store.syncStatus = { ...store.syncStatus!, state: "needs_input", questions: questions.map((q) => ({ ...q })) };
+    await flushPromises();
+    const question = find("sync-question");
+    const radios = question.findAll("input[type='radio']").map((r) => (r.element as HTMLInputElement).checked);
+    expect(radios).toEqual([false, false]);
+    expect((question.find("[data-testid='sync-other']").element as HTMLInputElement).value).toBe("");
+    await click("sync-continue");
+    expect(api.answerAutoResolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearing_free_text_leaves_choices_unchecked", async () => {
+    await mountWith({
+      state: "needs_input",
+      questions: [{ id: "q1", text: "Which headline should stay?", options: ["Mine", "Theirs"] }],
+    });
+    const question = find("sync-question");
+    await question.findAll("input[type='radio']")[0]!.setValue(true);
+    const other = question.find("[data-testid='sync-other']");
+    await other.setValue("Both");
+    await other.setValue("");
+    await flushPromises();
+    const radios = question.findAll("input[type='radio']").map((r) => (r.element as HTMLInputElement).checked);
+    expect(radios).toEqual([false, false]);
+  });
+
   it("done_shows_summary", async () => {
     const store = await mountWith({ state: "done", summary: "Kept your headline and their new price." });
     const done = find("sync-done");
@@ -143,6 +178,15 @@ describe("SyncDialog", () => {
     expect(api.getConflict).toHaveBeenCalledWith("site", "s1");
     expect(store.selectedConflictId).toBe("s1");
     expect(store.syncSessionId).toBeNull();
+  });
+
+  it("advanced_failure_shows_message", async () => {
+    api.getConflict.mockRejectedValueOnce(new Error("session expired"));
+    const store = await mountWith({ state: "failed" });
+    await click("sync-advanced");
+    expect(find("sync-failed").exists()).toBe(true);
+    expect(find("sync-failed").text()).toContain("Couldn't open the advanced view. Please try again.");
+    expect(store.syncSessionId).toBe("s1");
   });
 
   it("copy_never_mentions_git_words", async () => {

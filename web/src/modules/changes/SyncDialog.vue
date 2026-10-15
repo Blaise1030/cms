@@ -42,9 +42,16 @@ const submitting = ref(false);
 const picked = reactive<Record<string, string>>({});
 const other = reactive<Record<string, string>>({});
 
-watch(() => questions.value.map((q) => q.id).join("\n"), () => {
+const advancedError = ref<string | null>(null);
+
+function clearAnswers() {
   for (const key of Object.keys(picked)) delete picked[key];
   for (const key of Object.keys(other)) delete other[key];
+}
+
+watch(() => questions.value.map((q) => q.id).join("\n"), clearAnswers);
+watch(view, (_, previous) => {
+  if (previous === "question") clearAnswers();
 });
 watch(closable, (isClosable) => {
   if (isClosable) confirmStop.value = false;
@@ -53,6 +60,20 @@ watch(closable, (isClosable) => {
 function pick(questionId: string, option: string) {
   picked[questionId] = option;
   other[questionId] = "";
+}
+
+function type(questionId: string, text: string) {
+  other[questionId] = text;
+  delete picked[questionId];
+}
+
+async function advanced() {
+  advancedError.value = null;
+  try {
+    await store.openAdvanced(props.projectId);
+  } catch {
+    advancedError.value = "Couldn't open the advanced view. Please try again.";
+  }
 }
 
 function onEscape(event: KeyboardEvent) {
@@ -112,14 +133,15 @@ async function submitAnswers() {
                 v-for="option in q.options"
                 :key="option"
                 :value="option"
-                :checked="picked[q.id] === option && !other[q.id]"
+                :checked="picked[q.id] === option"
                 @update:checked="$event && pick(q.id, option)"
               >
                 {{ option }}
               </QuestionnaireChoice>
             </QuestionnaireChoices>
             <QuestionnaireInput
-              v-model="other[q.id]"
+              :model-value="other[q.id] ?? ''"
+              @update:model-value="type(q.id, $event)"
               data-testid="sync-other"
               placeholder="Something else…"
               aria-label="Something else"
@@ -148,8 +170,9 @@ async function submitAnswers() {
           <DialogTitle>Nothing changed. Your draft is safe.</DialogTitle>
         </DialogHeader>
         <p v-if="store.syncStatus?.error" class="text-destructive text-sm" role="alert">{{ store.syncStatus.error }}</p>
+        <p v-if="advancedError" class="text-destructive text-sm" role="alert" data-testid="sync-advanced-error">{{ advancedError }}</p>
         <DialogFooter class="sm:justify-between">
-          <Button variant="link" class="px-0" data-testid="sync-advanced" @click="store.openAdvanced(projectId)">Advanced</Button>
+          <Button variant="link" class="px-0" data-testid="sync-advanced" @click="advanced">Advanced</Button>
           <div class="flex gap-2">
             <Button variant="outline" data-testid="sync-close" @click="store.closeSync()">Close</Button>
             <Button data-testid="sync-retry" @click="store.retrySync(projectId)">Try again</Button>
