@@ -84,6 +84,17 @@ pub fn default_providers() -> Vec<Provider> {
         .collect()
 }
 
+/// What people call the provider; unknown ids are shown as is.
+pub fn display_name(provider_id: &str) -> &str {
+    match provider_id {
+        "cursor" => "Cursor CLI",
+        "claude" => "Claude Code",
+        "codex" => "Codex",
+        "opencode" => "OpenCode",
+        other => other,
+    }
+}
+
 /// Load from `path`. `None` or a missing file gives the defaults.
 pub fn load(path: Option<&Path>) -> Result<Vec<Provider>, ApiError> {
     let Some(path) = path else {

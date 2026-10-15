@@ -1,8 +1,9 @@
 mod commands;
+pub mod links;
 pub mod logs;
 pub mod supervisor;
 
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WebviewWindowBuilder};
 
 use supervisor::Supervisor;
 
@@ -23,11 +24,21 @@ pub fn run() {
             commands::retry_daemon
         ])
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                match window.url() {
-                    Ok(url) => logs::shell(&format!("main window showing {url}")),
-                    Err(e) => logs::shell(&format!("main window URL unavailable: {e}")),
-                }
+            // Built here rather than from the config so new-window requests get a handler.
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("no main window in tauri.conf.json")?;
+            let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .on_new_window(|url, _| links::on_new_window(url))
+                .build()?;
+            match window.url() {
+                Ok(url) => logs::shell(&format!("main window showing {url}")),
+                Err(e) => logs::shell(&format!("main window URL unavailable: {e}")),
             }
             let handle = app.handle().clone();
             std::thread::spawn(move || {

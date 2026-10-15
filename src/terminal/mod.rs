@@ -538,6 +538,27 @@ pub fn login_command(argv: &[String], cwd: &Path) -> tokio::process::Command {
     cmd
 }
 
+/// The `PATH` terminals get from the login shell, or `None` when the shell fails or takes
+/// over 5 s.
+pub async fn login_path() -> Option<std::ffi::OsString> {
+    use std::os::unix::ffi::OsStringExt;
+    let argv = ["/usr/bin/printenv".to_string(), "PATH".to_string()];
+    let mut cmd = login_command(&argv, Path::new("/"));
+    cmd.stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let out = tokio::time::timeout(Duration::from_secs(5), cmd.output())
+        .await
+        .ok()?
+        .ok()
+        .filter(|o| o.status.success())?;
+    let mut path = out.stdout;
+    while path.last().is_some_and(|b| b.is_ascii_whitespace()) {
+        path.pop();
+    }
+    Some(std::ffi::OsString::from_vec(path))
+}
+
 /// `exec` followed by each argument single-quoted for `sh`.
 fn exec_line(argv: &[String]) -> String {
     let mut line = String::from("exec");
@@ -593,6 +614,15 @@ mod tests {
         assert_eq!(group_target(Some(0)), None);
         assert_eq!(group_target(Some(-1)), None);
         assert_eq!(group_target(Some(42)), Some(42));
+    }
+
+    #[tokio::test]
+    async fn login_path_is_the_login_shells_path() {
+        let path = login_path().await.expect("login shell PATH");
+        assert!(
+            std::env::split_paths(&path).any(|d| d == Path::new("/usr/bin")),
+            "{path:?}"
+        );
     }
 
     #[test]

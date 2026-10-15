@@ -9,6 +9,13 @@ import { api, startWorkbench } from "./daemon";
 export type TemplateProject = { id: string; dir: string };
 
 export const test = base.extend<{ workbench: WorkbenchEnv; templateProject: TemplateProject }>({
+  // Specs start signed out of GitHub (and may lack gh), which would put the first-run setup
+  // check in front of the app. Start as a user who already moved past it; the check itself is
+  // covered by the web unit tests.
+  context: async ({ context }, use) => {
+    await context.addInitScript(() => localStorage.setItem("cms:setup-dismissed", "1"));
+    await use(context);
+  },
   workbench: async ({}, use) => {
     const env = await startWorkbench();
     await use(env);

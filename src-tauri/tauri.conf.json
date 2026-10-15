@@ -10,6 +10,8 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "Workbench",
         "url": "splash.html",
         "width": 1280,
