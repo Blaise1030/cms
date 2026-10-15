@@ -70,6 +70,15 @@ export async function api(
   });
 }
 
+/** Start a change on the daemon (the UI's New change menu asks the agent instead). */
+export async function createChange(
+  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  title: string,
+): Promise<void> {
+  const res = await api(env.origin, env.token, "POST", "/api/changes", { project: env.projectId, title });
+  if (!res.ok) throw new Error(`create change failed: ${res.status} ${await res.text()}`);
+}
+
 /**
  * Drive a fake CLI turn over the terminal WebSocket: start session, send `edit …`, wait for checkpoint.
  */
@@ -217,7 +226,15 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
 
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
-  fs.writeFileSync(agents, JSON.stringify({ fake: [fakeCliPath(root)] }) + "\n");
+  const resolver = path.join(root, "tests/fixtures/fake_resolver.sh");
+  fs.writeFileSync(
+    agents,
+    JSON.stringify({
+      fake: [fakeCliPath(root)],
+      "fake-resolver": ["sh", resolver, "needs-input"],
+      "fake-garbage": ["sh", resolver, "garbage"],
+    }) + "\n",
+  );
 
   const child = spawn(
     path.join(root, "target/release/workbench"),

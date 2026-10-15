@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { terminalCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
+import { createChange, terminalCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -39,11 +39,9 @@ function pushToRemoteMain(env: WorkbenchEnv): string {
   return git(env.bareRemote, ["rev-parse", "refs/heads/main"]);
 }
 
-async function newChange(page: import("@playwright/test").Page, title: string, label: string) {
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill(title);
-  await page.getByRole("button", { name: "Create change" }).click();
+async function newChange(page: import("@playwright/test").Page, env: WorkbenchEnv, title: string, label: string) {
+  await createChange(env, title);
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText(label);
 }
 
@@ -58,14 +56,14 @@ test("get latest merges new main into every open change without force-pushing", 
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // First change: edit + share (pushes the branch to the remote).
-  await newChange(page, "New post: First change", "First change");
+  await newChange(page, workbench, "New post: First change", "First change");
   await terminalCheckpoint(workbench, "edit the notes");
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   const sharedTip = git(bareRemote, ["rev-parse", "refs/heads/content/first-change"]);
 
   // Second change (active from here on).
-  await newChange(page, "New post: Second change", "Second change");
+  await newChange(page, workbench, "New post: Second change", "Second change");
   await terminalCheckpoint(workbench, "edit the notes");
 
   const preview = page.frameLocator('[data-testid="preview-frame"]');
