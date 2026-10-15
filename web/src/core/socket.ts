@@ -24,6 +24,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "terminal.session": { projectId: "string", sessionId: "string" },
   "checkpoint.blocked": { projectId: "string", reason: "string" },
   "changes.updated": { projectId: "string" },
+  "changes.auto_resolve": { projectId: "string", sessionId: "string", state: "string" },
   "terminal.turn": { projectId: "string" },
   "terminal.busy": { projectId: "string" },
   "events.lagged": { missed: "number" },

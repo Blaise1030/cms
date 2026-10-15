@@ -2,12 +2,13 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
+import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
 import { errorMessage } from "@workbench/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
+import { useTerminalStore } from "@/modules/terminal/store";
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -40,6 +41,9 @@ export const useChangesStore = defineStore("changes", () => {
   const candidate = ref<ConflictCandidate | null>(null);
   const conflictLoading = ref(false);
   const conflictError = ref<string | null>(null);
+  /** The conflict session the auto-resolve dialog shows; null when closed. */
+  const syncSessionId = ref<string | null>(null);
+  const syncStatus = ref<AutoResolveStatus | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
    *  applies its result nor schedules a poll, so at most one timer ever exists. */
@@ -101,6 +105,8 @@ export const useChangesStore = defineStore("changes", () => {
       selectedConflictId.value = null;
       currentConflict.value = null;
       candidate.value = null;
+      syncSessionId.value = null;
+      syncStatus.value = null;
     }
     projectId.value = id;
     loading.value = true;
@@ -195,7 +201,87 @@ export const useChangesStore = defineStore("changes", () => {
     // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
     await Promise.all([load(id), list(id).catch(() => undefined)]);
     const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
-    if (first) await openConflict(id, result.conflictSessions![first.branch]!);
+    if (first) await startSync(id, result.conflictSessions![first.branch]!);
+  }
+
+  function syncFailed(sessionId: string, message: string) {
+    syncStatus.value = { sessionId, state: "failed", stage: "", questions: [], summary: null, error: message };
+  }
+
+  /** Let the user's AI assistant combine the conflict session in the background. */
+  async function startSync(id: string, sessionId: string) {
+    syncSessionId.value = sessionId;
+    syncStatus.value = { sessionId, state: "preparing", stage: "", questions: [], summary: null, error: null };
+    const provider = useTerminalStore().provider;
+    if (!provider) {
+      syncFailed(sessionId, "Your AI assistant isn't available.");
+      return;
+    }
+    try {
+      await daemon.api.startAutoResolve(id, sessionId, provider);
+    } catch (e) {
+      if (syncSessionId.value === sessionId) syncFailed(sessionId, errorMessage(e));
+    }
+  }
+
+  /** A failed answer/stop shows on the open status; once done the job is gone (404), so ignore it. */
+  function syncRequestFailed(sessionId: string, e: unknown) {
+    const current = syncStatus.value;
+    if (syncSessionId.value !== sessionId || !current || current.state === "done") return;
+    syncStatus.value = { ...current, error: errorMessage(e) };
+  }
+
+  async function answerSync(id: string, answers: Record<string, string>) {
+    const sessionId = syncSessionId.value;
+    if (!sessionId) return;
+    try {
+      await daemon.api.answerAutoResolve(id, sessionId, answers);
+    } catch (e) {
+      syncRequestFailed(sessionId, e);
+    }
+  }
+
+  async function stopSync(id: string) {
+    const sessionId = syncSessionId.value;
+    if (!sessionId) return;
+    try {
+      await daemon.api.cancelAutoResolve(id, sessionId);
+    } catch (e) {
+      syncRequestFailed(sessionId, e);
+    }
+  }
+
+  async function retrySync(id: string) {
+    if (syncSessionId.value) await startSync(id, syncSessionId.value);
+  }
+
+  function closeSync() {
+    syncSessionId.value = null;
+    syncStatus.value = null;
+  }
+
+  /** Leave the agent and pick each file by hand in the conflict view. */
+  async function openAdvanced(id: string) {
+    const sessionId = syncSessionId.value;
+    if (!sessionId) return;
+    await openConflict(id, sessionId);
+    closeSync();
+  }
+
+  async function onAutoResolve(id: string, event: AutoResolveStatus) {
+    if (event.sessionId !== syncSessionId.value) return;
+    const { sessionId, state, stage, questions, summary, error } = event;
+    syncStatus.value = { sessionId, state, stage, questions, summary, error };
+    if (state !== "done") return;
+    await refreshTreeAndPreview();
+    await Promise.all([
+      load(id),
+      list(id).catch(() => undefined),
+      daemon.api.listConflicts(id).then(
+        (sessions) => (conflictSessions.value = sessions),
+        () => undefined,
+      ),
+    ]);
   }
 
   /** Re-read the active change (the agent may have started or switched one); refresh every
@@ -225,13 +311,23 @@ export const useChangesStore = defineStore("changes", () => {
 
   async function loadConflicts(id: string) {
     conflictSessions.value = await daemon.api.listConflicts(id);
-    if (conflictSessions.value.length) {
-      const current = conflictSessions.value.find((s) => s.id === selectedConflictId.value);
-      await openConflict(id, current?.id ?? conflictSessions.value[0]!.id);
-    } else {
-      selectedConflictId.value = null;
-      currentConflict.value = null;
-      candidate.value = null;
+    const sessions = conflictSessions.value;
+    const selected = sessions.find((s) => s.id === selectedConflictId.value);
+    if (selected) {
+      await openConflict(id, selected.id);
+      return;
+    }
+    selectedConflictId.value = null;
+    currentConflict.value = null;
+    candidate.value = null;
+    if (!sessions.length) return;
+    const sessionId = sessions.find((s) => s.id === syncSessionId.value)?.id ?? sessions[0]!.id;
+    syncSessionId.value = sessionId;
+    try {
+      const current = await daemon.api.autoResolveStatus(id, sessionId);
+      if (syncSessionId.value === sessionId) syncStatus.value = current;
+    } catch (e) {
+      if (syncSessionId.value === sessionId) syncFailed(sessionId, errorMessage(e));
     }
   }
 
@@ -415,6 +511,8 @@ export const useChangesStore = defineStore("changes", () => {
     candidate,
     conflictLoading,
     conflictError,
+    syncSessionId,
+    syncStatus,
     load,
     list,
     create,
@@ -427,6 +525,13 @@ export const useChangesStore = defineStore("changes", () => {
     chooseConflict,
     finishConflict,
     abandonConflict,
+    startSync,
+    answerSync,
+    stopSync,
+    retrySync,
+    closeSync,
+    openAdvanced,
+    onAutoResolve,
     share,
     cleanup,
     markReady,
