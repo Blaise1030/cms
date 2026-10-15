@@ -5,6 +5,7 @@ import type { Project } from "@/core/types";
 import { projectTabFromRoute } from "@/router";
 import PreviewPanel from "@/modules/preview/PreviewPanel.vue";
 import ConflictView from "@/modules/changes/ConflictView.vue";
+import SyncDialog from "@/modules/changes/SyncDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
 
 defineProps<{ project: Project }>();
@@ -28,6 +29,7 @@ const changes = useChangesStore();
         <RouterView />
       </div>
       <ConflictView v-if="changes.selectedConflictId" :project-id="project.id" />
+      <SyncDialog v-if="changes.syncSessionId" :project-id="project.id" />
     </div>
   </div>
 </template>
