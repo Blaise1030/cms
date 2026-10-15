@@ -4,6 +4,11 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 use workbench::changes::auto_resolve::{
     AutoResolveJobs, JobContext, JobState, JobStatus, Timeouts,
 };
@@ -12,6 +17,7 @@ use workbench::conflict_preview::ConflictPreviewManager;
 use workbench::events::EventBus;
 use workbench::git::Identity;
 use workbench::providers::Provider;
+use workbench::{config::Config, http, state::AppState};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -398,4 +404,250 @@ async fn second_job_same_project_409() {
     setup.jobs.start(setup.ctx(fake("resolved"))).await.unwrap();
     let status = setup.finished().await;
     assert_eq!(status.state, JobState::Done, "{status:?}");
+}
+
+// --- HTTP ---
+
+async fn call(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::HOST, "localhost");
+    let body = if let Some(v) = body {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(v.to_string())
+    } else {
+        Body::empty()
+    };
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+struct HttpSetup {
+    _tmp: tempfile::TempDir,
+    app: axum::Router,
+    project: String,
+    dir: PathBuf,
+    session_id: String,
+}
+
+impl HttpSetup {
+    /// A project whose `content/page` draft conflicts with `main`, after Get latest opened a
+    /// conflict session; `fake-resolver` runs the fixture in `mode`.
+    async fn new(mode: &str) -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        std::fs::create_dir(&projects).unwrap();
+        let agents = tmp.path().join("agents.json");
+        std::fs::write(
+            &agents,
+            json!({ "fake-resolver": ["sh", &fake(mode)[0], mode] }).to_string(),
+        )
+        .unwrap();
+        let state = AppState::with_scaffold_install(
+            Config {
+                port: 0,
+                projects_dir: projects.clone(),
+                no_auth: true,
+                agents_config: Some(agents),
+                ..Default::default()
+            },
+            false,
+        );
+        let info = state.projects.create("Site").await.unwrap();
+        let dir = projects.join(&info.id);
+        git(&dir, &["config", "user.name", "Ada"]);
+        git(&dir, &["config", "user.email", "ada@example.com"]);
+        std::fs::write(dir.join("page.md"), "old\n").unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{"name":"site","private":true,"scripts":{"build":"true"}}"#,
+        )
+        .unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-m", "base"]);
+        git(&dir, &["checkout", "-b", "content/page"]);
+        std::fs::write(dir.join("page.md"), "mine\n").unwrap();
+        git(&dir, &["commit", "-am", "mine"]);
+        git(&dir, &["checkout", "main"]);
+        std::fs::write(dir.join("page.md"), "latest\n").unwrap();
+        git(&dir, &["commit", "-am", "latest"]);
+        git(&dir, &["checkout", "content/page"]);
+        let app = http::router(state);
+        let (status, update) = call(
+            &app,
+            "POST",
+            "/api/changes/update",
+            Some(json!({ "project": info.id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{update}");
+        let session_id = update["conflictSessions"]["content/page"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no conflict session: {update}"))
+            .to_string();
+        Self {
+            _tmp: tmp,
+            app,
+            project: info.id,
+            dir,
+            session_id,
+        }
+    }
+
+    fn url(&self, suffix: &str) -> String {
+        format!("/api/changes/conflicts/{}{suffix}", self.session_id)
+    }
+
+    async fn post(&self, suffix: &str, body: Value) -> (StatusCode, Value) {
+        call(&self.app, "POST", &self.url(suffix), Some(body)).await
+    }
+
+    async fn status(&self) -> Value {
+        let uri = self.url(&format!("/auto?project={}", self.project));
+        let (status, body) = call(&self.app, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    async fn poll(&self, done: impl Fn(&Value) -> bool) -> Value {
+        for _ in 0..600 {
+            let body = self.status().await;
+            if done(&body) {
+                return body;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!(
+            "job never reached the expected state: {}",
+            self.status().await
+        );
+    }
+
+    async fn wait_for(&self, state: &str) -> Value {
+        let body = self
+            .poll(|b| b["state"] == state || b["state"] == "done" || b["state"] == "failed")
+            .await;
+        assert_eq!(body["state"], state, "{body}");
+        body
+    }
+
+    async fn wait_for_end(&self) -> Value {
+        self.poll(|b| b["state"] == "done" || b["state"] == "failed")
+            .await
+    }
+
+    async fn start(&self) {
+        let (status, body) = self
+            .post(
+                "/auto",
+                json!({ "project": self.project, "provider": "fake-resolver" }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, json!({ "started": true }));
+    }
+}
+
+#[tokio::test]
+async fn http_auto_resolved_flow() {
+    let setup = HttpSetup::new("resolved").await;
+    setup.start().await;
+    let status = setup.wait_for("done").await;
+    assert_eq!(status["sessionId"], setup.session_id.as_str());
+    assert_eq!(status["summary"], "Kept your version");
+    assert_eq!(git(&setup.dir, &["show", "content/page:page.md"]), "mine");
+}
+
+#[tokio::test]
+async fn http_auto_answers() {
+    let setup = HttpSetup::new("needs-input").await;
+    setup.start().await;
+    let status = setup.wait_for("needs_input").await;
+    assert_eq!(status["questions"][0]["id"], "q1");
+    let (status, body) = setup
+        .post(
+            "/auto/answers",
+            json!({ "project": setup.project, "answers": { "q1": "Theirs" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "ok": true }));
+    setup.wait_for("done").await;
+    assert_eq!(git(&setup.dir, &["show", "content/page:page.md"]), "Theirs");
+}
+
+#[tokio::test]
+async fn http_auto_unknown_provider_400() {
+    let setup = HttpSetup::new("resolved").await;
+    let (status, body) = setup
+        .post(
+            "/auto",
+            json!({ "project": setup.project, "provider": "nope" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn http_get_auto_idle() {
+    let setup = HttpSetup::new("resolved").await;
+    assert_eq!(
+        setup.status().await,
+        json!({
+            "sessionId": setup.session_id,
+            "state": "idle",
+            "stage": "",
+            "questions": [],
+            "summary": null,
+            "error": null,
+        })
+    );
+}
+
+#[tokio::test]
+async fn http_finish_blocked_while_running() {
+    let setup = HttpSetup::new("sleep").await;
+    setup.start().await;
+    setup.wait_for("resolving").await;
+    let project = json!({ "project": setup.project });
+    let (status, body) = setup.post("/finish", project.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["message"], "Combining is in progress.");
+    let (status, body) = setup
+        .post(
+            "/choice",
+            json!({ "project": setup.project, "path": "page.md", "choice": "yours" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = setup.post("/abandon", project.clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = setup
+        .post(
+            "/auto",
+            json!({ "project": setup.project, "provider": "fake-resolver" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, body) = setup.post("/auto/cancel", project).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "ok": true }));
+    let status = setup.wait_for_end().await;
+    assert_eq!(status["error"], "You stopped combining.");
 }
