@@ -3,6 +3,7 @@
 target/
 node_modules/
 web/dist/
+src-tauri/binaries/
 web/node_modules/
 templates/astro-marketing/node_modules/
 templates/astro-marketing/dist/
