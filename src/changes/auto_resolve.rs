@@ -1,11 +1,23 @@
-//! Agent-driven conflict resolution: result parsing, prompt, and verification.
+//! Agent-driven conflict resolution: result parsing, prompt, verification, and the job runner.
 
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::process::Command;
+use tokio::sync::{oneshot, Mutex, Notify};
 
-use super::conflicts;
+use super::conflict_sessions::{ConflictSession, ConflictSessions};
+use super::conflicts::{self, ConflictFile};
+use crate::conflict_preview::{link_node_modules, BuildGroup, ConflictPreviewManager};
 use crate::error::ApiError;
+use crate::events::EventBus;
+use crate::git::{self, Identity};
+use crate::providers::{headless_spec, Provider};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
@@ -173,8 +185,465 @@ pub async fn stage_and_verify(
 }
 
 fn fail(e: ApiError) -> Failure {
-    eprintln!("workbench: auto-resolve verification failed ({e})");
+    eprintln!("workbench: auto-resolve failed ({e})");
     Failure::AgentFailed
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Preparing,
+    Resolving,
+    NeedsInput,
+    Verifying,
+    Done,
+    Failed,
+}
+
+impl JobState {
+    fn is_terminal(self) -> bool {
+        matches!(self, JobState::Done | JobState::Failed)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobStatus {
+    pub session_id: String,
+    pub state: JobState,
+    pub stage: String,
+    pub questions: Vec<Question>,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Timeouts {
+    pub agent: Duration,
+    pub build: Duration,
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self {
+            agent: Duration::from_secs(600),
+            build: Duration::from_secs(300),
+        }
+    }
+}
+
+pub struct JobContext {
+    pub project_id: String,
+    pub project_dir: PathBuf,
+    pub session_id: String,
+    pub provider: Provider,
+    pub author: Identity,
+    pub state_dir: PathBuf,
+    pub events: EventBus,
+    pub sessions: Arc<ConflictSessions>,
+    pub previews: Arc<ConflictPreviewManager>,
+}
+
+struct Job {
+    project_id: String,
+    status: JobStatus,
+    answer: Option<oneshot::Sender<Vec<(Question, String)>>>,
+    cancel: Arc<Notify>,
+}
+
+type Jobs = Arc<Mutex<HashMap<String, Job>>>;
+
+/// One auto-resolve job per conflict session, at most one running per project.
+pub struct AutoResolveJobs {
+    timeouts: Timeouts,
+    jobs: Jobs,
+}
+
+impl AutoResolveJobs {
+    pub fn new(timeouts: Timeouts) -> Self {
+        Self {
+            timeouts,
+            jobs: Arc::default(),
+        }
+    }
+
+    pub async fn start(&self, ctx: JobContext) -> Result<(), ApiError> {
+        let session = ctx.sessions.get(&ctx.session_id).await?;
+        if session.project_id != ctx.project_id {
+            return Err(ApiError::enoent("conflict session expired or not found"));
+        }
+        let mut jobs = self.jobs.lock().await;
+        if jobs
+            .values()
+            .any(|j| j.project_id == ctx.project_id && !j.status.state.is_terminal())
+        {
+            return Err(ApiError::conflict(
+                "Your AI assistant is already combining changes in this project",
+            ));
+        }
+        jobs.retain(|_, j| j.project_id != ctx.project_id);
+        let status = new_status(&ctx.session_id, JobState::Preparing, "Getting ready…");
+        emit(&ctx, &status);
+        let cancel = Arc::new(Notify::new());
+        jobs.insert(
+            ctx.session_id.clone(),
+            Job {
+                project_id: ctx.project_id.clone(),
+                status,
+                answer: None,
+                cancel: cancel.clone(),
+            },
+        );
+        drop(jobs);
+        tokio::spawn(run(self.jobs.clone(), self.timeouts, ctx, session, cancel));
+        Ok(())
+    }
+
+    pub async fn status(&self, session_id: &str) -> Option<JobStatus> {
+        self.jobs
+            .lock()
+            .await
+            .get(session_id)
+            .map(|j| j.status.clone())
+    }
+
+    pub async fn answer(
+        &self,
+        session_id: &str,
+        answers: BTreeMap<String, String>,
+    ) -> Result<(), ApiError> {
+        let mut jobs = self.jobs.lock().await;
+        let job = jobs
+            .get_mut(session_id)
+            .ok_or_else(|| ApiError::enoent("no combining job for this conflict"))?;
+        if job.status.state != JobState::NeedsInput || job.answer.is_none() {
+            return Err(ApiError::conflict("Not waiting for an answer"));
+        }
+        let mut pairs = Vec::new();
+        for question in &job.status.questions {
+            let answer = answers
+                .get(&question.id)
+                .map(|a| a.trim())
+                .filter(|a| !a.is_empty())
+                .ok_or_else(|| ApiError::badreq(format!("Answer \"{}\"", question.text)))?;
+            pairs.push((question.clone(), answer.to_string()));
+        }
+        if let Some(tx) = job.answer.take() {
+            let _ = tx.send(pairs);
+        }
+        Ok(())
+    }
+
+    pub async fn cancel(&self, session_id: &str) -> Result<(), ApiError> {
+        let jobs = self.jobs.lock().await;
+        let job = jobs
+            .get(session_id)
+            .ok_or_else(|| ApiError::enoent("no combining job for this conflict"))?;
+        if job.status.state.is_terminal() {
+            return Err(ApiError::conflict("Combining already finished"));
+        }
+        job.cancel.notify_one();
+        Ok(())
+    }
+
+    pub async fn is_running(&self, session_id: &str) -> bool {
+        self.jobs
+            .lock()
+            .await
+            .get(session_id)
+            .is_some_and(|j| !j.status.state.is_terminal())
+    }
+}
+
+fn new_status(session_id: &str, state: JobState, stage: &str) -> JobStatus {
+    JobStatus {
+        session_id: session_id.to_string(),
+        state,
+        stage: stage.to_string(),
+        questions: Vec::new(),
+        summary: None,
+        error: None,
+    }
+}
+
+fn emit(ctx: &JobContext, status: &JobStatus) {
+    let mut fields = serde_json::to_value(status).unwrap_or(Value::Null);
+    if let Value::Object(map) = &mut fields {
+        map.insert("projectId".into(), Value::String(ctx.project_id.clone()));
+    }
+    ctx.events.emit("changes.auto_resolve", fields);
+}
+
+/// "src/content/pricing-plans.md" → "Pricing plans".
+fn label(path: &str) -> String {
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .replace(['-', '_'], " ");
+    let mut chars = stem.trim().chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => path.to_string(),
+    }
+}
+
+fn resolving_stage(files: &[ConflictFile]) -> String {
+    let labels: Vec<String> = files.iter().map(|f| label(&f.path)).collect();
+    format!("Combining {}…", labels.join(", "))
+}
+
+async fn run(
+    jobs: Jobs,
+    timeouts: Timeouts,
+    ctx: JobContext,
+    session: ConflictSession,
+    cancel: Arc<Notify>,
+) {
+    let job_dir = std::env::temp_dir().join(format!("wb-sync-{}", ctx.session_id));
+    cleanup(&ctx.project_dir, &job_dir).await;
+    let runner = Runner {
+        jobs: &jobs,
+        ctx: &ctx,
+        session: &session,
+        timeouts,
+        site: job_dir.join("site"),
+        job_dir: &job_dir,
+    };
+    let outcome = tokio::select! {
+        outcome = runner.resolve() => outcome,
+        _ = cancel.notified() => Err(Failure::Cancelled),
+    };
+    let outcome = match outcome {
+        Ok((commit, summary)) => runner.land(&commit).await.map(|()| summary),
+        Err(failure) => Err(failure),
+    };
+    cleanup(&ctx.project_dir, &job_dir).await;
+    let status = match outcome {
+        Ok(summary) => JobStatus {
+            summary: Some(summary),
+            ..new_status(&ctx.session_id, JobState::Done, "Done")
+        },
+        Err(failure) => JobStatus {
+            error: Some(failure.message().to_string()),
+            ..new_status(&ctx.session_id, JobState::Failed, "")
+        },
+    };
+    runner.update(status, None).await;
+}
+
+async fn cleanup(project_dir: &Path, job_dir: &Path) {
+    let site = job_dir.join("site");
+    let _ = conflicts::git(
+        project_dir,
+        &["worktree", "remove", "--force", &site.to_string_lossy()],
+        &[],
+        None,
+    )
+    .await;
+    let _ = tokio::fs::remove_dir_all(job_dir).await;
+}
+
+struct Runner<'a> {
+    jobs: &'a Jobs,
+    ctx: &'a JobContext,
+    session: &'a ConflictSession,
+    timeouts: Timeouts,
+    job_dir: &'a Path,
+    site: PathBuf,
+}
+
+enum RunError {
+    Io(std::io::Error),
+    TimedOut,
+}
+
+impl Runner<'_> {
+    async fn update(
+        &self,
+        status: JobStatus,
+        answer: Option<oneshot::Sender<Vec<(Question, String)>>>,
+    ) {
+        let mut jobs = self.jobs.lock().await;
+        if let Some(job) = jobs.get_mut(&self.ctx.session_id) {
+            emit(self.ctx, &status);
+            job.status = status;
+            job.answer = answer;
+        }
+    }
+
+    async fn set(&self, state: JobState, stage: &str) {
+        self.update(new_status(&self.ctx.session_id, state, stage), None)
+            .await;
+    }
+
+    /// Everything up to an unattached merge commit; safe to abandon at any await.
+    async fn resolve(&self) -> Result<(String, String), Failure> {
+        let (ctx, session) = (self.ctx, self.session);
+        tokio::fs::create_dir_all(self.job_dir)
+            .await
+            .map_err(|e| fail(e.into()))?;
+        conflicts::checked(
+            &ctx.project_dir,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                &self.site.to_string_lossy(),
+                &session.tip,
+            ],
+            &[],
+            None,
+        )
+        .await
+        .map_err(fail)?;
+        let (code, _, stderr) = conflicts::git(
+            &self.site,
+            &["merge", "--no-commit", "--no-ff", &session.incoming],
+            &[],
+            None,
+        )
+        .await
+        .map_err(fail)?;
+        if code != 0 && code != 1 {
+            return Err(fail(ApiError::git(format!(
+                "git merge failed: {}",
+                String::from_utf8_lossy(&stderr).trim()
+            ))));
+        }
+
+        let stage = resolving_stage(&session.files);
+        let mut answers = Vec::new();
+        let mut round = 1;
+        let summary = loop {
+            self.set(JobState::Resolving, &stage).await;
+            match self.agent(&answers).await? {
+                ResolveResult::Resolved { summary } => break summary,
+                ResolveResult::NeedsInput { questions } if round < MAX_ROUNDS => {
+                    let (tx, rx) = oneshot::channel();
+                    let status = JobStatus {
+                        questions,
+                        ..new_status(
+                            &ctx.session_id,
+                            JobState::NeedsInput,
+                            "Waiting for your answer",
+                        )
+                    };
+                    self.update(status, Some(tx)).await;
+                    answers.extend(rx.await.map_err(|_| Failure::Cancelled)?);
+                    round += 1;
+                }
+                ResolveResult::NeedsInput { .. } => return Err(Failure::AgentFailed),
+            }
+        };
+
+        self.set(JobState::Verifying, "Checking the site still builds…")
+            .await;
+        let conflicted: Vec<String> = session.files.iter().map(|f| f.path.clone()).collect();
+        stage_and_verify(&self.site, &session.tip, &session.incoming, &conflicted).await?;
+        link_node_modules(&ctx.project_dir, &self.site).map_err(|e| {
+            eprintln!("workbench: auto-resolve cannot link node_modules ({e})");
+            Failure::BuildFailed
+        })?;
+        let mut build = Command::new("npm");
+        build.args(["run", "build"]);
+        match self.run_logged(build, self.timeouts.build).await {
+            Ok(status) if status.success() => {}
+            Ok(_) | Err(RunError::Io(_)) => return Err(Failure::BuildFailed),
+            Err(RunError::TimedOut) => return Err(Failure::TimedOut),
+        }
+
+        let tree = conflicts::text(&self.site, &["write-tree"])
+            .await
+            .map_err(fail)?;
+        let commit = conflicts::merge_commit(
+            &ctx.project_dir,
+            &tree,
+            &session.tip,
+            &session.incoming,
+            &ctx.author,
+            "Sync with live site",
+        )
+        .await
+        .map_err(fail)?;
+        Ok((commit, summary))
+    }
+
+    async fn agent(&self, answers: &[(Question, String)]) -> Result<ResolveResult, Failure> {
+        let ctx = self.ctx;
+        let result_path = self.job_dir.join("result.json");
+        let _ = tokio::fs::remove_file(&result_path).await;
+        let spec = headless_spec(
+            &ctx.provider,
+            &prompt(&result_path, answers),
+            &ctx.state_dir,
+            &ctx.project_id,
+        );
+        let (program, args) = spec.argv.split_first().ok_or(Failure::Unavailable)?;
+        let mut agent = Command::new(program);
+        agent
+            .args(args)
+            .envs(spec.env)
+            .env("WORKBENCH_RESOLVE_RESULT", &result_path);
+        match self.run_logged(agent, self.timeouts.agent).await {
+            Ok(_) => {}
+            Err(RunError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Failure::Unavailable)
+            }
+            Err(RunError::Io(e)) => return Err(fail(e.into())),
+            Err(RunError::TimedOut) => return Err(Failure::TimedOut),
+        }
+        let bytes = tokio::fs::read(&result_path).await.unwrap_or_default();
+        parse_result(&bytes).ok_or(Failure::AgentFailed)
+    }
+
+    /// Runs `cmd` in the worktree as its own process group, logging to the session's sync log.
+    async fn run_logged(&self, mut cmd: Command, limit: Duration) -> Result<ExitStatus, RunError> {
+        let logs = self.ctx.state_dir.join("sync-logs");
+        let log = std::fs::create_dir_all(&logs)
+            .and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(logs.join(format!("{}.log", self.ctx.session_id)))
+            })
+            .map_err(RunError::Io)?;
+        let stderr = log.try_clone().map_err(RunError::Io)?;
+        cmd.current_dir(&self.site)
+            .stdin(Stdio::null())
+            .stdout(log)
+            .stderr(stderr)
+            .kill_on_drop(true)
+            .process_group(0);
+        let mut child = cmd.spawn().map_err(RunError::Io)?;
+        let _group = BuildGroup(child.id().map(|pid| pid as i32));
+        match tokio::time::timeout(limit, child.wait()).await {
+            Ok(status) => status.map_err(RunError::Io),
+            Err(_) => Err(RunError::TimedOut),
+        }
+    }
+
+    /// Moves the draft branch onto `commit` and closes the conflict session.
+    async fn land(&self, commit: &str) -> Result<(), Failure> {
+        let (ctx, session) = (self.ctx, self.session);
+        {
+            let lock = git::lock_for(&ctx.project_dir);
+            let _guard = lock.lock().await;
+            conflicts::advance_branch(&ctx.project_dir, &session.branch, &session.tip, commit)
+                .await
+                .map_err(|e| {
+                    if e.status.unwrap_or(e.code.status()) == 409 {
+                        Failure::DraftMoved
+                    } else {
+                        fail(e)
+                    }
+                })?;
+        }
+        let _ = ctx.sessions.abandon(&ctx.session_id).await;
+        ctx.previews.remove_session(&ctx.session_id).await;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +773,28 @@ mod tests {
         let answers = p.find("Answers from the writer:").unwrap();
         assert!(instruction < path && path < answers);
         assert!(p[answers..].contains("\n- Which headline should stay?: Simple pricing"));
+    }
+
+    #[test]
+    fn labels_from_file_stems() {
+        assert_eq!(label("src/content/pricing-plans.md"), "Pricing plans");
+        assert_eq!(label("about_us.yaml"), "About us");
+        assert_eq!(label(".md"), ".md");
+        let file = |path: &str| ConflictFile {
+            path: path.into(),
+            binary: false,
+            ours_deleted: false,
+            theirs_deleted: false,
+            ours_oid: String::new(),
+            theirs_oid: String::new(),
+            base_oid: None,
+            ours_mode: String::new(),
+            theirs_mode: String::new(),
+        };
+        assert_eq!(
+            resolving_stage(&[file("src/content/pricing-plans.md"), file("home.md")]),
+            "Combining Pricing plans, Home…"
+        );
     }
 
     #[test]
