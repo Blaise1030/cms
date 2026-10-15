@@ -8,6 +8,7 @@ use tokio::process::Command;
 use crate::error::ApiError;
 use crate::projects;
 
+pub mod auto_resolve;
 pub mod conflict_sessions;
 pub mod conflicts;
 
