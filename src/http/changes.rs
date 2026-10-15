@@ -265,7 +265,9 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let leave_checkout = state.terminals.status(&req.project).is_some();
-    Ok(Json(run_update(&state, &req.project, leave_checkout).await?))
+    Ok(Json(
+        run_update(&state, &req.project, leave_checkout).await?,
+    ))
 }
 
 /// Finish a Get latest that skipped the checked-out change, now that nothing is editing it
@@ -551,20 +553,33 @@ pub async fn start_auto(
     Ok(Json(json!({ "started": true })))
 }
 
+/// The session is gone once a job succeeds or the session expires, so a job started by
+/// `project` also proves ownership. `idle_ok` lets a session with neither through.
+async fn job_owner(
+    state: &AppState,
+    project: &str,
+    id: &str,
+    idle_ok: bool,
+) -> Result<(), ApiError> {
+    project_dir(state, project).await?;
+    if state.conflicts.get(id).await.is_ok() {
+        return project_session(state, project, id).await.map(drop);
+    }
+    match state.auto_resolve.project_of(id).await {
+        Some(owner) if owner == project => Ok(()),
+        None if idle_ok => Ok(()),
+        _ => Err(ApiError::enoent("conflict session not found")),
+    }
+}
+
 /// `GET /api/changes/conflicts/{id}/auto?project=` → the job's status, `idle` when none.
-/// The session is gone once a job succeeds, so only a live session is checked for ownership.
 pub async fn auto_status(
     State(state): State<AppState>,
     Path(id): Path<String>,
     q: Result<Query<ProjectQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let q = query_or_badreq(q)?;
-    project_dir(&state, &q.project).await?;
-    if let Ok(session) = state.conflicts.get(&id).await {
-        if session.project_id != q.project {
-            return Err(ApiError::enoent("conflict session not found"));
-        }
-    }
+    job_owner(&state, &q.project, &id, true).await?;
     Ok(Json(match state.auto_resolve.status(&id).await {
         Some(status) => serde_json::to_value(status).map_err(|e| ApiError::io(e.to_string()))?,
         None => json!({
@@ -595,7 +610,7 @@ pub async fn answer_auto(
             "expected JSON body {{\"project\": string, \"answers\": object}}: {e}"
         ))
     })?;
-    project_session(&state, &req.project, &id).await?;
+    job_owner(&state, &req.project, &id, false).await?;
     state.auto_resolve.answer(&id, req.answers).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -608,7 +623,7 @@ pub async fn cancel_auto(
 ) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body)
         .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
-    project_session(&state, &req.project, &id).await?;
+    job_owner(&state, &req.project, &id, false).await?;
     state.auto_resolve.cancel(&id).await?;
     Ok(Json(json!({ "ok": true })))
 }

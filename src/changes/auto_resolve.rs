@@ -221,6 +221,8 @@ pub struct JobStatus {
 pub struct Timeouts {
     pub agent: Duration,
     pub build: Duration,
+    /// How long to wait for the writer's answers; below the conflict session TTL.
+    pub answer: Duration,
 }
 
 impl Default for Timeouts {
@@ -228,6 +230,7 @@ impl Default for Timeouts {
         Self {
             agent: Duration::from_secs(600),
             build: Duration::from_secs(300),
+            answer: Duration::from_secs(50 * 60),
         }
     }
 }
@@ -272,6 +275,12 @@ impl AutoResolveJobs {
         if session.project_id != ctx.project_id {
             return Err(ApiError::enoent("conflict session expired or not found"));
         }
+        let moved =
+            match conflicts::ensure_tip(&ctx.project_dir, &session.branch, &session.tip).await {
+                Ok(()) => false,
+                Err(e) if e.status.unwrap_or(e.code.status()) == 409 => true,
+                Err(e) => return Err(e),
+            };
         let mut jobs = self.jobs.lock().await;
         if jobs
             .values()
@@ -282,7 +291,14 @@ impl AutoResolveJobs {
             ));
         }
         jobs.retain(|_, j| j.project_id != ctx.project_id);
-        let status = new_status(&ctx.session_id, JobState::Preparing, "Getting ready…");
+        let status = if moved {
+            JobStatus {
+                error: Some(Failure::DraftMoved.message().to_string()),
+                ..new_status(&ctx.session_id, JobState::Failed, "")
+            }
+        } else {
+            new_status(&ctx.session_id, JobState::Preparing, "Getting ready…")
+        };
         emit(&ctx, &status);
         let cancel = Arc::new(Notify::new());
         jobs.insert(
@@ -295,8 +311,19 @@ impl AutoResolveJobs {
             },
         );
         drop(jobs);
-        tokio::spawn(run(self.jobs.clone(), self.timeouts, ctx, session, cancel));
+        if !moved {
+            tokio::spawn(run(self.jobs.clone(), self.timeouts, ctx, session, cancel));
+        }
         Ok(())
+    }
+
+    /// The project that started the session's job; outlives the session itself.
+    pub async fn project_of(&self, session_id: &str) -> Option<String> {
+        self.jobs
+            .lock()
+            .await
+            .get(session_id)
+            .map(|j| j.project_id.clone())
     }
 
     pub async fn status(&self, session_id: &str) -> Option<JobStatus> {
@@ -531,7 +558,10 @@ impl Runner<'_> {
                         )
                     };
                     self.update(status, Some(tx)).await;
-                    answers.extend(rx.await.map_err(|_| Failure::Cancelled)?);
+                    let reply = tokio::time::timeout(self.timeouts.answer, rx)
+                        .await
+                        .map_err(|_| Failure::TimedOut)?;
+                    answers.extend(reply.map_err(|_| Failure::Cancelled)?);
                     round += 1;
                 }
                 ResolveResult::NeedsInput { .. } => return Err(Failure::AgentFailed),

@@ -111,6 +111,7 @@ impl Setup {
             jobs: AutoResolveJobs::new(Timeouts {
                 agent,
                 build: Duration::from_secs(30),
+                answer: Duration::from_secs(30),
             }),
         }
     }
@@ -375,6 +376,46 @@ async fn draft_moved_keeps_new_commit() {
 }
 
 #[tokio::test]
+async fn needs_input_times_out() {
+    let mut setup = Setup::new("true", Duration::from_secs(5)).await;
+    setup.jobs = AutoResolveJobs::new(Timeouts {
+        agent: Duration::from_secs(5),
+        build: Duration::from_secs(30),
+        answer: Duration::from_secs(1),
+    });
+    setup.start("needs-input").await;
+    setup.wait_for(|s| s.state == JobState::NeedsInput).await;
+    failed_with(&setup, "This took too long.").await;
+    assert_eq!(setup.branch(), setup.tip);
+    setup.jobs.start(setup.ctx(fake("resolved"))).await.unwrap();
+    let status = setup.finished().await;
+    assert_eq!(status.state, JobState::Done, "{status:?}");
+}
+
+#[tokio::test]
+async fn start_with_moved_tip_fails_fast() {
+    let setup = Setup::new("true", Duration::from_secs(5)).await;
+    std::fs::write(setup.dir.join("new.md"), "new\n").unwrap();
+    git(&setup.dir, &["add", "new.md"]);
+    git(&setup.dir, &["commit", "-m", "new"]);
+    let moved = setup.branch();
+    let mut events = setup.events.subscribe();
+    setup.start("resolved").await;
+    let status = setup.jobs.status(&setup.session_id).await.unwrap();
+    assert_eq!(status.state, JobState::Failed, "{status:?}");
+    assert_eq!(
+        status.error.as_deref(),
+        Some("Your draft changed while combining. Please sync again.")
+    );
+    assert!(!setup.jobs.is_running(&setup.session_id).await);
+    assert!(!setup.job_dir().exists());
+    let event: Value = serde_json::from_str(&events.try_recv().unwrap()).unwrap();
+    assert_eq!(event["state"], "failed");
+    assert!(events.try_recv().is_err());
+    assert_eq!(setup.branch(), moved);
+}
+
+#[tokio::test]
 async fn merge_commit_excludes_node_modules_link() {
     let setup = Setup::new("true", Duration::from_secs(5)).await;
     std::fs::create_dir(setup.dir.join("node_modules")).unwrap();
@@ -440,6 +481,7 @@ async fn call(
 struct HttpSetup {
     _tmp: tempfile::TempDir,
     app: axum::Router,
+    state: AppState,
     project: String,
     dir: PathBuf,
     session_id: String,
@@ -487,7 +529,7 @@ impl HttpSetup {
         std::fs::write(dir.join("page.md"), "latest\n").unwrap();
         git(&dir, &["commit", "-am", "latest"]);
         git(&dir, &["checkout", "content/page"]);
-        let app = http::router(state);
+        let app = http::router(state.clone());
         let (status, update) = call(
             &app,
             "POST",
@@ -503,6 +545,7 @@ impl HttpSetup {
         Self {
             _tmp: tmp,
             app,
+            state,
             project: info.id,
             dir,
             session_id,
@@ -648,6 +691,39 @@ async fn http_finish_blocked_while_running() {
     let (status, body) = setup.post("/auto/cancel", project).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body, json!({ "ok": true }));
+    let status = setup.wait_for_end().await;
+    assert_eq!(status["error"], "You stopped combining.");
+}
+
+#[tokio::test]
+async fn http_cancel_after_session_removed() {
+    let setup = HttpSetup::new("needs-input").await;
+    setup.start().await;
+    setup.wait_for("needs_input").await;
+    setup
+        .state
+        .conflicts
+        .abandon(&setup.session_id)
+        .await
+        .unwrap();
+
+    let (status, body) = setup
+        .post("/auto/cancel", json!({ "project": "someone-else" }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let other = setup.state.projects.create("Other").await.unwrap();
+    let (status, body) = setup
+        .post("/auto/cancel", json!({ "project": other.id }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let uri = setup.url(&format!("/auto?project={}", other.id));
+    let (status, body) = call(&setup.app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, body) = setup
+        .post("/auto/cancel", json!({ "project": setup.project }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let status = setup.wait_for_end().await;
     assert_eq!(status["error"], "You stopped combining.");
 }
