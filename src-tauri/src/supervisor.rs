@@ -3,6 +3,7 @@ mod health;
 mod ready;
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -13,6 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, Url};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
+use crate::logs;
 use backoff::Backoff;
 use ready::ReadyInfo;
 
@@ -21,6 +23,11 @@ const SIDECAR: &str = "workbench";
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const MAIN_WINDOW: &str = "main";
+/// Origin of the bundled `ui/` pages on macOS.
+const LOCAL_PAGES: &str = "tauri://localhost/";
+/// When set, the log bundle is also written here whenever the daemon is
+/// given up on, for checks that can't drive the save dialog.
+const BUNDLE_ON_FAILURE_ENV: &str = "WORKBENCH_DESKTOP_LOG_BUNDLE_ON_FAILURE";
 
 #[derive(Debug)]
 pub enum SupervisorError {
@@ -45,6 +52,16 @@ impl fmt::Display for SupervisorError {
 
 impl std::error::Error for SupervisorError {}
 
+/// Any failure seen while shutting down is reported as `Stopped`, so quitting
+/// never looks like a crash.
+fn settle(err: SupervisorError, stopping: bool) -> SupervisorError {
+    if stopping {
+        SupervisorError::Stopped
+    } else {
+        err
+    }
+}
+
 /// The running daemon's address. `shutdown` stops the daemon for good: it is
 /// not restarted afterwards.
 #[derive(Clone)]
@@ -61,6 +78,8 @@ impl DaemonHandle {
 }
 
 /// Managed app state; lets quit handlers stop the daemon even mid-startup.
+/// Manage it before `start` runs so a quit at any point finds it.
+#[derive(Default)]
 pub struct Supervisor {
     control: Arc<Control>,
 }
@@ -69,12 +88,17 @@ impl Supervisor {
     /// Spawns the daemon, waits until it is healthy, navigates the main window
     /// to it and keeps it alive with restarts. Blocks until healthy, so call it
     /// off the main thread. Errors after the restart budget is spent, having
-    /// emitted `daemon://failed`.
+    /// emitted `daemon://failed` and shown the error page.
     pub fn start(app: &AppHandle) -> Result<DaemonHandle, SupervisorError> {
-        let control = Arc::new(Control::default());
-        app.manage(Supervisor {
-            control: control.clone(),
-        });
+        let control = match app.try_state::<Supervisor>() {
+            Some(supervisor) => supervisor.control.clone(),
+            None => {
+                let supervisor = Supervisor::default();
+                let control = supervisor.control.clone();
+                app.manage(supervisor);
+                control
+            }
+        };
 
         let mut backoff = Backoff::default();
         let (info, exits) = launch_with_retries(app, &control, &mut backoff)?;
@@ -84,6 +108,23 @@ impl Supervisor {
         let watcher = control.clone();
         thread::spawn(move || supervise(&app, &watcher, backoff, exits));
         Ok(handle)
+    }
+
+    /// After the daemon was given up on: shows the splash and starts again
+    /// with a fresh restart budget. Returns false if there was nothing to retry.
+    pub fn retry(&self, app: &AppHandle) -> bool {
+        if self.control.is_stopping() || !self.control.failed.swap(false, Ordering::SeqCst) {
+            return false;
+        }
+        logs::shell("retrying the workbench service");
+        show_page(app, "splash.html", None);
+        let app = app.clone();
+        thread::spawn(move || {
+            if let Err(e) = Supervisor::start(&app) {
+                logs::shell(&format!("daemon unavailable: {e}"));
+            }
+        });
+        true
     }
 
     pub fn handle(&self) -> Option<DaemonHandle> {
@@ -105,6 +146,8 @@ struct Control {
     /// Guarded together with `child` so a spawn can't slip past `shutdown`.
     child: Mutex<ChildSlot>,
     current: Mutex<Option<ReadyInfo>>,
+    /// Set once the restart budget is spent; cleared by `retry`.
+    failed: AtomicBool,
 }
 
 #[derive(Default)]
@@ -150,6 +193,24 @@ impl Control {
             control: self.clone(),
         }
     }
+
+    /// Gives up on the daemon: tells listeners and swaps in the error page.
+    fn fail(&self, app: &AppHandle, message: String) {
+        if self.is_stopping() {
+            return;
+        }
+        *lock(&self.current) = None;
+        self.failed.store(true, Ordering::SeqCst);
+        logs::shell(&message);
+        let _ = app.emit(FAILED_EVENT, message.clone());
+        if let Some(path) = std::env::var_os(BUNDLE_ON_FAILURE_ENV) {
+            match logs::save_bundle(path.as_ref()) {
+                Ok(()) => logs::shell("wrote log bundle on failure"),
+                Err(e) => logs::shell(&format!("could not write log bundle: {e}")),
+            }
+        }
+        show_page(app, "error.html", Some(&message));
+    }
 }
 
 #[derive(Default)]
@@ -190,12 +251,19 @@ fn terminate(running: Running) {
         return;
     }
     let pid = child.pid() as libc::pid_t;
-    // SAFETY: `pid` is our own unreaped child (its exit signal is unset).
+    // SAFETY: `kill` has no memory-safety preconditions; the risk is signalling
+    // a reused pid. An unset exit signal does not prove the daemon is unreaped:
+    // the shell plugin sends `Terminated` only after it has waited on the child
+    // *and* both pipe readers have hit EOF (tauri-plugin-shell 2.5.0,
+    // src/process/mod.rs:397-404). This relies on nothing outliving the daemon
+    // with its stdout/stderr — its dev servers are piped, one-shot commands use
+    // `.output()` and PTY children get PTY fds — so EOF follows the reap within
+    // milliseconds, far too soon for the pid to be reused.
     unsafe {
         libc::kill(pid, libc::SIGTERM);
     }
     if !exited.wait(SHUTDOWN_GRACE) {
-        eprintln!("workbench-desktop: daemon ignored SIGTERM for {SHUTDOWN_GRACE:?}, killing");
+        logs::shell(&format!("daemon ignored SIGTERM for {SHUTDOWN_GRACE:?}, killing"));
         let _ = child.kill();
     }
 }
@@ -211,7 +279,7 @@ fn launch_with_retries(
             Err(SupervisorError::Stopped) => return Err(SupervisorError::Stopped),
             Err(e) => e,
         };
-        eprintln!("workbench-desktop: daemon start failed: {err}");
+        logs::shell(&format!("daemon start failed: {err}"));
         match backoff.next_delay() {
             Some(delay) => {
                 if !sleep_unless_stopping(control, delay) {
@@ -219,11 +287,10 @@ fn launch_with_retries(
                 }
             }
             None => {
-                let message = format!(
-                    "Workbench's background service failed to start after 3 restart attempts ({err})."
+                control.fail(
+                    app,
+                    format!("Workbench's background service failed to start after 3 restart attempts ({err})."),
                 );
-                eprintln!("workbench-desktop: {message}");
-                let _ = app.emit(FAILED_EVENT, message);
                 return Err(err);
             }
         }
@@ -249,7 +316,7 @@ fn launch(
             .sidecar(SIDECAR)
             .and_then(|cmd| cmd.args(["serve", "--port", "0"]).spawn())
             .map_err(|e| SupervisorError::Spawn(e.to_string()))?;
-        eprintln!("workbench-desktop: spawned daemon pid {}", child.pid());
+        logs::shell(&format!("spawned daemon pid {}", child.pid()));
         let pump_exited = exited.clone();
         thread::spawn(move || pump(events, ready_tx, exit_tx, &pump_exited));
         slot.running = Some(Running {
@@ -262,8 +329,6 @@ fn launch(
         Ok(info) => {
             if health::wait_healthy(info.port, || exited.is_set() || control.is_stopping()) {
                 Ok(info)
-            } else if control.is_stopping() {
-                Err(SupervisorError::Stopped)
             } else if exited.is_set() {
                 Err(SupervisorError::ExitedBeforeReady)
             } else {
@@ -275,18 +340,18 @@ fn launch(
     };
     match result {
         Ok(info) => {
-            eprintln!("workbench-desktop: daemon healthy at {}", info.base_url);
+            logs::shell(&format!("daemon healthy at {}", info.base_url));
             Ok((info, exit_rx))
         }
         Err(e) => {
             control.stop_current();
-            Err(e)
+            Err(settle(e, control.is_stopping()))
         }
     }
 }
 
-/// Drains the child's stdout/stderr for its whole life so its pipes never
-/// fill, reports the ready line once, and signals exit.
+/// Drains the child's stdout/stderr into the daemon log for its whole life so
+/// its pipes never fill, reports the ready line once, and signals exit.
 fn pump(
     mut events: Receiver<CommandEvent>,
     ready_tx: mpsc::Sender<ReadyInfo>,
@@ -294,34 +359,27 @@ fn pump(
     exited: &ExitSignal,
 ) {
     let mut ready_tx = Some(ready_tx);
-    let mut token: Option<String> = None;
-    let redact = |line: &str, token: &Option<String>| match token {
-        Some(t) => line.replace(t.as_str(), "<redacted>"),
-        None => line.to_owned(),
-    };
     while let Some(event) = events.blocking_recv() {
         match event {
             CommandEvent::Stdout(bytes) => {
                 let line = String::from_utf8_lossy(&bytes);
                 if ready::is_ready_line(&line) {
-                    if let (Some(info), Some(tx)) = (ready::parse_ready_line(&line), ready_tx.take()) {
-                        token = Some(info.token.clone());
-                        let _ = tx.send(info);
+                    if let Some(info) = ready::parse_ready_line(&line) {
+                        logs::add_secret(&info.token);
+                        if let Some(tx) = ready_tx.take() {
+                            let _ = tx.send(info);
+                        }
                     }
-                    continue;
                 }
-                eprintln!("[daemon] {}", redact(line.trim_end(), &token));
+                logs::daemon(line.trim_end());
             }
-            CommandEvent::Stderr(bytes) => {
-                let line = String::from_utf8_lossy(&bytes);
-                eprintln!("[daemon] {}", redact(line.trim_end(), &token));
-            }
-            CommandEvent::Error(e) => eprintln!("workbench-desktop: daemon pipe error: {e}"),
+            CommandEvent::Stderr(bytes) => logs::daemon(String::from_utf8_lossy(&bytes).trim_end()),
+            CommandEvent::Error(e) => logs::shell(&format!("daemon pipe error: {e}")),
             CommandEvent::Terminated(payload) => {
-                eprintln!(
-                    "workbench-desktop: daemon exited (code {:?}, signal {:?})",
+                logs::shell(&format!(
+                    "daemon exited (code {:?}, signal {:?})",
                     payload.code, payload.signal
-                );
+                ));
                 break;
             }
             _ => {}
@@ -348,12 +406,13 @@ fn supervise(
         if Backoff::was_stable(healthy_since.elapsed()) {
             backoff.reset();
         }
-        eprintln!("workbench-desktop: daemon exited unexpectedly, restarting");
+        logs::shell("daemon exited unexpectedly, restarting");
         // The exit that brought us here counts as a failure.
         let Some(delay) = backoff.next_delay() else {
-            let message = "Workbench's background service keeps crashing and was not restarted after 3 attempts.".to_owned();
-            eprintln!("workbench-desktop: {message}");
-            let _ = app.emit(FAILED_EVENT, message);
+            control.fail(
+                app,
+                "Workbench's background service keeps crashing and was not restarted after 3 attempts.".to_owned(),
+            );
             return;
         };
         if !sleep_unless_stopping(control, delay) {
@@ -382,19 +441,64 @@ fn sleep_unless_stopping(control: &Control, delay: Duration) -> bool {
 }
 
 fn navigate(app: &AppHandle, info: &ReadyInfo) {
-    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
-        eprintln!("workbench-desktop: main window missing, cannot navigate");
-        return;
-    };
-    let url = match Url::parse(&format!("{}/?t={}", info.base_url, info.token)) {
+    match Url::parse(&format!("{}/?t={}", info.base_url, info.token)) {
+        Ok(url) => navigate_main(app, url, &info.base_url),
+        Err(e) => logs::shell(&format!("bad daemon URL: {e}")),
+    }
+}
+
+/// Shows a bundled `ui/` page, optionally passing a `message` query param.
+fn show_page(app: &AppHandle, page: &str, message: Option<&str>) {
+    let mut url = match Url::parse(LOCAL_PAGES).and_then(|base| base.join(page)) {
         Ok(url) => url,
         Err(e) => {
-            eprintln!("workbench-desktop: bad daemon URL: {e}");
+            logs::shell(&format!("bad page URL {page}: {e}"));
             return;
         }
     };
+    if let Some(message) = message {
+        url.query_pairs_mut().append_pair("message", message);
+    }
+    navigate_main(app, url, page);
+}
+
+/// `label` is what gets logged instead of the URL, which may carry the token.
+fn navigate_main(app: &AppHandle, url: Url, label: &str) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        logs::shell("main window missing, cannot navigate");
+        return;
+    };
     match window.navigate(url) {
-        Ok(()) => eprintln!("workbench-desktop: navigating main window to {}", info.base_url),
-        Err(e) => eprintln!("workbench-desktop: navigation failed: {e}"),
+        Ok(()) => logs::shell(&format!("navigating main window to {label}")),
+        Err(e) => logs::shell(&format!("navigation failed: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_while_stopping_settle_as_stopped() {
+        for err in [
+            SupervisorError::ExitedBeforeReady,
+            SupervisorError::ReadyTimeout,
+            SupervisorError::HealthTimeout,
+            SupervisorError::Spawn("x".into()),
+        ] {
+            assert!(matches!(settle(err, true), SupervisorError::Stopped));
+        }
+    }
+
+    #[test]
+    fn errors_while_running_are_kept() {
+        assert!(matches!(
+            settle(SupervisorError::ExitedBeforeReady, false),
+            SupervisorError::ExitedBeforeReady
+        ));
+        assert!(matches!(
+            settle(SupervisorError::HealthTimeout, false),
+            SupervisorError::HealthTimeout
+        ));
     }
 }

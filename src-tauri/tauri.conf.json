@@ -3,12 +3,15 @@
   "productName": "Workbench",
   "version": "0.1.0",
   "identifier": "com.workbench.desktop",
-  "build": {},
+  "build": {
+    "frontendDist": "ui"
+  },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Workbench",
-        "url": "about:blank",
+        "url": "splash.html",
         "width": 1280,
         "height": 800
       }
