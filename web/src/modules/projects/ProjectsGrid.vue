@@ -84,89 +84,91 @@ function open(project: Project) {
 </script>
 
 <template>
-  <div class="relative h-full overflow-y-auto">
-    <div v-if="macDesktop" class="fixed inset-x-0 top-0 h-11" data-tauri-drag-region data-testid="window-drag-strip" />
-    <div class="absolute top-3 right-3">
-      <GithubAccount />
-    </div>
-    <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
-    <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
-      <header class="text-center">
-        <h1 class="text-3xl font-light tracking-tight">workbench</h1>
-        <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
-      </header>
-
-      <div class="flex gap-2">
-        <Button @click="showNew = true"><Plus /> New project</Button>
-        <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
-          <FolderGit2 /> Open from GitHub
-        </Button>
+  <div class="flex h-full flex-col">
+    <div v-if="macDesktop" class="h-11 shrink-0" data-tauri-drag-region data-testid="window-drag-strip" />
+    <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
+      <div class="absolute top-3 right-3">
+        <GithubAccount />
       </div>
+      <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
+      <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
+        <header class="text-center">
+          <h1 class="text-3xl font-light tracking-tight">workbench</h1>
+          <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
+        </header>
 
-      <section class="flex w-full max-w-xl flex-col gap-3">
-        <h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
-
-        <p v-if="store.error" class="text-destructive text-sm" role="alert">
-          {{ store.error }}
-          <Button variant="link" size="sm" @click="store.load()">Retry</Button>
-        </p>
-
-        <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
-          <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
+        <div class="flex gap-2">
+          <Button @click="showNew = true"><Plus /> New project</Button>
+          <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
+            <FolderGit2 /> Open from GitHub
+          </Button>
         </div>
 
-        <p
-          v-else-if="store.loaded && store.projects.length === 0"
-          class="text-muted-foreground text-sm"
-        >
-          No projects yet.
-        </p>
+        <section class="flex w-full max-w-xl flex-col gap-3">
+          <h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
 
-        <ItemGroup v-else class="gap-2" data-testid="project-grid">
-          <!-- The whole row links to the project; the menu stops its clicks from following it. -->
-          <Item
-            v-for="project in store.projects"
-            :key="project.id"
-            as-child
-            variant="outline"
-            size="sm"
+          <p v-if="store.error" class="text-destructive text-sm" role="alert">
+            {{ store.error }}
+            <Button variant="link" size="sm" @click="store.load()">Retry</Button>
+          </p>
+
+          <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
+            <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
+          </div>
+
+          <p
+            v-else-if="store.loaded && store.projects.length === 0"
+            class="text-muted-foreground text-sm"
           >
-            <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
-            <ItemMedia>
-              <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
-                <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
-                <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
-              </span>
-            </ItemMedia>
-            <ItemContent class="min-w-0">
-              <ItemTitle>{{ project.name }}</ItemTitle>
-              <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Badge variant="outline">localhost:{{ project.port }}</Badge>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="`Actions for ${project.name}`"
-                    @click.stop.prevent
-                    @keydown.enter.stop
-                  >
-                    <EllipsisVertical />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
-                    <Trash2 /> Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </ItemActions>
-            </RouterLink>
-          </Item>
-        </ItemGroup>
-      </section>
+            No projects yet.
+          </p>
+
+          <ItemGroup v-else class="gap-2" data-testid="project-grid">
+            <!-- The whole row links to the project; the menu stops its clicks from following it. -->
+            <Item
+              v-for="project in store.projects"
+              :key="project.id"
+              as-child
+              variant="outline"
+              size="sm"
+            >
+              <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
+              <ItemMedia>
+                <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
+                  <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
+                  <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
+                </span>
+              </ItemMedia>
+              <ItemContent class="min-w-0">
+                <ItemTitle>{{ project.name }}</ItemTitle>
+                <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Badge variant="outline">localhost:{{ project.port }}</Badge>
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="`Actions for ${project.name}`"
+                      @click.stop.prevent
+                      @keydown.enter.stop
+                    >
+                      <EllipsisVertical />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </ItemActions>
+              </RouterLink>
+            </Item>
+          </ItemGroup>
+        </section>
+      </div>
     </div>
   </div>
 

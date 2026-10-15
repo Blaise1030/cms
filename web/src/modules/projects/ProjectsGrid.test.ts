@@ -140,7 +140,15 @@ describe("ProjectsGrid", () => {
       const desktop = mountGrid();
       await flushPromises();
       expect(desktop.findAll("[data-tauri-drag-region]")).toHaveLength(1);
-      expect(desktop.get("[data-testid='window-drag-strip']").attributes("data-tauri-drag-region")).toBe("");
+      const strip = desktop.get("[data-testid='window-drag-strip']");
+      expect(strip.attributes("data-tauri-drag-region")).toBe("");
+      // Its own row above the scrolling page, so it never covers projects or the scrollbar.
+      expect(strip.classes()).not.toContain("fixed");
+      expect(strip.classes()).not.toContain("absolute");
+      const scroller = desktop.get("[data-testid='projects-scroll']");
+      expect(scroller.element.contains(strip.element)).toBe(false);
+      expect(strip.element.nextElementSibling).toBe(scroller.element);
+      expect(scroller.text()).toContain("Site a");
       desktop.unmount();
     } finally {
       delete document.documentElement.dataset.desktop;
