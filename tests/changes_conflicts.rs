@@ -7,7 +7,7 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 use workbench::changes::conflict_sessions::ConflictSessions;
-use workbench::changes::conflicts::Choice;
+use workbench::changes::conflicts::{self, Choice};
 use workbench::config::Config;
 use workbench::conflict_preview::ConflictPreviewManager;
 use workbench::git::Identity;
@@ -182,6 +182,20 @@ async fn binary_conflict_rejects_both_and_stale_tip_rejects_finish() {
         .finish(&session.id, &Identity::workbench())
         .await
         .is_err());
+    assert_eq!(git(&dir, &["rev-parse", "content/page"]), newer_tip);
+}
+
+#[tokio::test]
+async fn advance_branch_refuses_moved_tip() {
+    let (_tmp, dir, tip, incoming) = fixture(b"old\n", b"mine\n", b"latest\n");
+    std::fs::write(dir.join("new.md"), "later\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-m", "later"]);
+    let newer_tip = git(&dir, &["rev-parse", "HEAD"]);
+    let err = conflicts::advance_branch(&dir, "content/page", &tip, &incoming)
+        .await
+        .unwrap_err();
+    assert_eq!(err.http_status(), 409);
     assert_eq!(git(&dir, &["rev-parse", "content/page"]), newer_tip);
 }
 
