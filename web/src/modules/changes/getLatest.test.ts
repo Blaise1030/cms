@@ -50,6 +50,10 @@ describe("report", () => {
     report(result({ updated: [] }));
     report(result({ skipped: a }));
     report(result({ mainDiverged: true, mainUpdated: true, updated: [a], skipped: a }));
+    report(result({ conflicts: [a], conflictSessions: {}, conflictErrors: { "content/a": "binary file" } }));
+    expect(toast.warning).toHaveBeenCalledWith("Some drafts couldn't be updated", {
+      description: "Try syncing again. If it keeps happening, ask your site admin.",
+    });
     const strings = toastedStrings();
     expect(strings.length).toBeGreaterThan(0);
     for (const s of strings) expect(s).not.toMatch(/main|merge|conflict|branch/i);

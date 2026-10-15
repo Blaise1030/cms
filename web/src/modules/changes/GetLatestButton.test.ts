@@ -38,7 +38,7 @@ describe("GetLatestButton", () => {
     await flushPromises();
     expect(updateChanges).toHaveBeenCalledWith("site");
     expect(useAgentOutboxStore().messages).toEqual([]);
-    expect(toast.info).not.toHaveBeenCalledWith("Asked the agent to get the latest");
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it("is disabled while switching or creating a change", async () => {

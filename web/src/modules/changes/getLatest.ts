@@ -30,22 +30,14 @@ function skippedNote(result: ChangesUpdate): string | undefined {
 
 export function report(result: ChangesUpdate) {
   if (result.conflicts.some((c) => result.conflictSessions?.[c.branch])) return;
-  const summary = updatedSummary(result);
-  const skipped = skippedNote(result);
   if (result.conflicts.length > 0) {
-    const unsupported = result.conflictErrors && Object.entries(result.conflictErrors).map(([branch, reason]) => `${branch}: ${reason}`);
-    const description = [
-      `Left as they were: ${titles(result.conflicts)}.`,
-      ...(unsupported ?? []),
-      summary,
-      result.mainDiverged ? DIVERGED : undefined,
-      skipped,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    toast.warning(`Conflicts in ${plural(result.conflicts.length, "change")}`, { description });
+    toast.warning("Some drafts couldn't be updated", {
+      description: "Try syncing again. If it keeps happening, ask your site admin.",
+    });
     return;
   }
+  const summary = updatedSummary(result);
+  const skipped = skippedNote(result);
   if (result.mainDiverged) {
     toast.warning("Your draft is updated; the live site was left as is.", {
       description: [DIVERGED, summary, skipped].filter(Boolean).join(" "),
