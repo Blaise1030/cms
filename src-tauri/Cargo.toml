@@ -8,8 +8,15 @@ publish = false
 # Standalone: keeps the shell out of the root daemon package's build.
 [workspace]
 
+[lib]
+name = "workbench_desktop_lib"
+
 [build-dependencies]
 tauri-build = { version = "=2.7.3", features = [] }
 
 [dependencies]
 tauri = { version = "=2.12.4", features = [] }
+tauri-plugin-shell = "=2.5.0"
+tauri-plugin-single-instance = "=2.5.4"
+libc = "=0.2.190"
+serde_json = "=1.0.154"

@@ -5,7 +5,5 @@
 // - shutdown: SIGTERM (the daemon exits 0 and reaps its PTY children)
 
 fn main() {
-    tauri::Builder::default()
-        .run(tauri::generate_context!())
-        .expect("error while running Workbench");
+    workbench_desktop_lib::run();
 }
