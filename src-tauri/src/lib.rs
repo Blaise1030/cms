@@ -1,11 +1,15 @@
+mod busy;
 mod commands;
 pub mod links;
 pub mod logs;
 pub mod supervisor;
+mod updater;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{Manager, RunEvent, WebviewWindowBuilder};
 
 use supervisor::Supervisor;
+use updater::Updates;
 
 pub fn run() {
     let app = tauri::Builder::default()
@@ -18,10 +22,13 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Supervisor::default())
+        .manage(Updates::default())
         .invoke_handler(tauri::generate_handler![
             commands::collect_logs,
-            commands::retry_daemon
+            commands::retry_daemon,
+            commands::apply_update
         ])
         .setup(|app| {
             // Built here rather than from the config so new-window requests get a handler.
@@ -36,6 +43,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
                 .on_new_window(move |url, _| links::on_new_window(&handle, url))
+                .on_page_load(|window, payload| {
+                    if payload.event() == PageLoadEvent::Finished {
+                        updater::page_loaded(window.app_handle());
+                    }
+                })
                 .build()?;
             match window.url() {
                 Ok(url) => logs::shell(&format!("main window showing {url}")),
@@ -47,6 +59,7 @@ pub fn run() {
                     logs::shell(&format!("daemon unavailable: {e}"));
                 }
             });
+            updater::start(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -79,9 +92,15 @@ mod ipc_acl_tests {
         "ran"
     }
     #[tauri::command]
+    fn apply_update() -> &'static str {
+        "ran"
+    }
+    #[tauri::command]
     fn unlisted() -> &'static str {
         "ran"
     }
+
+    const SHELL_COMMANDS: [&str; 3] = ["collect_logs", "retry_daemon", "apply_update"];
 
     fn invoke(cmd: &str, url: &str) -> Result<String, serde_json::Value> {
         invoke_from("main", cmd, url)
@@ -89,7 +108,12 @@ mod ipc_acl_tests {
 
     fn invoke_from(label: &str, cmd: &str, url: &str) -> Result<String, serde_json::Value> {
         let app = mock_builder()
-            .invoke_handler(tauri::generate_handler![collect_logs, retry_daemon, unlisted])
+            .invoke_handler(tauri::generate_handler![
+                collect_logs,
+                retry_daemon,
+                apply_update,
+                unlisted
+            ])
             .build(tauri::generate_context!(test = true))
             .expect("mock app");
         let webview = WebviewWindowBuilder::new(&app, label, Default::default())
@@ -112,23 +136,48 @@ mod ipc_acl_tests {
 
     #[test]
     fn bundled_pages_can_invoke_shell_commands() {
-        for cmd in ["collect_logs", "retry_daemon"] {
-            assert_eq!(invoke(cmd, "tauri://localhost/error.html"), Ok("ran".into()), "{cmd}");
+        for cmd in SHELL_COMMANDS {
+            for page in ["error.html", "update.html"] {
+                let url = format!("tauri://localhost/{page}");
+                assert_eq!(invoke(cmd, &url), Ok("ran".into()), "{cmd} from {page}");
+            }
         }
     }
 
     #[test]
     fn daemon_origin_cannot_invoke_shell_commands() {
-        for cmd in ["collect_logs", "retry_daemon"] {
-            assert!(invoke(cmd, "http://127.0.0.1:51234/").is_err(), "{cmd}");
+        for cmd in SHELL_COMMANDS {
+            for url in [
+                "http://127.0.0.1:51234/",
+                "http://127.0.0.1:51234/preview/site/",
+            ] {
+                assert!(invoke(cmd, url).is_err(), "{cmd} from {url}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_webview_can_drive_the_updater_plugin() {
+        for cmd in [
+            "plugin:updater|check",
+            "plugin:updater|download_and_install",
+            "plugin:updater|install",
+        ] {
+            for url in ["tauri://localhost/update.html", "http://127.0.0.1:51234/"] {
+                assert!(invoke(cmd, url).is_err(), "{cmd} from {url}");
+            }
         }
     }
 
     #[test]
     fn secondary_windows_cannot_invoke_shell_commands() {
         let label = crate::links::secondary_label(1);
-        for cmd in ["collect_logs", "retry_daemon"] {
-            for url in ["http://127.0.0.1:51234/preview/site/", "tauri://localhost/error.html"] {
+        for cmd in SHELL_COMMANDS {
+            for url in [
+                "http://127.0.0.1:51234/preview/site/",
+                "tauri://localhost/error.html",
+                "tauri://localhost/update.html",
+            ] {
                 assert!(invoke_from(&label, cmd, url).is_err(), "{cmd} from {url}");
             }
         }

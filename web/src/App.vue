@@ -4,6 +4,7 @@ import { RouterView } from "vue-router";
 import CommandPalette from "@/app/CommandPalette.vue";
 import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
 import SetupCheck from "@/app/SetupCheck.vue";
+import UpdateNotice from "@/app/UpdateNotice.vue";
 import { SETUP_WAIT_MS, dismissSetup, setupDismissed, setupIncomplete } from "@/app/setup";
 import { Toaster } from "@/components/ui/sonner";
 import { useDaemon } from "@/core/daemon";
@@ -95,6 +96,7 @@ onBeforeUnmount(() => {
   <div v-else class="bg-background text-foreground h-svh overflow-hidden">
     <RouterView />
     <CommandPalette />
+    <UpdateNotice />
     <Toaster :theme="theme.resolved.value" />
   </div>
 </template>
