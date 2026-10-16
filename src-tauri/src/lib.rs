@@ -1,5 +1,6 @@
 mod busy;
 mod commands;
+mod dev;
 mod drag;
 pub mod links;
 pub mod logs;
@@ -73,7 +74,10 @@ pub fn run() {
                     logs::shell(&format!("daemon unavailable: {e}"));
                 }
             });
-            updater::start(app.handle());
+            // A dev build would otherwise download the latest release.
+            if dev::plan().ui.is_none() {
+                updater::start(app.handle());
+            }
             #[cfg(feature = "update-e2e")]
             update_e2e::start(app.handle());
             Ok(())
@@ -187,7 +191,7 @@ mod ipc_acl_tests {
             .build(tauri::generate_context!(test = true))
             .expect("mock app");
         for base_url in daemons {
-            crate::drag::allow_daemon_origin(&app, base_url).expect("grant");
+            crate::drag::allow_origin(&app, base_url).expect("grant");
         }
         let webview = WebviewWindowBuilder::new(&app, label, Default::default())
             .build()
@@ -267,6 +271,19 @@ mod ipc_acl_tests {
             restarted
         )
         .is_ok());
+    }
+
+    #[test]
+    fn in_desktop_dev_the_vite_origin_can_drag() {
+        // Granting localhost at all is debug-only; see drag::tests for the release refusal.
+        let granted = [DAEMON_BASE, "http://localhost:5173"];
+        assert!(respond_after(&granted, "main", START_DRAGGING, "http://localhost:5173/").is_ok());
+        assert!(refused_after(
+            &granted,
+            "main",
+            START_DRAGGING,
+            "http://localhost:5174/"
+        ));
     }
 
     #[test]

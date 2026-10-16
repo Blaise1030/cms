@@ -186,10 +186,15 @@ impl Control {
     }
 
     fn publish(self: &Arc<Self>, app: &AppHandle, info: ReadyInfo) -> DaemonHandle {
-        if let Err(e) = crate::drag::allow_daemon_origin(app, &info.base_url) {
-            logs::shell(&format!("window dragging unavailable: {e}"));
+        let ui = crate::dev::plan().ui;
+        let ui_base = ui.as_ref().map(|u| u.as_str().trim_end_matches('/'));
+        let origins = [Some(info.base_url.as_str()), ui_base];
+        for origin in origins.into_iter().flatten() {
+            if let Err(e) = crate::drag::allow_origin(app, origin) {
+                logs::shell(&format!("window dragging unavailable: {e}"));
+            }
         }
-        navigate(app, &info);
+        navigate(app, ui_base.unwrap_or(&info.base_url), &info.token);
         *lock(&self.current) = Some(info.clone());
         DaemonHandle {
             base_url: info.base_url,
@@ -315,10 +320,13 @@ fn launch(
         if slot.stopping {
             return Err(SupervisorError::Stopped);
         }
-        let (events, child) = app
-            .shell()
-            .sidecar(SIDECAR)
-            .and_then(|cmd| cmd.args(["serve", "--port", "0"]).spawn())
+        let plan = crate::dev::plan();
+        let command = match &plan.daemon {
+            Some(path) => Ok(app.shell().command(path)),
+            None => app.shell().sidecar(SIDECAR),
+        };
+        let (events, child) = command
+            .and_then(|cmd| cmd.args(["serve", "--port", &plan.port]).spawn())
             .map_err(|e| SupervisorError::Spawn(e.to_string()))?;
         logs::shell(&format!("spawned daemon pid {}", child.pid()));
         let pump_exited = exited.clone();
@@ -444,9 +452,10 @@ fn sleep_unless_stopping(control: &Control, delay: Duration) -> bool {
     !control.is_stopping()
 }
 
-fn navigate(app: &AppHandle, info: &ReadyInfo) {
-    match Url::parse(&format!("{}/?t={}", info.base_url, info.token)) {
-        Ok(url) => navigate_main(app, url, &info.base_url),
+/// `base` is the daemon, or Vite's UI in `just desktop-dev`.
+fn navigate(app: &AppHandle, base: &str, token: &str) {
+    match Url::parse(&format!("{base}/?t={token}")) {
+        Ok(url) => navigate_main(app, url, base),
         Err(e) => logs::shell(&format!("bad daemon URL: {e}")),
     }
 }

@@ -16,6 +16,21 @@ certificate, notarizes and staples it, and uploads:
 goes out without a signed app. The job's first step fails if any secret below is
 empty: unsigned or un-notarized builds are never shipped.
 
+## Local desktop development
+
+For the title-bar-less shell with web HMR (separate from `just dev`, which is browser-only):
+
+```sh
+just desktop-dev          # Vite :5180, daemon :7810 (defaults clear of just dev)
+# or: just desktop-dev 5173 7800
+```
+
+That runs `src-tauri/scripts/desktop-dev.sh`: builds a debug daemon, starts Vite, then
+`tauri dev` with identifier `com.workbench.desktop.dev` so an open Workbench.app is left
+alone. The window shows Vite; `/api`, `/ws` and `/preview` proxy to the daemon. Shell
+(`src-tauri/`) edits rebuild and relaunch; daemon (`src/`) edits need a restart.
+Ctrl-C stops everything. Release builds ignore the `WORKBENCH_DEV_*` env vars.
+
 ## Required GitHub secrets
 
 Set them under **Settings → Secrets and variables → Actions** of `Blaise1030/cms`

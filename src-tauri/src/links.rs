@@ -27,11 +27,11 @@ pub fn secondary_label(n: u64) -> String {
     format!("preview-{n}")
 }
 
-/// `daemon` is the running daemon's base URL, `None` while it is down or restarting. Only
-/// its exact origin counts; other loopback ports (e.g. a dev server) are ordinary web pages.
-pub fn classify(url: &Url, daemon: Option<&Url>) -> NewWindow {
+/// `app_origins` are the daemon (and, in `just desktop-dev`, Vite). Only their exact
+/// origins open as secondary windows; other loopback ports are ordinary web pages.
+pub fn classify(url: &Url, app_origins: &[Url]) -> NewWindow {
     match url.scheme() {
-        "http" | "https" if daemon.is_some_and(|d| d.origin() == url.origin()) => {
+        "http" | "https" if app_origins.iter().any(|o| o.origin() == url.origin()) => {
             NewWindow::Secondary
         }
         "http" | "https" => NewWindow::Browser,
@@ -40,11 +40,20 @@ pub fn classify(url: &Url, daemon: Option<&Url>) -> NewWindow {
 }
 
 pub fn on_new_window(app: &AppHandle, url: Url) -> NewWindowResponse<Wry> {
-    let daemon = app
+    let mut app_origins = Vec::new();
+    if let Some(daemon) = app
         .try_state::<Supervisor>()
         .and_then(|s| s.handle())
-        .and_then(|h| Url::parse(&h.base_url).ok());
-    match classify(&url, daemon.as_ref()) {
+        .and_then(|h| Url::parse(&h.base_url).ok())
+    {
+        app_origins.push(daemon);
+    }
+    // Vite proxies /preview to the daemon; treat its origin like the daemon's so
+    // "Open in new tab" still opens a managed secondary window in desktop-dev.
+    if let Some(ui) = crate::dev::plan().ui {
+        app_origins.push(ui);
+    }
+    match classify(&url, &app_origins) {
         NewWindow::Secondary => {
             open_secondary(app, url);
             NewWindowResponse::Deny
@@ -101,10 +110,14 @@ mod tests {
     use super::*;
 
     const DAEMON: &str = "http://127.0.0.1:51234";
+    const VITE: &str = "http://localhost:5180";
 
-    fn class(url: &str, daemon: Option<&str>) -> NewWindow {
-        let daemon = daemon.map(|d| d.parse::<Url>().unwrap());
-        classify(&url.parse().unwrap(), daemon.as_ref())
+    fn origins(bases: &[&str]) -> Vec<Url> {
+        bases.iter().map(|b| b.parse().unwrap()).collect()
+    }
+
+    fn class(url: &str, bases: &[&str]) -> NewWindow {
+        classify(&url.parse().unwrap(), &origins(bases))
     }
 
     #[test]
@@ -116,7 +129,7 @@ mod tests {
             "http://127.0.0.1@evil.example/",
             "http://127.0.0.1:51234@evil.example/",
         ] {
-            assert_eq!(class(url, Some(DAEMON)), NewWindow::Browser, "{url}");
+            assert_eq!(class(url, &[DAEMON]), NewWindow::Browser, "{url}");
         }
     }
 
@@ -126,8 +139,21 @@ mod tests {
             "http://127.0.0.1:51234/preview/site/",
             "http://127.0.0.1:51234/api/docs/branch-protection",
         ] {
-            assert_eq!(class(url, Some(DAEMON)), NewWindow::Secondary, "{url}");
+            assert_eq!(class(url, &[DAEMON]), NewWindow::Secondary, "{url}");
         }
+    }
+
+    #[test]
+    fn vite_preview_pages_open_in_a_secondary_window_in_desktop_dev() {
+        assert_eq!(
+            class("http://localhost:5180/preview/site/", &[DAEMON, VITE]),
+            NewWindow::Secondary
+        );
+        // Without the Vite origin in the list, same URL is a normal web page.
+        assert_eq!(
+            class("http://localhost:5180/preview/site/", &[DAEMON]),
+            NewWindow::Browser
+        );
     }
 
     #[test]
@@ -144,14 +170,14 @@ mod tests {
             "http://[::1]:51234/",
             "https://127.0.0.1:51234/",
         ] {
-            assert_eq!(class(url, Some(DAEMON)), NewWindow::Browser, "{url}");
+            assert_eq!(class(url, &[DAEMON]), NewWindow::Browser, "{url}");
         }
     }
 
     #[test]
     fn without_a_running_daemon_nothing_is_the_daemon() {
         assert_eq!(
-            class("http://127.0.0.1:51234/preview/site/", None),
+            class("http://127.0.0.1:51234/preview/site/", &[]),
             NewWindow::Browser
         );
     }
@@ -164,8 +190,8 @@ mod tests {
             "javascript:alert(1)",
             "mailto:a@b.c",
         ] {
-            assert_eq!(class(url, Some(DAEMON)), NewWindow::Deny, "{url}");
-            assert_eq!(class(url, None), NewWindow::Deny, "{url}");
+            assert_eq!(class(url, &[DAEMON]), NewWindow::Deny, "{url}");
+            assert_eq!(class(url, &[]), NewWindow::Deny, "{url}");
         }
     }
 }
