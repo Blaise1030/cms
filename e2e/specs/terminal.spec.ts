@@ -1,5 +1,5 @@
 import { startChange } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, selectFakeProvider, test } from "../fixtures/workbench";
 
 test("terminal shows the CLI and checkpoints a turn", async ({ page, workbench }) => {
   const { origin, token, projectId } = workbench;
@@ -10,7 +10,7 @@ test("terminal shows the CLI and checkpoints a turn", async ({ page, workbench }
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("active-change")).toHaveText("Terminal e2e");
 
-  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
+  await selectFakeProvider(page);
   await page.getByTestId("terminal-start").click();
 
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
@@ -33,7 +33,7 @@ test("terminal leaves CLI output visible after exit", async ({ page, workbench }
   await startChange(workbench, "Terminal exit");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible();
-  await page.getByTestId("terminal-provider").getByRole("radio", { name: "fake" }).check();
+  await selectFakeProvider(page);
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY");
 
