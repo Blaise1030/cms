@@ -51,6 +51,9 @@ jobs:
           pnpm -C web build
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+      # content_catalog reads templates/astro-marketing via its Node helper, which needs node_modules.
+      - name: Install template deps
+        run: npm --prefix templates/astro-marketing ci
       - name: Test
         run: cargo test --locked
 

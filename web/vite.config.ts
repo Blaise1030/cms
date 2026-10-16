@@ -5,6 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { pwaOptions } from "./pwa.config.ts";
 
+// `just desktop-dev` moves both so it can run next to `just dev`; the desktop shell reads
+// WORKBENCH_DAEMON_PORT too, to start its daemon where this proxies.
+const daemonPort = process.env.WORKBENCH_DAEMON_PORT ?? "7800";
+const uiPort = Number(process.env.WORKBENCH_VITE_PORT ?? 5173);
+
 export default defineConfig({
   plugins: [vue(), tailwindcss(), VitePWA(pwaOptions)],
   resolve: {
@@ -21,14 +26,14 @@ export default defineConfig({
   },
   server: {
     // Fixed so the daemon's dev ready link (`just dev`, --ui-url) always points here.
-    port: 5173,
+    port: uiPort,
     strictPort: true,
     proxy: {
       // `ws: true` is required: the terminal lives at `/api/terminal/{id}/ws`.
       // The string form proxies HTTP only, so the panel stays blank in `just dev`.
-      "/api": { target: "http://127.0.0.1:7800", ws: true },
-      "/ws": { target: "ws://127.0.0.1:7800", ws: true },
-      "/preview": "http://127.0.0.1:7800",
+      "/api": { target: `http://127.0.0.1:${daemonPort}`, ws: true },
+      "/ws": { target: `ws://127.0.0.1:${daemonPort}`, ws: true },
+      "/preview": `http://127.0.0.1:${daemonPort}`,
     },
   },
 });

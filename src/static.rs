@@ -107,8 +107,8 @@ pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
     }
     let rel = path.trim_start_matches('/');
     // Project routes may end in a file name (`/p/site/code/src/index.astro`) yet are still pages.
-    let looks_like_file = !path.starts_with("/p/")
-        && rel.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
+    let looks_like_file =
+        !path.starts_with("/p/") && rel.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
     let target = if rel.is_empty() { "index.html" } else { rel };
     if let Some(res) = asset_response(target, &headers, &method) {
         return res;

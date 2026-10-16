@@ -63,6 +63,8 @@ fn deps_stale(dir: &std::path::Path) -> bool {
 /// Record the manifests a successful `npm install` in `dir` ran against.
 pub(crate) fn record_deps(dir: &std::path::Path) {
     if let Some(fp) = deps_fingerprint(dir) {
+        // A package with no dependencies gets no `node_modules` from `npm install`.
+        let _ = std::fs::create_dir_all(dir.join("node_modules"));
         let _ = std::fs::write(dir.join(DEPS_MARKER), fp);
     }
 }
@@ -287,7 +289,10 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                 match npm && deps_stale(&project.dir) {
                     true => match crate::projects::npm_install(&project.dir).await {
                         Ok(()) => run_once(&shared, &id, project.dir, port, &mut stop).await,
-                        Err(e) => Outcome::Died { message: e.message, stable: false },
+                        Err(e) => Outcome::Died {
+                            message: e.message,
+                            stable: false,
+                        },
                     },
                     false => run_once(&shared, &id, project.dir, port, &mut stop).await,
                 }
@@ -632,6 +637,17 @@ mod tests {
         record_deps(dir);
         std::fs::write(dir.join("package.json"), r#"{"dependencies":{"x":"1"}}"#).unwrap();
         assert!(deps_stale(dir), "manifest changed");
+    }
+
+    #[test]
+    fn deps_stay_fresh_for_a_package_without_dependencies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // `npm install` with no dependencies writes a lockfile but no `node_modules`.
+        std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
+        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        record_deps(dir);
+        assert!(!deps_stale(dir));
     }
 
     #[test]

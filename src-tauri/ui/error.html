@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workbench</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        height: 100vh;
+        box-sizing: border-box;
+        padding-top: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 14px -apple-system, BlinkMacSystemFont, sans-serif;
+        background: Canvas;
+        color: CanvasText;
+      }
+      main { max-width: 440px; padding: 24px; text-align: center; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      p { margin: 0 0 20px; color: #888; line-height: 1.5; }
+      button { font: inherit; padding: 6px 16px; margin: 0 4px; }
+      #status { margin-top: 16px; min-height: 1.5em; font-size: 12px; }
+    </style>
+  </head>
+  <body data-tauri-drag-region>
+    <main>
+      <h1>Workbench stopped working</h1>
+      <p id="message">Workbench's background service could not be started.</p>
+      <button id="retry">Retry</button>
+      <button id="collect">Collect logs</button>
+      <div id="status"></div>
+    </main>
+    <script>
+      const { invoke } = window.__TAURI__.core;
+      const status = document.getElementById("status");
+      const message = new URLSearchParams(location.search).get("message");
+      if (message) document.getElementById("message").textContent = message;
+
+      document.getElementById("retry").addEventListener("click", async () => {
+        status.textContent = "Restarting…";
+        try {
+          await invoke("retry_daemon");
+        } catch (e) {
+          status.textContent = `Could not restart: ${e}`;
+        }
+      });
+
+      document.getElementById("collect").addEventListener("click", async () => {
+        status.textContent = "";
+        try {
+          const saved = await invoke("collect_logs");
+          if (saved) status.textContent = `Saved logs to ${saved}`;
+        } catch (e) {
+          status.textContent = `Could not save logs: ${e}`;
+        }
+      });
+    </script>
+  </body>
+</html>

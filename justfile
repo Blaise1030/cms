@@ -17,6 +17,12 @@ dev:
     pnpm -C web dev & \
     wait
 
+# Desktop shell in dev mode: `tauri dev` (rebuilds and relaunches on src-tauri changes) with a
+# debug daemon, and the title-bar-less window showing Vite with HMR. Ports default clear of
+# `dev`, so both can run. Daemon (src/) changes need a restart. Ctrl-C stops everything.
+desktop-dev vite_port="5180" daemon_port="7810":
+    src-tauri/scripts/desktop-dev.sh {{vite_port}} {{daemon_port}}
+
 # Build the SPA (+ PWA service worker, checked), then the release binary that embeds it
 build:
     pnpm -C web install --frozen-lockfile

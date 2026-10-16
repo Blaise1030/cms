@@ -604,11 +604,13 @@ impl GithubAuth {
 
     /// Run `gh` without a terminal, with a deadline. Only exit status, stdout and stderr
     /// come back; callers must not log stdout.
+    #[allow(clippy::result_large_err)] // GhFail carries ApiError; boxing every call site is noisier.
     async fn run_gh(&self, args: &[&str], secs: u64) -> Result<GhOutput, GhFail> {
         self.run_gh_input(args, secs, None).await
     }
 
     /// [`Self::run_gh`] with `input` written to gh's stdin.
+    #[allow(clippy::result_large_err)]
     async fn run_gh_input(
         &self,
         args: &[&str],
@@ -1539,9 +1541,7 @@ fn github_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
     }
     if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
         let text: String = String::from_utf8_lossy(body).chars().take(200).collect();
-        return ApiError::conflict(format!(
-            "GitHub could not open the pull request: {text}"
-        ));
+        return ApiError::conflict(format!("GitHub could not open the pull request: {text}"));
     }
     let text: String = String::from_utf8_lossy(body).chars().take(300).collect();
     ApiError::github(format!("GitHub returned {status}: {text}"))
@@ -2165,9 +2165,8 @@ esac"#,
         assert_eq!(pr.number, 7);
 
         let calls = std::fs::read_to_string(dir.join("gh.calls")).unwrap();
-        assert!(calls.contains(
-            "api --method GET /repos/acme/site/pulls?head=acme:content%2Fx&state=open"
-        ));
+        assert!(calls
+            .contains("api --method GET /repos/acme/site/pulls?head=acme:content%2Fx&state=open"));
         assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
         let sent: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("gh.stdin")).unwrap()).unwrap();

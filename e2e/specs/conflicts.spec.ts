@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { getLatest, startChange } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -33,10 +34,8 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New page: Home");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New page: Home");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Home");
 
   fs.writeFileSync(path.join(projectDir, hero), '<section id="hero"><h1>Your headline</h1></section>\n');
@@ -45,7 +44,8 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   const before = git(projectDir, ["rev-parse", "HEAD"]);
   const latest = pushConflictingMain(tmp, bareRemote, hero);
 
-  await page.getByTestId("get-latest").click();
+  await getLatest(workbench);
+  await page.reload();
   await expect(page.getByTestId("conflict-view")).toBeVisible();
   await expect(page.getByTestId("conflict-file")).toContainText("hero.mdx");
   await expect(page.frameLocator('iframe[title="yours preview"]').locator("h1")).toHaveText("Your headline");
@@ -68,17 +68,16 @@ test("writer can abandon a conflict without moving the branch", async ({ page, w
   const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New page: Home");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New page: Home");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Home");
   fs.writeFileSync(path.join(projectDir, "index.html"), "<h1>Your headline</h1>\n");
   git(projectDir, ["add", "index.html"]);
   git(projectDir, ["commit", "-m", "your headline"]);
   const before = git(projectDir, ["rev-parse", "HEAD"]);
   pushConflictingMain(tmp, bareRemote);
-  await page.getByTestId("get-latest").click();
+  await getLatest(workbench);
+  await page.reload();
   await expect(page.getByTestId("conflict-view")).toBeVisible();
   await page.getByTestId("abandon-conflict").click();
   await page.getByTestId("confirm-abandon").click();
@@ -95,15 +94,14 @@ test("writer resolves a deleted-versus-edited page by choosing a side", async ({
   git(projectDir, ["push", "origin", "main"]);
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("Remove home page");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "Remove home page");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Remove home page");
   git(projectDir, ["rm", "index.html"]);
   git(projectDir, ["commit", "-m", "remove home"]);
   pushConflictingMain(tmp, bareRemote);
-  await page.getByTestId("get-latest").click();
+  await getLatest(workbench);
+  await page.reload();
   await expect(page.getByTestId("conflict-file")).toContainText("index.html");
   await expect(page.getByTestId("keep-yours")).toHaveText("Keep your deletion");
   await expect(page.getByTestId("keep-both")).toBeDisabled();

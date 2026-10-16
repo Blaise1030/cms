@@ -245,7 +245,10 @@ async fn history_endpoint_lists_versions() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir, id) = content_project(tmp.path()).await;
     set_title(&dir, "Edited");
-    git::checkpoint(&dir, "edit welcome").await.unwrap().unwrap();
+    git::checkpoint(&dir, "edit welcome")
+        .await
+        .unwrap()
+        .unwrap();
 
     let (s, v) = call(&app, req("GET", &history_uri(&id, "welcome", None), None)).await;
     assert_eq!(s, StatusCode::OK, "{v}");
@@ -274,7 +277,10 @@ async fn version_endpoint_returns_parsed_old_content() {
     assert_eq!(v["fields"]["title"], "Old");
     assert_eq!(v["parseable"], true);
     assert!(v["source"].as_str().unwrap().contains("Old"));
-    assert!(v["body"].as_str().unwrap().contains("We're glad you're here"));
+    assert!(v["body"]
+        .as_str()
+        .unwrap()
+        .contains("We're glad you're here"));
 }
 
 #[tokio::test]
@@ -309,7 +315,11 @@ async fn version_endpoint_returns_old_content_after_rename() {
 
     let (s, v) = call(
         &app,
-        req("GET", &history_uri(&id, "welcome2", Some(&before.sha)), None),
+        req(
+            "GET",
+            &history_uri(&id, "welcome2", Some(&before.sha)),
+            None,
+        ),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");

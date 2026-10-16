@@ -238,7 +238,10 @@ async fn restore_resets_files_and_cleans_untracked() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["restored"], base);
     assert_eq!(git_cli(&dir, &["rev-parse", "HEAD"]), base);
-    assert_eq!(std::fs::read_to_string(dir.join(WELCOME)).unwrap(), original);
+    assert_eq!(
+        std::fs::read_to_string(dir.join(WELCOME)).unwrap(),
+        original
+    );
     assert!(dir.join("AGENTS.md").is_file());
     assert!(!dir.join("scratch").exists());
     assert_eq!(git_cli(&dir, &["status", "--porcelain"]), "");
@@ -374,7 +377,11 @@ async fn tree_and_file_reads() {
 
     let (s, v) = call(
         &app,
-        req("GET", &format!("/api/file?project=site&path={WELCOME}"), None),
+        req(
+            "GET",
+            &format!("/api/file?project=site&path={WELCOME}"),
+            None,
+        ),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");

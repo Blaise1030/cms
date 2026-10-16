@@ -3,6 +3,7 @@ import { computed, type Component } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { Code, FileText, History, House, MonitorPlay, Palette } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { isMacDesktop } from "@/lib/desktop";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
 const props = defineProps<{ projectId: string }>();
@@ -18,12 +19,20 @@ const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "history", label: "History", icon: History },
 ];
 
+// On desktop the rail starts at the top bar's height (pt-11), below the traffic lights.
+const macDesktop = isMacDesktop();
+
 const item = "relative flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
 </script>
 
 <template>
   <TooltipProvider :delay-duration="300">
-    <nav class="flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r bg-background py-2" aria-label="Project" data-testid="project-rail">
+    <nav
+      :class="['flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r bg-background pb-2', macDesktop ? 'pt-11' : 'pt-2']"
+      aria-label="Project"
+      :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
+      data-testid="project-rail"
+    >
       <Tooltip>
         <TooltipTrigger as-child>
           <RouterLink to="/" :class="[item, 'mb-2 border bg-muted/50 text-foreground']" aria-label="All projects" data-testid="project-rail-home">

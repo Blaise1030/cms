@@ -327,6 +327,15 @@ export interface GithubStatus {
   user: GithubUser | null;
 }
 
+/** `GET /api/setup/status`: which prerequisites this machine has. */
+export interface SetupStatus {
+  git: boolean;
+  gh: boolean;
+  githubSignedIn: boolean;
+  providers: { id: string; name: string; available: boolean }[];
+  projectsDir: string;
+}
+
 export interface DeviceStart {
   userCode: string;
   verificationUri: string;

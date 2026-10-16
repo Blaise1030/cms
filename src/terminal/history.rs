@@ -140,7 +140,10 @@ mod tests {
         assert_eq!(updated.title.as_deref(), Some("t"));
         let ids: Vec<_> = list(dir.path(), "p").into_iter().map(|r| r.id).collect();
         assert_eq!(ids, ["b", "a"], "updating a record keeps its place");
-        assert_eq!(get(dir.path(), "p", "a").unwrap().title.as_deref(), Some("t"));
+        assert_eq!(
+            get(dir.path(), "p", "a").unwrap().title.as_deref(),
+            Some("t")
+        );
         assert!(update(dir.path(), "p", "nope", |_| {}).unwrap().is_none());
         assert!(list(dir.path(), "other").is_empty());
     }

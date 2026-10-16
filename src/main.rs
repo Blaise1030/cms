@@ -124,6 +124,7 @@ async fn main() -> ExitCode {
         },
         ui_url,
         hook_exe: None,
+        search_path: None,
     };
     match workbench::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

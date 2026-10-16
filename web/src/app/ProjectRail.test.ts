@@ -40,3 +40,20 @@ it("links each tab and marks the current one, including nested pages", async () 
   await w.get('[data-testid="project-rail-home"]').trigger("click"); await flushPromises();
   expect(router.currentRoute.value.path).toBe("/");
 });
+
+it("keeps its buttons below the macOS traffic lights and drags the window from above them", async () => {
+  const rail = async () => (await setup("/p/site/preview")).w.get('[data-testid="project-rail"]');
+
+  const browser = await rail();
+  expect(browser.attributes("data-tauri-drag-region")).toBeUndefined();
+  expect(browser.classes()).not.toContain("pt-11");
+
+  document.documentElement.dataset.desktop = "macos";
+  try {
+    const desktop = await rail();
+    expect(desktop.attributes("data-tauri-drag-region")).toBe("deep");
+    expect(desktop.classes()).toContain("pt-11");
+  } finally {
+    delete document.documentElement.dataset.desktop;
+  }
+});

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workbench</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        height: 100vh;
+        box-sizing: border-box;
+        padding-top: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 14px -apple-system, BlinkMacSystemFont, sans-serif;
+        background: Canvas;
+        color: CanvasText;
+      }
+      main { max-width: 440px; padding: 24px; text-align: center; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      p { margin: 0 0 20px; color: #888; line-height: 1.5; }
+      button { font: inherit; padding: 6px 16px; margin: 0 4px; }
+      #status { margin-top: 16px; min-height: 1.5em; font-size: 12px; }
+    </style>
+  </head>
+  <body data-tauri-drag-region>
+    <main>
+      <h1 id="title">Update Workbench</h1>
+      <p>
+        Workbench will stop its background service, install the update and reopen. Running
+        terminal sessions end.
+      </p>
+      <button id="apply">Restart to update</button>
+      <button id="back">Not now</button>
+      <div id="status"></div>
+    </main>
+    <script>
+      // Applies only on an explicit click: other pages can navigate here too.
+      const { invoke } = window.__TAURI__.core;
+      const status = document.getElementById("status");
+      const apply = document.getElementById("apply");
+      const version = new URLSearchParams(location.search).get("version");
+      if (version) document.getElementById("title").textContent = `Update Workbench to ${version}`;
+
+      apply.addEventListener("click", async () => {
+        apply.disabled = true;
+        status.textContent = "Installing the update…";
+        try {
+          await invoke("apply_update");
+        } catch (e) {
+          status.textContent = String(e);
+          apply.disabled = false;
+        }
+      });
+
+      document.getElementById("back").addEventListener("click", () => history.back());
+    </script>
+  </body>
+</html>
