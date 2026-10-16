@@ -1,5 +1,5 @@
-import { terminalCheckpoint } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { expect, openPrMenu, test } from "../fixtures/workbench";
 
 test("browser bar shows PR state, checks and preview link; changes menu shows PR state", async ({
   page,
@@ -10,10 +10,8 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Launch week");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New post: Launch week");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
   await terminalCheckpoint(workbench, "edit the notes");
 
@@ -23,8 +21,9 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   // Draft PR, checks pending, nothing deployed.
   github.setPrStatus({ checkRuns: [{ status: "in_progress", conclusion: null }] });
   await page.getByTestId("share-preview").click();
-  await expect(page.getByTestId("pr-link")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
 
+  await openPrMenu(page);
   const pill = page.getByTestId("pr-status");
   await expect(pill).toHaveText("Draft · Checks pending");
   await expect(page.getByTestId("preview-deploy-link")).toHaveCount(0);
@@ -36,6 +35,7 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
     deployment: { environment_url: "https://content-launch-week.site.pages.dev" },
   });
   await page.reload();
+  await openPrMenu(page);
   await expect(pill).toHaveText("Open · Checks passing", { timeout: 30_000 });
   const link = page.getByTestId("preview-deploy-link");
   await expect(link).toHaveAttribute("href", "https://content-launch-week.site.pages.dev");
@@ -44,7 +44,9 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   // An approving review.
   github.setPrStatus({ reviews: [{ user: { login: "grace" }, state: "APPROVED" }] });
   await page.reload();
+  await openPrMenu(page);
   await expect(pill).toHaveText("Approved · Checks passing", { timeout: 30_000 });
+  await page.keyboard.press("Escape");
 
   // The changes menu shows each change's PR state.
   await page.getByTestId("changes-menu").click();

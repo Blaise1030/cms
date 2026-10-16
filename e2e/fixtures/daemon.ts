@@ -71,6 +71,44 @@ export async function api(
 }
 
 /**
+ * Start a change the way the app's Content and Design "Create change" prompts do. The Changes
+ * menu and command palette hand "New change" to the coding agent instead, which the fake CLI
+ * cannot act on, so specs start changes here and reload the page to pick them up.
+ */
+export async function startChange(
+  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  title: string,
+): Promise<{ branch: string; title: string }> {
+  const res = await api(env.origin, env.token, "POST", "/api/changes", {
+    project: env.projectId,
+    title,
+  });
+  if (!res.ok) throw new Error(`start change failed: ${await res.text()}`);
+  return (await res.json()) as { branch: string; title: string };
+}
+
+export type ChangesUpdate = {
+  mainUpdated: boolean;
+  updated: { branch: string; title: string }[];
+  conflicts: { branch: string; title: string }[];
+  skipped?: { branch: string } | null;
+};
+
+/**
+ * The daemon's Get latest. The app's Sync button hands this to the coding agent instead, so specs
+ * call it here and reload the page, which opens any conflict it left.
+ */
+export async function getLatest(
+  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+): Promise<ChangesUpdate> {
+  const res = await api(env.origin, env.token, "POST", "/api/changes/update", {
+    project: env.projectId,
+  });
+  if (!res.ok) throw new Error(`get latest failed: ${await res.text()}`);
+  return (await res.json()) as ChangesUpdate;
+}
+
+/**
  * Drive a fake CLI turn over the terminal WebSocket: start session, send `edit …`, wait for checkpoint.
  */
 export async function terminalCheckpoint(

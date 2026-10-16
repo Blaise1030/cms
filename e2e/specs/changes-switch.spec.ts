@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, terminalCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -32,19 +32,18 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // First change + distinct file edit.
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: First change");
-  await page.getByRole("button", { name: "Create change" }).click();
+  await startChange(workbench, "New post: First change");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("First change");
   await terminalCheckpoint(workbench, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-first-change\n");
 
-  // Second (newer) change + different edit.
-  await page.getByTestId("changes-menu").click();
-  await page.getByTestId("new-change").click();
-  await page.getByLabel("Change title").fill("New post: Second change");
-  await page.getByRole("button", { name: "Create change" }).click();
+  // Second (newer) change + different edit. "Newest first" compares commit times in whole
+  // seconds, so its commits must land in a later second than the first change's.
+  const firstAt = Number(git(projectDir, ["log", "-1", "--format=%ct", "content/first-change"]));
+  await expect.poll(() => Math.floor(Date.now() / 1000)).toBeGreaterThan(firstAt);
+  await startChange(workbench, "New post: Second change");
+  await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Second change");
   await terminalCheckpoint(workbench, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-second-change\n");

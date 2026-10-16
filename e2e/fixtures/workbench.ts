@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { test as base } from "@playwright/test";
+import { expect, test as base, type Page } from "@playwright/test";
 
 import type { WorkbenchEnv } from "./daemon";
 import { api, startWorkbench } from "./daemon";
@@ -35,4 +35,10 @@ export const test = base.extend<{ workbench: WorkbenchEnv; templateProject: Temp
   ],
 });
 
-export { expect } from "@playwright/test";
+/** Open the header's pull request menu (status, GitHub link, Ready for review). Escape closes it. */
+export async function openPrMenu(page: Page) {
+  await page.getByTestId("pr-menu").click();
+  await expect(page.getByTestId("pr-link")).toBeVisible();
+}
+
+export { expect };
