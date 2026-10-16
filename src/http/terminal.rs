@@ -98,7 +98,9 @@ fn state_dir(state: &AppState) -> PathBuf {
 /// `POST /api/terminal` `{ project, provider, resume? }` → `{ running: true, sessionId }`.
 pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: StartRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!("expected JSON body {{project, provider, resume?}}: {e}"))
+        ApiError::badreq(format!(
+            "expected JSON body {{project, provider, resume?}}: {e}"
+        ))
     })?;
     let project = state
         .projects
@@ -167,7 +169,14 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
         .await?;
     state.terminals.set_history_id(&req.project, &record.id);
     let session_id = record.id.clone();
-    if let Err(e) = history::insert(&state_dir, &req.project, SessionRecord { updated_at: now, ..record }) {
+    if let Err(e) = history::insert(
+        &state_dir,
+        &req.project,
+        SessionRecord {
+            updated_at: now,
+            ..record
+        },
+    ) {
         eprintln!("workbench: cannot save terminal session history: {e}");
     }
     Ok(Json(json!({ "running": true, "sessionId": session_id })))
@@ -199,8 +208,8 @@ async fn create_cursor_chat(provider: &Provider, dir: &FsPath) -> Option<String>
     }
     let text = String::from_utf8_lossy(&out.stdout);
     let id = text.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
-    let plausible = (8..=64).contains(&id.len())
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let plausible =
+        (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
     plausible.then(|| id.to_string())
 }
 
@@ -211,7 +220,14 @@ fn uuid_v4() -> String {
     hex[12] = b'4';
     hex[16] = b"89ab"[(hex[16] as usize) % 4];
     let s = String::from_utf8(hex).unwrap_or_default();
-    format!("{}-{}-{}-{}-{}", &s[..8], &s[8..12], &s[12..16], &s[16..20], &s[20..])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &s[..8],
+        &s[8..12],
+        &s[12..16],
+        &s[16..20],
+        &s[20..]
+    )
 }
 
 /// `GET /api/terminal/{project}` → `{ running, provider?, sessionId?, busy? }`.
@@ -283,7 +299,11 @@ pub async fn attach(
         "image/jpeg" => "jpg",
         "image/gif" => "gif",
         "image/webp" => "webp",
-        _ => return Err(ApiError::badreq(format!("unsupported attachment type: {mime:?}"))),
+        _ => {
+            return Err(ApiError::badreq(format!(
+                "unsupported attachment type: {mime:?}"
+            )))
+        }
     };
     let dir = state_dir(&state).join(&project).join("attachments");
     tokio::fs::create_dir_all(&dir).await?;
@@ -418,12 +438,12 @@ fn record_turn(state: &AppState, req: &TurnEndRequest) {
     }
 }
 
-pub async fn turn_end(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<Json<Value>, ApiError> {
-    let req: TurnEndRequest = serde_json::from_slice(&body)
-        .map_err(|e| ApiError::badreq(format!("expected JSON body {{project, token, summary?}}: {e}")))?;
+pub async fn turn_end(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let req: TurnEndRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!(
+            "expected JSON body {{project, token, summary?}}: {e}"
+        ))
+    })?;
     if !state.terminals.token_matches(&req.project, &req.token) {
         return Err(ApiError::unauth("invalid hook token").with_status(403));
     }
@@ -432,7 +452,9 @@ pub async fn turn_end(
     record_turn(&state, &req);
     state.terminals.set_idle(&req.project);
     // The agent may have started or switched changes this turn.
-    state.events.emit("terminal.turn", json!({ "projectId": req.project }));
+    state
+        .events
+        .emit("terminal.turn", json!({ "projectId": req.project }));
 
     let dir = project_dir(&state, &req.project).await?;
     if let Err(e) = checkpoints::require_change(&state, &req.project).await {
@@ -467,7 +489,10 @@ pub async fn turn_end(
         None => false,
     };
     // The agent is idle and its edits are committed: safe to move the checkout now.
-    tokio::spawn(changes::finish_pending_update(state.clone(), req.project.clone()));
+    tokio::spawn(changes::finish_pending_update(
+        state.clone(),
+        req.project.clone(),
+    ));
     Ok(Json(json!({ "committed": committed })))
 }
 
@@ -480,7 +505,10 @@ mod tests {
         let id = uuid_v4();
         let groups: Vec<_> = id.split('-').map(str::len).collect();
         assert_eq!(groups, [8, 4, 4, 4, 12], "{id}");
-        assert!(id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()), "{id}");
+        assert!(
+            id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()),
+            "{id}"
+        );
         assert_eq!(&id[14..15], "4", "{id}");
         assert!("89ab".contains(&id[19..20]), "{id}");
         assert_ne!(id, uuid_v4());

@@ -157,9 +157,7 @@ async fn create_carries_edits_from_main_but_refuses_from_another_change() {
         "edits made on main move into the new change"
     );
 
-    let err = changes::create(&work, "Another")
-        .await
-        .unwrap_err();
+    let err = changes::create(&work, "Another").await.unwrap_err();
     assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
     assert!(
         err.message.to_lowercase().contains("checkpoint"),

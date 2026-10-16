@@ -153,7 +153,10 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
         return Ok(None);
     }
     // A merge the agent is still resolving: committing now would seal in conflict markers.
-    if run(dir, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).await.is_ok() {
+    if run(dir, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+        .await
+        .is_ok()
+    {
         return Ok(None);
     }
     let summary = clean_summary(summary);

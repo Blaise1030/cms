@@ -289,7 +289,10 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                 match npm && deps_stale(&project.dir) {
                     true => match crate::projects::npm_install(&project.dir).await {
                         Ok(()) => run_once(&shared, &id, project.dir, port, &mut stop).await,
-                        Err(e) => Outcome::Died { message: e.message, stable: false },
+                        Err(e) => Outcome::Died {
+                            message: e.message,
+                            stable: false,
+                        },
                     },
                     false => run_once(&shared, &id, project.dir, port, &mut stop).await,
                 }

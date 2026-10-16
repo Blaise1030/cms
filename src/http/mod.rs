@@ -91,8 +91,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/terminal/{project}/sessions", get(terminal::sessions))
         .route(
             "/api/terminal/{project}/attachments",
-            post(terminal::attach)
-                .layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
+            post(terminal::attach).layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
         )
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))

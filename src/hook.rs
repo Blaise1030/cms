@@ -90,6 +90,7 @@ pub async fn turn_end(payload_arg: Option<String>) -> ExitCode {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)] // Serializes env mutation across async tests.
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
@@ -131,7 +132,10 @@ mod tests {
             session_id_from_payload(r#"{"thread-id":"t1","session_id":"s1"}"#),
             Some("t1".into())
         );
-        assert_eq!(session_id_from_payload(r#"{"session_id":"s1"}"#), Some("s1".into()));
+        assert_eq!(
+            session_id_from_payload(r#"{"session_id":"s1"}"#),
+            Some("s1".into())
+        );
         assert_eq!(session_id_from_payload(r#"{"session_id":" "}"#), None);
     }
 

@@ -481,9 +481,10 @@ fn forget(inner: &Inner, project_id: &str, session: &Arc<Session>) {
 }
 
 fn emit_busy(inner: &Inner, project_id: &str, busy: bool) {
-    inner
-        .events
-        .emit("terminal.busy", json!({ "projectId": project_id, "busy": busy }));
+    inner.events.emit(
+        "terminal.busy",
+        json!({ "projectId": project_id, "busy": busy }),
+    );
 }
 
 fn no_terminal(project_id: &str) -> ApiError {
@@ -501,12 +502,11 @@ fn process_group_id(pid: Option<u32>) -> Option<libc::pid_t> {
     let deadline = std::time::Instant::now() + Duration::from_millis(50);
     loop {
         let pgid = unsafe { libc::getpgid(pid) };
-        if let Some(pgid) = group_target(Some(pgid)) {
+        {
+            let pgid = group_target(Some(pgid))?;
             if pgid != ours {
                 return Some(pgid);
             }
-        } else {
-            return None;
         }
         if std::time::Instant::now() >= deadline {
             return None;

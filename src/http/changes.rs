@@ -260,7 +260,9 @@ pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<V
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
     let leave_checkout = state.terminals.status(&req.project).is_some();
-    Ok(Json(run_update(&state, &req.project, leave_checkout).await?))
+    Ok(Json(
+        run_update(&state, &req.project, leave_checkout).await?,
+    ))
 }
 
 /// Finish a Get latest that skipped the checked-out change, now that nothing is editing it
