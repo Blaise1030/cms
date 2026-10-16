@@ -67,11 +67,15 @@ const offBlocked = daemon.on("checkpoint.blocked", (e) => {
 const offUpdated = daemon.on("changes.updated", (e) => {
   if (e.projectId !== props.id) return;
   if (e.error || !e.result) {
-    toast.error(e.error ?? "Couldn't sync with main");
+    toast.error(e.error ?? "Couldn't sync with the live site");
     return;
   }
   report(e.result);
   void changes.applyUpdate(props.id, e.result).catch(() => undefined);
+});
+const offAutoResolve = daemon.on("changes.auto_resolve", (e) => {
+  if (e.projectId !== props.id) return;
+  void changes.onAutoResolve(props.id, e).catch(() => undefined);
 });
 const offTurn = daemon.on("terminal.turn", (e) => {
   if (e.projectId !== props.id) return;
@@ -80,6 +84,7 @@ const offTurn = daemon.on("terminal.turn", (e) => {
 onBeforeUnmount(() => {
   offBlocked();
   offUpdated();
+  offAutoResolve();
   offTurn();
   changes.stopStatusPolling();
 });

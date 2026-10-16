@@ -25,19 +25,20 @@ beforeEach(() => {
 });
 
 describe("GetLatestButton", () => {
-  it("asks the agent to bring in the latest main instead of syncing itself", async () => {
+  it("is labelled for writers", () => {
+    const { w } = mountButton();
+    const button = w.find("[data-testid='get-latest']");
+    expect(button.attributes("aria-label")).toBe("Sync with live site");
+    expect(button.attributes("title")).toBe("Sync with live site");
+  });
+
+  it("asks the daemon to sync instead of the agent", async () => {
     const { w, updateChanges } = mountButton();
     await w.find("[data-testid='get-latest']").trigger("click");
     await flushPromises();
-    expect(useAgentOutboxStore().messages).toEqual([
-      {
-        kind: "text",
-        text: "Bring the latest version of the site (main) into my current change.",
-        submit: true,
-      },
-    ]);
-    expect(updateChanges).not.toHaveBeenCalled();
-    expect(toast.info).toHaveBeenCalledWith("Asked the agent to get the latest");
+    expect(updateChanges).toHaveBeenCalledWith("site");
+    expect(useAgentOutboxStore().messages).toEqual([]);
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it("is disabled while switching or creating a change", async () => {

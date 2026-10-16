@@ -35,6 +35,18 @@
 //!   (`ctx.event.subscribe`). All-permissions: `{"permission":"allow"}` in `opencode.json` in
 //!   that dir (not exercised at runtime; the CLI also has an `--auto` flag). Concern: if the CLI
 //!   attaches to an already-running background service, that server does not see this env var.
+//!
+//! # Headless mechanics ([`headless_spec`], checked 2026-10-15 in a scratch git repo with a
+//! "write `{"ok":true}` to `$WORKBENCH_RESOLVE_RESULT`" prompt)
+//!
+//! - Cursor CLI 2026.10.14-0f9edde: `cursor-agent -p --force --output-format stream-json
+//!   <prompt>` exited 0 and wrote the file (no `--trust` needed).
+//! - Codex codex-cli 0.162.1: `codex exec --json --dangerously-bypass-approvals-and-sandbox
+//!   <prompt>` exited 0 and wrote the file. The env var reached its shell tool.
+//! - Claude 2.1.296: `claude -p <prompt> --output-format stream-json --verbose
+//!   --dangerously-skip-permissions` not verified: OAuth session expired (exit 1, flags parsed).
+//! - OpenCode 1.18.31: `opencode run <prompt>` with `OPENCODE_CONFIG_DIR` not verified: model
+//!   subscription expired (exit 1 after the CLI started the session, flags parsed).
 
 use std::path::Path;
 
@@ -327,6 +339,70 @@ pub fn launch_spec(
     LaunchSpec { argv, env }
 }
 
+/// Resolve the argv/env for running `provider` once, non-interactively, on `prompt`.
+/// Always auto-approves; no turn-end hook and no session flags. OpenCode gets its own
+/// `{state_dir}/{project_id}/opencode-headless` config dir (permissions only, no plugin), so
+/// it never rewrites the interactive terminal's config. Unknown providers get the prompt
+/// appended as the last argument.
+pub fn headless_spec(
+    provider: &Provider,
+    prompt: &str,
+    state_dir: &Path,
+    project_id: &str,
+) -> LaunchSpec {
+    let mut argv = provider.command.clone();
+    let mut env = Vec::new();
+    match provider.id.as_str() {
+        "cursor" => {
+            argv.extend(
+                ["-p", "--force", "--output-format", "stream-json", prompt].map(String::from),
+            );
+        }
+        "claude" => argv.extend(
+            [
+                "-p",
+                prompt,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--dangerously-skip-permissions",
+                "--append-system-prompt",
+                GIT_GUIDE,
+            ]
+            .map(String::from),
+        ),
+        "codex" => {
+            let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
+            argv.extend(
+                [
+                    "exec",
+                    "--json",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "-c",
+                ]
+                .map(String::from),
+            );
+            argv.push(format!("developer_instructions={guide}"));
+            argv.push(prompt.into());
+        }
+        "opencode" => {
+            argv.extend(["run", prompt].map(String::from));
+            let dir = state_dir.join(project_id).join("opencode-headless");
+            match std::fs::create_dir_all(&dir).and_then(|()| {
+                std::fs::write(dir.join("opencode.json"), r#"{"permission":"allow"}"#)
+            }) {
+                Ok(()) => env.push((
+                    "OPENCODE_CONFIG_DIR".to_string(),
+                    dir.to_string_lossy().into_owned(),
+                )),
+                Err(e) => eprintln!("workbench: opencode headless config unavailable ({e})"),
+            }
+        }
+        _ => argv.push(prompt.into()),
+    }
+    LaunchSpec { argv, env }
+}
+
 fn write_opencode_config(dir: &Path, exe: &str, auto_approve: bool) -> std::io::Result<()> {
     std::fs::create_dir_all(dir.join("plugins"))?;
     std::fs::write(dir.join("plugins/workbench.ts"), opencode_plugin(exe))?;
@@ -608,6 +684,103 @@ mod tests {
         );
         assert_eq!(s.argv, ["/bin/a", "-v"]);
         assert!(s.env.is_empty());
+    }
+
+    const PROMPT: &str = "resolve the conflicts";
+
+    fn headless(id: &str, dir: &Path) -> LaunchSpec {
+        headless_spec(&p(id), PROMPT, dir, "p")
+    }
+
+    #[test]
+    fn headless_claude() {
+        let spec = headless("claude", Path::new("/nope"));
+        assert_eq!(
+            spec.argv,
+            [
+                "claude",
+                "-p",
+                PROMPT,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--dangerously-skip-permissions",
+                "--append-system-prompt",
+                GIT_GUIDE
+            ]
+        );
+        assert!(spec.env.is_empty());
+    }
+
+    #[test]
+    fn headless_codex() {
+        let spec = headless("codex", Path::new("/nope"));
+        let guide = serde_json::to_string(GIT_GUIDE).unwrap();
+        assert_eq!(
+            spec.argv,
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                &format!("developer_instructions={guide}"),
+                PROMPT
+            ]
+        );
+        assert!(spec.env.is_empty());
+    }
+
+    #[test]
+    fn headless_cursor() {
+        let spec = headless("cursor", Path::new("/nope"));
+        assert_eq!(
+            spec.argv,
+            [
+                "cursor",
+                "-p",
+                "--force",
+                "--output-format",
+                "stream-json",
+                PROMPT
+            ]
+        );
+        assert!(spec.env.is_empty());
+    }
+
+    #[test]
+    fn headless_opencode_sets_config_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = headless("opencode", dir.path());
+        assert_eq!(spec.argv, ["opencode", "run", PROMPT]);
+        let cfg = dir.path().join("p").join("opencode-headless");
+        assert_eq!(
+            spec.env,
+            [(
+                "OPENCODE_CONFIG_DIR".to_string(),
+                cfg.to_string_lossy().into_owned()
+            )]
+        );
+        assert_eq!(
+            std::fs::read_to_string(cfg.join("opencode.json")).unwrap(),
+            r#"{"permission":"allow"}"#
+        );
+        assert!(!cfg.join("plugins").exists());
+    }
+
+    #[test]
+    fn headless_unknown_appends_prompt() {
+        let spec = headless_spec(
+            &Provider {
+                id: "fake".into(),
+                command: vec!["sh".into(), "fake.sh".into(), "resolved".into()],
+            },
+            PROMPT,
+            Path::new("/nope"),
+            "p",
+        );
+        assert_eq!(spec.argv, ["sh", "fake.sh", "resolved", PROMPT]);
+        assert!(spec.env.is_empty());
     }
 
     #[test]

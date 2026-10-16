@@ -17,6 +17,7 @@ import {
   type FileVersion,
   type Change,
   type ChangesUpdate,
+  type AutoResolveStatus,
   type ConflictCandidate,
   type ConflictChoice,
   type ConflictSession,
@@ -289,6 +290,14 @@ export function createApi(
       json<{ commit: string }>("POST", `/api/changes/conflicts/${enc(id)}/finish`, { body: { project } }),
     abandonConflict: (project: string, id: string) =>
       json<{ abandoned: true }>("POST", `/api/changes/conflicts/${enc(id)}/abandon`, { body: { project } }),
+    startAutoResolve: (project: string, sessionId: string, provider: string) =>
+      json<{ started: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto`, { body: { project, provider } }),
+    autoResolveStatus: (project: string, sessionId: string) =>
+      json<AutoResolveStatus>("GET", `/api/changes/conflicts/${enc(sessionId)}/auto`, { query: { project } }),
+    answerAutoResolve: (project: string, sessionId: string, answers: Record<string, string>) =>
+      json<{ ok: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto/answers`, { body: { project, answers } }),
+    cancelAutoResolve: (project: string, sessionId: string) =>
+      json<{ ok: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto/cancel`, { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },

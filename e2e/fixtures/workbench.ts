@@ -35,6 +35,17 @@ export const test = base.extend<{ workbench: WorkbenchEnv; templateProject: Temp
   ],
 });
 
+/**
+ * Pick the e2e `fake` CLI. Exact match is required: the fixture also registers
+ * `fake-resolver` and `fake-garbage`, which substring-match `name: "fake"`.
+ */
+export async function selectFakeProvider(page: Page) {
+  await page
+    .getByTestId("terminal-provider")
+    .getByRole("radio", { name: "fake", exact: true })
+    .check();
+}
+
 /** Open the header's pull request menu (status, GitHub link, Ready for review). Escape closes it. */
 export async function openPrMenu(page: Page) {
   await page.getByTestId("pr-menu").click();

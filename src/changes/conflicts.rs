@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use crate::error::ApiError;
+use crate::git::Identity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +108,83 @@ pub async fn text(dir: &Path, args: &[&str]) -> Result<String, ApiError> {
             .trim()
             .to_string(),
     )
+}
+
+#[doc(hidden)]
+pub async fn merge_commit(
+    dir: &Path,
+    tree: &str,
+    tip: &str,
+    incoming: &str,
+    author: &Identity,
+    message: &str,
+) -> Result<String, ApiError> {
+    let env = [
+        ("GIT_AUTHOR_NAME", author.name.as_str()),
+        ("GIT_AUTHOR_EMAIL", author.email.as_str()),
+        ("GIT_COMMITTER_NAME", author.name.as_str()),
+        ("GIT_COMMITTER_EMAIL", author.email.as_str()),
+    ];
+    let bytes = checked(
+        dir,
+        &[
+            "commit-tree",
+            tree,
+            "-p",
+            tip,
+            "-p",
+            incoming,
+            "-m",
+            message,
+        ],
+        &env,
+        None,
+    )
+    .await?;
+    Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+}
+
+pub(crate) async fn ensure_tip(dir: &Path, branch: &str, tip: &str) -> Result<(), ApiError> {
+    let current = text(
+        dir,
+        &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
+    )
+    .await?;
+    if current != tip {
+        return Err(ApiError::conflict(
+            "This change moved while resolving; run Get latest again",
+        ));
+    }
+    Ok(())
+}
+
+/// Callers hold `git::lock_for(dir)`.
+#[doc(hidden)]
+pub async fn advance_branch(
+    dir: &Path,
+    branch: &str,
+    tip: &str,
+    commit: &str,
+) -> Result<(), ApiError> {
+    ensure_tip(dir, branch, tip).await?;
+    if text(dir, &["branch", "--show-current"]).await? == branch {
+        let clean = text(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
+        if !clean.is_empty() {
+            return Err(ApiError::conflict(
+                "Checkpoint or discard uncommitted edits before finishing",
+            ));
+        }
+        checked(dir, &["merge", "--ff-only", commit], &[], None).await?;
+    } else {
+        checked(
+            dir,
+            &["update-ref", &format!("refs/heads/{branch}"), commit, tip],
+            &[],
+            None,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 pub async fn preview_commit(dir: &Path, tree: &str, parent: &str) -> Result<String, ApiError> {

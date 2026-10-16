@@ -7,7 +7,7 @@ import { useDaemon } from "@/core/daemon";
 import type { ContentEntrySummary } from "@/core/types";
 import { THEME_LABELS, useTheme, type ThemePreference } from "@/lib/theme";
 import { SOUND_PACKS, useTypingSound, type SoundPack, type TypingSoundSetting } from "@/lib/typingSound";
-import { askAgentToGetLatest } from "@/modules/changes/agentRequests";
+import { getLatest } from "@/modules/changes/getLatest";
 import { useFilesStore } from "@/modules/files/store";
 import { useProjectsStore } from "@/modules/projects/store";
 import { codePath, contentPath, projectPath, type ProjectTab } from "@/router";
@@ -88,7 +88,7 @@ export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): voi
       out.push({
         heading: "Actions",
         items: [
-          { id: "action:get-latest", label: "Sync from main", hint: "ask the agent to bring in the latest main", icon: RefreshCw, run: askAgentToGetLatest },
+          { id: "action:get-latest", label: "Sync with live site", icon: RefreshCw, run: () => getLatest(id) },
           { id: "action:switch-change", label: "Switch change…", hint: "branch", icon: GitBranch, stay: true, run: ui.showChanges },
           { id: "action:new-change", label: "New change…", hint: "branch", icon: Plus, run: ui.showNewChange },
         ],

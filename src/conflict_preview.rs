@@ -264,12 +264,7 @@ async fn build_snapshot(
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ));
     }
-    #[cfg(unix)]
-    if repo.join("node_modules").exists() {
-        tokio::fs::symlink(repo.join("node_modules"), dir.join("node_modules"))
-            .await
-            .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    }
+    link_node_modules(repo, dir).map_err(|e| BuildError::Unavailable(e.to_string()))?;
     let mut build = Command::new("npm");
     build
         .args(["run", "build"])
@@ -333,7 +328,17 @@ async fn build_snapshot(
     Ok(())
 }
 
-struct BuildGroup(Option<i32>);
+/// Lets a worktree build with the project's installed dependencies.
+pub(crate) fn link_node_modules(repo: &Path, dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if repo.join("node_modules").exists() {
+        std::os::unix::fs::symlink(repo.join("node_modules"), dir.join("node_modules"))?;
+    }
+    Ok(())
+}
+
+/// Kills a `process_group(0)` child's whole group when dropped.
+pub(crate) struct BuildGroup(pub(crate) Option<i32>);
 impl Drop for BuildGroup {
     fn drop(&mut self) {
         if let Some(group) = self.0 {

@@ -191,20 +191,7 @@ impl ConflictSessions {
         let lock = git::lock_for(&session.dir);
         let _guard = lock.lock().await;
         let session = self.get(id).await?;
-        let current = conflicts::text(
-            &session.dir,
-            &[
-                "rev-parse",
-                "--verify",
-                &format!("refs/heads/{}", session.branch),
-            ],
-        )
-        .await?;
-        if current != session.tip {
-            return Err(ApiError::conflict(
-                "This change moved while resolving; run Get latest again",
-            ));
-        }
+        conflicts::ensure_tip(&session.dir, &session.branch, &session.tip).await?;
         let candidate = conflicts::candidate_tree(
             &session.dir,
             &session.merged_tree,
@@ -236,57 +223,16 @@ impl ConflictSessions {
                 PreviewState::Ready { .. } | PreviewState::Unavailable { .. } => {}
             }
         }
-        let env = [
-            ("GIT_AUTHOR_NAME", author.name.as_str()),
-            ("GIT_AUTHOR_EMAIL", author.email.as_str()),
-            ("GIT_COMMITTER_NAME", author.name.as_str()),
-            ("GIT_COMMITTER_EMAIL", author.email.as_str()),
-        ];
-        let bytes = conflicts::checked(
+        let commit = conflicts::merge_commit(
             &session.dir,
-            &[
-                "commit-tree",
-                &candidate.tree,
-                "-p",
-                &session.tip,
-                "-p",
-                &session.incoming,
-                "-m",
-                "Get latest from main",
-            ],
-            &env,
-            None,
+            &candidate.tree,
+            &session.tip,
+            &session.incoming,
+            author,
+            "Get latest from main",
         )
         .await?;
-        let commit = String::from_utf8_lossy(&bytes).trim().to_string();
-        let active =
-            conflicts::text(&session.dir, &["branch", "--show-current"]).await? == session.branch;
-        if active {
-            let clean = conflicts::text(
-                &session.dir,
-                &["status", "--porcelain", "--untracked-files=no"],
-            )
-            .await?;
-            if !clean.is_empty() {
-                return Err(ApiError::conflict(
-                    "Checkpoint or discard uncommitted edits before finishing",
-                ));
-            }
-            conflicts::checked(&session.dir, &["merge", "--ff-only", &commit], &[], None).await?;
-        } else {
-            conflicts::checked(
-                &session.dir,
-                &[
-                    "update-ref",
-                    &format!("refs/heads/{}", session.branch),
-                    &commit,
-                    &session.tip,
-                ],
-                &[],
-                None,
-            )
-            .await?;
-        }
+        conflicts::advance_branch(&session.dir, &session.branch, &session.tip, &commit).await?;
         self.entries.lock().await.remove(id);
         Ok(commit)
     }

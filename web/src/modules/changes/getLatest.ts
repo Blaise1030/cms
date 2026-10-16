@@ -11,10 +11,10 @@ function titles(list: Change[]): string {
   return list.map((c) => c.title).join(", ");
 }
 
-/** "Updated main and 2 changes (A, B)." — or undefined when nothing moved. */
+/** "Updated your copy of the live site and 2 changes (A, B)." — or undefined when nothing moved. */
 function updatedSummary(result: ChangesUpdate): string | undefined {
   const parts: string[] = [];
-  if (result.mainUpdated) parts.push("main");
+  if (result.mainUpdated) parts.push("your copy of the live site");
   if (result.updated.length) {
     parts.push(`${plural(result.updated.length, "change")} (${titles(result.updated)})`);
   }
@@ -22,47 +22,40 @@ function updatedSummary(result: ChangesUpdate): string | undefined {
 }
 
 const DIVERGED =
-  "Your local main has commits that are not on GitHub, so it was left as is. Ask a developer to bring it back in line with GitHub.";
+  "Your copy of the live site has edits that are not on GitHub, so it was left as is. Ask a developer to bring it back in line with GitHub.";
 
 function skippedNote(result: ChangesUpdate): string | undefined {
   return result.skipped ? "Your current change will update when the agent finishes." : undefined;
 }
 
 export function report(result: ChangesUpdate) {
-  const summary = updatedSummary(result);
-  const skipped = skippedNote(result);
+  if (result.conflicts.some((c) => result.conflictSessions?.[c.branch])) return;
   if (result.conflicts.length > 0) {
-    const unsupported = result.conflictErrors && Object.entries(result.conflictErrors).map(([branch, reason]) => `${branch}: ${reason}`);
-    const description = [
-      `Left as they were: ${titles(result.conflicts)}.`,
-      ...(unsupported ?? []),
-      summary,
-      result.mainDiverged ? DIVERGED : undefined,
-      skipped,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    toast.warning(`Conflicts in ${plural(result.conflicts.length, "change")}`, { description });
+    toast.warning("Some drafts couldn't be updated", {
+      description: "Try syncing again. If it keeps happening, ask your site admin.",
+    });
     return;
   }
+  const summary = updatedSummary(result);
+  const skipped = skippedNote(result);
   if (result.mainDiverged) {
-    toast.warning("Changes updated, but main was left as is", {
+    toast.warning("Your draft is updated; the live site was left as is.", {
       description: [DIVERGED, summary, skipped].filter(Boolean).join(" "),
     });
     return;
   }
   if (skipped) {
-    toast.info("Syncing with main", { description: skipped });
+    toast.info("Syncing with the live site", { description: skipped });
     return;
   }
-  toast.success("Synced with main", {
+  toast.success("Up to date with the live site", {
     description: result.updated.length
-      ? `Merged main into ${plural(result.updated.length, "change")}.`
+      ? `Brought the live site into ${plural(result.updated.length, "change")}.`
       : "Everything was already up to date.",
   });
 }
 
-/** Pull main, update every open change, and toast the outcome. */
+/** Pull the live site, update every open change, and toast the outcome. */
 export async function getLatest(projectId: string) {
   try {
     report(await useChangesStore().getLatest(projectId));

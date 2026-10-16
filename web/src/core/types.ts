@@ -124,6 +124,26 @@ export interface ChangesUpdate {
   conflictErrors?: Record<string, string>;
 }
 
+/** A question the agent needs answered before it can finish resolving. */
+export interface AutoResolveQuestion {
+  id: string;
+  text: string;
+  options: string[];
+}
+
+/** `idle` when the session has no auto-resolve job. */
+export type AutoResolveState = "idle" | "preparing" | "resolving" | "needs_input" | "verifying" | "done" | "failed";
+
+/** Result of `GET /api/changes/conflicts/{id}/auto`. */
+export interface AutoResolveStatus {
+  sessionId: string;
+  state: AutoResolveState;
+  stage: string;
+  questions: AutoResolveQuestion[];
+  summary: string | null;
+  error: string | null;
+}
+
 export type ConflictChoice = "yours" | "latest" | "both";
 
 export interface ConflictFile {
@@ -273,6 +293,9 @@ export interface TerminalBusyEvent {
   busy: boolean;
 }
 
+/** Progress of an agent auto-resolving a conflict session. */
+export type ChangesAutoResolveEvent = { type: "changes.auto_resolve"; projectId: string } & AutoResolveStatus;
+
 /** The daemon finished a Get latest that had skipped the current change (agent went idle). */
 export interface ChangesUpdatedEvent {
   type: "changes.updated";
@@ -295,6 +318,7 @@ export type DaemonEvent =
   | TerminalSessionEvent
   | CheckpointBlockedEvent
   | ChangesUpdatedEvent
+  | ChangesAutoResolveEvent
   | TerminalTurnEvent
   | TerminalBusyEvent
   | EventsLaggedEvent;
