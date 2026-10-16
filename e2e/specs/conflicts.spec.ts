@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { Page } from "@playwright/test";
 
-import { createChange } from "../fixtures/daemon";
+import { startChange } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -46,7 +46,7 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   git(projectDir, ["push", "origin", "main"]);
   fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
   await page.goto(`${origin}/?t=${token}`);
-  await createChange(workbench, "New page: Home");
+  await startChange(workbench, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
 
@@ -78,7 +78,7 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
 test("writer can abandon a conflict without moving the branch", async ({ page, workbench }) => {
   const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
   await page.goto(`${origin}/?t=${token}`);
-  await createChange(workbench, "New page: Home");
+  await startChange(workbench, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
   fs.writeFileSync(path.join(projectDir, "index.html"), "<h1>Your headline</h1>\n");
@@ -102,7 +102,7 @@ test("writer resolves a deleted-versus-edited page by choosing a side", async ({
   git(projectDir, ["commit", "-m", "add home"]);
   git(projectDir, ["push", "origin", "main"]);
   await page.goto(`${origin}/?t=${token}`);
-  await createChange(workbench, "Remove home page");
+  await startChange(workbench, "Remove home page");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Remove home page");
   git(projectDir, ["rm", "index.html"]);

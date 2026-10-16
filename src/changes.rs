@@ -155,7 +155,10 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
 }
 
 async fn current_branch(dir: &Path) -> Result<String, ApiError> {
-    Ok(run(dir, &["branch", "--show-current"]).await?.trim().to_string())
+    Ok(run(dir, &["branch", "--show-current"])
+        .await?
+        .trim()
+        .to_string())
 }
 
 /// Tracked files have uncommitted modifications.

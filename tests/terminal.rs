@@ -1,6 +1,9 @@
 //! `TerminalManager`: PTY spawn, streaming, replay, resize, exit and process-group kill.
 //! Drives `tests/fixtures/fake_cli.sh`, a line-driven stand-in for a coding CLI.
 
+// One PTY at a time across async tests — a std Mutex is intentional.
+#![allow(clippy::await_holding_lock)]
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Once};
 use std::time::{Duration, Instant};
@@ -421,7 +424,11 @@ async fn busy_ends_when_output_goes_quiet() {
         hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
         ..Default::default()
     };
-    let m = TerminalManager::with_quiet_idle(Arc::new(config), events.clone(), Duration::from_millis(300));
+    let m = TerminalManager::with_quiet_idle(
+        Arc::new(config),
+        events.clone(),
+        Duration::from_millis(300),
+    );
     let dir = tempfile::tempdir().unwrap();
     start_fake(&m, "p1", dir.path()).await;
     let mut a = m.attach("p1").unwrap();
@@ -452,13 +459,13 @@ mod http {
     use tower::ServiceExt;
     use workbench::config::Config;
     use workbench::events::EventBus;
+    use workbench::git;
     use workbench::http;
     use workbench::http::terminal::commit_message;
     use workbench::projects::Source;
     use workbench::state::AppState;
-    use workbench::git;
 
-    use super::{fake_cli, TERMINAL_TEST_LOCK, TIMEOUT, word_after};
+    use super::{fake_cli, word_after, TERMINAL_TEST_LOCK, TIMEOUT};
 
     const AUTH_TOKEN: &str = "abc123def4567890abcdef1234567890ab";
 
@@ -581,7 +588,12 @@ mod http {
         http::router(env.state.clone())
     }
 
-    async fn call_http(env: &HttpEnv, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+    async fn call_http(
+        env: &HttpEnv,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         call(&app(env), http_req(method, path, body)).await
     }
 
@@ -608,12 +620,13 @@ mod http {
         assert_eq!(v["running"], true);
     }
 
-    async fn ws_connect(env: &HttpEnv) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    async fn ws_connect(
+        env: &HttpEnv,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         let url = format!(
             "ws://{}/api/terminal/{}/ws?t={}",
-            env.addr,
-            env.project,
-            AUTH_TOKEN
+            env.addr, env.project, AUTH_TOKEN
         );
         let (ws, _) = connect_async(url).await.unwrap();
         ws
@@ -727,8 +740,7 @@ mod http {
                 break;
             }
             let left = deadline.saturating_duration_since(Instant::now());
-            if let Ok(Some(Ok(WsMessage::Binary(b)))) =
-                tokio::time::timeout(left, ws.next()).await
+            if let Ok(Some(Ok(WsMessage::Binary(b)))) = tokio::time::timeout(left, ws.next()).await
             {
                 acc.push_str(&String::from_utf8_lossy(&b));
             }
@@ -816,7 +828,10 @@ mod http {
             git_cli(&env.dir, &["log", "-1", "--format=%s", "content/first"]),
             "checkpoint: Saved edits"
         );
-        assert_eq!(git_cli(&env.dir, &["status", "--porcelain", "--untracked-files=no"]), "");
+        assert_eq!(
+            git_cli(&env.dir, &["status", "--porcelain", "--untracked-files=no"]),
+            ""
+        );
         env.server.abort();
     }
 
@@ -867,7 +882,10 @@ mod http {
             }
         }
         let updated = updated.expect("changes.updated not seen");
-        assert_eq!(updated["result"]["updated"][0]["branch"], branch, "{updated}");
+        assert_eq!(
+            updated["result"]["updated"][0]["branch"], branch,
+            "{updated}"
+        );
         assert!(env.dir.join("news.md").exists());
         env.server.abort();
     }
@@ -878,11 +896,7 @@ mod http {
         start_terminal(&env).await;
         let token = hook_token_from_ws(&env).await;
         let before = git_cli(&env.dir, &["rev-parse", "HEAD"]);
-        let (s, v) = post_turn_end(
-            &env,
-            json!({ "project": env.project, "token": token }),
-        )
-        .await;
+        let (s, v) = post_turn_end(&env, json!({ "project": env.project, "token": token })).await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(v["committed"], false);
         assert_eq!(git_cli(&env.dir, &["rev-parse", "HEAD"]), before);
@@ -901,7 +915,8 @@ mod http {
         .await;
         assert_eq!(s, StatusCode::OK, "{v}");
         let id = v["sessionId"].as_str().unwrap().to_string();
-        let (_, status) = call_http(&env, "GET", &format!("/api/terminal/{}", env.project), None).await;
+        let (_, status) =
+            call_http(&env, "GET", &format!("/api/terminal/{}", env.project), None).await;
         assert_eq!(status["sessionId"], id.as_str());
 
         let token = hook_token_from_ws(&env).await;
@@ -922,7 +937,13 @@ mod http {
         // `fake` is not a provider the daemon knows how to resume.
         assert_eq!(list[0]["resumable"], false);
 
-        call_http(&env, "DELETE", &format!("/api/terminal/{}", env.project), None).await;
+        call_http(
+            &env,
+            "DELETE",
+            &format!("/api/terminal/{}", env.project),
+            None,
+        )
+        .await;
         let (s, v) = call_http(
             &env,
             "POST",
@@ -956,7 +977,11 @@ mod http {
     #[tokio::test]
     async fn attachment_is_saved_outside_the_project() {
         let env = http_env(false).await;
-        let (s, v) = call(&app(&env), attachment_req(&env.project, "image/png", b"png-bytes")).await;
+        let (s, v) = call(
+            &app(&env),
+            attachment_req(&env.project, "image/png", b"png-bytes"),
+        )
+        .await;
         assert_eq!(s, StatusCode::OK, "{v}");
         let path = PathBuf::from(v["path"].as_str().unwrap());
         assert!(path.is_absolute(), "{}", path.display());
@@ -964,7 +989,11 @@ mod http {
         assert!(!path.starts_with(&env.dir), "{}", path.display());
         assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
 
-        let (s, _) = call(&app(&env), attachment_req(&env.project, "text/plain", b"hi")).await;
+        let (s, _) = call(
+            &app(&env),
+            attachment_req(&env.project, "text/plain", b"hi"),
+        )
+        .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
         let (s, _) = call(&app(&env), attachment_req("nope", "image/png", b"x")).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
@@ -1020,15 +1049,15 @@ mod http {
         assert_eq!(s, StatusCode::OK, "{v}");
         git_cli(&gh_dir, &["checkout", "main"]);
         let tracked = git_cli(&gh_dir, &["ls-files"]);
-        std::fs::write(gh_dir.join(tracked.lines().next().unwrap()), "edited on main\n").unwrap();
+        std::fs::write(
+            gh_dir.join(tracked.lines().next().unwrap()),
+            "edited on main\n",
+        )
+        .unwrap();
         let mut ws = ws_connect_for_project(&env, &gh.id).await;
         let token = hook_token_from_ws_stream(&mut ws).await;
         let mut ev = env.events.subscribe();
-        let (s, v) = post_turn_end(
-            &env,
-            json!({ "project": gh.id, "token": token }),
-        )
-        .await;
+        let (s, v) = post_turn_end(&env, json!({ "project": gh.id, "token": token })).await;
         assert_eq!(s, StatusCode::OK);
         assert_eq!(v["committed"], false);
         let deadline = Instant::now() + TIMEOUT;
@@ -1049,8 +1078,12 @@ mod http {
     async fn ws_connect_for_project(
         env: &HttpEnv,
         project: &str,
-    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
-        let url = format!("ws://{}/api/terminal/{}/ws?t={}", env.addr, project, AUTH_TOKEN);
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
+        let url = format!(
+            "ws://{}/api/terminal/{}/ws?t={}",
+            env.addr, project, AUTH_TOKEN
+        );
         let (ws, _) = connect_async(url).await.unwrap();
         ws
     }
@@ -1075,8 +1108,7 @@ mod http {
                 return tok;
             }
             let left = deadline.saturating_duration_since(Instant::now());
-            if let Ok(Some(Ok(WsMessage::Binary(b)))) =
-                tokio::time::timeout(left, ws.next()).await
+            if let Ok(Some(Ok(WsMessage::Binary(b)))) = tokio::time::timeout(left, ws.next()).await
             {
                 acc.push_str(&String::from_utf8_lossy(&b));
             }
@@ -1096,13 +1128,7 @@ mod http {
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{v}");
-        let (s, v) = call_http(
-            &env,
-            "GET",
-            &format!("/api/terminal/{}", env.project),
-            None,
-        )
-        .await;
+        let (s, v) = call_http(&env, "GET", &format!("/api/terminal/{}", env.project), None).await;
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(v["running"], false);
 
@@ -1117,13 +1143,7 @@ mod http {
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{v}");
-        let (s, v) = call_http(
-            &env,
-            "GET",
-            &format!("/api/terminal/{}", env.project),
-            None,
-        )
-        .await;
+        let (s, v) = call_http(&env, "GET", &format!("/api/terminal/{}", env.project), None).await;
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(v["running"], false);
         env.server.abort();

@@ -12,6 +12,7 @@ pub mod github;
 pub mod health;
 pub mod history;
 pub mod projects;
+pub mod setup;
 pub mod terminal;
 
 use std::path::PathBuf;
@@ -56,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/github/device/poll", post(github::device_poll))
         .route("/api/github/signout", post(github::sign_out))
         .route("/api/github/repos", get(github::repos))
+        .route("/api/setup/status", get(setup::status))
         .route(
             "/api/projects/{id}",
             delete(projects::remove).patch(projects::update),
@@ -89,8 +91,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/terminal/{project}/sessions", get(terminal::sessions))
         .route(
             "/api/terminal/{project}/attachments",
-            post(terminal::attach)
-                .layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
+            post(terminal::attach).layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
         )
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))

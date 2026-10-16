@@ -33,6 +33,7 @@ import {
   type GithubStatus,
   type Health,
   type Project,
+  type SetupStatus,
   type TerminalSession,
   type Tree,
 } from "./types";
@@ -227,6 +228,7 @@ export function createApi(
     cloneProject: (repo: string, name?: string) =>
       json<Project>("POST", "/api/github/clone", { body: name ? { repo, name } : { repo } }),
     githubStatus: () => json<GithubStatus>("GET", "/api/github/status"),
+    setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
     githubDeviceStart: () => json<DeviceStart>("POST", "/api/github/device"),
     githubDevicePoll: () => json<DevicePoll>("POST", "/api/github/device/poll"),
     githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),

@@ -87,13 +87,28 @@ pub struct LaunchSpec {
 }
 
 pub fn default_providers() -> Vec<Provider> {
-    [("cursor", "cursor-agent"), ("claude", "claude"), ("codex", "codex")]
-        .into_iter()
-        .map(|(id, program)| Provider {
-            id: id.into(),
-            command: vec![program.into()],
-        })
-        .collect()
+    [
+        ("cursor", "cursor-agent"),
+        ("claude", "claude"),
+        ("codex", "codex"),
+    ]
+    .into_iter()
+    .map(|(id, program)| Provider {
+        id: id.into(),
+        command: vec![program.into()],
+    })
+    .collect()
+}
+
+/// What people call the provider; unknown ids are shown as is.
+pub fn display_name(provider_id: &str) -> &str {
+    match provider_id {
+        "cursor" => "Cursor CLI",
+        "claude" => "Claude Code",
+        "codex" => "Codex",
+        "opencode" => "OpenCode",
+        other => other,
+    }
 }
 
 /// Load from `path`. `None` or a missing file gives the defaults.
@@ -339,7 +354,9 @@ pub fn headless_spec(
     let mut env = Vec::new();
     match provider.id.as_str() {
         "cursor" => {
-            argv.extend(["-p", "--force", "--output-format", "stream-json", prompt].map(String::from));
+            argv.extend(
+                ["-p", "--force", "--output-format", "stream-json", prompt].map(String::from),
+            );
         }
         "claude" => argv.extend(
             [
@@ -357,8 +374,13 @@ pub fn headless_spec(
         "codex" => {
             let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
             argv.extend(
-                ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-c"]
-                    .map(String::from),
+                [
+                    "exec",
+                    "--json",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "-c",
+                ]
+                .map(String::from),
             );
             argv.push(format!("developer_instructions={guide}"));
             argv.push(prompt.into());
@@ -366,9 +388,9 @@ pub fn headless_spec(
         "opencode" => {
             argv.extend(["run", prompt].map(String::from));
             let dir = state_dir.join(project_id).join("opencode-headless");
-            match std::fs::create_dir_all(&dir)
-                .and_then(|()| std::fs::write(dir.join("opencode.json"), r#"{"permission":"allow"}"#))
-            {
+            match std::fs::create_dir_all(&dir).and_then(|()| {
+                std::fs::write(dir.join("opencode.json"), r#"{"permission":"allow"}"#)
+            }) {
                 Ok(()) => env.push((
                     "OPENCODE_CONFIG_DIR".to_string(),
                     dir.to_string_lossy().into_owned(),
@@ -460,15 +482,24 @@ mod tests {
     #[test]
     fn claude_assigns_or_resumes_its_session() {
         let new = session_argv("claude", AgentSession::Assign("u1".into()));
-        assert_eq!(new[5..], ["--session-id", "u1", "--dangerously-skip-permissions"]);
+        assert_eq!(
+            new[5..],
+            ["--session-id", "u1", "--dangerously-skip-permissions"]
+        );
         let resumed = session_argv("claude", AgentSession::Resume("u1".into()));
-        assert_eq!(resumed[5..], ["--resume", "u1", "--dangerously-skip-permissions"]);
+        assert_eq!(
+            resumed[5..],
+            ["--resume", "u1", "--dangerously-skip-permissions"]
+        );
         assert_eq!(session_argv("claude", AgentSession::Fresh).len(), 6);
     }
 
     #[test]
     fn cursor_resumes_assigned_and_past_chats() {
-        for s in [AgentSession::Assign("c1".into()), AgentSession::Resume("c1".into())] {
+        for s in [
+            AgentSession::Assign("c1".into()),
+            AgentSession::Resume("c1".into()),
+        ] {
             assert_eq!(
                 session_argv("cursor", s),
                 ["cursor", "--resume", "c1", "--force", "--trust"]
@@ -480,8 +511,14 @@ mod tests {
     fn codex_resume_is_a_subcommand_with_the_id_last() {
         let argv = session_argv("codex", AgentSession::Resume("t1".into()));
         assert_eq!(argv[..3], ["codex", "resume", "-c"]);
-        assert_eq!(argv[6..], ["--dangerously-bypass-approvals-and-sandbox", "t1"]);
-        assert_eq!(session_argv("codex", AgentSession::Assign("t1".into()))[1], "-c");
+        assert_eq!(
+            argv[6..],
+            ["--dangerously-bypass-approvals-and-sandbox", "t1"]
+        );
+        assert_eq!(
+            session_argv("codex", AgentSession::Assign("t1".into()))[1],
+            "-c"
+        );
     }
 
     #[test]
@@ -582,7 +619,14 @@ mod tests {
     fn opencode_writes_plugin_and_sets_config_env() {
         let dir = tempfile::tempdir().unwrap();
         let fresh = &AgentSession::Fresh;
-        let s = launch_spec(&p("opencode"), Path::new("/x/wb"), true, dir.path(), "alpha", fresh);
+        let s = launch_spec(
+            &p("opencode"),
+            Path::new("/x/wb"),
+            true,
+            dir.path(),
+            "alpha",
+            fresh,
+        );
         assert_eq!(s.argv, ["opencode"]);
         let cfg = dir.path().join("alpha").join("opencode");
         assert_ne!(cfg, dir.path().join("opencode"));
@@ -601,12 +645,26 @@ mod tests {
             r#"{"permission":"allow"}"#
         );
         // A second project without auto-approve must not delete the first project's file.
-        let other = launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "beta", fresh);
+        let other = launch_spec(
+            &p("opencode"),
+            Path::new("/x/wb"),
+            false,
+            dir.path(),
+            "beta",
+            fresh,
+        );
         let beta = dir.path().join("beta").join("opencode");
         assert_eq!(other.env[0].1, beta.to_string_lossy().into_owned());
         assert!(cfg.join("opencode.json").exists());
         assert!(!beta.join("opencode.json").exists());
-        launch_spec(&p("opencode"), Path::new("/x/wb"), false, dir.path(), "alpha", fresh);
+        launch_spec(
+            &p("opencode"),
+            Path::new("/x/wb"),
+            false,
+            dir.path(),
+            "alpha",
+            fresh,
+        );
         assert!(!cfg.join("opencode.json").exists());
         assert!(!dir.path().join("opencode").join("opencode.json").exists());
     }
@@ -678,7 +736,14 @@ mod tests {
         let spec = headless("cursor", Path::new("/nope"));
         assert_eq!(
             spec.argv,
-            ["cursor", "-p", "--force", "--output-format", "stream-json", PROMPT]
+            [
+                "cursor",
+                "-p",
+                "--force",
+                "--output-format",
+                "stream-json",
+                PROMPT
+            ]
         );
         assert!(spec.env.is_empty());
     }
@@ -724,7 +789,14 @@ mod tests {
         let f = dir.path().join("agents.json");
         std::fs::write(&f, r#"{"claude":["npx","claude"]}"#).unwrap();
         let provs = load(Some(&f)).unwrap();
-        let s = launch_spec(&provs[0], Path::new("/x"), false, dir.path(), "p", &AgentSession::Fresh);
+        let s = launch_spec(
+            &provs[0],
+            Path::new("/x"),
+            false,
+            dir.path(),
+            "p",
+            &AgentSession::Fresh,
+        );
         assert_eq!(&s.argv[..3], ["npx", "claude", "--settings"]);
     }
 }

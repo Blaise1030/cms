@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { createChange } from "../fixtures/daemon";
+import { startChange } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
@@ -32,7 +32,7 @@ test("syncing a colliding draft asks the writer one question and combines it", a
 
   await page.addInitScript(() => localStorage.setItem("workbench.terminal.provider", "fake-resolver"));
   await page.goto(`${origin}/?t=${token}`);
-  await createChange(workbench, "New page: Home");
+  await startChange(workbench, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
 

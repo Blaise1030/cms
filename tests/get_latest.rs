@@ -470,4 +470,3 @@ fn git_version_check() {
     assert!(err.message.contains("2.37.1"), "{}", err.message);
     assert!(changes::check_git_version("nonsense").is_err());
 }
-

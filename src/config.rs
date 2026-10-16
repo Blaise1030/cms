@@ -1,5 +1,6 @@
 //! Runtime configuration for `workbench serve`.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use rand::Rng;
@@ -65,6 +66,9 @@ pub struct Config {
     /// Executable terminal CLIs run as `<exe> hook turn-end`. `None` = this daemon's own
     /// binary ([`Config::hook_exe_path`]); tests point it at the built `workbench`.
     pub hook_exe: Option<PathBuf>,
+    /// Directories the setup check searches for git, gh and the agent CLIs, `PATH`-style.
+    /// `None` = the daemon's own `PATH`.
+    pub search_path: Option<OsString>,
 }
 
 /// Tests build configs with `..Default::default()`, so the default must never run the
@@ -84,6 +88,7 @@ impl Default for Config {
             },
             ui_url: None,
             hook_exe: None,
+            search_path: None,
         }
     }
 }

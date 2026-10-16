@@ -553,7 +553,11 @@ async fn dangling_and_empty_references_are_refused_without_writes() {
         .await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
         assert_eq!(v["error"]["reason"], "invalid_schema");
-        assert_eq!(v["error"]["details"][0]["path"], json!(["relatedPosts", 1]), "{v}");
+        assert_eq!(
+            v["error"]["details"][0]["path"],
+            json!(["relatedPosts", 1]),
+            "{v}"
+        );
         assert!(
             v["error"]["details"][0]["message"]
                 .as_str()

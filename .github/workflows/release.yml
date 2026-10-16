@@ -3,8 +3,9 @@ name: Release
 # Runs when a merged release PR lands on main (package.json's version changed
 # and has no tag yet). It builds the daemon, with the web app embedded, for
 # macOS and Linux, then publishes a GitHub release tagged vX.Y.Z with that
-# version's CHANGELOG.md section. Last, it points the Homebrew tap at the new
-# release.
+# version's CHANGELOG.md section. The signed macOS desktop app (.dmg plus
+# updater bundles and latest.json) ships in the same release. Last, it points
+# the Homebrew tap at the new release.
 on:
   push:
     branches: [main]
@@ -110,9 +111,104 @@ jobs:
       - run: pnpm -C e2e test
       - run: pnpm -C e2e e2e
 
+  # The signed + notarized macOS app (src-tauri/), as a .dmg plus the updater
+  # bundle and its signature. See docs/desktop-release.md for the secrets.
+  desktop:
+    name: Desktop ${{ matrix.target }}
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, arch: aarch64 }
+          - { target: x86_64-apple-darwin, arch: x86_64 }
+    runs-on: macos-latest
+    steps:
+      # Unsigned or un-notarized builds are never shipped.
+      - name: Require signing and notarization secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          missing=""
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets:$missing (see docs/desktop-release.md)"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+          workspaces: |
+            . -> target
+            src-tauri -> target
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            src-tauri/pnpm-lock.yaml
+      # The sidecar daemon embeds web/dist.
+      - name: Build the web app
+        run: |
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web build
+      - run: src-tauri/scripts/stage-sidecar.sh ${{ matrix.target }}
+      - run: pnpm --prefix src-tauri install --frozen-lockfile
+      # The app version comes from package.json (tauri.conf.json points at it).
+      - name: Build, sign and notarize
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }}
+      - name: Verify signature and notarization
+        run: |
+          app=src-tauri/target/${{ matrix.target }}/release/bundle/macos/Workbench.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+      - name: Package
+        run: |
+          bundle=src-tauri/target/${{ matrix.target }}/release/bundle
+          name=Workbench-${{ needs.check.outputs.version }}-${{ matrix.arch }}
+          mkdir desktop
+          dmgs=("$bundle"/dmg/*.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
+          cp "${dmgs[0]}" "desktop/$name.dmg"
+          cp "$bundle/macos/Workbench.app.tar.gz" "desktop/$name.app.tar.gz"
+          cp "$bundle/macos/Workbench.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: desktop/*
+
   publish:
     name: Publish v${{ needs.check.outputs.version }}
-    needs: [check, build, e2e]
+    needs: [check, build, e2e, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -122,6 +218,12 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # The desktop app's updater reads releases/latest/download/latest.json.
+      - name: Write the desktop updater manifest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.check.outputs.version }}
+        run: .github/scripts/desktop-latest-json.sh "$VERSION" dist "$BASE_URL" > dist/latest.json
       - name: Create the tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
