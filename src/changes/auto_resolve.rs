@@ -17,7 +17,7 @@ use crate::conflict_preview::{link_node_modules, BuildGroup, ConflictPreviewMana
 use crate::error::ApiError;
 use crate::events::EventBus;
 use crate::git::{self, Identity};
-use crate::providers::{headless_spec, Provider};
+use crate::providers::{headless_spec, AgentSession, Provider};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
@@ -609,6 +609,7 @@ impl Runner<'_> {
             &prompt(&result_path, answers),
             &ctx.state_dir,
             &ctx.project_id,
+            &AgentSession::Fresh,
         );
         let (program, args) = spec.argv.split_first().ok_or(Failure::Unavailable)?;
         let mut agent = Command::new(program);

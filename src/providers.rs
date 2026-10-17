@@ -340,37 +340,49 @@ pub fn launch_spec(
 }
 
 /// Resolve the argv/env for running `provider` once, non-interactively, on `prompt`.
-/// Always auto-approves; no turn-end hook and no session flags. OpenCode gets its own
-/// `{state_dir}/{project_id}/opencode-headless` config dir (permissions only, no plugin), so
-/// it never rewrites the interactive terminal's config. Unknown providers get the prompt
-/// appended as the last argument.
+/// Always auto-approves; no turn-end hook. `session` is honoured by Cursor, Claude and Codex
+/// (Codex only resumes; `Assign` is treated as `Fresh`) and ignored by the rest. OpenCode
+/// gets its own `{state_dir}/{project_id}/opencode-headless` config dir (permissions only, no
+/// plugin), so it never rewrites the interactive terminal's config. Unknown providers get the
+/// prompt appended as the last argument.
 pub fn headless_spec(
     provider: &Provider,
     prompt: &str,
     state_dir: &Path,
     project_id: &str,
+    session: &AgentSession,
 ) -> LaunchSpec {
     let mut argv = provider.command.clone();
     let mut env = Vec::new();
     match provider.id.as_str() {
         "cursor" => {
+            if let AgentSession::Assign(id) | AgentSession::Resume(id) = session {
+                argv.extend(["--resume".into(), id.clone()]);
+            }
             argv.extend(
                 ["-p", "--force", "--output-format", "stream-json", prompt].map(String::from),
             );
         }
-        "claude" => argv.extend(
-            [
-                "-p",
-                prompt,
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--dangerously-skip-permissions",
-                "--append-system-prompt",
-                GIT_GUIDE,
-            ]
-            .map(String::from),
-        ),
+        "claude" => {
+            argv.extend(
+                [
+                    "-p",
+                    prompt,
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--dangerously-skip-permissions",
+                    "--append-system-prompt",
+                    GIT_GUIDE,
+                ]
+                .map(String::from),
+            );
+            match session {
+                AgentSession::Fresh => {}
+                AgentSession::Assign(id) => argv.extend(["--session-id".into(), id.clone()]),
+                AgentSession::Resume(id) => argv.extend(["--resume".into(), id.clone()]),
+            }
+        }
         "codex" => {
             let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
             argv.extend(
@@ -383,6 +395,10 @@ pub fn headless_spec(
                 .map(String::from),
             );
             argv.push(format!("developer_instructions={guide}"));
+            // `codex exec [OPTIONS] resume <id> <prompt>`: options must precede `resume`.
+            if let AgentSession::Resume(id) = session {
+                argv.extend(["resume".into(), id.clone()]);
+            }
             argv.push(prompt.into());
         }
         "opencode" => {
@@ -689,7 +705,68 @@ mod tests {
     const PROMPT: &str = "resolve the conflicts";
 
     fn headless(id: &str, dir: &Path) -> LaunchSpec {
-        headless_spec(&p(id), PROMPT, dir, "p")
+        headless_spec(&p(id), PROMPT, dir, "p", &AgentSession::Fresh)
+    }
+
+    fn headless_session(id: &str, session: AgentSession) -> Vec<String> {
+        headless_spec(&p(id), PROMPT, Path::new("/nope"), "p", &session).argv
+    }
+
+    #[test]
+    fn headless_cursor_resume() {
+        for session in [
+            AgentSession::Resume("c1".into()),
+            AgentSession::Assign("c1".into()),
+        ] {
+            assert_eq!(
+                headless_session("cursor", session),
+                [
+                    "cursor",
+                    "--resume",
+                    "c1",
+                    "-p",
+                    "--force",
+                    "--output-format",
+                    "stream-json",
+                    PROMPT
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn headless_claude_sessions() {
+        let assigned = headless_session("claude", AgentSession::Assign("u1".into()));
+        assert_eq!(assigned[assigned.len() - 2..], ["--session-id", "u1"]);
+        let resumed = headless_session("claude", AgentSession::Resume("u1".into()));
+        assert_eq!(resumed[resumed.len() - 2..], ["--resume", "u1"]);
+        assert_eq!(
+            headless_session("claude", AgentSession::Fresh),
+            headless("claude", Path::new("/nope")).argv
+        );
+    }
+
+    #[test]
+    fn headless_codex_resume() {
+        let guide = serde_json::to_string(GIT_GUIDE).unwrap();
+        assert_eq!(
+            headless_session("codex", AgentSession::Resume("t1".into())),
+            [
+                "codex",
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                &format!("developer_instructions={guide}"),
+                "resume",
+                "t1",
+                PROMPT
+            ]
+        );
+        assert_eq!(
+            headless_session("codex", AgentSession::Assign("t1".into())),
+            headless_session("codex", AgentSession::Fresh)
+        );
     }
 
     #[test]
@@ -778,6 +855,7 @@ mod tests {
             PROMPT,
             Path::new("/nope"),
             "p",
+            &AgentSession::Resume("x".into()),
         );
         assert_eq!(spec.argv, ["sh", "fake.sh", "resolved", PROMPT]);
         assert!(spec.env.is_empty());
