@@ -352,6 +352,14 @@ pub fn headless_spec(
     project_id: &str,
     session: &AgentSession,
 ) -> LaunchSpec {
+    // The CLIs would parse a leading `-` as an option (`--` isn't verified for all of them).
+    let padded;
+    let prompt = if prompt.starts_with('-') {
+        padded = format!(" {prompt}");
+        padded.as_str()
+    } else {
+        prompt
+    };
     let mut argv = provider.command.clone();
     let mut env = Vec::new();
     match provider.id.as_str() {
@@ -710,6 +718,38 @@ mod tests {
 
     fn headless_session(id: &str, session: AgentSession) -> Vec<String> {
         headless_spec(&p(id), PROMPT, Path::new("/nope"), "p", &session).argv
+    }
+
+    #[test]
+    fn headless_dash_prompt_is_not_a_flag() {
+        for id in ["cursor", "claude", "codex", "opencode"] {
+            let dir = tempfile::tempdir().unwrap();
+            let argv = headless_spec(
+                &p(id),
+                "- fix the title",
+                dir.path(),
+                "p",
+                &AgentSession::Fresh,
+            )
+            .argv;
+            assert!(
+                argv.iter().any(|a| a == " - fix the title"),
+                "{id}: {argv:?}"
+            );
+            assert!(
+                !argv.iter().any(|a| a == "- fix the title"),
+                "{id}: {argv:?}"
+            );
+        }
+        let argv = headless_spec(
+            &p("cursor"),
+            "fix - the title",
+            Path::new("/nope"),
+            "p",
+            &AgentSession::Fresh,
+        )
+        .argv;
+        assert_eq!(argv.last().map(String::as_str), Some("fix - the title"));
     }
 
     #[test]
