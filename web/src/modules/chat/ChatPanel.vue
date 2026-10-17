@@ -288,16 +288,23 @@ defineExpose({ insert, insertReference, send, busy });
       </MessageScroller>
     </MessageScrollerProvider>
 
-    <div class="flex shrink-0 flex-col gap-2 p-2">
-      <div
-        v-if="streaming"
-        class="bg-background/95 text-muted-foreground flex items-center gap-1.5 self-center rounded-full border px-3 py-1 text-xs shadow-sm"
-        role="status"
-        data-testid="chat-working"
+    <div class="relative flex shrink-0 flex-col gap-2 p-2">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="translate-y-2 opacity-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-to-class="translate-y-2 opacity-0"
       >
-        <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
-        Agent is working…
-      </div>
+        <div
+          v-if="streaming"
+          class="pointer-events-none absolute bottom-full left-0 right-0 mx-auto flex w-fit items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground shadow-sm"
+          role="status"
+          data-testid="chat-working"
+        >
+          <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
+          Agent is working…
+        </div>
+      </Transition>
       <Alert v-if="errorText" variant="destructive">
         <CircleAlert />
         <AlertDescription data-testid="chat-error">{{ errorText }}</AlertDescription>
