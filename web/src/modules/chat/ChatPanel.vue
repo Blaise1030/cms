@@ -103,6 +103,19 @@ async function open(id: string) {
   if (history?.running) void chat.value.resumeStream();
 }
 
+/** Catch up with the saved transcript (a Stop's checkpoint, a terminal turn's marker) unless a turn is streaming here. */
+async function reload(id: string) {
+  const current = chat.value;
+  const idle = () => chat.value === current && !streaming.value;
+  if (id !== activeId.value || !current || !idle()) return;
+  try {
+    const history = await daemon.api.chatHistory(props.projectId, id);
+    if (idle()) current.messages = history.messages;
+  } catch {
+    // Keep what we have; the next turn or reopen catches up.
+  }
+}
+
 watch(
   activeId,
   (id) => {
@@ -143,7 +156,12 @@ const offs = [
     if (e.projectId === props.projectId) terminalRunning.value = false;
   }),
   daemon.on("terminal.session", (e) => {
-    if (e.projectId === props.projectId) void refreshTerminal();
+    if (e.projectId !== props.projectId) return;
+    void refreshTerminal();
+    void reload(e.sessionId);
+  }),
+  daemon.on("chat.turn", (e) => {
+    if (e.projectId === props.projectId) void reload(e.chatId);
   }),
 ];
 onBeforeUnmount(() => {

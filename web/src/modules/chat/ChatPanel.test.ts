@@ -163,6 +163,62 @@ describe("ChatPanel", () => {
     expect(vm.busy).toBe(true);
   });
 
+  it("reloads the history when the stopped turn ends, showing its checkpoint", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = await mountPanel();
+    const id = useChatStore().activeChatId("p1")!;
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
+    await w.find("[data-testid='chat-stop']").trigger("click");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(false));
+    histories[id] = {
+      provider: "cursor",
+      running: false,
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [
+            { type: "text", text: "Hello " },
+            { type: "data-checkpoint", data: { sha: "abcdef1234", files: ["a.md"] } },
+          ],
+        },
+      ],
+    };
+    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: id });
+    await vi.waitFor(() => expect(w.find("[data-testid='checkpoint']").exists()).toBe(true));
+    expect(w.find("[data-testid='checkpoint']").text()).toContain("Saved 1 file");
+    expect(w.findAll("[data-testid='chat-stop']")).toHaveLength(0);
+  });
+
+  it("reloads the history when a terminal turn ends in the active chat", async () => {
+    histories["c-old"] = {
+      provider: "claude",
+      running: false,
+      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Earlier question" }] }],
+    };
+    useChatStore().setActive("p1", "c-old");
+    const w = await mountPanel();
+    expect(w.text()).not.toContain("Continued in Terminal");
+    histories["c-old"].messages.push({ id: "m1", role: "assistant", parts: [{ type: "data-terminal", data: {} }] });
+    h.daemon.emit({ type: "terminal.session", projectId: "p1", sessionId: "c-old" });
+    await vi.waitFor(() => expect(w.text()).toContain("Continued in Terminal"));
+  });
+
+  it("doesn't reload the history over a streaming turn", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = await mountPanel();
+    const id = useChatStore().activeChatId("p1")!;
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
+    const before = calls.length;
+    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: id });
+    await flushPromises();
+    expect(calls.slice(before).some((c) => c.url === `${ORIGIN}/api/chat/p1/${id}`)).toBe(false);
+    expect(w.text()).toContain("Hello");
+  });
+
   it("offers three suggestions on an empty chat that fill the input", async () => {
     const w = await mountPanel();
     const suggestions = w.findAll("[data-testid='chat-suggestion']");
