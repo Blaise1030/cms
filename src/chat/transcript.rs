@@ -57,8 +57,16 @@ fn append_file(file: &Path, messages: &[Value]) -> std::io::Result<()> {
         .write_all(lines.as_bytes())
 }
 
-/// Oldest first. A missing file is an empty transcript; unparseable lines are skipped.
+fn invalid_chat_id() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid chat id")
+}
+
+/// Oldest first. A missing file (or an invalid id) is an empty transcript; unparseable lines
+/// are skipped.
 pub fn read(state_dir: &Path, project_id: &str, chat_id: &str) -> Vec<Value> {
+    if !valid_chat_id(chat_id) {
+        return Vec::new();
+    }
     read_file(&path(state_dir, project_id, chat_id))
 }
 
@@ -68,6 +76,9 @@ pub fn append(
     chat_id: &str,
     messages: &[Value],
 ) -> std::io::Result<()> {
+    if !valid_chat_id(chat_id) {
+        return Err(invalid_chat_id());
+    }
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     append_file(&path(state_dir, project_id, chat_id), messages)
 }
@@ -209,6 +220,9 @@ fn is_terminal_marker(message: &Value) -> bool {
 
 /// Appends a `data-terminal` marker to an existing transcript, unless it already ends with one.
 pub fn mark_terminal(state_dir: &Path, project_id: &str, chat_id: &str) -> std::io::Result<()> {
+    if !valid_chat_id(chat_id) {
+        return Err(invalid_chat_id());
+    }
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let file = path(state_dir, project_id, chat_id);
     if !file.exists() {
@@ -389,6 +403,24 @@ mod tests {
         append(dir.path(), "p", "c", std::slice::from_ref(&first)).unwrap();
         append(dir.path(), "p", "c", std::slice::from_ref(&second)).unwrap();
         assert_eq!(read(dir.path(), "p", "c"), vec![first, second]);
+    }
+
+    #[test]
+    fn invalid_chat_ids_never_touch_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("p").join("x.jsonl");
+        std::fs::create_dir_all(dir.path().join("p").join("chats")).unwrap();
+        std::fs::write(&outside, "{\"id\":\"u1\"}\n").unwrap();
+
+        assert!(read(dir.path(), "p", "../x").is_empty());
+        let err = append(dir.path(), "p", "../x", &[user_message("u1", "a")]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        let err = mark_terminal(dir.path(), "p", "../x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "{\"id\":\"u1\"}\n"
+        );
     }
 
     #[test]

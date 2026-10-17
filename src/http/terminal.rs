@@ -171,7 +171,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
 }
 
 /// A new conversation, with its id up front where the CLI allows it.
-async fn new_agent_session(provider: &Provider, dir: &FsPath) -> AgentSession {
+pub(crate) async fn new_agent_session(provider: &Provider, dir: &FsPath) -> AgentSession {
     match provider.id.as_str() {
         "claude" => AgentSession::Assign(uuid_v4()),
         "cursor" => create_cursor_chat(provider, dir)

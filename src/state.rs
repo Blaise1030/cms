@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::changes::auto_resolve::{AutoResolveJobs, Timeouts};
 use crate::changes::conflict_sessions::ConflictSessions;
+use crate::chat::manager::ChatManager;
 use crate::config::Config;
 use crate::conflict_preview::ConflictPreviewManager;
 use crate::devserver::{DevServerManager, DevServerOptions};
@@ -24,6 +25,8 @@ pub struct AppState {
     pub events: EventBus,
     /// PTY terminal sessions (one per project).
     pub terminals: Arc<TerminalManager>,
+    /// Headless chat turns (one per project, never alongside its terminal).
+    pub chats: Arc<ChatManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
     /// `fs.change` watcher per project.
@@ -91,6 +94,7 @@ impl AppState {
         let projects = Arc::new(projects);
         let events = EventBus::new();
         let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
+        let chats = Arc::new(ChatManager::new(events.clone()));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
@@ -102,6 +106,7 @@ impl AppState {
             projects,
             events,
             terminals,
+            chats,
             devservers,
             watchers,
             github,
