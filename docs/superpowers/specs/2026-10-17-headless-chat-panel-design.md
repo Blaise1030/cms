@@ -131,7 +131,9 @@ pub trait Translator {
 `UiChunk` is a serde enum matching the AI SDK 7 `UIMessageChunk` subset we emit: `start`,
 `start-step`, `finish-step`, `text-start|delta|end`, `reasoning-start|delta|end`,
 `tool-input-available`, `tool-output-available`, `tool-output-error`, `data-checkpoint`,
-`message-metadata`, `error`, `abort`, `finish`.
+`data-agent-error`, `message-metadata`, `error`, `abort`, `finish`. Agent failures are a
+`data-agent-error { code, message }` part, not an `error` chunk, so they are saved in the
+transcript and still show after a reload. `error` is only for daemon faults mid-stream.
 
 Mapping rules:
 
@@ -145,11 +147,11 @@ Mapping rules:
   query? }` plus the raw args; outputs are truncated to 16 KB.
 - Usage → `message-metadata { provider, model, usage }` before `finish`.
 - Claude `system/hook_*` lines are ignored.
-- **Failure detection** (`finish`): exit code 127 → `error` "`<cmd>` is not installed or not on
-  PATH"; Claude `terminal_reason` other than a normal end, `is_error: true`, or Cursor
-  `result.is_error` → `error` with the CLI's text; any of "authenticate", "OAuth", "log in" in
-  that text → error code `login`, message "Your <Provider> login has expired. Open the Terminal tab
-  and run `/login`." Non-zero exit with no result → `error` with the last 20 stderr lines.
+- **Failure detection** (`finish`), emitted as `data-agent-error`: exit code 127 → code
+  `not_installed`; Claude `terminal_reason` other than a normal end, `is_error: true`, or Cursor
+  `result.is_error` → code `failed` with the CLI's text; any of "authenticate", "OAuth", "log in"
+  in that text → code `login`, message "Your <Provider> login has expired. Open the Terminal tab
+  and run /login." Non-zero exit with no result → code `failed` with the last 20 stderr lines.
 
 ### Shared turn-end
 
@@ -190,8 +192,9 @@ Auth is the daemon's existing token middleware.
 
 - `ChatPanel.vue`
   - `new Chat({ id: chatId, messages, transport: new DefaultChatTransport({ api:
-    `/api/chat/${project}`, body: () => ({ provider }), prepareReconnectToStreamRequest }) })`,
-    `resume: true` on mount so a reload rejoins a running turn. Initial messages come from
+    `/api/chat/${project}`, body: () => ({ provider }) }) })`; the transport's default reconnect
+    URL `${api}/${chatId}/stream` is the resume route. `chat.resumeStream()` on mount when the
+    history says `running`, so a reload rejoins a running turn. Initial messages come from
     `GET /api/chat/{project}/{chatId}`. The daemon token goes in the transport headers, as `core/api.ts` does.
   - Conversation: `MessageScroller` + `Message`/`Bubble` for user turns.
   - Composer: `InputGroup` textarea, provider select (Cursor CLI / Claude Code / Codex from
@@ -208,7 +211,9 @@ Auth is the daemon's existing token middleware.
     confirm dialog as `CheckpointsPanel` and calls `api.restoreCheckpoint`. Blocked → Marker
     "Not saved: <reason>".
   - `data-terminal` → Marker "Continued in Terminal".
-  - Chat-level `error` → inline Alert; code `login` / not-installed add an **Open Terminal** button.
+  - `data-agent-error` → inline Alert; codes `login` / `not_installed` add an **Open Terminal**
+    button. A chat-level `chat.error` (request refused, network) shows the same Alert above the
+    composer.
 - `store.ts` (Pinia): active chat id per project, provider, running flag (also driven by
   `chat.turn` events so other tabs stay in sync).
 
