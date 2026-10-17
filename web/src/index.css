@@ -133,6 +133,19 @@ file-tree-container {
   color-scheme: inherit;
 }
 
+/* Running-state pulse used by the trace and attachment components. */
+@utility shimmer {
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+@utility shimmer-none {
+  animation: none;
+}
+@keyframes shimmer {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Animated by the file trees' scroll fade (lib/treeScrollFade.ts). */
 @property --tree-fade-top {
   syntax: "<length>";
