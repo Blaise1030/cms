@@ -23,6 +23,8 @@ let calls: Call[];
 let terminalRunning: boolean;
 let histories: Record<string, { messages: UIMessage[]; provider: string; running: boolean }>;
 let chatResponse: (init: RequestInit) => Response;
+/** When set, chat history responses wait for it. */
+let historyGate: Promise<void> | null;
 
 function sse(chunks: unknown[], keepOpen = false, signal?: AbortSignal | null) {
   const body = new ReadableStream<Uint8Array>({
@@ -61,6 +63,7 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   if (path === "/api/chat/p1/turn" && method === "DELETE") return json({ stopped: true });
   const history = path.match(/^\/api\/chat\/p1\/([^/]+)$/);
   if (history && method === "GET") {
+    if (historyGate) await historyGate;
     const found = histories[decodeURIComponent(history[1]!)];
     return found ? json(found) : json({ error: { code: "NOT_FOUND", message: "no such chat" } }, 404);
   }
@@ -75,6 +78,7 @@ beforeEach(() => {
   terminalRunning = false;
   histories = {};
   chatResponse = () => sse(reply);
+  historyGate = null;
   vi.stubGlobal("fetch", vi.fn(fetchMock));
   const api = createApi({ origin: ORIGIN, token: "tok" }, (i, init) => fetchMock(i, init));
   h.daemon = createFakeDaemon(api);
@@ -218,6 +222,63 @@ describe("ChatPanel", () => {
     );
     const w = await mountPanel();
     await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+  });
+
+  it("reloads a chat started here when it is reopened", async () => {
+    histories["c-old"] = {
+      provider: "claude",
+      running: false,
+      messages: [{ id: "u0", role: "user", parts: [{ type: "text", text: "Earlier question" }] }],
+    };
+    const w = await mountPanel();
+    const id = useChatStore().activeChatId("p1")!;
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+    histories[id] = {
+      provider: "cursor",
+      running: false,
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "Saved reply" }] },
+      ],
+    };
+    useChatStore().setActive("p1", "c-old");
+    await vi.waitFor(() => expect(w.text()).toContain("Earlier question"));
+    const before = calls.length;
+    useChatStore().setActive("p1", id);
+    await vi.waitFor(() => expect(w.text()).toContain("Saved reply"));
+    expect(calls.slice(before).some((c) => c.method === "GET" && c.url === `${ORIGIN}/api/chat/p1/${id}`)).toBe(true);
+  });
+
+  it("keeps the typed text and disables Send while the history loads", async () => {
+    let release!: () => void;
+    historyGate = new Promise((r) => (release = r));
+    const w = await mountPanel();
+    await w.find("[data-testid='chat-input']").setValue("hi");
+    const sendButton = w.find<HTMLButtonElement>("[data-testid='chat-send']");
+    expect(sendButton.element.disabled).toBe(true);
+    await sendButton.trigger("click");
+    await w.find("[data-testid='chat-input']").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(w.find<HTMLTextAreaElement>("[data-testid='chat-input']").element.value).toBe("hi");
+    expect(posts()).toHaveLength(0);
+    release();
+    await flushPromises();
+    expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(false);
+  });
+
+  it("queues an exposed send until the history has loaded", async () => {
+    let release!: () => void;
+    historyGate = new Promise((r) => (release = r));
+    const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
+    const sent = (w.vm as unknown as { send(t: string): Promise<void> }).send("hi");
+    await flushPromises();
+    expect(posts()).toHaveLength(0);
+    release();
+    await sent;
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+    expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe("hi");
   });
 
   it("exposes insert and send for the outbox", async () => {

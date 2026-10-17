@@ -46,8 +46,8 @@ const historyOpen = ref(false);
 const terminalRunning = ref(false);
 /** The chat's own provider, or the user's pick; null falls back to the terminal's. */
 const chosen = ref<string | null>(null);
-/** Chats started here: the daemon has no history for them yet. */
-const fresh = new Set<string>();
+/** The latest `open()`; sends wait for it so none land while the history loads. */
+let opened: Promise<void> = Promise.resolve();
 
 const providers = computed(() => terminal.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
 const provider = computed({
@@ -86,12 +86,10 @@ async function open(id: string) {
   chat.value = null;
   chosen.value = null;
   let history: Awaited<ReturnType<typeof daemon.api.chatHistory>> | null = null;
-  if (!fresh.has(id)) {
-    try {
-      history = await daemon.api.chatHistory(props.projectId, id);
-    } catch {
-      // Not saved yet (a chat with no turns), or a transient failure: start empty.
-    }
+  try {
+    history = await daemon.api.chatHistory(props.projectId, id);
+  } catch {
+    // Not saved yet (a chat with no turns), or a transient failure: start empty.
   }
   if (seq !== opening) return;
   if (history?.provider) chosen.value = history.provider;
@@ -102,7 +100,7 @@ async function open(id: string) {
 watch(
   activeId,
   (id) => {
-    if (id) void open(id);
+    if (id) opened = open(id);
     else startNew();
   },
   { immediate: true },
@@ -110,7 +108,7 @@ watch(
 
 function startNew() {
   historyOpen.value = false;
-  fresh.add(store.newChat(props.projectId));
+  store.newChat(props.projectId);
 }
 
 async function refreshTerminal() {
@@ -147,8 +145,13 @@ onBeforeUnmount(() => {
 
 async function send(text: string) {
   const trimmed = text.trim();
-  if (!trimmed || !chat.value) return;
-  await chat.value.sendMessage({ text: trimmed });
+  if (!trimmed) return;
+  let pending: Promise<void>;
+  do {
+    pending = opened;
+    await pending;
+  } while (pending !== opened);
+  await chat.value?.sendMessage({ text: trimmed });
 }
 
 function submit(text: string) {
@@ -241,7 +244,7 @@ defineExpose({ insert, send });
         :providers="providers"
         :provider-locked="messages.length > 0"
         :streaming="streaming"
-        :blocked="terminalRunning ? 'The agent is busy in Terminal' : null"
+        :blocked="terminalRunning ? 'The agent is busy in Terminal' : chat ? null : 'Loading chat'"
         @submit="submit"
         @stop="stop"
       />
