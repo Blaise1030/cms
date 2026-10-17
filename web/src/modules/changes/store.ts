@@ -8,7 +8,7 @@ import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
-import { useTerminalStore } from "@/modules/terminal/store";
+import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { getLatest as syncAgain } from "./getLatest";
 
 const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
@@ -218,7 +218,7 @@ export const useChangesStore = defineStore("changes", () => {
   async function startSync(id: string, sessionId: string) {
     syncSessionId.value = sessionId;
     syncStatus.value = { sessionId, state: "preparing", stage: "", questions: [], summary: null, error: null };
-    const provider = useTerminalStore().provider;
+    const provider = useAgentProvidersStore().provider;
     if (!provider) {
       syncFailed(sessionId, SYNC_UNAVAILABLE);
       return;

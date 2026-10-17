@@ -12,7 +12,7 @@ import { STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
-import { useTerminalStore } from "@/modules/terminal/store";
+import { useAgentProvidersStore } from "@/modules/chat/providers";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -645,7 +645,7 @@ describe("changes store auto-resolve", () => {
     const startAutoResolve = vi.fn(async () => ({ started: true }));
     const getConflict = vi.fn();
     const store = setupSync({ startAutoResolve, getConflict });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
 
     await store.applyUpdate("site", conflictResult);
 
@@ -659,7 +659,7 @@ describe("changes store auto-resolve", () => {
   it("startSync_without_provider_fails_plainly", async () => {
     const startAutoResolve = vi.fn(async () => ({ started: true }));
     const store = setupSync({ startAutoResolve });
-    useTerminalStore().provider = null;
+    useAgentProvidersStore().provider = null;
 
     await store.startSync("site", "s1");
 
@@ -675,7 +675,7 @@ describe("changes store auto-resolve", () => {
         throw new ApiError("CONFLICT", "already running", 409);
       }),
     });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
 
     await store.startSync("site", "s1");
 
@@ -692,13 +692,13 @@ describe("changes store auto-resolve", () => {
     const seen: string[] = [];
 
     let store = setupSync({ startAutoResolve: fail(400) });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
     await store.startSync("site", "s1");
     expect(store.syncStatus?.error).toBe("Your AI assistant isn't available.");
     seen.push(store.syncStatus!.error!);
 
     store = setupSync({ startAutoResolve: fail(404), answerAutoResolve: fail(404), cancelAutoResolve: fail(404) });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
     await store.startSync("site", "s1");
     expect(store.syncStatus?.error).toBe("Couldn't start combining. Please try again.");
     seen.push(store.syncStatus!.error!);
@@ -732,7 +732,7 @@ describe("changes store auto-resolve", () => {
     const startAutoResolve = vi.fn(async () => ({ started: true }));
     const updateChanges = vi.fn(async () => ({ ...conflictResult, conflictSessions: { "content/a": "s2" } }));
     const store = setupSync({ startAutoResolve, updateChanges });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
     store.syncSessionId = "s1";
     store.syncStatus = { ...status("failed"), error: "Your draft changed while combining. Please sync again." };
 
@@ -815,7 +815,7 @@ describe("changes store auto-resolve", () => {
     const cancelAutoResolve = vi.fn(async () => ({ ok: true }));
     const startAutoResolve = vi.fn(async () => ({ started: true }));
     const store = setupSync({ answerAutoResolve, cancelAutoResolve, startAutoResolve });
-    useTerminalStore().provider = "fake";
+    useAgentProvidersStore().provider = "fake";
     store.syncSessionId = "s1";
 
     await store.answerSync("site", { q1: "Keep theirs" });

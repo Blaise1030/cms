@@ -135,7 +135,7 @@ Not yet done; it needs the Apple secrets and two real releases. Use a test versi
        `.app.tar.gz` + `.sig` pairs and `latest.json` (its `version` is N and both `url`s download).
 3. [ ] On a clean macOS user account, download the `.dmg` for that Mac, drag Workbench to
        Applications and open it. Gatekeeper must not warn about an unidentified developer.
-4. [ ] Create or open a project; start a terminal session; confirm the preview and terminal work.
+4. [ ] Create or open a project; send a chat message; confirm the preview and chat work.
 5. [ ] Release N+1. Within 6 h, or immediately after relaunching N, the app downloads it.
 6. [ ] While an agent turn is running, confirm the notice does **not** appear (shell log:
        "waiting for terminal sessions to go idle"). When the turn ends, **Update ready — restart to
@@ -145,5 +145,5 @@ Not yet done; it needs the Apple secrets and two real releases. Use a test versi
        busy message and **Not now** goes back.
 9. [ ] Idle again: **Restart to update** → the app quits, relaunches as N+1 (About / `Info.plist`),
        and no `workbench serve` process from N is left (`pgrep -fl 'Workbench.app'`).
-10. [ ] Projects and terminals still work after the update; run `just test` and the e2e suite on the
+10. [ ] Projects and chat still work after the update; run `just test` and the e2e suite on the
         release commit.

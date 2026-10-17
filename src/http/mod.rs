@@ -1,6 +1,7 @@
 //! HTTP layer: router, middleware wiring.
 
 pub mod changes;
+pub mod chat;
 pub mod checkpoints;
 pub mod content;
 pub mod design;
@@ -93,6 +94,10 @@ pub fn router(state: AppState) -> Router {
             "/api/terminal/{project}/attachments",
             post(terminal::attach).layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
         )
+        .route("/api/chat/{project}", get(chat::list).post(chat::post))
+        .route("/api/chat/{project}/turn", delete(chat::stop))
+        .route("/api/chat/{project}/{chat}", get(chat::get))
+        .route("/api/chat/{project}/{chat}/stream", get(chat::resume))
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))

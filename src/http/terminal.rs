@@ -1,8 +1,6 @@
 //! Terminal HTTP + WebSocket: provider registry, PTY lifecycle, hook checkpoints.
 
-use std::collections::HashMap;
 use std::path::{Path as FsPath, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use axum::body::Bytes;
@@ -15,8 +13,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 
-use super::{changes, checkpoints, project_dir};
+use super::{changes, checkpoints};
 use crate::auth;
+use crate::chat::transcript;
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::projects::STATE_DIR;
@@ -28,16 +27,6 @@ use crate::terminal::{login_command, Output};
 const SUMMARY_MAX: usize = 72;
 /// How long `cursor-agent create-chat` may take before the session starts without an id.
 const CREATE_CHAT_TIMEOUT: Duration = Duration::from_secs(20);
-
-static TURN_END_SERIAL: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn turn_end_lock(project_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    let mut map = TURN_END_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    map.entry(project_id.to_string())
-        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-        .clone()
-}
 
 /// One-line commit subject for terminal hook checkpoints.
 pub fn commit_message(summary: Option<&str>, changed: &[String]) -> String {
@@ -163,6 +152,9 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
         &req.project,
         &session,
     );
+    if state.chats.running(&req.project).is_some() {
+        return Err(ApiError::conflict("The agent is busy in Chat"));
+    }
     state
         .terminals
         .start(&req.project, &provider.id, &project.dir, launch)
@@ -183,7 +175,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
 }
 
 /// A new conversation, with its id up front where the CLI allows it.
-async fn new_agent_session(provider: &Provider, dir: &FsPath) -> AgentSession {
+pub(crate) async fn new_agent_session(provider: &Provider, dir: &FsPath) -> AgentSession {
     match provider.id.as_str() {
         "claude" => AgentSession::Assign(uuid_v4()),
         "cursor" => create_cursor_chat(provider, dir)
@@ -413,6 +405,9 @@ fn record_turn(state: &AppState, req: &TurnEndRequest) {
     let Some(id) = state.terminals.history_id(&req.project) else {
         return;
     };
+    if let Err(e) = transcript::mark_terminal(&state_dir(state), &req.project, &id) {
+        eprintln!("workbench: cannot mark the chat transcript: {e}");
+    }
     let title = req
         .summary
         .as_deref()
@@ -447,8 +442,6 @@ pub async fn turn_end(State(state): State<AppState>, body: Bytes) -> Result<Json
     if !state.terminals.token_matches(&req.project, &req.token) {
         return Err(ApiError::unauth("invalid hook token").with_status(403));
     }
-    let lock = turn_end_lock(&req.project);
-    let _guard = lock.lock().await;
     record_turn(&state, &req);
     state.terminals.set_idle(&req.project);
     // The agent may have started or switched changes this turn.
@@ -456,43 +449,8 @@ pub async fn turn_end(State(state): State<AppState>, body: Bytes) -> Result<Json
         .events
         .emit("terminal.turn", json!({ "projectId": req.project }));
 
-    let dir = project_dir(&state, &req.project).await?;
-    if let Err(e) = checkpoints::require_change(&state, &req.project).await {
-        // A turn that only talked (no edits) on `main` is fine.
-        if crate::changes::is_dirty(&dir).await? {
-            state.events.emit(
-                "checkpoint.blocked",
-                json!({
-                    "projectId": req.project,
-                    "reason": e.message,
-                }),
-            );
-        }
-        return Ok(Json(json!({ "committed": false })));
-    }
-    let changed = crate::git::changed_paths(&dir).await?;
-    let message = commit_message(req.summary.as_deref(), &changed);
-    let committed = match crate::git::checkpoint(&dir, &message).await? {
-        Some(cp) => {
-            state.events.emit(
-                "checkpoint.created",
-                json!({
-                    "projectId": req.project,
-                    "sha": cp.sha,
-                    "summary": cp.summary,
-                    "author": cp.author,
-                    "ts": cp.ts,
-                }),
-            );
-            true
-        }
-        None => false,
-    };
-    // The agent is idle and its edits are committed: safe to move the checkout now.
-    tokio::spawn(changes::finish_pending_update(
-        state.clone(),
-        req.project.clone(),
-    ));
+    let outcome = checkpoints::finish_turn(&state, &req.project, req.summary.as_deref()).await?;
+    let committed = matches!(outcome, checkpoints::TurnOutcome::Committed { .. });
     Ok(Json(json!({ "committed": committed })))
 }
 

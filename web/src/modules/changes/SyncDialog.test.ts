@@ -10,7 +10,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import SyncDialog from "./SyncDialog.vue";
 import { useChangesStore } from "./store";
-import { useTerminalStore } from "@/modules/terminal/store";
+import { useAgentProvidersStore } from "@/modules/chat/providers";
 
 const api = {
   startAutoResolve: vi.fn(async () => ({})),
@@ -41,7 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
-  useTerminalStore().provider = "claude";
+  useAgentProvidersStore().provider = "claude";
 });
 
 afterEach(() => {

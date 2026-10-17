@@ -9,6 +9,8 @@ import { createBareRemote, DEFAULT_REPO, fileGitUrl } from "./bareRemote";
 import { startGithubStub } from "./githubStub";
 
 export const E2E_TOKEN = "a".repeat(64);
+/** The stream-json turn the e2e `cursor` agent replays (after appending to `notes.md`). */
+export const CURSOR_TURN_FIXTURE = "tests/fixtures/chat/cursor/turn.jsonl";
 
 export type WorkbenchEnv = {
   origin: string;
@@ -265,12 +267,14 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
   const resolver = path.join(root, "tests/fixtures/fake_resolver.sh");
+  const headless = path.join(root, "tests/fixtures/fake_headless.sh");
   fs.writeFileSync(
     agents,
     JSON.stringify({
       fake: [fakeCliPath(root)],
       "fake-resolver": ["sh", resolver, "needs-input"],
       "fake-garbage": ["sh", resolver, "garbage"],
+      cursor: ["sh", headless, path.join(root, CURSOR_TURN_FIXTURE), "edit"],
     }) + "\n",
   );
 

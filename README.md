@@ -1,7 +1,7 @@
 # Workbench
 
 Local site builder: a Rust daemon, a Vue SPA, and (on macOS) a Tauri desktop shell.
-Edit content in the UI, run a coding agent in a project terminal, preview locally, and
+Edit content in the UI, chat with a coding agent about a project, preview locally, and
 publish to GitHub Pages. Sync with a live site can hand conflict resolution to the agent.
 
 Repo path is still `Blaise1030/cms`; the product name is **Workbench**.
@@ -63,9 +63,9 @@ Ctrl-C stops everything. Release builds ignore `WORKBENCH_DEV_*`.
 Signing, notarization, updater keys, and cutting a release:
 [docs/desktop-release.md](docs/desktop-release.md).
 
-### Terminal providers
+### Agent providers
 
-Each project runs a coding CLI in a daemon-owned terminal. Built-in providers: Cursor CLI
+The agent panel's chat runs a coding CLI through the daemon. Built-in providers: Cursor CLI
 (`cursor-agent`), Claude (`claude`), and Codex (`codex`). Override in
 `~/.config/workbench/agents.json`, or pass `--agents-config`.
 

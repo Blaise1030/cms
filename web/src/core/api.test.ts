@@ -108,6 +108,24 @@ describe("createApi", () => {
     expect(fetchMock.mock.calls[1]![0]).toBe("http://b.test/api/health");
     expect(a.previewUrl("my proj")).toBe("http://b.test/preview/my%20proj/");
   });
+
+  it("builds chat routes, the stream URL and auth headers", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => json({ chats: [], running: null }));
+    const a = api(fetchMock, "tok");
+    await a.listChats("my proj");
+    fetchMock.mockResolvedValueOnce(json({ messages: [], provider: "claude", running: false }));
+    await a.chatHistory("my proj", "c1");
+    fetchMock.mockResolvedValueOnce(json({ stopped: true }));
+    await a.stopChat("my proj");
+    expect(fetchMock.mock.calls.map(([url, init]) => `${init!.method} ${url}`)).toEqual([
+      "GET http://127.0.0.1:7800/api/chat/my%20proj",
+      "GET http://127.0.0.1:7800/api/chat/my%20proj/c1",
+      "DELETE http://127.0.0.1:7800/api/chat/my%20proj/turn",
+    ]);
+    expect(a.chatUrl("my proj")).toBe("http://127.0.0.1:7800/api/chat/my%20proj");
+    expect(a.authHeaders()).toEqual({ Authorization: "Bearer tok" });
+    expect(api(fetchMock).authHeaders()).toEqual({});
+  });
 });
 
 describe("updateContentEntry", () => {
