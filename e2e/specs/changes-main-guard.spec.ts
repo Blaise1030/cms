@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { api, startChange } from "../fixtures/daemon";
-import { expect, selectFakeProvider, test } from "../fixtures/workbench";
+import { expect, openTerminalTab, selectFakeProvider, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -16,7 +16,6 @@ async function terminalEdit(page: import("@playwright/test").Page, line: string)
 
 async function startFakeTerminal(page: import("@playwright/test").Page) {
   await selectFakeProvider(page);
-  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
 }
@@ -32,10 +31,9 @@ test("GitHub project on main prompts Start a change, then runs on the new branch
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId("terminal-panel")).toBeVisible();
+  await openTerminalTab(page);
 
   await selectFakeProvider(page);
-  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
   await expect(page.getByTestId("terminal-error")).toContainText("Start a change first");
 
@@ -93,7 +91,7 @@ test("local-only project edits main with no Start a change dialog", async ({
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${localId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByTestId("terminal-panel")).toBeVisible();
+  await openTerminalTab(page);
 
   await startFakeTerminal(page);
   await terminalEdit(page, "edit the notes");
