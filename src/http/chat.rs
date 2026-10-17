@@ -39,6 +39,14 @@ async fn project(state: &AppState, id: &str) -> Result<Project, ApiError> {
         .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))
 }
 
+fn check_chat_id(id: &str) -> Result<(), ApiError> {
+    if transcript::valid_chat_id(id) {
+        Ok(())
+    } else {
+        Err(ApiError::badreq(format!("invalid chat id: {id}")))
+    }
+}
+
 /// What `DefaultChatTransport` sends (`provider` through the transport's `body`).
 #[derive(Deserialize)]
 struct PostRequest {
@@ -75,9 +83,7 @@ pub async fn post(
             "expected JSON body {{id, messages, provider?}}: {e}"
         ))
     })?;
-    if !transcript::valid_chat_id(&req.id) {
-        return Err(ApiError::badreq(format!("invalid chat id: {}", req.id)));
-    }
+    check_chat_id(&req.id)?;
     let project = project(&state, &project_id).await?;
     let state_dir = state_dir(&state);
     let existing = history::get(&state_dir, &project_id, &req.id);
@@ -224,6 +230,7 @@ pub async fn get(
     State(state): State<AppState>,
     Path((project_id, chat_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
+    check_chat_id(&chat_id)?;
     project(&state, &project_id).await?;
     let state_dir = state_dir(&state);
     let record = history::get(&state_dir, &project_id, &chat_id)
@@ -241,6 +248,7 @@ pub async fn resume(
     State(state): State<AppState>,
     Path((project_id, chat_id)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
+    check_chat_id(&chat_id)?;
     project(&state, &project_id).await?;
     Ok(match state.chats.subscribe(&project_id, &chat_id) {
         Some(sub) => sse(sub),

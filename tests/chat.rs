@@ -631,6 +631,26 @@ mod http_routes {
     }
 
     #[tokio::test]
+    async fn get_routes_reject_bad_chat_ids() {
+        let env = env(fake("default", None)).await;
+        let long = "a".repeat(65);
+        for id in ["bad.id", long.as_str(), "..%2Fx"] {
+            for suffix in ["", "/stream"] {
+                let uri = format!("/api/chat/{}/{id}{suffix}", env.project);
+                let (s, v) = call(&env, "GET", &uri, None).await;
+                assert_eq!(s, StatusCode::BAD_REQUEST, "{uri}: {v}");
+                assert!(
+                    v["error"]["message"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("invalid chat id"),
+                    "{uri}: {v}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn chat_and_terminal_exclusive() {
         let env = env(fake("slow", None)).await;
         let terminal = json!({ "project": env.project, "provider": "fake" });
