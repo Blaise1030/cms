@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { Chat } from "@ai-sdk/vue";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { CircleAlert, MessageSquare, Plus } from "@lucide/vue";
+import { CircleAlert, LoaderCircle, MessageSquare, Plus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { errorMessage } from "@workbench/utils";
 import { mapErrorResponse } from "@/core/api";
@@ -289,6 +289,15 @@ defineExpose({ insert, insertReference, send, busy });
     </MessageScrollerProvider>
 
     <div class="flex shrink-0 flex-col gap-2 p-2">
+      <div
+        v-if="streaming"
+        class="bg-background/95 text-muted-foreground flex items-center gap-1.5 self-center rounded-full border px-3 py-1 text-xs shadow-sm"
+        role="status"
+        data-testid="chat-working"
+      >
+        <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
+        Agent is working…
+      </div>
       <Alert v-if="errorText" variant="destructive">
         <CircleAlert />
         <AlertDescription data-testid="chat-error">{{ errorText }}</AlertDescription>

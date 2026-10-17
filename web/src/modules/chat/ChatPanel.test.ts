@@ -409,6 +409,17 @@ describe("ChatPanel", () => {
     expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe("Ship it");
   });
 
+  it("shows a working indicator above the input while a turn runs", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = await mountPanel();
+    expect(w.find("[data-testid='chat-working']").exists()).toBe(false);
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(true));
+    expect(w.find("[data-testid='chat-working']").text()).toBe("Agent is working…");
+    await w.find("[data-testid='chat-stop']").trigger("click");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
+  });
+
   describe("element references", () => {
     type Vm = { insertReference(t: string): void };
     const ref1 = '[element <section id="hero"> "Stop building" in src/Hero.astro:5:69] /p/attachments/a.png ';
