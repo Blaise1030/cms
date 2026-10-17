@@ -16,9 +16,10 @@ pub struct CodexTranslator {
     texts: usize,
     reasonings: usize,
     announced_tools: HashSet<String>,
-    /// Message of `turn.failed` or a top-level `error`.
+    /// Message of `turn.failed`.
     failure: Option<String>,
-    /// Message of the last `error` item; non-fatal, so it only explains a failed exit.
+    /// Message of the last `error` item or top-level `error` (e.g. a stream retry); non-fatal,
+    /// so it only explains a failed exit.
     error_note: Option<String>,
 }
 
@@ -101,7 +102,7 @@ impl Translator for CodexTranslator {
             Some("turn.failed") => {
                 self.failure = Some(message(&event["error"]));
             }
-            Some("error") => self.failure = Some(message(&event)),
+            Some("error") => self.error_note = Some(message(&event)),
             _ => {}
         }
         out
@@ -406,10 +407,15 @@ mod tests {
     }
 
     #[test]
-    fn top_level_error_fails_the_turn() {
-        let mut t = CodexTranslator::default();
-        t.feed(r#"{"type":"error","message":"stream disconnected"}"#);
-        let chunks = t.finish(Some(0), "");
+    fn top_level_error_only_explains_a_failed_exit() {
+        let line = r#"{"type":"error","message":"Reconnecting... 1/5"}"#;
+        let mut ok = CodexTranslator::default();
+        ok.feed(line);
+        ok.feed(r#"{"type":"turn.completed","usage":{}}"#);
+        assert_eq!(ok.finish(Some(0), ""), []);
+        let mut failed = CodexTranslator::default();
+        failed.feed(r#"{"type":"error","message":"stream disconnected"}"#);
+        let chunks = failed.finish(Some(1), "stderr text");
         assert!(agent_error(&chunks).message.contains("stream disconnected"));
     }
 
