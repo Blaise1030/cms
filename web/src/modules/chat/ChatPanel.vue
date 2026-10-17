@@ -297,12 +297,12 @@ defineExpose({ insert, insertReference, send, busy });
       >
         <div
           v-if="streaming"
-          class="pointer-events-none absolute bottom-full left-0 right-0 mx-auto flex w-fit items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground shadow-sm"
+          class="pointer-events-none absolute bottom-full left-3 flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
           role="status"
           data-testid="chat-working"
         >
           <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
-          Agent is working…
+          <span class="shimmer motion-reduce:shimmer-none">Agent is working…</span>
         </div>
       </Transition>
       <Alert v-if="errorText" variant="destructive">
