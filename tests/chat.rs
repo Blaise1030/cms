@@ -148,6 +148,24 @@ fn has_text(chunks: &[UiChunk], needle: &str) -> bool {
         .any(|c| matches!(c, UiChunk::TextDelta { delta, .. } if delta.contains(needle)))
 }
 
+/// The pid of the `slow` fake's SIGTERM-ignoring child, once it is running.
+async fn child_pid(pidfile: &Path) -> String {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let text = std::fs::read_to_string(pidfile).unwrap_or_default();
+        if !text.trim().is_empty() {
+            let pid = text.trim().to_string();
+            assert!(alive(&pid));
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the fake never started its child"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 fn alive(pid: &str) -> bool {
     std::process::Command::new("kill")
         .args(["-0", pid])
@@ -251,30 +269,26 @@ async fn stop_kills_group_and_checkpoints() {
         .start(env.state.clone(), request(&env, "slow one"))
         .unwrap();
 
-    let deadline = Instant::now() + WAIT;
-    let pid = loop {
-        let text = std::fs::read_to_string(&pidfile).unwrap_or_default();
-        if !text.trim().is_empty() {
-            break text.trim().to_string();
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the fake never started its child"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
-    assert!(alive(&pid));
+    let pid = child_pid(&pidfile).await;
     std::fs::write(env.dir.join("notes.md"), "partial\n").unwrap();
 
     let stopped = Instant::now();
-    env.state.chats.stop(&env.project).await;
-    while alive(&pid) {
+    let (chats, project) = (env.state.chats.clone(), env.project.clone());
+    let stop = tokio::spawn(async move { chats.stop(&project).await });
+    loop {
+        // Read before the liveness check: an idle manager means the group is already dead.
+        let running = env.state.chats.running(&env.project);
+        if !alive(&pid) {
+            break;
+        }
+        assert!(running.is_some(), "turn ended while child {pid} still ran");
         assert!(
             stopped.elapsed() < Duration::from_secs(3),
             "child {pid} survived stop"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    tokio::time::timeout(WAIT, stop).await.unwrap().unwrap();
 
     let chunks = collect(sub).await;
     let n = chunks.len();
@@ -289,6 +303,30 @@ async fn stop_kills_group_and_checkpoints() {
         transcript::read(&env.state_dir, &env.project, CHAT).len(),
         2
     );
+}
+
+#[tokio::test]
+async fn shutdown_kills_running_turns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pidfile = tmp.path().join("child.pid");
+    let env = env(fake("slow", Some(&pidfile))).await;
+    let sub = env
+        .state
+        .chats
+        .start(env.state.clone(), request(&env, "slow one"))
+        .unwrap();
+    let pid = child_pid(&pidfile).await;
+
+    tokio::time::timeout(WAIT, env.state.chats.shutdown())
+        .await
+        .expect("shutdown is bounded");
+    assert_eq!(env.state.chats.running(&env.project), None);
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while alive(&pid) {
+        assert!(Instant::now() < deadline, "child {pid} survived shutdown");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(collect(sub).await.last(), Some(&UiChunk::Abort));
 }
 
 #[tokio::test]

@@ -38,6 +38,7 @@ pub fn version() -> &'static str {
 /// Serve the HTTP API on an already-bound listener until an interrupt or termination signal.
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     let terminals = state.terminals.clone();
+    let chats = state.chats.clone();
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
     let previews = state.conflict_previews.clone();
@@ -63,6 +64,7 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
         .with_graceful_shutdown(shutdown_signal())
         .await;
     terminals.shutdown().await;
+    chats.shutdown().await;
     devservers.shutdown().await;
     watchers.shutdown();
     cleanup.abort();

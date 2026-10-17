@@ -7,7 +7,8 @@
 //! copied to `{state_dir}/{project}/chat-logs/{chat}.log`, keeping the last 20 lines for error
 //! messages.
 //!
-//! At exit the turn goes through [`finish_turn`] (checkpoint), ends the stream (`finish`, or
+//! At exit (after a stop: once the whole process group is gone) the turn goes through
+//! [`finish_turn`] (checkpoint), ends the stream (`finish`, or
 //! `abort` when stopped, then `None`), saves the assistant message to the transcript, updates
 //! the chat's history record, forgets the turn and emits `terminal.busy { busy: false }` and
 //! `chat.turn { projectId, chatId }`.
@@ -227,12 +228,15 @@ impl ChatManager {
         };
         turn.stopped.store(true, Ordering::SeqCst);
         signal_group(turn.pgid, libc::SIGTERM);
-        if !group_ends(turn.pgid, KILL_GRACE).await {
-            signal_group(turn.pgid, libc::SIGKILL);
-            group_ends(turn.pgid, KILL_GRACE).await;
-        }
+        kill_group_after_grace(turn.pgid).await;
         let mut done = turn.done.clone();
         let _ = tokio::time::timeout(STOP_WAIT, done.wait_for(|d| *d)).await;
+    }
+
+    /// Stop every running turn.
+    pub async fn shutdown(&self) {
+        let ids: Vec<String> = self.turns.lock().unwrap().keys().cloned().collect();
+        futures_util::future::join_all(ids.iter().map(|id| self.stop(id))).await;
     }
 
     fn get(&self, project_id: &str) -> Option<Arc<Turn>> {
@@ -259,6 +263,11 @@ impl TurnTask {
             None => (Some(127), String::new()),
         };
         let stopped = self.turn.stopped.load(Ordering::SeqCst);
+        if stopped {
+            // Members ignoring SIGTERM can still write: checkpoint and go idle only once the
+            // group is gone (escalating here too, in case `stop` was cancelled).
+            kill_group_after_grace(self.turn.pgid).await;
+        }
         // A stop is not a failure: only close the open parts.
         let closing = if stopped {
             translator.finish(None, "")
@@ -459,6 +468,14 @@ async fn open_log(log: &Path) -> Option<tokio::fs::File> {
             eprintln!("workbench: cannot open chat log {}: {e}", log.display());
             None
         }
+    }
+}
+
+/// Give a signalled group [`KILL_GRACE`] to exit, then `SIGKILL` it and wait as long again.
+async fn kill_group_after_grace(pgid: Option<libc::pid_t>) {
+    if !group_ends(pgid, KILL_GRACE).await {
+        signal_group(pgid, libc::SIGKILL);
+        group_ends(pgid, KILL_GRACE).await;
     }
 }
 
