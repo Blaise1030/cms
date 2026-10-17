@@ -420,6 +420,16 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
   });
 
+  it("leaves room under the last message for the working indicator while a turn runs", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = await mountPanel();
+    await send(w, "hi");
+    const list = () => w.find("[data-testid='chat-messages']");
+    await vi.waitFor(() => expect(list().classes()).toContain("pb-10"));
+    await w.find("[data-testid='chat-stop']").trigger("click");
+    await vi.waitFor(() => expect(list().classes()).not.toContain("pb-10"));
+  });
+
   describe("element references", () => {
     type Vm = { insertReference(t: string): void };
     const ref1 = '[element <section id="hero"> "Stop building" in src/Hero.astro:5:69] /p/attachments/a.png ';

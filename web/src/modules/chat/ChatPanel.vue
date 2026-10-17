@@ -275,10 +275,14 @@ defineExpose({ insert, insertReference, send, busy });
         </Button>
       </EmptyContent>
     </Empty>
-    <MessageScrollerProvider v-else>
+    <MessageScrollerProvider v-else auto-scroll>
       <MessageScroller class="min-h-0 flex-1">
         <MessageScrollerViewport>
-          <MessageScrollerContent class="flex flex-col gap-4 p-3">
+          <!-- The working indicator floats over the bottom edge; keep the last line clear of it. -->
+          <MessageScrollerContent
+            data-testid="chat-messages"
+            :class="['flex flex-col gap-4 p-3', streaming && 'pb-10']"
+          >
             <MessageScrollerItem v-for="m in messages" :key="m.id" :message-id="m.id">
               <ChatMessage :project-id="projectId" :message="m" @open-terminal="$emit('open-terminal')" />
             </MessageScrollerItem>
