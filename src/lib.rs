@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod changes;
+pub mod chat;
 pub mod config;
 pub mod conflict_preview;
 pub mod content;
