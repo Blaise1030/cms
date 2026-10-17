@@ -263,17 +263,6 @@ export interface TerminalSessionEvent {
   sessionId: string;
 }
 
-/** A past or live agent session, from `GET /api/terminal/{project}/sessions`. */
-export interface TerminalSession {
-  id: string;
-  provider: string;
-  title?: string | null;
-  /** Unix milliseconds. */
-  createdAt: number;
-  updatedAt: number;
-  resumable: boolean;
-}
-
 /** A chat conversation, from `GET /api/chat/{project}`. */
 export interface ChatSummary {
   id: string;

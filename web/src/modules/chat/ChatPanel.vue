@@ -26,7 +26,6 @@ import { expandReferences, referenceTag } from "./references";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
-defineEmits<{ "open-terminal": [] }>();
 
 /** Terminal providers the daemon can also drive headlessly. */
 const CHAT_PROVIDERS = ["cursor", "claude", "codex"];
@@ -286,7 +285,7 @@ defineExpose({ insert, insertReference, send, busy });
             :class="['flex flex-col gap-4 p-3', streaming && 'pb-10']"
           >
             <MessageScrollerItem v-for="m in messages" :key="m.id" :message-id="m.id">
-              <ChatMessage :project-id="projectId" :message="m" @open-terminal="$emit('open-terminal')" />
+              <ChatMessage :project-id="projectId" :message="m" />
             </MessageScrollerItem>
           </MessageScrollerContent>
         </MessageScrollerViewport>

@@ -16,7 +16,6 @@ import {
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Message, MessageContent } from "@/components/ui/message";
@@ -34,7 +33,6 @@ import { formatValue, toolLabel, type AgentErrorData, type CheckpointData, type 
 import { segmentReferences } from "./references";
 
 defineProps<{ projectId: string; message: UIMessage }>();
-defineEmits<{ "open-terminal": [] }>();
 
 /** Agent text is untrusted: replacing the parser's default `html` plugin leaves raw HTML as escaped text. */
 const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }] };
@@ -132,17 +130,7 @@ const agentError = (data: unknown) => data as AgentErrorData;
 
         <Alert v-else-if="part.type === 'data-agent-error'" variant="destructive">
           <CircleAlert />
-          <AlertDescription class="flex flex-wrap items-center gap-2">
-            <span class="min-w-0 flex-1">{{ agentError(part.data).message }}</span>
-            <Button
-              v-if="agentError(part.data).code !== 'failed'"
-              variant="outline"
-              size="sm"
-              @click="$emit('open-terminal')"
-            >
-              Open Terminal
-            </Button>
-          </AlertDescription>
+          <AlertDescription>{{ agentError(part.data).message }}</AlertDescription>
         </Alert>
       </template>
     </MessageContent>

@@ -36,7 +36,6 @@ import {
   type Health,
   type Project,
   type SetupStatus,
-  type TerminalSession,
   type Tree,
 } from "./types";
 
@@ -252,11 +251,6 @@ export function createApi(
           "/api/terminal/providers",
         )
       ).providers,
-    /** Start a new session, or `resume` a past one (its provider wins over `provider`). */
-    startTerminal: (project: string, provider: string, resume?: string) =>
-      json<{ running: true; sessionId?: string }>("POST", "/api/terminal", {
-        body: resume ? { project, provider, resume } : { project, provider },
-      }),
     stopTerminal: (project: string) =>
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
@@ -264,13 +258,6 @@ export function createApi(
         "GET",
         `/api/terminal/${enc(project)}`,
       ),
-    terminalSessions: async (project: string): Promise<TerminalSession[]> =>
-      (
-        await json<{ sessions: TerminalSession[] }>(
-          "GET",
-          `/api/terminal/${enc(project)}/sessions`,
-        )
-      ).sessions,
     /** Save an image for the agent; resolves to an absolute path on the daemon's machine. */
     attachTerminalImage: async (project: string, image: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/terminal/${enc(project)}/attachments`, { blob: image })).path,

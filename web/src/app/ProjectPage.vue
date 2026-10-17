@@ -15,7 +15,6 @@ import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 import AgentPanel from "@/modules/chat/AgentPanel.vue";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
-import { useTerminalStore } from "@/modules/terminal/store";
 import { projectTabFromRoute } from "@/router";
 
 const props = defineProps<{ id: string }>();
@@ -25,8 +24,6 @@ const route = useRoute();
 const router = useRouter();
 const projects = useProjectsStore();
 const changes = useChangesStore();
-const terminal = useTerminalStore();
-
 const outbox = useAgentOutboxStore();
 const shell = ref<InstanceType<typeof Shell> | null>(null);
 
@@ -102,7 +99,7 @@ watch(
 </script>
 
 <template>
-  <Shell ref="shell" :show-chat="showChat" :chat-detached="terminal.floating">
+  <Shell ref="shell" :show-chat="showChat">
     <template #rail>
       <ProjectRail v-if="project" :project-id="project.id">
         <template #footer>

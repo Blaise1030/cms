@@ -175,18 +175,14 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
-  it("offers the terminal for a login error", async () => {
-    const w = await render([{ type: "data-agent-error", data: { code: "login", message: "Log in to Claude" } }]);
-    expect(w.text()).toContain("Log in to Claude");
-    byText("Open Terminal")!.click();
-    expect(w.emitted("open-terminal")).toHaveLength(1);
-    w.unmount();
-  });
-
-  it("has no terminal button for a failed turn", async () => {
-    const w = await render([{ type: "data-agent-error", data: { code: "failed", message: "exit 1" } }]);
-    expect(w.text()).toContain("exit 1");
-    expect(byText("Open Terminal")).toBeUndefined();
+  it.each([
+    ["login", "Log in to Claude"],
+    ["not_installed", "Claude isn't installed"],
+    ["failed", "exit 1"],
+  ])("shows only the message for a %s agent error", async (code, message) => {
+    const w = await render([{ type: "data-agent-error", data: { code, message } }]);
+    expect(w.find("[role='alert']").text()).toBe(message);
+    expect(w.find("button").exists()).toBe(false);
     w.unmount();
   });
 });

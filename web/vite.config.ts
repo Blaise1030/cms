@@ -19,7 +19,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    setupFiles: ["src/test/vitest-globals.ts"],
     include: ["src/**/*.test.ts", "packages/*/src/**/*.test.ts"],
     // Component tests opt in with `// @vitest-environment happy-dom`; never load iframe URLs.
     environmentOptions: { happyDOM: { settings: { disableIframePageLoading: true } } },

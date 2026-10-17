@@ -8,7 +8,6 @@ import type { Project } from "@/core/types";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useChangesStore } from "@/modules/changes/store";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
-import { useTerminalStore } from "@/modules/terminal/store";
 import { routes } from "@/router";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn(), openChat: vi.fn() }));
@@ -29,10 +28,10 @@ const project = (id: string): Project => ({
 // The page's children have their own tests; stubs keep this one about routing.
 const stubs = {
   Shell: {
-    props: ["showChat", "chatDetached"],
+    props: ["showChat"],
     methods: { openChat: () => h.openChat() },
     template:
-      "<div data-testid='shell' :data-chat-detached='chatDetached' :data-show-chat='showChat'><slot name='menubar' /><slot name='workspace' /><slot name='chat' /></div>",
+      "<div data-testid='shell' :data-show-chat='showChat'><slot name='menubar' /><slot name='workspace' /><slot name='chat' /></div>",
   },
   EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
@@ -68,14 +67,6 @@ describe("ProjectPage", () => {
     expect(w.find("[data-testid='workspace']").text()).toBe("a");
     expect(w.find("[data-testid='chat']").text()).toBe("a");
     expect(router.currentRoute.value.path).toBe("/p/a/preview");
-  });
-
-  it("collapses the chat column while the agent panel floats", async () => {
-    const w = await mountAt("/p/a");
-    expect(w.find("[data-testid='shell']").attributes("data-chat-detached")).toBe("false");
-    useTerminalStore().floating = true;
-    await flushPromises();
-    expect(w.find("[data-testid='shell']").attributes("data-chat-detached")).toBe("true");
   });
 
   it("shows the agent beside the design editor", async () => {

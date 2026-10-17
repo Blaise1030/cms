@@ -10,7 +10,6 @@ const h = vi.hoisted(() => ({
   insertReference: null as any,
   send: null as any,
   busy: null as unknown as Ref<boolean>,
-  emitOpenTerminal: null as unknown as () => void,
 }));
 
 vi.mock("./ChatPanel.vue", async () => {
@@ -20,22 +19,9 @@ vi.mock("./ChatPanel.vue", async () => {
     __esModule: true,
     default: defineComponent({
       props: { projectId: String, active: Boolean },
-      emits: ["open-terminal"],
-      setup(props, { emit, expose }) {
-        h.emitOpenTerminal = () => emit("open-terminal");
+      setup(props, { expose }) {
         expose({ insert: h.insert, insertReference: h.insertReference, send: h.send, busy: h.busy });
         return () => render("div", { "data-testid": "chat-stub", "data-active": String(props.active) });
-      },
-    }),
-  };
-});
-vi.mock("@/modules/terminal/TerminalPanel.vue", async () => {
-  const { defineComponent, h: render } = await import("vue");
-  return {
-    default: defineComponent({
-      props: { projectId: String, active: Boolean },
-      setup(props) {
-        return () => render("div", { "data-testid": "terminal-stub", "data-active": String(props.active) });
       },
     }),
   };
@@ -65,32 +51,13 @@ async function mountPanel() {
 
 const stub = (w: Awaited<ReturnType<typeof mountPanel>>, id: string) => w.find(`[data-testid='${id}']`);
 
-async function showTerminal(w: Awaited<ReturnType<typeof mountPanel>>) {
-  const tab = w.find("[data-testid='agent-tab-terminal']");
-  await tab.trigger("mousedown", { button: 0 });
-  await tab.trigger("click");
-  await flushPromises();
-}
-
 describe("AgentPanel", () => {
-  it("opens on the Chat tab with both panels mounted", async () => {
+  it("renders only the chat, active", async () => {
     const w = await mountPanel();
-    expect(w.find("[data-testid='agent-tab-chat']").attributes("data-state")).toBe("active");
     expect(stub(w, "chat-stub").attributes("data-active")).toBe("true");
-    expect(stub(w, "terminal-stub").exists()).toBe(true);
-    expect(stub(w, "terminal-stub").attributes("data-active")).toBe("false");
     expect(stub(w, "chat-stub").isVisible()).toBe(true);
-    expect(stub(w, "terminal-stub").isVisible()).toBe(false);
-  });
-
-  it("switches to Terminal when the chat asks for it", async () => {
-    const w = await mountPanel();
-    h.emitOpenTerminal();
-    await flushPromises();
-    expect(w.find("[data-testid='agent-tab-terminal']").attributes("data-state")).toBe("active");
-    expect(stub(w, "terminal-stub").attributes("data-active")).toBe("true");
-    expect(stub(w, "chat-stub").attributes("data-active")).toBe("false");
-    expect(stub(w, "terminal-stub").isVisible()).toBe(true);
+    expect(w.find("[role='tablist']").exists()).toBe(false);
+    expect(w.find("[data-testid='agent-tab-terminal']").exists()).toBe(false);
   });
 
   it("puts a picked element in the chat input without sending it", async () => {
@@ -100,15 +67,6 @@ describe("AgentPanel", () => {
     expect(h.insertReference).toHaveBeenCalledWith(elementText);
     expect(h.send).not.toHaveBeenCalled();
     expect(useAgentOutboxStore().messages).toEqual([]);
-  });
-
-  it("leaves outbox messages for the terminal while Terminal is active", async () => {
-    const w = await mountPanel();
-    await showTerminal(w);
-    useAgentOutboxStore().send({ kind: "element", element });
-    await flushPromises();
-    expect(h.insertReference).not.toHaveBeenCalled();
-    expect(useAgentOutboxStore().messages).toHaveLength(1);
   });
 
   it("sends a request in Chat", async () => {
