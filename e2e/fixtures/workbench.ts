@@ -35,24 +35,6 @@ export const test = base.extend<{ workbench: WorkbenchEnv; templateProject: Temp
   ],
 });
 
-/** Bring the agent panel's Terminal tab into view; Chat is the default and the terminal is hidden. */
-export async function openTerminalTab(page: Page) {
-  await page.getByTestId("agent-tab-terminal").click();
-  await expect(page.getByTestId("terminal-panel")).toBeVisible();
-}
-
-/**
- * Pick the e2e `fake` CLI (on the Terminal tab). Exact match is required: the fixture also
- * registers `fake-resolver` and `fake-garbage`, which substring-match `name: "fake"`.
- */
-export async function selectFakeProvider(page: Page) {
-  await openTerminalTab(page);
-  await page
-    .getByTestId("terminal-provider")
-    .getByRole("radio", { name: "fake", exact: true })
-    .check();
-}
-
 /** Open the header's pull request menu (status, GitHub link, Ready for review). Escape closes it. */
 export async function openPrMenu(page: Page) {
   await page.getByTestId("pr-menu").click();

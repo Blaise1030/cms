@@ -1,26 +1,13 @@
 import { execFileSync } from "node:child_process";
 
-import { api, startChange } from "../fixtures/daemon";
-import { expect, openTerminalTab, selectFakeProvider, test } from "../fixtures/workbench";
+import { api, startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { expect, test } from "../fixtures/workbench";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
-async function terminalEdit(page: import("@playwright/test").Page, line: string) {
-  await page.locator(".xterm-screen").click();
-  await page.keyboard.type(line);
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".xterm-rows")).toContainText("TURN-END", { timeout: 60_000 });
-}
-
-async function startFakeTerminal(page: import("@playwright/test").Page) {
-  await selectFakeProvider(page);
-  await page.getByTestId("terminal-start").click();
-  await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
-}
-
-test("GitHub project on main prompts Start a change, then runs on the new branch", async ({
+test("GitHub project on main refuses an agent session, then runs on the new branch", async ({
   page,
   workbench,
 }) => {
@@ -28,25 +15,21 @@ test("GitHub project on main prompts Start a change, then runs on the new branch
   const mainBefore = git(projectDir, ["rev-parse", "main"]);
   expect(git(projectDir, ["branch", "--show-current"])).toBe("main");
 
-  await page.goto(`${origin}/?t=${token}`);
-  await page.goto(`${origin}/p/${projectId}`);
-  await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
-  await openTerminalTab(page);
-
-  await selectFakeProvider(page);
-  await page.getByTestId("terminal-start").click();
-  await expect(page.getByTestId("terminal-error")).toContainText("Start a change first");
+  const refused = await api(origin, token, "POST", "/api/terminal", { project: projectId, provider: "fake" });
+  expect(refused.status).toBe(409);
+  const body = await refused.text();
+  expect(body).toContain("CHANGE_REQUIRED");
+  expect(body).toContain("Start a change first");
 
   await startChange(workbench, "New post: Launch week");
-  await page.reload();
-
-  await expect(page.getByTestId("active-change")).toHaveText("Launch week");
+  await page.goto(`${origin}/?t=${token}`);
+  await page.goto(`${origin}/p/${projectId}`);
+  await expect(page.getByTestId("active-change")).toHaveText("Launch week", { timeout: 60_000 });
   await expect
     .poll(() => git(projectDir, ["branch", "--show-current"]))
     .toBe("content/launch-week");
 
-  await startFakeTerminal(page);
-  await terminalEdit(page, "edit the notes");
+  await terminalCheckpoint(workbench, "edit the notes");
 
   await expect
     .poll(() => {
@@ -91,13 +74,10 @@ test("local-only project edits main with no Start a change dialog", async ({
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${localId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 120_000 });
-  await openTerminalTab(page);
 
-  await startFakeTerminal(page);
-  await terminalEdit(page, "edit the notes");
+  await terminalCheckpoint({ origin, token, projectId: localId }, "edit the notes");
 
   await expect(page.getByRole("dialog", { name: "Start a change first" })).toHaveCount(0);
-  await expect(page.getByTestId("terminal-error")).toHaveCount(0);
   await page.goto(`${origin}/p/${localId}/history`);
   await expect(page.getByTestId("checkpoint-item").first()).toContainText("the notes", {
     timeout: 60_000,

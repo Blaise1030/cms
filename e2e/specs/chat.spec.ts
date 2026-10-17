@@ -27,7 +27,8 @@ test("chat sends a message, shows the reply and a checkpoint", async ({ page, wo
   await startChange(workbench, "Chat e2e");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId("agent-tab-chat")).toHaveAttribute("data-state", "active");
+  await expect(page.getByTestId("chat-panel")).toBeVisible();
+  await expect(page.getByTestId("agent-panel").getByRole("tablist")).toHaveCount(0);
 
   await page.getByTestId("chat-provider").selectOption("cursor");
   await page.getByTestId("chat-input").fill("hello");
