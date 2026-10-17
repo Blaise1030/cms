@@ -4,7 +4,10 @@
 //! ids are `t{n}` and reasoning ids `r{n}`, counting from 0 per turn. Whole messages are emitted
 //! as start + one delta + end.
 
+pub mod codex;
 pub mod cursor;
+
+use serde_json::Value;
 
 use crate::chat::chunk::{AgentError, AgentErrorCode, UiChunk};
 use crate::providers::display_name;
@@ -25,6 +28,7 @@ pub trait Translator: Send {
 pub fn for_provider(provider_id: &str) -> Option<Box<dyn Translator>> {
     match provider_id {
         "cursor" => Some(Box::new(cursor::CursorTranslator::default())),
+        "codex" => Some(Box::new(codex::CodexTranslator::default())),
         _ => None,
     }
 }
@@ -74,6 +78,20 @@ pub fn truncate_output(s: &str) -> String {
         return s.to_string();
     }
     format!("{}…", &s[..s.floor_char_boundary(MAX_OUTPUT)])
+}
+
+/// `v` with every string leaf passed through [`truncate_output`].
+pub fn truncate_input(v: Value) -> Value {
+    match v {
+        Value::String(s) if s.len() > MAX_OUTPUT => truncate_output(&s).into(),
+        Value::Array(items) => items.into_iter().map(truncate_input).collect(),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, truncate_input(value)))
+                .collect(),
+        ),
+        v => v,
+    }
 }
 
 #[cfg(test)]
@@ -136,12 +154,31 @@ mod tests {
     }
 
     #[test]
+    fn truncate_input_cuts_long_string_leaves() {
+        let long = "x".repeat(20_000);
+        let input = serde_json::json!({
+            "path": "a.md",
+            "raw": { "lines": 2, "ok": true, "content": long, "list": ["short", long] },
+        });
+        let out = truncate_input(input);
+        let cut = out["raw"]["content"].as_str().unwrap();
+        assert!(cut.len() <= MAX_OUTPUT + "…".len());
+        assert!(cut.ends_with('…'));
+        assert_eq!(out["raw"]["list"][1], cut);
+        assert_eq!(out["path"], "a.md");
+        assert_eq!(out["raw"]["lines"], 2);
+        assert_eq!(out["raw"]["ok"], true);
+        assert_eq!(out["raw"]["list"][0], "short");
+    }
+
+    #[test]
     fn chat_providers() {
         for id in ["cursor", "claude", "codex"] {
             assert!(is_chat_provider(id), "{id}");
         }
         assert!(!is_chat_provider("opencode"));
         assert!(for_provider("cursor").is_some());
+        assert!(for_provider("codex").is_some());
         assert!(for_provider("opencode").is_none());
     }
 }

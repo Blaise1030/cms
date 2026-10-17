@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use serde_json::{json, Map, Value};
 
 use crate::chat::chunk::UiChunk;
-use crate::chat::translate::{agent_error, truncate_output, Translator};
+use crate::chat::translate::{agent_error, truncate_input, truncate_output, Translator};
 
 #[derive(Debug, Default)]
 pub struct CursorTranslator {
@@ -93,7 +93,7 @@ impl CursorTranslator {
             out.push(UiChunk::ToolInputAvailable {
                 tool_call_id: id.to_string(),
                 tool_name: name.to_string(),
-                input: tool_input(&body["args"]),
+                input: truncate_input(tool_input(&body["args"])),
                 dynamic: true,
             });
         }
@@ -303,6 +303,26 @@ mod tests {
         assert!(input["raw"]["streamContent"].is_string());
         let output = tool_output(&chunks, at, id);
         assert!(output.as_str().unwrap().contains("+Hello from the agent."));
+    }
+
+    #[test]
+    fn long_edit_content_is_truncated() {
+        let line = json!({
+            "type": "tool_call",
+            "subtype": "started",
+            "call_id": "c1",
+            "session_id": "s",
+            "tool_call": {
+                "editToolCall": { "args": { "path": "/a.md", "streamContent": "x".repeat(20_000) } }
+            },
+        })
+        .to_string();
+        let chunks = CursorTranslator::default().feed(&line);
+        let (_, _, input) = tool_input(&chunks, "edit");
+        let content = input["raw"]["streamContent"].as_str().unwrap();
+        assert!(content.len() <= crate::chat::translate::MAX_OUTPUT + "…".len());
+        assert!(content.ends_with('…'));
+        assert_eq!(input["path"], "/a.md");
     }
 
     #[test]
