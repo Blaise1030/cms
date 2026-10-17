@@ -13,7 +13,7 @@ import { report } from "@/modules/changes/getLatest";
 import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
-import TerminalPanel from "@/modules/terminal/TerminalPanel.vue";
+import AgentPanel from "@/modules/chat/AgentPanel.vue";
 import { useAgentOutboxStore } from "@/modules/terminal/outbox";
 import { useTerminalStore } from "@/modules/terminal/store";
 import { projectTabFromRoute } from "@/router";
@@ -121,7 +121,7 @@ watch(
       <Workspace v-if="project" :project="project" />
     </template>
     <template #chat>
-      <TerminalPanel
+      <AgentPanel
         v-if="project"
         :key="project.id"
         :project-id="project.id"

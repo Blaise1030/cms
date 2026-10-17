@@ -22,14 +22,17 @@ import { useDaemon } from "@/core/daemon";
 import type { TerminalSession } from "@/core/types";
 import { useTheme } from "@/lib/theme";
 import { bracketedPaste, errorMessage } from "@workbench/utils";
+import { useChatStore } from "@/modules/chat/store";
 import { agentPrompt, isRequest, useAgentOutboxStore } from "./outbox";
 import { buildTerminalUrl, connectTerminal, type TerminalConnection } from "./socket";
 import { useTerminalStore } from "./store";
 
-const props = defineProps<{ projectId: string }>();
+/** `active`: the panel is the agent tab in view, so it takes the outbox. */
+const props = withDefaults(defineProps<{ projectId: string; active?: boolean }>(), { active: true });
 
 const daemon = useDaemon();
 const store = useTerminalStore();
+const chats = useChatStore();
 const outbox = useAgentOutboxStore();
 const theme = useTheme();
 
@@ -232,8 +235,14 @@ function teardown() {
   disposeTerminal();
 }
 
+/** Start a session; with no `resume`, continue the chat tab's conversation when it has one to resume. */
 async function start(resume?: TerminalSession) {
   ended.value = null;
+  if (!resume) {
+    await store.loadSessions(props.projectId);
+    const chatId = chats.activeChatId(props.projectId);
+    resume = store.sessions.find((s) => s.id === chatId && s.resumable);
+  }
   if (!(await store.start(props.projectId, resume))) {
     state.value = "idle";
     return;
@@ -332,7 +341,10 @@ async function switchTo(session: TerminalSession | null) {
     ended.value = null;
     store.error = null;
     if (session) await start(session);
-    else state.value = "idle";
+    else {
+      chats.newChat(props.projectId);
+      state.value = "idle";
+    }
   } catch (e) {
     store.error = errorMessage(e);
     state.value = "idle";
@@ -376,7 +388,7 @@ function notFoundCommand(): string {
 
 /** Paste everything waiting in the outbox, if the agent can take it now. */
 function deliver() {
-  if (!ready || !conn || outbox.messages.length === 0) return;
+  if (!props.active || !ready || !conn || outbox.messages.length === 0) return;
   const wait = bootUntil - Date.now();
   if (wait > 0 && outbox.messages.some(isRequest)) {
     deliverTimer ??= setTimeout(() => {
@@ -396,10 +408,10 @@ function deliver() {
 
 /** A request with no session running starts one with the chosen agent. */
 function startForRequests() {
-  if (state.value === "idle" && !store.starting && outbox.messages.some(isRequest)) void onStart();
+  if (props.active && state.value === "idle" && !store.starting && outbox.messages.some(isRequest)) void onStart();
 }
 
-watch(() => outbox.messages.length, () => {
+watch([() => outbox.messages.length, () => props.active], () => {
   startForRequests();
   deliver();
 });

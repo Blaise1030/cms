@@ -76,6 +76,7 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useAgentOutboxStore } from "./outbox";
 import { useTheme } from "@/lib/theme";
 import { useTerminalStore } from "./store";
+import { useChatStore } from "@/modules/chat/store";
 
 enableAutoUnmount(afterEach);
 
@@ -84,6 +85,7 @@ let sessions: TerminalSession[] = [];
 
 async function mountPanel(
   status: { running: boolean; provider?: string; sessionId?: string } = { running: false },
+  extra: { active?: boolean } = {},
 ) {
   api = {
     terminalSessions: vi.fn(async () => sessions),
@@ -100,7 +102,7 @@ async function mountPanel(
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
   const w = mount(TerminalPanel, {
-    props: { projectId: "p" },
+    props: { projectId: "p", ...extra },
     attachTo: document.body,
   });
   await flushPromises();
@@ -204,6 +206,47 @@ describe("TerminalPanel sessions", () => {
     expect(w.find("[data-testid='terminal-title']").text()).toBe("New session");
   });
 
+  it("Start resumes the session the chat tab has open", async () => {
+    sessions = [session("s1", "codex"), session("c1", "claude")];
+    const w = await mountPanel();
+    useChatStore().setActive("p", "c1");
+    await pressStart(w);
+    expect(api.startTerminal).toHaveBeenCalledWith("p", "claude", "c1");
+  });
+
+  it("a new session does not resume the chat tab's conversation", async () => {
+    sessions = [session("c1", "claude")];
+    const w = await mountPanel({ running: true, provider: "claude", sessionId: "c1" });
+    useChatStore().setActive("p", "c1");
+    await w.find("[data-testid='terminal-new-session']").trigger("click");
+    await flushPromises();
+    await pressStart(w);
+    expect(api.startTerminal).toHaveBeenLastCalledWith("p", "cursor");
+  });
+});
+
+describe("TerminalPanel inactive", () => {
+  it("leaves the outbox alone until it becomes active", async () => {
+    const w = await mountPanel({ running: true, provider: "claude", sessionId: "s1" }, { active: false });
+    replayDone();
+    useAgentOutboxStore().send({ kind: "text", text: "hello" });
+    useAgentOutboxStore().send({ kind: "text", text: "go", submit: true });
+    await flushPromises();
+    expect(sent()).toBe("");
+    expect(useAgentOutboxStore().messages).toHaveLength(2);
+
+    await w.setProps({ active: true });
+    await flushPromises();
+    expect(sent()).toContain("\x1b[200~hello\x1b[201~");
+    expect(useAgentOutboxStore().messages).toEqual([]);
+  });
+
+  it("does not start a session for a request while inactive", async () => {
+    await mountPanel(undefined, { active: false });
+    useAgentOutboxStore().send({ kind: "text", text: "go", submit: true });
+    await flushPromises();
+    expect(api.startTerminal).not.toHaveBeenCalled();
+  });
 });
 
 describe("TerminalPanel floating", () => {

@@ -36,7 +36,7 @@ const stubs = {
   },
   EditorMenubar: true,
   Workspace: { props: ["project"], template: "<div data-testid='workspace'>{{ project.id }}</div>" },
-  TerminalPanel: {
+  AgentPanel: {
     props: ["projectId"],
     template: "<div data-testid='chat'>{{ projectId }}</div>",
   },

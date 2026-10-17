@@ -178,7 +178,7 @@ function suggest(text: string) {
   composer.value?.focus();
 }
 
-defineExpose({ insert, send });
+defineExpose({ insert, send, terminalRunning });
 </script>
 
 <template>
