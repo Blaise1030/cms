@@ -689,6 +689,46 @@ mod http_routes {
     }
 
     #[tokio::test]
+    async fn failed_first_turn_is_not_resumed() {
+        let env = env(fake("default", None)).await;
+        let agents = env.state.config.agents_config.clone().unwrap();
+        let use_claude = |argv: Vec<String>| {
+            std::fs::write(&agents, json!({ "claude": argv }).to_string()).unwrap();
+        };
+        use_claude(vec!["/nonexistent/claude".into()]);
+        let res = send(
+            &env,
+            post_chat(&env, chat_body("first", Some("claude"), "hi")),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = read_to_end(res).await;
+        assert!(body.contains("not_installed"), "{body}");
+        let record =
+            workbench::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
+        assert_eq!(
+            record.agent_session_id, None,
+            "an unconfirmed session id is forgotten"
+        );
+
+        let argv_file = env.state_dir.join("argv.txt");
+        let fixture = super::fixtures().join("chat/claude/turn.jsonl");
+        let script = format!(
+            "printf '%s\\n' \"$@\" > '{}'; cat '{}'",
+            argv_file.display(),
+            fixture.display()
+        );
+        use_claude(vec!["sh".into(), "-c".into(), script, "claude".into()]);
+        let res = send(&env, post_chat(&env, chat_body("first", None, "again"))).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        read_to_end(res).await;
+        let argv = std::fs::read_to_string(&argv_file).unwrap();
+        let argv: Vec<&str> = argv.lines().collect();
+        assert!(!argv.contains(&"--resume"), "{argv:?}");
+        assert!(argv.contains(&"--session-id"), "{argv:?}");
+    }
+
+    #[tokio::test]
     async fn get_routes_reject_bad_chat_ids() {
         let env = env(fake("default", None)).await;
         let long = "a".repeat(65);

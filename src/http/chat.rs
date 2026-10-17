@@ -126,9 +126,11 @@ pub async fn post(
     }
 
     let session = match existing {
-        Some(record) => record
-            .agent_session_id
-            .map_or(AgentSession::Fresh, AgentSession::Resume),
+        Some(record) => match record.agent_session_id {
+            Some(id) => AgentSession::Resume(id),
+            // No conversation yet (or its first turn never started one).
+            None => new_agent_session(&provider, &project.dir).await,
+        },
         None => {
             let session = new_agent_session(&provider, &project.dir).await;
             let now = history::now_ms();

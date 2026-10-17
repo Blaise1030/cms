@@ -419,8 +419,13 @@ impl TurnTask {
             &self.req.project_id,
             &self.turn.chat_id,
             |record| {
-                if let Some(id) = session_id {
-                    record.agent_session_id = Some(id.to_string());
+                match session_id {
+                    Some(id) => record.agent_session_id = Some(id.to_string()),
+                    // The CLI never confirmed the id it was given: resuming it could fail forever.
+                    None if matches!(self.req.session, AgentSession::Assign(_)) => {
+                        record.agent_session_id = None;
+                    }
+                    None => {}
                 }
                 if record.title.as_deref().is_none_or(str::is_empty) && !title.is_empty() {
                     record.title = Some(title);
