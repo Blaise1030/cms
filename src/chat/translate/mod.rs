@@ -4,6 +4,7 @@
 //! ids are `t{n}` and reasoning ids `r{n}`, counting from 0 per turn. Whole messages are emitted
 //! as start + one delta + end.
 
+pub mod claude;
 pub mod codex;
 pub mod cursor;
 
@@ -28,6 +29,7 @@ pub trait Translator: Send {
 pub fn for_provider(provider_id: &str) -> Option<Box<dyn Translator>> {
     match provider_id {
         "cursor" => Some(Box::new(cursor::CursorTranslator::default())),
+        "claude" => Some(Box::new(claude::ClaudeTranslator::default())),
         "codex" => Some(Box::new(codex::CodexTranslator::default())),
         _ => None,
     }
@@ -178,6 +180,7 @@ mod tests {
         }
         assert!(!is_chat_provider("opencode"));
         assert!(for_provider("cursor").is_some());
+        assert!(for_provider("claude").is_some());
         assert!(for_provider("codex").is_some());
         assert!(for_provider("opencode").is_none());
     }
