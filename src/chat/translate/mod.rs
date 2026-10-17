@@ -55,7 +55,9 @@ pub fn agent_error(provider_id: &str, exit: Option<i32>, text: &str) -> AgentErr
     {
         (
             AgentErrorCode::Login,
-            format!("Your {name} login has expired. Open the Terminal tab and run /login."),
+            format!(
+                "Your {name} login has expired. Log in again from your terminal, then try again."
+            ),
         )
     } else {
         let text = match (text.trim(), exit) {
@@ -111,7 +113,7 @@ mod tests {
         assert_eq!(err.code, AgentErrorCode::Login);
         assert_eq!(
             err.message,
-            "Your Claude Code login has expired. Open the Terminal tab and run /login."
+            "Your Claude Code login has expired. Log in again from your terminal, then try again."
         );
     }
 

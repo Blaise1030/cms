@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(data.code, AgentErrorCode::Login);
         assert_eq!(
             data.message,
-            "Your Claude Code login has expired. Open the Terminal tab and run /login."
+            "Your Claude Code login has expired. Log in again from your terminal, then try again."
         );
     }
 
