@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use serde_json::{json, Value};
 
 use crate::chat::chunk::UiChunk;
-use crate::chat::translate::{agent_error, truncate_input, truncate_output, Translator};
+use crate::chat::translate::{
+    agent_error, truncate_input, truncate_output, Translator, MAX_OUTPUT,
+};
 
 #[derive(Debug, Default)]
 pub struct CodexTranslator {
@@ -200,10 +202,10 @@ fn tool_result(name: &str, id: &str, item: &Value) -> UiChunk {
             if failed {
                 return error(format!("{name} {status}"));
             }
-            truncate_input(item["result"].clone())
+            cap_output(&item["result"])
         }
         _ if failed => return error(format!("{name} {status}")),
-        "edit" => truncate_input(item["changes"].clone()),
+        "edit" => cap_output(&item["changes"]),
         _ => Value::Null,
     };
     UiChunk::ToolOutputAvailable {
@@ -213,11 +215,20 @@ fn tool_result(name: &str, id: &str, item: &Value) -> UiChunk {
     }
 }
 
+/// `value` as is if its JSON fits in [`MAX_OUTPUT`], else its JSON text truncated.
+fn cap_output(value: &Value) -> Value {
+    let text = value.to_string();
+    if text.len() <= MAX_OUTPUT {
+        value.clone()
+    } else {
+        truncate_output(&text).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::chat::chunk::AgentErrorCode;
-    use crate::chat::translate::MAX_OUTPUT;
     use serde_json::{json, Value};
 
     const TURN: &str = include_str!("../../../tests/fixtures/chat/codex/turn.jsonl");
@@ -505,6 +516,24 @@ mod tests {
         assert_eq!(input["query"], "rust floor_char_boundary");
         tool_output(&chunks, *at, id);
         assert_eq!(chunks.len(), 3 * 2, "todo_list ignored: {chunks:#?}");
+    }
+
+    #[test]
+    fn large_mcp_result_is_capped() {
+        let blocks: Vec<Value> = (0..5)
+            .map(|_| json!({"type": "text", "text": "x".repeat(10_000)}))
+            .collect();
+        let item = json!({"id": "item_0", "type": "mcp_tool_call", "server": "docs", "tool": "search", "arguments": {}, "result": {"content": blocks}, "error": null, "status": "completed"});
+        let mut t = CodexTranslator::default();
+        let chunks = t.feed(&json!({"type": "item.completed", "item": item}).to_string());
+        let mcp = tool_inputs(&chunks, "mcp");
+        let (at, id, _) = mcp[0];
+        let output = tool_output(&chunks, at, id);
+        let size = match output {
+            Value::String(s) => s.len(),
+            other => other.to_string().len(),
+        };
+        assert!(size <= MAX_OUTPUT + "…".len(), "{size}");
     }
 
     #[test]
