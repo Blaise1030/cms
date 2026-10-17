@@ -235,13 +235,22 @@ function teardown() {
   disposeTerminal();
 }
 
-/** Start a session; with no `resume`, continue the chat tab's conversation when it has one to resume. */
-async function start(resume?: TerminalSession) {
+/** The chat tab's conversation, when the terminal can resume it. */
+const continuable = computed(() => {
+  const chatId = chats.activeChatId(props.projectId);
+  return store.sessions.find((s) => s.id === chatId && s.resumable) ?? null;
+});
+
+/**
+ * Start `resume`, a fresh session (`"new"`), or by default the chat tab's conversation when it
+ * has one to resume.
+ */
+async function start(resume?: TerminalSession | "new") {
   ended.value = null;
-  if (!resume) {
+  if (resume === "new") resume = undefined;
+  else if (!resume) {
     await store.loadSessions(props.projectId);
-    const chatId = chats.activeChatId(props.projectId);
-    resume = store.sessions.find((s) => s.id === chatId && s.resumable);
+    resume = continuable.value ?? undefined;
   }
   if (!(await store.start(props.projectId, resume))) {
     state.value = "idle";
@@ -321,7 +330,8 @@ function sessionTitle(s: TerminalSession): string {
 const headerTitle = computed(() => {
   const current = store.sessions.find((s) => s.id === store.sessionId);
   if (current && state.value === "running") return sessionTitle(current);
-  return state.value === "running" ? `${providerLabel(runningProvider ?? "")} session` : "New session";
+  if (state.value === "running") return `${providerLabel(runningProvider ?? "")} session`;
+  return continuable.value ? sessionTitle(continuable.value) : "New session";
 });
 
 function when(ms: number): string {
@@ -460,9 +470,9 @@ async function onDrop(e: DragEvent) {
   }
 }
 
-async function onStart() {
+async function onStart(resume?: TerminalSession | "new") {
   try {
-    await start();
+    await start(resume);
   } catch (e) {
     store.error = errorMessage(e);
     state.value = "idle";
@@ -574,7 +584,13 @@ async function onStart() {
       v-else-if="state === 'idle'"
       class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm"
     >
-      <Questionnaire class="max-w-sm" @submit.prevent="onStart">
+      <template v-if="continuable">
+        <Button data-testid="terminal-continue" :disabled="store.starting" @click="onStart(continuable)">
+          Continue {{ continuable.title || "this conversation" }} ({{ providerLabel(continuable.provider) }})
+        </Button>
+        <Button variant="ghost" size="sm" :disabled="store.starting" @click="switchTo(null)">New session</Button>
+      </template>
+      <Questionnaire v-else class="max-w-sm" @submit.prevent="onStart('new')">
         <QuestionnaireItem name="provider" required data-testid="terminal-provider">
           <QuestionnaireTitle>Which agent should work on this project?</QuestionnaireTitle>
           <QuestionnaireChoices>

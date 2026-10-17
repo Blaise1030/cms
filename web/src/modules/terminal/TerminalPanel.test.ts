@@ -76,7 +76,6 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useAgentOutboxStore } from "./outbox";
 import { useTheme } from "@/lib/theme";
 import { useTerminalStore } from "./store";
-import { useChatStore } from "@/modules/chat/store";
 
 enableAutoUnmount(afterEach);
 
@@ -153,6 +152,11 @@ beforeEach(() => {
   sessions = [];
 });
 
+/** The chat tab's saved active conversation, as a previous visit left it. */
+function activeChat(id: string) {
+  localStorage.setItem("workbench.chat.active.p", id);
+}
+
 function session(id: string, provider: string, extra: Partial<TerminalSession> = {}): TerminalSession {
   return { id, provider, createdAt: 1, updatedAt: 1, resumable: true, ...extra };
 }
@@ -206,22 +210,49 @@ describe("TerminalPanel sessions", () => {
     expect(w.find("[data-testid='terminal-title']").text()).toBe("New session");
   });
 
-  it("Start resumes the session the chat tab has open", async () => {
-    sessions = [session("s1", "codex"), session("c1", "claude")];
+  it("offers to continue the chat tab's conversation in its own provider", async () => {
+    sessions = [session("s1", "codex"), session("c1", "claude", { title: "Add pricing" })];
+    activeChat("c1");
     const w = await mountPanel();
-    useChatStore().setActive("p", "c1");
-    await pressStart(w);
+    const cont = w.find("[data-testid='terminal-continue']");
+    expect(cont.text()).toBe("Continue Add pricing (Claude)");
+    expect(w.find("[data-testid='terminal-provider']").exists()).toBe(false);
+    expect(w.find("[data-testid='terminal-start']").exists()).toBe(false);
+    expect(w.find("[data-testid='terminal-title']").text()).toBe("Add pricing");
+    await cont.trigger("click");
+    await flushPromises();
+    await flushPromises();
     expect(api.startTerminal).toHaveBeenCalledWith("p", "claude", "c1");
   });
 
-  it("a new session does not resume the chat tab's conversation", async () => {
+  it("names an untitled conversation generically", async () => {
+    sessions = [session("c1", "codex")];
+    activeChat("c1");
+    const w = await mountPanel();
+    expect(w.find("[data-testid='terminal-continue']").text()).toBe("Continue this conversation (Codex)");
+  });
+
+  it("New session starts the picked provider fresh instead of continuing", async () => {
     sessions = [session("c1", "claude")];
-    const w = await mountPanel({ running: true, provider: "claude", sessionId: "c1" });
-    useChatStore().setActive("p", "c1");
+    activeChat("c1");
+    const w = await mountPanel();
     await w.find("[data-testid='terminal-new-session']").trigger("click");
     await flushPromises();
+    expect(w.find("[data-testid='terminal-continue']").exists()).toBe(false);
+    const choices = w.find("[data-testid='terminal-provider']").findAll("[data-slot='questionnaire-choice']");
+    await choices[2]!.find("input").setValue(true);
     await pressStart(w);
-    expect(api.startTerminal).toHaveBeenLastCalledWith("p", "cursor");
+    expect(api.startTerminal).toHaveBeenCalledTimes(1);
+    expect(api.startTerminal).toHaveBeenCalledWith("p", "codex");
+  });
+
+  it("shows the provider picker when the chat has no session to continue", async () => {
+    sessions = [session("s1", "claude")];
+    const w = await mountPanel();
+    expect(w.find("[data-testid='terminal-continue']").exists()).toBe(false);
+    expect(w.find("[data-testid='terminal-provider']").exists()).toBe(true);
+    await pressStart(w);
+    expect(api.startTerminal).toHaveBeenCalledWith("p", "cursor");
   });
 });
 

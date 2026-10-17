@@ -11,6 +11,7 @@ test("terminal shows the CLI and checkpoints a turn", async ({ page, workbench }
   await expect(page.getByTestId("active-change")).toHaveText("Terminal e2e");
 
   await selectFakeProvider(page);
+  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
 
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
@@ -34,6 +35,7 @@ test("terminal leaves CLI output visible after exit", async ({ page, workbench }
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible();
   await selectFakeProvider(page);
+  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY");
 

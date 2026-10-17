@@ -16,6 +16,7 @@ async function terminalEdit(page: import("@playwright/test").Page, line: string)
 
 async function startFakeTerminal(page: import("@playwright/test").Page) {
   await selectFakeProvider(page);
+  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
   await expect(page.locator(".xterm-rows")).toContainText("FAKE-CLI READY", { timeout: 60_000 });
 }
@@ -34,6 +35,7 @@ test("GitHub project on main prompts Start a change, then runs on the new branch
   await expect(page.getByTestId("terminal-panel")).toBeVisible();
 
   await selectFakeProvider(page);
+  await page.getByTestId("agent-tab-terminal").click();
   await page.getByTestId("terminal-start").click();
   await expect(page.getByTestId("terminal-error")).toContainText("Start a change first");
 
