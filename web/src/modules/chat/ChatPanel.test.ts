@@ -137,6 +137,32 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(false));
   });
 
+  it("doesn't send on Enter while a turn streams, and keeps the typed text", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = await mountPanel();
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
+    const input = w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
+    await input.setValue("next");
+    await input.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(posts()).toHaveLength(1);
+    expect(input.element.value).toBe("next");
+  });
+
+  it("is busy until the terminal check completes, and while a turn runs", async () => {
+    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+    const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
+    const vm = w.vm as unknown as { busy: boolean; send(t: string): Promise<void> };
+    expect(vm.busy).toBe(true);
+    await flushPromises();
+    expect(vm.busy).toBe(false);
+    void vm.send("hi");
+    expect(vm.busy).toBe(true);
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
+    expect(vm.busy).toBe(true);
+  });
+
   it("offers three suggestions on an empty chat that fill the input", async () => {
     const w = await mountPanel();
     const suggestions = w.findAll("[data-testid='chat-suggestion']");

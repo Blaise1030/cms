@@ -21,7 +21,7 @@ const provider = defineModel<string | null>("provider", { required: true });
 const labels: Record<string, string> = { cursor: "Cursor", claude: "Claude", codex: "Codex" };
 const textarea = ref<{ $el: HTMLTextAreaElement } | null>(null);
 
-const canSend = computed(() => !props.blocked && !!text.value.trim() && !!provider.value);
+const canSend = computed(() => !props.streaming && !props.blocked && !!text.value.trim() && !!provider.value);
 
 function submit() {
   if (canSend.value) emit("submit", text.value);

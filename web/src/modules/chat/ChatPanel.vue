@@ -44,6 +44,10 @@ const input = ref("");
 const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
 const historyOpen = ref(false);
 const terminalRunning = ref(false);
+/** Until the first terminal status arrives, `terminalRunning` may be stale. */
+const terminalChecked = ref(false);
+/** A `send` is waiting for the history or for its turn to end. */
+const sending = ref(false);
 /** The chat's own provider, or the user's pick; null falls back to the terminal's. */
 const chosen = ref<string | null>(null);
 /** The latest `open()`; sends wait for it so none land while the history loads. */
@@ -59,6 +63,8 @@ const provider = computed({
 });
 const messages = computed(() => chat.value?.messages ?? []);
 const streaming = computed(() => chat.value?.status === "submitted" || chat.value?.status === "streaming");
+/** A new turn would be refused (or race the current one): outbox requests wait. */
+const busy = computed(() => !terminalChecked.value || terminalRunning.value || sending.value || streaming.value);
 /** The daemon refuses a turn with its JSON error envelope as the body. */
 const errorText = computed(() => {
   const e = chat.value?.error;
@@ -116,6 +122,8 @@ async function refreshTerminal() {
     terminalRunning.value = (await daemon.api.terminalStatus(props.projectId)).running;
   } catch {
     // Keep the last known state.
+  } finally {
+    terminalChecked.value = true;
   }
 }
 
@@ -146,12 +154,17 @@ onBeforeUnmount(() => {
 async function send(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return;
-  let pending: Promise<void>;
-  do {
-    pending = opened;
-    await pending;
-  } while (pending !== opened);
-  await chat.value?.sendMessage({ text: trimmed });
+  sending.value = true;
+  try {
+    let pending: Promise<void>;
+    do {
+      pending = opened;
+      await pending;
+    } while (pending !== opened);
+    await chat.value?.sendMessage({ text: trimmed });
+  } finally {
+    sending.value = false;
+  }
 }
 
 function submit(text: string) {
@@ -178,7 +191,7 @@ function suggest(text: string) {
   composer.value?.focus();
 }
 
-defineExpose({ insert, send, terminalRunning });
+defineExpose({ insert, send, busy });
 </script>
 
 <template>

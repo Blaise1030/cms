@@ -8,7 +8,7 @@ import { ref, type Ref } from "vue";
 const h = vi.hoisted(() => ({
   insert: null as any,
   send: null as any,
-  terminalRunning: null as unknown as Ref<boolean>,
+  busy: null as unknown as Ref<boolean>,
   emitOpenTerminal: null as unknown as () => void,
 }));
 
@@ -22,7 +22,7 @@ vi.mock("./ChatPanel.vue", async () => {
       emits: ["open-terminal"],
       setup(props, { emit, expose }) {
         h.emitOpenTerminal = () => emit("open-terminal");
-        expose({ insert: h.insert, send: h.send, terminalRunning: h.terminalRunning });
+        expose({ insert: h.insert, send: h.send, busy: h.busy });
         return () => render("div", { "data-testid": "chat-stub", "data-active": String(props.active) });
       },
     }),
@@ -51,7 +51,7 @@ const elementText = '[element <h1> "Hi" at `h1`]';
 beforeEach(() => {
   h.insert = vi.fn();
   h.send = vi.fn(async () => undefined);
-  h.terminalRunning = ref(false);
+  h.busy = ref(false);
   setActivePinia(createPinia());
 });
 
@@ -118,8 +118,8 @@ describe("AgentPanel", () => {
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 
-  it("holds a request while the terminal is running, and sends it once it stops", async () => {
-    h.terminalRunning.value = true;
+  it("holds a request while the chat is busy, and sends it once it isn't", async () => {
+    h.busy.value = true;
     await mountPanel();
     useAgentOutboxStore().send({ kind: "text", text: "Sync please", submit: true });
     useAgentOutboxStore().send({ kind: "element", element });
@@ -128,9 +128,28 @@ describe("AgentPanel", () => {
     expect(h.insert).toHaveBeenCalledWith(elementText);
     expect(useAgentOutboxStore().messages).toEqual([{ kind: "text", text: "Sync please", submit: true }]);
 
-    h.terminalRunning.value = false;
+    h.busy.value = false;
     await flushPromises();
     expect(h.send).toHaveBeenCalledWith("Sync please");
+    expect(useAgentOutboxStore().messages).toEqual([]);
+  });
+
+  it("sends one request per turn and keeps the rest until the turn ends", async () => {
+    h.send = vi.fn(async () => {
+      h.busy.value = true;
+    });
+    await mountPanel();
+    useAgentOutboxStore().send({ kind: "text", text: "First", submit: true });
+    useAgentOutboxStore().send({ kind: "text", text: "Second", submit: true });
+    await flushPromises();
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send).toHaveBeenCalledWith("First");
+    expect(useAgentOutboxStore().messages).toEqual([{ kind: "text", text: "Second", submit: true }]);
+
+    h.busy.value = false;
+    await flushPromises();
+    expect(h.send).toHaveBeenCalledTimes(2);
+    expect(h.send).toHaveBeenLastCalledWith("Second");
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 });

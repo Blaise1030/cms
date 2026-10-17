@@ -15,20 +15,20 @@ const tab = ref<"chat" | "terminal">("chat");
 /** Null until the lazy panel has loaded; the outbox waits for it. */
 const chat = ref<InstanceType<typeof ChatPanelComponent> | null>(null);
 
-/** In Chat, picks land in the input and requests are sent; a request waits while the terminal runs. */
+/** In Chat, picks land in the input and requests are sent one per turn; requests wait while the chat is busy. */
 function deliverToChat() {
   const panel = chat.value;
   if (tab.value !== "chat" || !panel || outbox.messages.length === 0) return;
   const held: AgentMessage[] = [];
   for (const message of outbox.drain()) {
     if (!isRequest(message)) panel.insert(agentPrompt(message));
-    else if (panel.terminalRunning) held.push(message);
+    else if (panel.busy) held.push(message);
     else void panel.send(agentPrompt(message));
   }
   outbox.messages.push(...held);
 }
 
-watch([() => outbox.messages.length, tab, chat, () => chat.value?.terminalRunning], deliverToChat, {
+watch([() => outbox.messages.length, tab, chat, () => chat.value?.busy], deliverToChat, {
   flush: "post",
 });
 </script>
