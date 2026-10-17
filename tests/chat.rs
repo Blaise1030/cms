@@ -339,6 +339,64 @@ async fn shutdown_kills_running_turns() {
 }
 
 #[tokio::test]
+async fn server_shutdown_ends_watched_turns() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let env = env(fake("slow", None)).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (trigger, signal) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(workbench::serve_until(
+        listener,
+        env.state.clone(),
+        async move {
+            let _ = signal.await;
+        },
+    ));
+
+    let body = json!({
+        "id": CHAT,
+        "messages": [{"id": "u1", "role": "user", "parts": [{"type": "text", "text": "slow one"}]}],
+    })
+    .to_string();
+    let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "POST /api/chat/{} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        env.project,
+        body.len()
+    );
+    sock.write_all(head.as_bytes()).await.unwrap();
+    sock.write_all(body.as_bytes()).await.unwrap();
+    let mut seen = String::new();
+    let mut buf = [0u8; 4096];
+    while !seen.contains("\"type\":\"start\"") {
+        let n = tokio::time::timeout(WAIT, sock.read(&mut buf))
+            .await
+            .expect("the turn starts streaming")
+            .unwrap();
+        assert!(n > 0, "the response ended early: {seen}");
+        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+    }
+    assert!(env.state.chats.running(&env.project).is_some());
+
+    trigger.send(()).unwrap();
+    tokio::time::timeout(WAIT, server)
+        .await
+        .expect("the server shuts down while a browser watches the turn")
+        .unwrap()
+        .unwrap();
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, sock.read_to_end(&mut rest))
+        .await
+        .expect("the stream closes")
+        .unwrap();
+    seen.push_str(&String::from_utf8_lossy(&rest));
+    assert!(seen.contains("\"type\":\"abort\""), "{seen}");
+    assert!(seen.contains("[DONE]"), "{seen}");
+    assert_eq!(env.state.chats.running(&env.project), None);
+}
+
+#[tokio::test]
 async fn missing_cli_is_not_installed() {
     let env = env(vec!["/nonexistent/cursor-agent".into()]).await;
     let sub = env
