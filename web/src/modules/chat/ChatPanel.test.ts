@@ -56,6 +56,10 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   const path = url.replace(ORIGIN, "");
   if (path === "/api/terminal/providers")
     return json({ providers: ["cursor", "claude", "codex", "shell"].map((id) => ({ id, command: [id] })) });
+  if (path === "/api/terminal/p1" && method === "DELETE") {
+    terminalRunning = false;
+    return json({ stopped: true });
+  }
   if (path === "/api/terminal/p1") return json({ running: terminalRunning });
   if (path === "/api/chat/p1" && method === "GET")
     return json({ chats: [{ id: "c-old", provider: "claude", title: "Old chat", updatedAt: 1 }], running: null });
@@ -258,6 +262,19 @@ describe("ChatPanel", () => {
     await w.find("[data-testid='chat-input']").setValue("hi");
     expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(true);
     expect(w.find("[data-testid='chat-send']").attributes("aria-label")).toBe("The agent is busy in Terminal");
+  });
+
+  it("offers to stop the terminal session that blocks the chat", async () => {
+    terminalRunning = true;
+    const w = await mountPanel();
+    await w.find("[data-testid='chat-input']").setValue("hi");
+    const stopTerminal = w.find("[data-testid='chat-stop-terminal']");
+    expect(stopTerminal.text()).toBe("Stop terminal session");
+    await stopTerminal.trigger("click");
+    await flushPromises();
+    expect(calls.some((c) => c.method === "DELETE" && c.url === `${ORIGIN}/api/terminal/p1`)).toBe(true);
+    expect(w.find("[data-testid='chat-stop-terminal']").exists()).toBe(false);
+    expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(false);
   });
 
   it("shows a refused turn's message in an alert", async () => {

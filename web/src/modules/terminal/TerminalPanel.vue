@@ -288,8 +288,17 @@ onMounted(async () => {
 /** Set while stopping one session to open another; that stop's exit is expected. */
 let switching = false;
 
+/** `terminal.busy` while no terminal session runs comes from a chat turn. */
+const chatTurn = ref(false);
+const chatBusy = computed(
+  () => state.value !== "running" && (chatTurn.value || !!chats.running[props.projectId]),
+);
+const CHAT_BUSY = "The agent is busy in Chat";
+
 const offExited = daemon.on("terminal.exited", (e) => {
   if (e.projectId !== props.projectId) return;
+  // A terminal that exits mid-request never reports itself idle.
+  chatTurn.value = false;
   void store.loadSessions(props.projectId);
   if (ended.value || switching) return;
   // A late exit of the session we just switched away from.
@@ -301,9 +310,18 @@ const offSession = daemon.on("terminal.session", (e) => {
   if (e.projectId === props.projectId) void store.loadSessions(props.projectId);
 });
 
+const offBusy = daemon.on("terminal.busy", (e) => {
+  if (e.projectId === props.projectId) chatTurn.value = e.busy;
+});
+const offChatTurn = daemon.on("chat.turn", (e) => {
+  if (e.projectId === props.projectId) chatTurn.value = false;
+});
+
 onBeforeUnmount(() => {
   offExited();
   offSession();
+  offBusy();
+  offChatTurn();
   disposed = true;
   if (deliverTimer) clearTimeout(deliverTimer);
   teardown();
@@ -418,10 +436,17 @@ function deliver() {
 
 /** A request with no session running starts one with the chosen agent. */
 function startForRequests() {
-  if (props.active && state.value === "idle" && !store.starting && outbox.messages.some(isRequest)) void onStart();
+  if (
+    props.active &&
+    state.value === "idle" &&
+    !store.starting &&
+    !chatBusy.value &&
+    outbox.messages.some(isRequest)
+  )
+    void onStart();
 }
 
-watch([() => outbox.messages.length, () => props.active], () => {
+watch([() => outbox.messages.length, () => props.active, chatBusy], () => {
   startForRequests();
   deliver();
 });
@@ -585,9 +610,11 @@ async function onStart(resume?: TerminalSession | "new") {
       class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm"
     >
       <template v-if="continuable">
-        <Button data-testid="terminal-continue" :disabled="store.starting" @click="onStart(continuable)">
-          Continue {{ continuable.title || "this conversation" }} ({{ providerLabel(continuable.provider) }})
-        </Button>
+        <span :title="chatBusy ? CHAT_BUSY : undefined">
+          <Button data-testid="terminal-continue" :disabled="store.starting || chatBusy" @click="onStart(continuable)">
+            Continue {{ continuable.title || "this conversation" }} ({{ providerLabel(continuable.provider) }})
+          </Button>
+        </span>
         <Button variant="ghost" size="sm" :disabled="store.starting" @click="switchTo(null)">New session</Button>
       </template>
       <Questionnaire v-else class="max-w-sm" @submit.prevent="onStart('new')">
@@ -606,7 +633,9 @@ async function onStart(resume?: TerminalSession | "new") {
           </QuestionnaireChoices>
         </QuestionnaireItem>
         <QuestionnaireActions>
-          <QuestionnaireSubmit data-testid="terminal-start" :disabled="store.starting">Start</QuestionnaireSubmit>
+          <span :title="chatBusy ? CHAT_BUSY : undefined">
+            <QuestionnaireSubmit data-testid="terminal-start" :disabled="store.starting || chatBusy">Start</QuestionnaireSubmit>
+          </span>
         </QuestionnaireActions>
       </Questionnaire>
       <p v-if="store.error" data-testid="terminal-error" class="text-destructive max-w-sm text-center">

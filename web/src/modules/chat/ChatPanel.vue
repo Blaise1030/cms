@@ -203,6 +203,15 @@ async function stop() {
   }
 }
 
+async function stopTerminal() {
+  try {
+    await daemon.api.stopTerminal(props.projectId);
+  } catch (e) {
+    toast.error(`Couldn't stop the terminal session: ${errorMessage(e)}`);
+  }
+  await refreshTerminal();
+}
+
 function insert(text: string) {
   input.value = input.value ? `${input.value} ${text}` : text;
   composer.value?.focus();
@@ -272,6 +281,12 @@ defineExpose({ insert, send, busy });
         <CircleAlert />
         <AlertDescription data-testid="chat-error">{{ errorText }}</AlertDescription>
       </Alert>
+      <div v-if="terminalRunning" class="text-muted-foreground flex items-center justify-between gap-2 text-sm">
+        <span>The agent is busy in Terminal</span>
+        <Button variant="outline" size="sm" data-testid="chat-stop-terminal" @click="stopTerminal">
+          Stop terminal session
+        </Button>
+      </div>
       <ChatComposer
         ref="composer"
         v-model="input"

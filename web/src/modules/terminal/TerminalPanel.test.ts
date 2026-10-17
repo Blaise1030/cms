@@ -76,6 +76,7 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useAgentOutboxStore } from "./outbox";
 import { useTheme } from "@/lib/theme";
 import { useTerminalStore } from "./store";
+import { useChatStore } from "@/modules/chat/store";
 
 enableAutoUnmount(afterEach);
 
@@ -337,6 +338,42 @@ describe("TerminalPanel", () => {
     await w.find("[data-testid='terminal-start']").trigger("click");
     await flushPromises();
     expect(api.startTerminal).toHaveBeenCalledWith("p", "codex");
+  });
+
+  it("disables Start while a chat turn runs", async () => {
+    const w = await mountPanel();
+    h.daemon.emit({ type: "terminal.busy", projectId: "p", busy: true });
+    await flushPromises();
+    const start = w.find<HTMLButtonElement>("[data-testid='terminal-start']");
+    expect(start.element.disabled).toBe(true);
+    expect(start.element.closest("[title]")?.getAttribute("title")).toBe("The agent is busy in Chat");
+    await start.trigger("click");
+    await flushPromises();
+    expect(api.startTerminal).not.toHaveBeenCalled();
+
+    h.daemon.emit({ type: "terminal.busy", projectId: "p", busy: false });
+    await flushPromises();
+    expect(w.find<HTMLButtonElement>("[data-testid='terminal-start']").element.disabled).toBe(false);
+    expect(w.find("[data-testid='terminal-start']").element.closest("[title]")).toBeNull();
+  });
+
+  it("disables Continue while the chat store has a running turn, and doesn't start for requests", async () => {
+    sessions = [session("c1", "claude")];
+    activeChat("c1");
+    const w = await mountPanel();
+    useChatStore().running.p = "c1";
+    await flushPromises();
+    const cont = w.find<HTMLButtonElement>("[data-testid='terminal-continue']");
+    expect(cont.element.disabled).toBe(true);
+    expect(cont.element.closest("[title]")?.getAttribute("title")).toBe("The agent is busy in Chat");
+    useAgentOutboxStore().send({ kind: "text", text: "Sync please", submit: true });
+    await flushPromises();
+    expect(api.startTerminal).not.toHaveBeenCalled();
+
+    useChatStore().running.p = null;
+    await flushPromises();
+    await flushPromises();
+    expect(api.startTerminal).toHaveBeenCalledWith("p", "claude", "c1");
   });
 
   it("shows the change-required error from start", async () => {
