@@ -157,6 +157,45 @@ file-tree-container {
   }
 }
 
+/* Fades a scroll container's top and bottom edges while there is more content that way. Driven by
+   its own scroll position, so content that fits shows no fade. */
+@property --scroll-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@utility scroll-fade-y {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--scroll-fade-top),
+    #000 calc(100% - var(--scroll-fade-bottom)),
+    transparent
+  );
+  animation: scroll-fade-y linear both;
+  animation-timeline: scroll(self);
+}
+@keyframes scroll-fade-y {
+  0% {
+    --scroll-fade-top: 0px;
+    --scroll-fade-bottom: 32px;
+  }
+  10%,
+  90% {
+    --scroll-fade-top: 32px;
+    --scroll-fade-bottom: 32px;
+  }
+  100% {
+    --scroll-fade-top: 32px;
+    --scroll-fade-bottom: 0px;
+  }
+}
+
 /* Animated by the file trees' scroll fade (lib/treeScrollFade.ts). */
 @property --tree-fade-top {
   syntax: "<length>";

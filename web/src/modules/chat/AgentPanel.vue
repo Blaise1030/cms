@@ -36,7 +36,7 @@ watch([() => outbox.messages.length, tab, chat, () => chat.value?.busy], deliver
 
 <template>
   <Tabs v-model="tab" class="bg-background h-full min-h-0 gap-0" data-testid="agent-panel">
-    <div class="flex shrink-0 border-b p-1.5">
+    <div class="flex shrink-0 p-1.5">
       <TabsList class="w-full">
         <TabsTrigger value="chat" data-testid="agent-tab-chat">Chat</TabsTrigger>
         <TabsTrigger value="terminal" data-testid="agent-tab-terminal">Terminal</TabsTrigger>

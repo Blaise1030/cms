@@ -420,6 +420,14 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
   });
 
+  it("fades the message list at its edges under a borderless header", async () => {
+    const w = await mountPanel();
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-viewport']").exists()).toBe(true));
+    expect(w.find("[data-testid='chat-viewport']").classes()).toContain("scroll-fade-y");
+    expect(w.find("[data-testid='chat-header']").classes()).not.toContain("border-b");
+  });
+
   it("leaves room under the last message for the working indicator while a turn runs", async () => {
     chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
     const w = await mountPanel();

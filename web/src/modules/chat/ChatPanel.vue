@@ -239,7 +239,7 @@ defineExpose({ insert, insertReference, send, busy });
 
 <template>
   <div data-testid="chat-panel" class="bg-background text-foreground flex h-full min-h-0 flex-col">
-    <div class="flex h-11 shrink-0 items-center gap-1 border-b px-1.5">
+    <div data-testid="chat-header" class="flex h-11 shrink-0 items-center gap-1 px-1.5">
       <ChatHistory
         v-model:open="historyOpen"
         :chats="chats"
@@ -277,7 +277,7 @@ defineExpose({ insert, insertReference, send, busy });
     </Empty>
     <MessageScrollerProvider v-else auto-scroll>
       <MessageScroller class="min-h-0 flex-1">
-        <MessageScrollerViewport>
+        <MessageScrollerViewport class="scroll-fade-y" data-testid="chat-viewport">
           <!-- The working indicator floats over the bottom edge; keep the last line clear of it. -->
           <MessageScrollerContent
             data-testid="chat-messages"
