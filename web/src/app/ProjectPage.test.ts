@@ -7,7 +7,7 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useChangesStore } from "@/modules/changes/store";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import { useTerminalStore } from "@/modules/terminal/store";
 import { routes } from "@/router";
 

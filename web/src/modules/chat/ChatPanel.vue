@@ -18,7 +18,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { useTerminalStore } from "@/modules/terminal/store";
+import { useAgentProvidersStore } from "@/modules/chat/providers";
 import ChatComposer from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
@@ -38,7 +38,7 @@ const SUGGESTIONS = [
 
 const daemon = useDaemon();
 const store = useChatStore();
-const terminal = useTerminalStore();
+const agentProviders = useAgentProvidersStore();
 
 const chat = shallowRef<Chat<UIMessage> | null>(null);
 const input = ref("");
@@ -49,18 +49,20 @@ const terminalRunning = ref(false);
 const terminalChecked = ref(false);
 /** A `send` is waiting for the history or for its turn to end. */
 const sending = ref(false);
-/** The chat's own provider, or the user's pick; null falls back to the terminal's. */
+/** The chat's own provider, or the user's pick; null falls back to the saved pick. */
 const chosen = ref<string | null>(null);
 /** The latest `open()`; sends wait for it so none land while the history loads. */
 let opened: Promise<void> = Promise.resolve();
 /** What each `[Element #n]` in the input stands for, until the input is sent. */
 const references = new Map<string, string>();
 
-const providers = computed(() => terminal.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
+const providers = computed(() => agentProviders.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
 const provider = computed({
   get: () =>
     chosen.value ??
-    (terminal.provider && providers.value.includes(terminal.provider) ? terminal.provider : providers.value[0]) ??
+    (agentProviders.provider && providers.value.includes(agentProviders.provider)
+      ? agentProviders.provider
+      : providers.value[0]) ??
     null,
   set: (id) => (chosen.value = id),
 });
@@ -153,7 +155,7 @@ watch(
     if (!active) return;
     void refreshTerminal();
     void store.load(props.projectId);
-    if (!terminal.providers.length) void terminal.loadProviders();
+    if (!agentProviders.providers.length) void agentProviders.loadProviders();
   },
   { immediate: true },
 );

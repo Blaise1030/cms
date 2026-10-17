@@ -42,7 +42,7 @@ vi.mock("@/modules/terminal/TerminalPanel.vue", async () => {
 });
 
 import AgentPanel from "./AgentPanel.vue";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 
 enableAutoUnmount(afterEach);
 

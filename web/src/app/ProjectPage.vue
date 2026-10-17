@@ -14,7 +14,7 @@ import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 import AgentPanel from "@/modules/chat/AgentPanel.vue";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import { useTerminalStore } from "@/modules/terminal/store";
 import { projectTabFromRoute } from "@/router";
 

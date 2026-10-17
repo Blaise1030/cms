@@ -2,7 +2,7 @@
 import { defineAsyncComponent, ref, watch } from "vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TerminalPanel from "@/modules/terminal/TerminalPanel.vue";
-import { agentPrompt, isRequest, useAgentOutboxStore, type AgentMessage } from "@/modules/terminal/outbox";
+import { agentPrompt, isRequest, useAgentOutboxStore, type AgentMessage } from "@/modules/chat/outbox";
 import type ChatPanelComponent from "./ChatPanel.vue";
 
 /** Its AI SDK, markdown and highlighter would push the app shell past the PWA precache limit. */

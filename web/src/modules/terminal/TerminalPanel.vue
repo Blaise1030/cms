@@ -23,7 +23,7 @@ import type { TerminalSession } from "@/core/types";
 import { useTheme } from "@/lib/theme";
 import { bracketedPaste, errorMessage } from "@workbench/utils";
 import { useChatStore } from "@/modules/chat/store";
-import { agentPrompt, isRequest, useAgentOutboxStore } from "./outbox";
+import { agentPrompt, isRequest, useAgentOutboxStore } from "@/modules/chat/outbox";
 import { buildTerminalUrl, connectTerminal, type TerminalConnection } from "./socket";
 import { useTerminalStore } from "./store";
 

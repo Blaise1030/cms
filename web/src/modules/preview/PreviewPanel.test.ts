@@ -10,7 +10,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => hDaemon.daemon }));
 import PreviewPanel from "./PreviewPanel.vue";
 import { usePreviewStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {

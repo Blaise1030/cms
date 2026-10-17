@@ -73,7 +73,7 @@ vi.mock("./socket", () => ({
 
 import TerminalPanel from "./TerminalPanel.vue";
 import { usePreviewStore } from "@/modules/preview/store";
-import { useAgentOutboxStore } from "./outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import { useTheme } from "@/lib/theme";
 import { useTerminalStore } from "./store";
 import { useChatStore } from "@/modules/chat/store";
