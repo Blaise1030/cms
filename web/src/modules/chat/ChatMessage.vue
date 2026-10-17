@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 import type { DynamicToolUIPart, UIMessage } from "ai";
-import { Markdown } from "vue-stream-markdown";
+import { Markdown, type StreamMarkdownParserOptions } from "vue-stream-markdown";
 import "vue-stream-markdown/index.css";
 import {
   Brain,
@@ -33,6 +33,9 @@ import { formatValue, toolLabel, type AgentErrorData, type CheckpointData, type 
 
 defineProps<{ projectId: string; message: UIMessage }>();
 defineEmits<{ "open-terminal": [] }>();
+
+/** Agent text is untrusted: replacing the parser's default `html` plugin leaves raw HTML as escaped text. */
+const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }] };
 
 const toolIcons: Record<string, Component> = {
   read: FileText,
@@ -68,7 +71,7 @@ const agentError = (data: unknown) => data as AgentErrorData;
   <Message v-else>
     <MessageContent>
       <template v-for="(part, i) in message.parts" :key="i">
-        <Markdown v-if="part.type === 'text'" :content="part.text" />
+        <Markdown v-if="part.type === 'text'" :content="part.text" :parser-options="parserOptions" />
 
         <Trace v-else-if="part.type === 'reasoning'">
           <TraceCollapsible>

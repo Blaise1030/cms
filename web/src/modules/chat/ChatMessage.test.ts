@@ -35,6 +35,17 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("does not render raw HTML from the agent", async () => {
+    const w = await render([
+      { type: "text", text: 'See <iframe src="https://x"></iframe>\n\n<form><input name="q"></form>\n\n**ok**' },
+    ]);
+    expect(w.find("strong").text()).toBe("ok");
+    expect(document.body.querySelector("iframe")).toBeNull();
+    expect(document.body.querySelector("form")).toBeNull();
+    expect(document.body.querySelector("input")).toBeNull();
+    w.unmount();
+  });
+
   it("renders a user message's text", async () => {
     const w = await render([{ type: "text", text: "Make the hero bigger" }], "user");
     expect(w.text()).toContain("Make the hero bigger");
