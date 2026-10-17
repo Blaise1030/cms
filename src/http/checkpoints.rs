@@ -1,8 +1,12 @@
 //! `GET /api/checkpoints`, `GET /api/checkpoints/{sha}/diff`, `POST /api/checkpoints/{sha}/restore`.
 //!
 //! Also hosts the "start a change first" guard used by mutating edit paths (terminal
-//! start and hook turn-end checkpoints). Restore on `main` is intentionally not gated
-//! (Slice 3 out of scope).
+//! start and turn-end checkpoints), and the shared turn-end commit (`finish_turn`) for
+//! terminal hooks and chat. Restore on `main` is intentionally not gated (Slice 3 out of
+//! scope).
+
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -13,7 +17,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{project_dir, query_or_badreq};
+use super::{project_dir, query_or_badreq, terminal};
 use crate::changes;
 use crate::error::ApiError;
 use crate::git;
@@ -22,6 +26,84 @@ use crate::state::AppState;
 #[derive(Deserialize)]
 pub struct ProjectQuery {
     project: String,
+}
+
+static TURN_END_SERIAL: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn turn_end_lock(project_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut map = TURN_END_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(project_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+/// What an agent turn end did to the project's history.
+#[derive(Debug)]
+pub enum TurnOutcome {
+    /// `files` are the paths the checkpoint captured, sorted.
+    Committed {
+        checkpoint: git::Checkpoint,
+        files: Vec<String>,
+    },
+    /// Edits were left uncommitted because the project needs a change first.
+    Blocked(String),
+    Unchanged,
+}
+
+/// Checkpoint the agent's edits at the end of a turn (terminal hook or chat).
+///
+/// Serialised per project. Emits `checkpoint.blocked` / `checkpoint.created`, then lets a
+/// pending change update move the checkout now that the agent is idle.
+pub async fn finish_turn(
+    state: &AppState,
+    project_id: &str,
+    summary: Option<&str>,
+) -> Result<TurnOutcome, ApiError> {
+    let lock = turn_end_lock(project_id);
+    let _guard = lock.lock().await;
+    let dir = project_dir(state, project_id).await?;
+    if let Err(e) = require_change(state, project_id).await {
+        // A turn that only talked (no edits) on `main` is fine.
+        if !changes::is_dirty(&dir).await? {
+            return Ok(TurnOutcome::Unchanged);
+        }
+        state.events.emit(
+            "checkpoint.blocked",
+            json!({
+                "projectId": project_id,
+                "reason": e.message,
+            }),
+        );
+        return Ok(TurnOutcome::Blocked(e.message));
+    }
+    let mut files = git::changed_paths(&dir).await?;
+    let message = terminal::commit_message(summary, &files);
+    files.sort();
+    let outcome = match git::checkpoint(&dir, &message).await? {
+        Some(cp) => {
+            state.events.emit(
+                "checkpoint.created",
+                json!({
+                    "projectId": project_id,
+                    "sha": cp.sha,
+                    "summary": cp.summary,
+                    "author": cp.author,
+                    "ts": cp.ts,
+                }),
+            );
+            TurnOutcome::Committed {
+                checkpoint: cp,
+                files,
+            }
+        }
+        None => TurnOutcome::Unchanged,
+    };
+    tokio::spawn(super::changes::finish_pending_update(
+        state.clone(),
+        project_id.to_string(),
+    ));
+    Ok(outcome)
 }
 
 /// Reject edits on `main` for GitHub-remote projects. Local-only projects may edit `main`.
