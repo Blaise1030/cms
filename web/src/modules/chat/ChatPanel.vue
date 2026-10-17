@@ -80,7 +80,11 @@ function createChat(id: string, initial: UIMessage[]) {
     transport: new DefaultChatTransport({
       api: daemon.api.chatUrl(props.projectId),
       headers: () => daemon.api.authHeaders(),
-      body: () => ({ provider: provider.value }),
+      // The daemon keeps the transcript and only reads the new user message; the whole
+      // conversation would eventually exceed its request body limit.
+      prepareSendMessagesRequest: ({ id, messages }) => ({
+        body: { id, messages: messages.slice(-1), provider: provider.value },
+      }),
     }),
   });
 }

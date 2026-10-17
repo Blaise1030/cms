@@ -115,6 +115,24 @@ describe("ChatPanel", () => {
     expect(w.text()).toContain("hi");
   });
 
+  it("posts only the new message, not the whole conversation", async () => {
+    const w = await mountPanel();
+    const id = useChatStore().activeChatId("p1");
+    await send(w, "hi");
+    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+    chatResponse = () => sse([{ type: "start", messageId: "a2" }, ...reply.slice(1)]);
+    await w.find("[data-testid='chat-input']").setValue("again");
+    await w.find("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(posts()).toHaveLength(2));
+    const body = JSON.parse(String(posts()[1]!.init.body));
+    expect(body.id).toBe(id);
+    expect(body.provider).toBe("cursor");
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe("user");
+    expect(body.messages[0].parts[0].text).toBe("again");
+    expect(new Headers(posts()[1]!.init.headers).get("Authorization")).toBe("Bearer tok");
+  });
+
   it("lists only chat-capable providers and locks the choice once the chat has messages", async () => {
     const w = await mountPanel();
     const select = w.find<HTMLSelectElement>("[data-testid='chat-provider']");
