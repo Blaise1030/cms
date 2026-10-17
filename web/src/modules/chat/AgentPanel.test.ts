@@ -7,6 +7,7 @@ import { ref, type Ref } from "vue";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const h = vi.hoisted(() => ({
   insert: null as any,
+  insertReference: null as any,
   send: null as any,
   busy: null as unknown as Ref<boolean>,
   emitOpenTerminal: null as unknown as () => void,
@@ -22,7 +23,7 @@ vi.mock("./ChatPanel.vue", async () => {
       emits: ["open-terminal"],
       setup(props, { emit, expose }) {
         h.emitOpenTerminal = () => emit("open-terminal");
-        expose({ insert: h.insert, send: h.send, busy: h.busy });
+        expose({ insert: h.insert, insertReference: h.insertReference, send: h.send, busy: h.busy });
         return () => render("div", { "data-testid": "chat-stub", "data-active": String(props.active) });
       },
     }),
@@ -50,6 +51,7 @@ const elementText = '[element <h1> "Hi" at `h1`]';
 
 beforeEach(() => {
   h.insert = vi.fn();
+  h.insertReference = vi.fn();
   h.send = vi.fn(async () => undefined);
   h.busy = ref(false);
   setActivePinia(createPinia());
@@ -95,7 +97,7 @@ describe("AgentPanel", () => {
     await mountPanel();
     useAgentOutboxStore().send({ kind: "element", element });
     await flushPromises();
-    expect(h.insert).toHaveBeenCalledWith(elementText);
+    expect(h.insertReference).toHaveBeenCalledWith(elementText);
     expect(h.send).not.toHaveBeenCalled();
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
@@ -105,7 +107,7 @@ describe("AgentPanel", () => {
     await showTerminal(w);
     useAgentOutboxStore().send({ kind: "element", element });
     await flushPromises();
-    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.insertReference).not.toHaveBeenCalled();
     expect(useAgentOutboxStore().messages).toHaveLength(1);
   });
 
@@ -125,7 +127,7 @@ describe("AgentPanel", () => {
     useAgentOutboxStore().send({ kind: "element", element });
     await flushPromises();
     expect(h.send).not.toHaveBeenCalled();
-    expect(h.insert).toHaveBeenCalledWith(elementText);
+    expect(h.insertReference).toHaveBeenCalledWith(elementText);
     expect(useAgentOutboxStore().messages).toEqual([{ kind: "text", text: "Sync please", submit: true }]);
 
     h.busy.value = false;

@@ -46,6 +46,19 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("shows a picked element in a user message as a compact tag", async () => {
+    const ref = '[element <section class="mx-auto" id="hero"> "Stop building" in src/Hero.astro:5:69]';
+    const shot = "/p/.workbench/site/attachments/4b78.png";
+    const w = await render([{ type: "text", text: `${ref} ${shot} make it shorter` }], "user");
+    const tag = w.find("[data-testid='element-tag']");
+    expect(tag.text()).toBe("section#hero");
+    expect(tag.attributes("title")).toBe(`${ref} ${shot}`);
+    expect(w.text()).toContain("make it shorter");
+    expect(w.text()).not.toContain("attachments");
+    expect(w.text()).not.toContain("[element");
+    w.unmount();
+  });
+
   it("renders a user message's text", async () => {
     const w = await render([{ type: "text", text: "Make the hero bigger" }], "user");
     expect(w.text()).toContain("Make the hero bigger");

@@ -408,4 +408,44 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
     expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe("Ship it");
   });
+
+  describe("element references", () => {
+    type Vm = { insertReference(t: string): void };
+    const ref1 = '[element <section id="hero"> "Stop building" in src/Hero.astro:5:69] /p/attachments/a.png ';
+    const ref2 = "[element <h1> at `h1`]";
+    const input = (w: Awaited<ReturnType<typeof mountPanel>>) =>
+      w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
+
+    it("shows a short numbered tag in the input instead of the full reference", async () => {
+      const w = await mountPanel();
+      const vm = w.vm as unknown as Vm;
+      vm.insertReference(ref1);
+      vm.insertReference(ref2);
+      await flushPromises();
+      expect(input(w).element.value).toBe("[Element #1] [Element #2]");
+    });
+
+    it("sends the full reference text in place of each tag", async () => {
+      const w = await mountPanel();
+      (w.vm as unknown as Vm).insertReference(ref1);
+      await flushPromises();
+      await send(w, `${input(w).element.value} make it shorter`);
+      const sent = JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text;
+      expect(sent).toBe(`${ref1.trim()} make it shorter`);
+    });
+
+    it("drops a reference whose tag was deleted, and numbers afresh after sending", async () => {
+      const w = await mountPanel();
+      const vm = w.vm as unknown as Vm;
+      vm.insertReference(ref1);
+      vm.insertReference(ref2);
+      await flushPromises();
+      await send(w, "[Element #2] only");
+      expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe(`${ref2} only`);
+      await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+      vm.insertReference(ref2);
+      await flushPromises();
+      expect(input(w).element.value).toBe("[Element #1]");
+    });
+  });
 });

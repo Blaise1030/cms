@@ -9,6 +9,7 @@ import {
   FilePen,
   FileText,
   Globe,
+  MousePointerClick,
   Search,
   SquareTerminal,
   Wrench,
@@ -30,6 +31,7 @@ import {
 } from "@/components/ui/trace";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
 import { formatValue, toolLabel, type AgentErrorData, type CheckpointData, type ToolInput } from "./parts";
+import { segmentReferences } from "./references";
 
 defineProps<{ projectId: string; message: UIMessage }>();
 defineEmits<{ "open-terminal": [] }>();
@@ -62,7 +64,17 @@ const agentError = (data: unknown) => data as AgentErrorData;
     <MessageContent>
       <Bubble variant="secondary" align="end">
         <template v-for="(part, i) in message.parts" :key="i">
-          <BubbleContent v-if="part.type === 'text'" class="whitespace-pre-wrap">{{ part.text }}</BubbleContent>
+          <BubbleContent v-if="part.type === 'text'" class="whitespace-pre-wrap">
+            <template v-for="(seg, j) in segmentReferences(part.text)" :key="j">
+              <span
+                v-if="seg.kind === 'element'"
+                data-testid="element-tag"
+                :title="seg.full"
+                class="bg-background/60 inline-flex items-center gap-1 rounded-md border px-1.5 align-baseline font-mono text-xs"
+              ><MousePointerClick class="size-3" aria-hidden="true" />{{ seg.label }}</span>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </BubbleContent>
         </template>
       </Bubble>
     </MessageContent>

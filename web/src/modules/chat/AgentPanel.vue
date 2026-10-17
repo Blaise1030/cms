@@ -21,7 +21,8 @@ function deliverToChat() {
   if (tab.value !== "chat" || !panel || outbox.messages.length === 0) return;
   const held: AgentMessage[] = [];
   for (const message of outbox.drain()) {
-    if (!isRequest(message)) panel.insert(agentPrompt(message));
+    if (message.kind === "element") panel.insertReference(agentPrompt(message));
+    else if (!isRequest(message)) panel.insert(agentPrompt(message));
     else if (panel.busy) held.push(message);
     else void panel.send(agentPrompt(message));
   }

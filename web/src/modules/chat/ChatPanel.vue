@@ -22,6 +22,7 @@ import { useTerminalStore } from "@/modules/terminal/store";
 import ChatComposer from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
+import { expandReferences, referenceTag } from "./references";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
@@ -52,6 +53,8 @@ const sending = ref(false);
 const chosen = ref<string | null>(null);
 /** The latest `open()`; sends wait for it so none land while the history loads. */
 let opened: Promise<void> = Promise.resolve();
+/** What each `[Element #n]` in the input stands for, until the input is sent. */
+const references = new Map<string, string>();
 
 const providers = computed(() => terminal.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
 const provider = computed({
@@ -191,7 +194,9 @@ async function send(text: string) {
 
 function submit(text: string) {
   input.value = "";
-  void send(text);
+  const full = expandReferences(text, references);
+  references.clear();
+  void send(full);
 }
 
 async function stop() {
@@ -217,12 +222,19 @@ function insert(text: string) {
   composer.value?.focus();
 }
 
+/** Show a picked element as a short tag; `submit` puts the full reference back. */
+function insertReference(text: string) {
+  const tag = referenceTag(references.size + 1);
+  references.set(tag, text.trim());
+  insert(tag);
+}
+
 function suggest(text: string) {
   input.value = text;
   composer.value?.focus();
 }
 
-defineExpose({ insert, send, busy });
+defineExpose({ insert, insertReference, send, busy });
 </script>
 
 <template>
