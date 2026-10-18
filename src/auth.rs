@@ -15,7 +15,13 @@ use crate::static_files;
 
 pub const SESSION_COOKIE: &str = "wb_session";
 const HEALTH_PATH: &str = "/api/health";
-const TURN_END_PATH: &str = "/api/terminal/turn-end";
+/// Hook-token routes: they check the agent's hook token themselves, not the daemon token.
+const HOOK_PATHS: [&str; 4] = [
+    "/api/terminal/turn-end",
+    "/api/ctl/preview-status",
+    "/api/ctl/restart-preview",
+    "/api/ctl/change-status",
+];
 
 /// Constant-time string equality (length is not hidden).
 pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
@@ -105,7 +111,8 @@ fn cookie_token(req: &Request) -> Option<&str> {
 /// Token middleware. Passes everything through when `--no-auth`.
 pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let cfg = &state.config;
-    if cfg.no_auth || req.uri().path() == HEALTH_PATH || req.uri().path() == TURN_END_PATH {
+    let path = req.uri().path();
+    if cfg.no_auth || path == HEALTH_PATH || HOOK_PATHS.contains(&path) {
         return next.run(req).await;
     }
     let Some(expected) = cfg.token.as_deref() else {

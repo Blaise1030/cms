@@ -4,6 +4,7 @@ pub mod changes;
 pub mod chat;
 pub mod checkpoints;
 pub mod content;
+pub mod ctl;
 pub mod design;
 pub mod devserver;
 pub mod error;
@@ -84,6 +85,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/terminal/providers", get(terminal::list_providers))
         .route("/api/terminal", post(terminal::start))
         .route("/api/terminal/turn-end", post(terminal::turn_end))
+        .route("/api/ctl/preview-status", post(ctl::preview_status))
+        .route("/api/ctl/restart-preview", post(ctl::restart_preview))
+        .route("/api/ctl/change-status", post(ctl::change_status))
         .route(
             "/api/terminal/{project}",
             get(terminal::status).delete(terminal::stop),
