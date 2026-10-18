@@ -6,7 +6,7 @@ import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
 import { Button } from "@/components/ui/button";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
@@ -247,8 +247,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <ResizablePanel id="content-collections" ref="collectionsPanel" :default-size="20" :min-size="14" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
-          <SidebarGroup class="min-h-0 flex-1">
-            <SidebarGroupLabel>Collections</SidebarGroupLabel>
+          <SidebarGroup class="min-h-0 flex-1 px-1">
             <SidebarGroupContent class="min-h-0 flex-1">
               <ContentTree :storage-key="`content:${projectId}`" :collections="validCollections" :entries="treeEntries" :selected="treeSelected" :actions="treeActions" @open="openEntry" />
             </SidebarGroupContent>

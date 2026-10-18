@@ -2,16 +2,18 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* The macOS desktop window is full screen (set by the shell), so there are no traffic lights to clear. */
+@custom-variant fullscreen (&:is([data-fullscreen] *));
 
 :root {
   color-scheme: light;
-  --background: oklch(1 0 0);
+  --background: oklch(0.98 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.546 0.215 263);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -22,33 +24,36 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.65 0.18 260);
+  /* How much white the raised buttons' top gloss and edge highlight mix in. */
+  --raised-gloss: 22%;
+  --raised-soft-gloss: 70%;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.5rem;
+  --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary: oklch(0.546 0.215 263);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.65 0.18 260);
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.18 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.62 0.19 260);
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -58,7 +63,9 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.6 0.17 260);
+  --raised-gloss: 14%;
+  --raised-soft-gloss: 6%;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -66,12 +73,12 @@
   --chart-5: oklch(0.645 0.246 16.439);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary: oklch(0.62 0.19 260);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.6 0.17 260);
 }
 
 /* Compact density: every p-/m-/gap-/h-/size- utility derives from --spacing (default 0.25rem). */
@@ -79,6 +86,8 @@
   --spacing: 0.225rem;
   --text-sm: 0.8125rem;
   --text-sm--line-height: calc(1.125 / 0.8125);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @theme inline {
@@ -154,6 +163,50 @@ file-tree-container {
   }
   to {
     background-position: 0 0;
+  }
+}
+
+/* Raised buttons. Shadows go through Tailwind's shadow variables so focus rings still stack on top.
+   `btn-raised` is for filled buttons and tints its drop shadow with `--raised-tint` (the fill);
+   `btn-raised-soft` is the light pill for outline/secondary ones. Pressing sinks either. */
+@utility btn-raised {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklch, white var(--raised-gloss), transparent),
+    transparent 55%,
+    color-mix(in oklch, black 6%, transparent)
+  );
+  --tw-inset-shadow:
+    inset 0 1px 0 color-mix(in oklch, white calc(var(--raised-gloss) * 1.4), transparent),
+    inset 0 -1px 0 color-mix(in oklch, black 10%, transparent);
+  --tw-shadow:
+    0 1px 1px color-mix(in oklch, var(--raised-tint, black) 20%, transparent),
+    0 2px 6px -2px color-mix(in oklch, var(--raised-tint, black) 25%, transparent);
+  box-shadow:
+    var(--tw-inset-shadow), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:active {
+    --tw-inset-shadow: inset 0 1px 2px color-mix(in oklch, black 15%, transparent);
+    --tw-shadow: 0 1px 1px color-mix(in oklch, var(--raised-tint, black) 15%, transparent);
+  }
+}
+@utility btn-raised-soft {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklch, white var(--raised-soft-gloss), transparent),
+    transparent
+  );
+  --tw-inset-shadow: inset 0 1px 0 color-mix(in oklch, white var(--raised-soft-gloss), transparent);
+  --tw-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent),
+    0 1px 1px color-mix(in oklch, var(--foreground) 5%, transparent),
+    0 2px 4px -2px color-mix(in oklch, var(--foreground) 6%, transparent);
+  box-shadow:
+    var(--tw-inset-shadow), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:active {
+    --tw-inset-shadow: inset 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
+    --tw-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
   }
 }
 

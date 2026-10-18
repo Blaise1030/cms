@@ -19,19 +19,41 @@
         color: #666;
         background: Canvas;
       }
-      .spinner {
+      .grid-loader {
+        display: inline-grid;
         width: 28px;
         height: 28px;
-        border: 3px solid rgba(128, 128, 128, 0.25);
-        border-top-color: rgba(128, 128, 128, 0.9);
-        border-radius: 50%;
-        animation: spin 0.9s linear infinite;
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 8%;
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      .grid-loader > span {
+        border-radius: 2px;
+        background: currentColor;
+        animation: grid-loader-pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes grid-loader-pulse {
+        0%,
+        100% { opacity: 0.2; transform: scale(0.6); }
+        50% { opacity: 1; transform: scale(1); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .grid-loader > span { animation-duration: 3s; }
+      }
     </style>
   </head>
   <body data-tauri-drag-region>
-    <div class="spinner"></div>
+    <div class="grid-loader" role="status" aria-label="Loading">
+      <span style="animation-delay: 0s"></span>
+      <span style="animation-delay: 0.1s"></span>
+      <span style="animation-delay: 0.2s"></span>
+      <span style="animation-delay: 0.1s"></span>
+      <span style="animation-delay: 0.2s"></span>
+      <span style="animation-delay: 0.3s"></span>
+      <span style="animation-delay: 0.2s"></span>
+      <span style="animation-delay: 0.3s"></span>
+      <span style="animation-delay: 0.4s"></span>
+    </div>
     <div>Starting Workbench…</div>
   </body>
 </html>

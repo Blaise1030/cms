@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
-  LoaderCircle,
   Maximize2,
   Minimize2,
   Monitor,
@@ -30,6 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
@@ -291,7 +291,7 @@ function toggleFullscreen() {
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
-    <div ref="shell" class="bg-background flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div ref="shell" class="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-md">
       <TooltipProvider>
         <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
           <Tooltip>
@@ -333,7 +333,7 @@ function toggleFullscreen() {
 
           <form class="mx-1 flex min-w-0 flex-1" @submit.prevent="navigate">
             <div
-              class="bg-background focus-within:border-ring flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5"
+              class="bg-card focus-within:border-ring flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5"
             >
               <Tooltip>
                 <TooltipTrigger as-child>
@@ -543,7 +543,7 @@ function toggleFullscreen() {
         role="status"
         data-testid="agent-busy"
       >
-        <LoaderCircle class="size-3.5 animate-spin" />
+        <Spinner class="size-4" />
         Agent is working…
       </div>
 

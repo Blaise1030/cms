@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import type { ToasterProps } from "vue-sonner"
-import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon, XIcon } from "@lucide/vue"
+import { CircleCheckIcon, InfoIcon, OctagonXIcon, TriangleAlertIcon, XIcon } from "@lucide/vue"
 import { Toaster as Sonner } from "vue-sonner"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import "vue-sonner/style.css"
 
@@ -33,7 +34,7 @@ const props = defineProps<ToasterProps>()
     </template>
     <template #loading-icon>
       <div>
-        <Loader2Icon class="size-4 animate-spin" />
+        <Spinner class="size-4" />
       </div>
     </template>
     <template #close-icon>

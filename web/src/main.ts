@@ -1,5 +1,7 @@
 import { createPinia } from "pinia";
 import { createApp } from "vue";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./index.css";
 import App from "./App.vue";
 import { useDaemon } from "./core/daemon";

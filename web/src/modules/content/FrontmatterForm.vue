@@ -192,11 +192,10 @@ const placeholder = computed(() => (phrase.value ? `Enter ${phrase.value}` : "En
       </SelectContent>
     </Select>
     <Input v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" :placeholder="`${descriptor.collection} entry`" :model-value="modelValue as string | undefined" @update:model-value="setText" />
-    <div v-else-if="descriptor.type === 'image'" class="grid gap-2">
-      <ImageUploader :data-testid="`${id}-uploader`" :src="imageSrc" :accept="ACCEPTED_IMAGES" @select="uploadImage" @remove="setText('')">
+    <div v-else-if="descriptor.type === 'image'">
+      <ImageUploader :id="id" :data-testid="`${id}-uploader`" :src="imageSrc" :accept="ACCEPTED_IMAGES" @select="uploadImage" @remove="setText('')">
         <template #hint><span class="text-xs">PNG, JPEG, WebP, or GIF up to 10 MiB</span></template>
       </ImageUploader>
-      <Input :id="id" :data-testid="id" type="text" placeholder="Image path" :readonly="pendingPreview" :model-value="pendingPreview ? 'New image, uploaded on save' : modelValue as string | undefined" @update:model-value="setText" />
       <ImageDialog v-model:open="imageOpen" :file="imageFile" @insert="chooseImage" />
     </div>
 

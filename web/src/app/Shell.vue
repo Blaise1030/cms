@@ -21,7 +21,7 @@ const props = withDefaults(
 // The traffic lights end ~80px from the window's left edge; the 56px project rail covers most of that.
 const slots = useSlots();
 const macDesktop = isMacDesktop();
-const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7" : "pr-3 pl-20";
+const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7 fullscreen:pl-3" : "pr-3 pl-20 fullscreen:pl-3";
 
 const chatPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
 const chatOpen = ref(true);
@@ -100,7 +100,7 @@ watch(
             @collapse="chatOpen = false"
             @expand="chatOpen = true"
           >
-            <div class="bg-background h-full min-h-0 overflow-hidden border-l">
+            <div class="bg-background h-full min-h-0 overflow-hidden">
               <slot name="chat" />
             </div>
           </ResizablePanel>

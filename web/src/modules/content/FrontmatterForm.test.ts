@@ -65,7 +65,7 @@ it("maps each descriptor type to a control holding the loaded value", () => {
   expect(val("field-section.heading")).toBe("H");
   expect(w.find('[data-testid="field-section.label"]').exists()).toBe(false);
   expect(val("field-related.0")).toBe("welcome");
-  expect(val("field-coverImage")).toBe("src/assets/blog/x.png");
+  expect(w.get('[data-testid="field-coverImage-uploader"] img').attributes("src")).toBe("src/assets/blog/x.png");
   expect(w.get('[data-testid="field-custom-readonly"]').text()).toContain("Unknown custom refinement");
 });
 
@@ -80,7 +80,7 @@ it("emits typed values for edits, array changes, variant switches, and cleared o
   await w.get('[data-testid="field-tags"] [aria-label="Remove a"]').trigger("click");
   await select(w, "field-section").choose("cta");
   await w.get('[data-testid="field-section.label"]').setValue("Go");
-  await w.get('[data-testid="field-coverImage"]').setValue("");
+  await w.get('[data-testid="field-coverImage-uploader"] [data-slot="image-uploader-remove"]').trigger("click");
   w.findComponent(DatePicker).vm.$emit("update:modelValue", "2026-03-04");
   await nextTick();
   const out = w.props("modelValue") as Record<string, unknown>;

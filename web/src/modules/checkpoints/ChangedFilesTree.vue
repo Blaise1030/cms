@@ -87,6 +87,6 @@ onBeforeUnmount(() => {
   --trees-fg-muted-override: var(--muted-foreground);
   --trees-selected-bg-override: var(--accent);
   --trees-border-color-override: var(--border);
-  --trees-font-family-override: var(--font-mono, ui-monospace, monospace);
+  --trees-font-family-override: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
 }
 </style>
