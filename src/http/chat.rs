@@ -113,11 +113,11 @@ pub async fn post(
         return Err(ApiError::conflict("The agent is busy in Chat"));
     }
 
-    // Agents given `GIT_GUIDE` start changes themselves; other agents need one first.
+    // Agents given `agent_guide()` start changes themselves; other agents need one first.
     let mut guided = providers::gets_git_guide(&provider.id);
     if provider.id == "cursor" {
         if let Err(e) = providers::write_cursor_rule(&project.dir) {
-            eprintln!("workbench: cannot write the Cursor git guide rule: {e}");
+            eprintln!("workbench: cannot write the Cursor agent guide rule: {e}");
             guided = false;
         }
     }

@@ -17,7 +17,7 @@
 //! opencode v2.0.25)
 //!
 //! - Cursor CLI: `--force` and `--trust` when auto-approve is on. No turn-end hook. No
-//!   system-prompt flag: the git guide goes in a git-excluded `.cursor/rules/*.mdc` rule
+//!   system-prompt flag: the agent guide goes in a git-excluded `.cursor/rules/*.mdc` rule
 //!   (rule loading not exercised at runtime here).
 //! - Claude: `--settings <json>` adds a `Stop` command hook; `--dangerously-skip-permissions`
 //!   auto-approves.
@@ -25,7 +25,7 @@
 //!   Verified by one `codex exec -c 'notify=["n.sh","hook","turn-end"]' "say ok"`: the script ran
 //!   and received `hook turn-end <json payload>` (codex appends the payload as the last arg).
 //!   Hook trust applies to hooks.json hooks, not `notify`. Open question: hooks.json trust
-//!   was not exercised, so the bypass flag is not appended. The git guide goes in
+//!   was not exercised, so the bypass flag is not appended. The agent guide goes in
 //!   `-c developer_instructions=...` (verified 2026-10-13: `codex exec` obeyed it).
 //! - OpenCode: the installed binary reads `OPENCODE_CONFIG_DIR` (replaces the global config
 //!   dir; this daemon never reads or writes `~/.config/opencode`). Each project gets its own
@@ -207,14 +207,45 @@ A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its huma
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
 - The app also commits your work automatically at the end of each turn; that is expected."#;
 
-/// Agents that receive [`GIT_GUIDE`] and so may start on `main`: they branch before editing.
+/// The Workbench layer of [`agent_guide`]: who the user is, the words to use with them,
+/// what only they may do, and how to check work with `workbench ctl`. Agent terminals have
+/// the binary at `$WORKBENCH_HOOK_EXE`, not on `PATH`.
+pub const WORKBENCH_GUIDE: &str = r#"# Working in Workbench
+
+The person you are helping runs a website through Workbench, a no-code app. They are usually not technical.
+
+## Words to use
+For how their site gets updated, use these words: **change** (a set of edits made together), **greenlight** (a site owner's OK on a change), **ready to publish**, **publish**, and **live** (what visitors see). Never say branch, commit, pull request, or merge to them; describe what happened in plain words.
+
+## What only they do
+Publishing, sharing a change, sending it for a greenlight, giving a greenlight, and merging are clicks the person makes in the app. Never publish, share, or greenlight for them, and never do the git equivalent (opening, approving, or merging a pull request, or pushing to main). When a change is done, tell them it is ready to look at in the preview.
+
+## Check your work
+`workbench ctl` shows app state you cannot see from files. Run it as `"$WORKBENCH_HOOK_EXE" ctl <command>`; it prints JSON.
+- `"$WORKBENCH_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`. The preview reloads edits by itself; do not run a build.
+- `"$WORKBENCH_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
+- `"$WORKBENCH_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`) and what is not saved yet (`changedPaths`).
+If `$WORKBENCH_HOOK_EXE` is not set, or the command says to run it inside a Workbench agent session, skip these checks.
+
+## Edits after a greenlight
+If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
+
+## When unsure
+If what they want is unclear, ask one short question in plain words before editing."#;
+
+/// Everything a guided agent is told: [`WORKBENCH_GUIDE`] then [`GIT_GUIDE`].
+pub fn agent_guide() -> String {
+    format!("{WORKBENCH_GUIDE}\n\n{GIT_GUIDE}")
+}
+
+/// Agents that receive [`agent_guide`] and so may start on `main`: they branch before editing.
 /// Claude via `--append-system-prompt`, Codex via `developer_instructions`, Cursor via the
 /// project rule [`write_cursor_rule`] writes.
 pub fn gets_git_guide(provider_id: &str) -> bool {
     matches!(provider_id, "claude" | "codex" | "cursor")
 }
 
-/// Where [`write_cursor_rule`] puts [`GIT_GUIDE`], relative to the project.
+/// Where [`write_cursor_rule`] puts [`agent_guide`], relative to the project.
 pub const CURSOR_RULE_PATH: &str = ".cursor/rules/workbench-changes.mdc";
 
 /// Cursor CLI has no system-prompt flag but loads `.cursor/rules/*.mdc`: write the guide as
@@ -227,8 +258,9 @@ pub fn write_cursor_rule(project_dir: &Path) -> std::io::Result<()> {
     std::fs::write(
         &rule,
         format!(
-            "---\ndescription: How to start changes and sync in this app\n\
-             alwaysApply: true\n---\n{GIT_GUIDE}\n"
+            "---\ndescription: How to work in this app: changes, checks, and syncing\n\
+             alwaysApply: true\n---\n{}\n",
+            agent_guide()
         ),
     )?;
     let git = project_dir.join(".git");
@@ -289,7 +321,7 @@ pub fn launch_spec(
             argv.push("--settings".into());
             argv.push(settings.to_string());
             argv.push("--append-system-prompt".into());
-            argv.push(GIT_GUIDE.into());
+            argv.push(agent_guide());
             match session {
                 AgentSession::Fresh => {}
                 AgentSession::Assign(id) => argv.extend(["--session-id".into(), id.clone()]),
@@ -308,7 +340,7 @@ pub fn launch_spec(
             argv.push("-c".into());
             argv.push(format!(r#"notify=[{exe_json},"hook","turn-end"]"#));
             // A JSON string is a valid TOML basic string, which is what `-c` parses.
-            let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
+            let guide = serde_json::to_string(&agent_guide()).unwrap_or_default();
             argv.push("-c".into());
             argv.push(format!("developer_instructions={guide}"));
             if auto_approve {
@@ -381,10 +413,10 @@ pub fn headless_spec(
                     "--verbose",
                     "--dangerously-skip-permissions",
                     "--append-system-prompt",
-                    GIT_GUIDE,
                 ]
                 .map(String::from),
             );
+            argv.push(agent_guide());
             match session {
                 AgentSession::Fresh => {}
                 AgentSession::Assign(id) => argv.extend(["--session-id".into(), id.clone()]),
@@ -392,7 +424,7 @@ pub fn headless_spec(
             }
         }
         "codex" => {
-            let guide = serde_json::to_string(GIT_GUIDE).unwrap_or_default();
+            let guide = serde_json::to_string(&agent_guide()).unwrap_or_default();
             argv.extend(
                 [
                     "exec",
@@ -443,6 +475,33 @@ fn write_opencode_config(dir: &Path, exe: &str, auto_approve: bool) -> std::io::
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_guide_adds_the_workbench_layer_to_the_git_guide() {
+        let g = agent_guide();
+        assert!(g.starts_with(WORKBENCH_GUIDE));
+        assert!(g.ends_with(GIT_GUIDE));
+        assert!(g.contains("workbench ctl"));
+        for cmd in ["preview-status", "change-status", "restart-preview"] {
+            assert!(
+                g.contains(&format!("\"$WORKBENCH_HOOK_EXE\" ctl {cmd}")),
+                "{cmd}"
+            );
+        }
+        for word in [
+            "change",
+            "greenlight",
+            "ready to publish",
+            "publish",
+            "live",
+        ] {
+            assert!(g.contains(&format!("**{word}**")), "{word}");
+        }
+        assert!(g.contains("Never publish, share, or greenlight for them"));
+        assert!(g.contains("Never say branch, commit, pull request, or merge"));
+        assert!(g.contains("the greenlight no longer covers it"));
+        assert!(g.contains("crashed"));
+    }
+
     use super::*;
 
     #[test]
@@ -564,7 +623,10 @@ mod tests {
     fn claude_gets_stop_hook_settings() {
         let s = spec("claude", "/x/it's", false, Path::new("/nope"));
         assert_eq!(s.argv.len(), 5);
-        assert_eq!(s.argv[3..], ["--append-system-prompt", GIT_GUIDE]);
+        assert_eq!(
+            s.argv[3..],
+            ["--append-system-prompt".to_string(), agent_guide()]
+        );
         assert_eq!(
             (s.argv[0].as_str(), s.argv[1].as_str()),
             ("claude", "--settings")
@@ -598,7 +660,10 @@ mod tests {
         let s = spec("codex", "/x", false, Path::new("/nope"));
         assert_eq!(s.argv[3], "-c");
         let value = s.argv[4].strip_prefix("developer_instructions=").unwrap();
-        assert_eq!(serde_json::from_str::<String>(value).unwrap(), GIT_GUIDE);
+        assert_eq!(
+            serde_json::from_str::<String>(value).unwrap(),
+            agent_guide()
+        );
     }
 
     #[test]
@@ -621,7 +686,7 @@ mod tests {
         let rule = std::fs::read_to_string(dir.path().join(CURSOR_RULE_PATH)).unwrap();
         assert!(rule.starts_with("---\n"), "{rule}");
         assert!(rule.contains("alwaysApply: true"), "{rule}");
-        assert!(rule.contains(GIT_GUIDE));
+        assert!(rule.contains(&agent_guide()));
         let exclude = std::fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
         assert_eq!(exclude, format!("# keep\n*.log\n/{CURSOR_RULE_PATH}\n"));
     }
@@ -788,7 +853,7 @@ mod tests {
 
     #[test]
     fn headless_codex_resume() {
-        let guide = serde_json::to_string(GIT_GUIDE).unwrap();
+        let guide = serde_json::to_string(&agent_guide()).unwrap();
         assert_eq!(
             headless_session("codex", AgentSession::Resume("t1".into())),
             [
@@ -823,7 +888,7 @@ mod tests {
                 "--verbose",
                 "--dangerously-skip-permissions",
                 "--append-system-prompt",
-                GIT_GUIDE
+                &agent_guide()
             ]
         );
         assert!(spec.env.is_empty());
@@ -832,7 +897,7 @@ mod tests {
     #[test]
     fn headless_codex() {
         let spec = headless("codex", Path::new("/nope"));
-        let guide = serde_json::to_string(GIT_GUIDE).unwrap();
+        let guide = serde_json::to_string(&agent_guide()).unwrap();
         assert_eq!(
             spec.argv,
             [
