@@ -40,11 +40,15 @@ pub fn is_chat_provider(provider_id: &str) -> bool {
     matches!(provider_id, "cursor" | "claude" | "codex")
 }
 
-/// Classify a failed run: exit 127 is a missing binary, auth wording is an expired login.
+/// Classify a failed run: a missing binary, an expired login, or anything else.
 pub fn agent_error(provider_id: &str, exit: Option<i32>, text: &str) -> AgentError {
     let name = display_name(provider_id);
     let lower = text.to_lowercase();
-    let (code, message) = if exit == Some(127) {
+    // Most shells exit 127 for a missing program; bash 3.2 (macOS /bin/bash) `exec` exits 126
+    // with "No such file or directory", where 126 otherwise means "not executable".
+    let missing =
+        exit == Some(127) || (exit == Some(126) && lower.contains("no such file or directory"));
+    let (code, message) = if missing {
         (
             AgentErrorCode::NotInstalled,
             format!("{name} is not installed or not on your PATH."),
@@ -128,6 +132,28 @@ mod tests {
         let err = agent_error("codex", Some(127), "");
         assert_eq!(err.code, AgentErrorCode::NotInstalled);
         assert_eq!(err.message, "Codex is not installed or not on your PATH.");
+    }
+
+    #[test]
+    fn bash_3_exec_of_a_missing_program_is_not_installed() {
+        let stderr = "/bin/bash: /nonexistent/cursor-agent: No such file or directory\n\
+                      /bin/bash: line 0: exec: /nonexistent/cursor-agent: cannot execute: No such file or directory";
+        let err = agent_error("cursor", Some(126), stderr);
+        assert_eq!(err.code, AgentErrorCode::NotInstalled);
+        assert_eq!(
+            err.message,
+            "Cursor CLI is not installed or not on your PATH."
+        );
+    }
+
+    #[test]
+    fn exit_126_for_another_reason_is_a_failure() {
+        let err = agent_error(
+            "cursor",
+            Some(126),
+            "/usr/local/bin/cursor-agent: Permission denied",
+        );
+        assert_eq!(err.code, AgentErrorCode::Failed);
     }
 
     #[test]
