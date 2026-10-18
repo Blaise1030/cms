@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod changes;
+pub mod chat;
 pub mod config;
 pub mod conflict_preview;
 pub mod content;
@@ -36,7 +37,17 @@ pub fn version() -> &'static str {
 
 /// Serve the HTTP API on an already-bound listener until an interrupt or termination signal.
 pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
+    serve_until(listener, state, shutdown_signal()).await
+}
+
+/// Serve the HTTP API on an already-bound listener until `signal` resolves, then shut down.
+pub async fn serve_until(
+    listener: tokio::net::TcpListener,
+    state: AppState,
+    signal: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
     let terminals = state.terminals.clone();
+    let chats = state.chats.clone();
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
     let previews = state.conflict_previews.clone();
@@ -58,10 +69,20 @@ pub async fn serve_on(listener: tokio::net::TcpListener, state: AppState) -> std
         }
     });
     let app = http::router(state);
+    // Graceful shutdown waits for open responses, and a chat turn's SSE body only ends with
+    // the turn: end the turns first.
+    let signal = {
+        let chats = chats.clone();
+        async move {
+            signal.await;
+            chats.shutdown().await;
+        }
+    };
     let served = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(signal)
         .await;
     terminals.shutdown().await;
+    chats.shutdown().await;
     devservers.shutdown().await;
     watchers.shutdown();
     cleanup.abort();

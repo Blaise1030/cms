@@ -4,7 +4,7 @@ import { useLocalStorage } from "@vueuse/core";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import { errorMessage } from "@workbench/utils";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import type { PickedElement } from "./elementPicker";
 import { crashPrompt, pageErrorPrompt, type PageError } from "./pageErrors";
 

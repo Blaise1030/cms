@@ -39,12 +39,19 @@ async function openBlog(page: Page) {
 const entryBinding = (page: Page, file: string, branch: string) =>
   page.getByTestId("content-panel").getByTitle(`${file} · ${branch}`);
 
-/** Go to `route` in the preview frame through the address bar. */
+/**
+ * Go to `route` in the preview frame through the address bar. A dev-server reload of the page
+ * still showing (after a save or checkout) can cancel the navigation, so retry until the address
+ * bar, which shows the frame's own path once submitted, reports the route.
+ */
 async function previewAt(page: Page, route: string) {
   await page.getByTestId("workspace-tab-preview").click();
   const address = page.getByTestId("preview-address");
-  await address.fill(route);
-  await address.press("Enter");
+  await expect(async () => {
+    await address.fill(route);
+    await address.press("Enter");
+    await expect(address).toHaveValue(route, { timeout: 10_000 });
+  }).toPass({ timeout: 180_000 });
 }
 
 /** Create a change from the open New change dialog. */

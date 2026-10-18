@@ -43,7 +43,7 @@ vi.mock("@/modules/changes/NewChangeDialog.vue", async () => {
 
 import DesignPanel from "./DesignPanel.vue";
 import { useDesignStore } from "./store";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 
 const APPLY_PROMPT = "Update the @theme block in src/styles/global.css (fonts, colours, radius, spacing) to match DESIGN.md, and follow its guidance in the components.";
 const doc = (over: Partial<DesignDoc> = {}): DesignDoc => ({

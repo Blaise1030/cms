@@ -263,15 +263,20 @@ export interface TerminalSessionEvent {
   sessionId: string;
 }
 
-/** A past or live agent session, from `GET /api/terminal/{project}/sessions`. */
-export interface TerminalSession {
+/** A chat conversation, from `GET /api/chat/{project}`. */
+export interface ChatSummary {
   id: string;
   provider: string;
   title?: string | null;
   /** Unix milliseconds. */
-  createdAt: number;
   updatedAt: number;
-  resumable: boolean;
+}
+
+/** A chat turn ended; the chat list (titles, order, running) may have changed. */
+export interface ChatTurnEvent {
+  type: "chat.turn";
+  projectId: string;
+  chatId: string;
 }
 
 export interface CheckpointBlockedEvent {
@@ -321,6 +326,7 @@ export type DaemonEvent =
   | ChangesAutoResolveEvent
   | TerminalTurnEvent
   | TerminalBusyEvent
+  | ChatTurnEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];

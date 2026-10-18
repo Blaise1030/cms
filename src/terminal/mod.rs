@@ -54,7 +54,7 @@ const READ_CHUNK: usize = 8 * 1024;
 const SCROLLBACK_BYTES: usize = 512 * 1024;
 const BROADCAST_CAPACITY: usize = 1024;
 /// Grace between `SIGTERM` and `SIGKILL`, and the wait for the reap after `SIGKILL`.
-const KILL_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const KILL_GRACE: Duration = Duration::from_secs(2);
 /// How long the waiter lets the reader drain the child's last output before `Exit`.
 const DRAIN_WAIT: Duration = Duration::from_millis(200);
 
@@ -522,7 +522,7 @@ fn group_target(pgid: Option<libc::pid_t>) -> Option<libc::pid_t> {
 }
 
 /// `killpg` the group recorded at spawn. Does not `kill` a pid.
-fn signal_group(pgid: Option<libc::pid_t>, signal: libc::c_int) {
+pub(crate) fn signal_group(pgid: Option<libc::pid_t>, signal: libc::c_int) {
     let Some(pgid) = group_target(pgid) else {
         return;
     };

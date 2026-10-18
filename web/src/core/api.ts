@@ -1,6 +1,8 @@
+import type { UIMessage } from "ai";
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type ChatSummary,
   type ContentCollection,
   type ContentEntrySummary,
   type ContentEntry,
@@ -34,7 +36,6 @@ import {
   type Health,
   type Project,
   type SetupStatus,
-  type TerminalSession,
   type Tree,
 } from "./types";
 
@@ -140,10 +141,14 @@ export function createApi(
 
   type SendOpts = { query?: Query; body?: unknown; form?: FormData; blob?: Blob };
 
+  function authHeaders(): Record<string, string> {
+    const { token } = cfg();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   async function send(method: string, path: string, opts: SendOpts = {}) {
-    const { origin, token } = cfg();
-    const headers: Record<string, string> = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const { origin } = cfg();
+    const headers = authHeaders();
     const init: RequestInit = { method, headers };
     // The browser sets the multipart Content-Type with its boundary.
     if (opts.form) init.body = opts.form;
@@ -246,11 +251,6 @@ export function createApi(
           "/api/terminal/providers",
         )
       ).providers,
-    /** Start a new session, or `resume` a past one (its provider wins over `provider`). */
-    startTerminal: (project: string, provider: string, resume?: string) =>
-      json<{ running: true; sessionId?: string }>("POST", "/api/terminal", {
-        body: resume ? { project, provider, resume } : { project, provider },
-      }),
     stopTerminal: (project: string) =>
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
@@ -258,16 +258,23 @@ export function createApi(
         "GET",
         `/api/terminal/${enc(project)}`,
       ),
-    terminalSessions: async (project: string): Promise<TerminalSession[]> =>
-      (
-        await json<{ sessions: TerminalSession[] }>(
-          "GET",
-          `/api/terminal/${enc(project)}/sessions`,
-        )
-      ).sessions,
     /** Save an image for the agent; resolves to an absolute path on the daemon's machine. */
     attachTerminalImage: async (project: string, image: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/terminal/${enc(project)}/attachments`, { blob: image })).path,
+    listChats: (project: string) =>
+      json<{ chats: ChatSummary[]; running: string | null }>("GET", `/api/chat/${enc(project)}`),
+    chatHistory: (project: string, chatId: string) =>
+      json<{ messages: UIMessage[]; provider: string; running: boolean }>(
+        "GET",
+        `/api/chat/${enc(project)}/${enc(chatId)}`,
+      ),
+    /** Stop the project's running chat turn, if any. */
+    stopChat: (project: string) =>
+      json<{ stopped: boolean }>("DELETE", `/api/chat/${enc(project)}/turn`),
+    /** The chat stream endpoint; the AI SDK transport fetches it (and `/{chatId}/stream`) itself. */
+    chatUrl: (project: string) => `${cfg().origin}/api/chat/${enc(project)}`,
+    /** Headers for requests made outside this client (the chat transport). */
+    authHeaders,
     createChange: (project: string, title: string) =>
       json<Change>("POST", "/api/changes", { body: { project, title } }),
     listChanges: async (project: string): Promise<Change[]> =>

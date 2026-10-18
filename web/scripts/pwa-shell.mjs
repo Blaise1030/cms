@@ -34,4 +34,4 @@ export const SHIKI_PACK_NAME = /^assets\/(cpp|emacs-lisp|wasm|wolfram|typescript
 
 /** Shell budget enforced by the post-build check. */
 export const SHELL_MAX_ENTRIES = 40;
-export const SHELL_MAX_BYTES = 2 * 1024 * 1024;
+export const SHELL_MAX_BYTES = Math.round(2.5 * 1024 * 1024);

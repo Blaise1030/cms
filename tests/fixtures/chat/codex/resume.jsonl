@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a149cd-c3e5-7db2-a75c-86b4ed8e7928"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I added the line “Hello from the agent.”"}}
+{"type":"turn.completed","usage":{"input_tokens":74453,"cached_input_tokens":67072,"cache_write_input_tokens":0,"output_tokens":226,"reasoning_output_tokens":12}}

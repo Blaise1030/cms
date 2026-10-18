@@ -7,6 +7,8 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 use workbench::config::Config;
+use workbench::http::checkpoints::{finish_turn, TurnOutcome};
+use workbench::projects::Source;
 use workbench::state::AppState;
 use workbench::{git, http};
 
@@ -608,4 +610,87 @@ async fn oversized_files_are_rejected_with_413() {
         assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE, "{u}");
         assert_eq!(v["error"]["code"], "BADREQ");
     }
+}
+
+fn seed_bare(tmp: &Path) -> std::path::PathBuf {
+    let src = tmp.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git_cli(&src, &["init", "-b", "main"]);
+    git_cli(&src, &["config", "user.name", "Ada"]);
+    git_cli(&src, &["config", "user.email", "ada@example.com"]);
+    std::fs::write(src.join("package.json"), "{}\n").unwrap();
+    git_cli(&src, &["add", "-A"]);
+    git_cli(&src, &["commit", "-m", "init"]);
+    let bare = tmp.join("remote.git");
+    git_cli(
+        tmp,
+        &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
+    );
+    bare
+}
+
+#[tokio::test]
+async fn finish_turn_commits_and_lists_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = state(tmp.path());
+    let info = st.projects.create("Site").await.unwrap();
+    let dir = tmp.path().join(&info.id);
+    workbench::changes::create(&dir, "New post: Launch week")
+        .await
+        .unwrap();
+    std::fs::write(dir.join("b.md"), "b\n").unwrap();
+    std::fs::write(dir.join("a.md"), "a\n").unwrap();
+
+    match finish_turn(&st, &info.id, Some("Add posts")).await.unwrap() {
+        TurnOutcome::Committed { checkpoint, files } => {
+            assert_eq!(files, ["a.md", "b.md"]);
+            assert_eq!(checkpoint.summary, "Add posts");
+            assert_eq!(checkpoint.sha, git_cli(&dir, &["rev-parse", "HEAD"]));
+        }
+        other => panic!("expected Committed, got {other:?}"),
+    }
+    assert!(matches!(
+        finish_turn(&st, &info.id, Some("Again")).await.unwrap(),
+        TurnOutcome::Unchanged
+    ));
+}
+
+#[tokio::test]
+async fn finish_turn_blocked_on_main_with_remote() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = state(tmp.path());
+    let bare = seed_bare(&tmp.path().join("gh"));
+    let gh = st
+        .projects
+        .create_from(
+            "gh-site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", bare.display()),
+                env: vec![],
+            },
+            &git::Identity::workbench(),
+        )
+        .await
+        .unwrap();
+    let dir = tmp.path().join(&gh.id);
+
+    // Talk-only turn on main: nothing to block.
+    assert!(matches!(
+        finish_turn(&st, &gh.id, None).await.unwrap(),
+        TurnOutcome::Unchanged
+    ));
+
+    std::fs::write(dir.join("package.json"), "{\"edited\": true}\n").unwrap();
+    let mut ev = st.events.subscribe();
+    let base = git_cli(&dir, &["rev-parse", "HEAD"]);
+    let outcome = finish_turn(&st, &gh.id, Some("Edit")).await.unwrap();
+    assert!(matches!(outcome, TurnOutcome::Blocked(_)), "{outcome:?}");
+    assert_eq!(git_cli(&dir, &["rev-parse", "HEAD"]), base);
+    let mut blocked = false;
+    while let Ok(text) = ev.try_recv() {
+        let v: Value = serde_json::from_str(&text).unwrap();
+        blocked |= v["type"] == "checkpoint.blocked" && v["projectId"] == gh.id;
+    }
+    assert!(blocked);
 }

@@ -11,7 +11,7 @@ vi.mock("vue-sonner", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning
 
 import GetLatestButton from "./GetLatestButton.vue";
 import { useChangesStore } from "./store";
-import { useAgentOutboxStore } from "@/modules/terminal/outbox";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 
 function mountButton() {
   const updateChanges = vi.fn();
