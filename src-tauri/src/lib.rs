@@ -2,6 +2,7 @@ mod busy;
 mod commands;
 mod dev;
 mod drag;
+mod fullscreen;
 pub mod links;
 pub mod logs;
 pub mod supervisor;
@@ -10,7 +11,7 @@ mod update_e2e;
 mod updater;
 
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, RunEvent, WebviewWindowBuilder};
+use tauri::{Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 
 use supervisor::Supervisor;
 use updater::Updates;
@@ -60,10 +61,17 @@ pub fn run() {
                 .on_new_window(move |url, _| links::on_new_window(&handle, url))
                 .on_page_load(|window, payload| {
                     if payload.event() == PageLoadEvent::Finished {
+                        fullscreen::sync(&window);
                         updater::page_loaded(window.app_handle());
                     }
                 })
                 .build()?;
+            let resized = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::Resized(_) = event {
+                    fullscreen::sync(&resized);
+                }
+            });
             match window.url() {
                 Ok(url) => logs::shell(&format!("main window showing {url}")),
                 Err(e) => logs::shell(&format!("main window URL unavailable: {e}")),
