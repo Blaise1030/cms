@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Stepper,
   StepperIndicator,
@@ -95,7 +96,7 @@ async function restore() {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col" data-testid="checkpoints-panel">
+  <div class="relative flex h-full min-h-0 flex-col" data-testid="checkpoints-panel">
     <template v-if="selected">
       <div class="flex min-h-10 shrink-0 items-center gap-3 px-2 py-1.5">
         <TooltipProvider>
@@ -194,9 +195,13 @@ async function restore() {
     </template>
 
     <template v-else>
+      <div class="pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
       <ScrollArea class="min-h-0 flex-1">
         <div class="p-3">
-          <p v-if="store.loading && list.length === 0" class="text-muted-foreground text-sm">Loading…</p>
+          <p v-if="store.loading && list.length === 0" class="text-muted-foreground flex items-center gap-2 text-sm">
+            <Spinner class="size-4" />
+            Loading checkpoints…
+          </p>
           <p v-else-if="store.error" class="text-destructive text-sm" role="alert">{{ store.error }}</p>
           <p v-else-if="list.length === 0" class="text-muted-foreground text-sm">
             No checkpoints yet. One is saved after each agent turn that changes files.
@@ -208,7 +213,7 @@ async function restore() {
             orientation="vertical"
             :model-value="1"
             :linear="false"
-            class="flex w-full flex-col gap-0"
+            class="flex w-full flex-col gap-[8px]"
             data-testid="timeline"
           >
             <template v-for="(cp, i) in list" :key="cp.sha">
@@ -225,10 +230,11 @@ async function restore() {
               class="relative w-full items-start gap-2"
             >
               <!-- Nodes sit 13px down (the item's border and top padding) to line up with the title;
-                   the line runs from 4px below this node to 4px above the next row's node. -->
+                   the line runs from 4px below this node, across the 8px row gap, to 4px above the
+                   next row's node. -->
               <StepperSeparator
                 v-if="i < list.length - 1 && !startsDay(i + 1)"
-                class="bg-border absolute top-[41px] -bottom-[9px] left-[11.5px] w-px"
+                class="bg-border absolute top-[41px] -bottom-[17px] left-[11.5px] w-px"
               />
               <StepperIndicator
                 class="bg-muted text-muted-foreground mt-[13px] size-6 shrink-0 group-data-[state=active]:bg-primary"

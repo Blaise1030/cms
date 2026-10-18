@@ -29,8 +29,13 @@ export function isShellEntry(url, shell) {
   return !(url.startsWith("assets/") && url.endsWith(".js")) || shell.has(url);
 }
 
-/** Known lazy Shiki pack chunk names: a belt-and-braces guard in the post-build check. */
-export const SHIKI_PACK_NAME = /^assets\/(cpp|emacs-lisp|wasm|wolfram|typescript|javascript|tsx|jsx|vue-vine|angular-ts|objective-cpp|typst|mdx|dist)-/;
+/**
+ * Signatures of a Shiki pack — grammar/theme data or the oniguruma wasm — whatever chunk name
+ * the bundler gave it: the grammar/theme JSON carries a `"displayName"`, and the wasm pack starts
+ * with the base64 WebAssembly header. Content, not the chunk name, because names collide:
+ * `@vueuse/core/dist` and CodeMirror also emit `dist-*`/`atob(` code that is not Shiki.
+ */
+export const SHIKI_PACK_MARKER = /"displayName":"|atob\(`AGFzbQ/;
 
 /** Shell budget enforced by the post-build check. */
 export const SHELL_MAX_ENTRIES = 40;

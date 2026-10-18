@@ -12,3 +12,5 @@ templates/astro-marketing/.astro/
 .claude/worktrees/
 .claude/settings.local.json
 .pnpm-store/
+node-compile-cache/
+wb-gh-*-*/

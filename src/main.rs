@@ -59,6 +59,11 @@ enum Command {
         #[command(subcommand)]
         event: HookEvent,
     },
+    /// App state for the agent in a Workbench terminal (prints JSON).
+    Ctl {
+        #[command(subcommand)]
+        command: workbench::ctl::CtlCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -93,13 +98,13 @@ async fn main() -> ExitCode {
         ui_url,
     } = command
     else {
-        let Command::Hook {
-            event: HookEvent::TurnEnd { payload },
-        } = command
-        else {
-            unreachable!()
+        return match command {
+            Command::Hook {
+                event: HookEvent::TurnEnd { payload },
+            } => workbench::hook::turn_end(payload).await,
+            Command::Ctl { command } => workbench::ctl::run(command).await,
+            Command::Serve { .. } => unreachable!(),
         };
-        return workbench::hook::turn_end(payload).await;
     };
     let github_defaults = workbench::config::GithubConfig::default();
     let api_url = github_api_url.unwrap_or_else(|| github_defaults.api_url.clone());

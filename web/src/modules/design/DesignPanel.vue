@@ -44,7 +44,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
         <h2 class="truncate px-1 text-sm font-medium">DESIGN.md</h2>
         <p class="truncate text-xs text-muted-foreground">{{ store.doc.branch }}</p>
-        <div class="ml-auto flex shrink-0 items-center gap-1">
+        <div class="ml-auto flex shrink-0 items-center gap-2">
           <Button type="button" variant="ghost" size="sm" data-testid="design-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
           <Button type="button" variant="outline" size="sm" data-testid="design-save" :disabled="!store.dirty || store.saving" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
           <Button type="button" size="sm" data-testid="design-apply" :disabled="store.dirty || !store.doc.exists" :title="store.dirty ? 'Save your changes first' : undefined" @click="askAgentToApplyDesign()">Apply to site</Button>

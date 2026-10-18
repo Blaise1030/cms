@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use workbench::config::Config;
 use workbench::devserver::{DevServerOptions, MAX_RESTARTS};
 use workbench::http;
+use workbench::http::ctl::preview_status_value;
 use workbench::state::AppState;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -301,6 +302,25 @@ async fn startup_crashes_only_publish_the_terminal_state_with_the_output_tail() 
     // The project never left `starting` while retrying, so nothing else was published.
     assert_eq!(events.seen.len(), 1, "{:?}", events.seen);
     assert!(crashed["message"].as_str().unwrap().contains("boom-output"));
+}
+
+#[tokio::test]
+async fn ctl_preview_status_carries_the_crash_output_until_a_restart() {
+    let env = env_with(script(FLAKY));
+    let mut events = env.events();
+    env.create("Site").await;
+    events.status("site", "crashed").await;
+    let v = preview_status_value(&env.state, "site").await.unwrap();
+    assert_eq!(v["devserver"], "crashed", "{v}");
+    assert!(v["message"].as_str().unwrap().contains("not yet"), "{v}");
+
+    std::fs::write(env.file("site", "ok"), "").unwrap();
+    env.state.devservers.start("site").await.unwrap();
+    events.status("site", "ready").await;
+    let v = preview_status_value(&env.state, "site").await.unwrap();
+    assert_eq!(v["devserver"], "ready", "{v}");
+    assert!(v.get("message").is_none(), "{v}");
+    env.state.devservers.shutdown().await;
 }
 
 /// Make every registry write fail: `projects.json` becomes a directory, so the atomic

@@ -33,6 +33,18 @@ const DOT: Record<ChecksState, string> = {
   failing: "bg-red-500",
 };
 
+/**
+ * Route a menu link out to the browser ourselves. Selecting an item closes the menu, which
+ * unmounts the anchor before WebKit runs its `target="_blank"` navigation and drops the click
+ * (the desktop shell's new-window handler opens whatever `window.open` asks for).
+ */
+function openExternal(e: MouseEvent) {
+  const href = (e.currentTarget as HTMLAnchorElement | null)?.href ?? "";
+  if (!/^https?:\/\//i.test(href)) return;
+  e.preventDefault();
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
 async function onReady() {
   const id = store.projectId;
   const branch = store.active?.branch;
@@ -75,12 +87,12 @@ async function onReady() {
         <DropdownMenuSeparator />
       </template>
       <DropdownMenuItem as-child>
-        <a :href="status?.url ?? store.prUrl ?? undefined" target="_blank" rel="noopener noreferrer" data-testid="pr-link">
+        <a :href="status?.url ?? store.prUrl ?? undefined" target="_blank" rel="noopener noreferrer" data-testid="pr-link" @click="openExternal">
           <GitPullRequest /> Open on GitHub <ExternalLink class="ml-auto opacity-60" />
         </a>
       </DropdownMenuItem>
       <DropdownMenuItem v-if="previewHref" as-child>
-        <a :href="previewHref" target="_blank" rel="noopener noreferrer" data-testid="preview-deploy-link">
+        <a :href="previewHref" target="_blank" rel="noopener noreferrer" data-testid="preview-deploy-link" @click="openExternal">
           <Globe /> Open deployed preview <ExternalLink class="ml-auto opacity-60" />
         </a>
       </DropdownMenuItem>

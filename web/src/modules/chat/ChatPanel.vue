@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { Chat } from "@ai-sdk/vue";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { CircleAlert, LoaderCircle, MessageSquare, Plus } from "@lucide/vue";
+import { CircleAlert, MessageSquare, Plus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { errorMessage } from "@workbench/utils";
 import { mapErrorResponse } from "@/core/api";
@@ -18,17 +18,19 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
+import { Spinner } from "@/components/ui/spinner";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
-import ChatComposer from "./ChatComposer.vue";
+import ChatComposer, { type ChatAttachment } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
+import { attachmentMessage } from "./attachments";
 import { expandReferences, referenceTag } from "./references";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
 
 /** Terminal providers the daemon can also drive headlessly. */
-const CHAT_PROVIDERS = ["cursor", "claude", "codex"];
+const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
 const SUGGESTIONS = [
   "Write a new blog post about our latest update",
   "Make the homepage headline punchier",
@@ -48,12 +50,32 @@ const terminalRunning = ref(false);
 const terminalChecked = ref(false);
 /** A `send` is waiting for the history or for its turn to end. */
 const sending = ref(false);
+/** The saved transcript is being fetched; the message list is empty until it lands. */
+const loadingChat = ref(false);
 /** The chat's own provider, or the user's pick; null falls back to the saved pick. */
 const chosen = ref<string | null>(null);
 /** The latest `open()`; sends wait for it so none land while the history loads. */
 let opened: Promise<void> = Promise.resolve();
 /** What each `[Element #n]` in the input stands for, until the input is sent. */
 const references = new Map<string, string>();
+/** Files uploaded for the next message; the agent reads them from their saved paths. */
+const attachments = ref<ChatAttachment[]>([]);
+const attaching = ref(false);
+
+async function attach(files: File[]) {
+  if (!files.length) return;
+  attaching.value = true;
+  try {
+    for (const file of files) {
+      const path = await daemon.api.attachTerminalImage(props.projectId, file);
+      attachments.value.push({ name: file.name, path });
+    }
+  } catch (e) {
+    toast.error(`Couldn't attach file: ${errorMessage(e)}`);
+  } finally {
+    attaching.value = false;
+  }
+}
 
 const providers = computed(() => agentProviders.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
 const provider = computed({
@@ -65,6 +87,18 @@ const provider = computed({
     null,
   set: (id) => (chosen.value = id),
 });
+const models = computed(() => (provider.value ? (agentProviders.models[provider.value] ?? []) : []));
+/** The saved pick while the agent still offers it; `null` is the agent's default. */
+const model = computed({
+  get: () => {
+    const pick = provider.value ? agentProviders.modelPick(provider.value) : null;
+    return models.value.some((m) => m.id === pick) ? pick : null;
+  },
+  set: (id) => {
+    if (provider.value) agentProviders.setModel(provider.value, id);
+  },
+});
+watch(providers, (ids) => ids.forEach((id) => void agentProviders.loadModels(id)), { immediate: true });
 const messages = computed(() => chat.value?.messages ?? []);
 const streaming = computed(() => chat.value?.status === "submitted" || chat.value?.status === "streaming");
 /** A new turn would be refused (or race the current one): outbox requests wait. */
@@ -87,7 +121,7 @@ function createChat(id: string, initial: UIMessage[]) {
       // The daemon keeps the transcript and only reads the new user message; the whole
       // conversation would eventually exceed its request body limit.
       prepareSendMessagesRequest: ({ id, messages }) => ({
-        body: { id, messages: messages.slice(-1), provider: provider.value },
+        body: { id, messages: messages.slice(-1), provider: provider.value, ...(model.value && { model: model.value }) },
       }),
     }),
   });
@@ -99,6 +133,7 @@ async function open(id: string) {
   void chat.value?.stop();
   chat.value = null;
   chosen.value = null;
+  loadingChat.value = true;
   let history: Awaited<ReturnType<typeof daemon.api.chatHistory>> | null = null;
   try {
     history = await daemon.api.chatHistory(props.projectId, id);
@@ -106,6 +141,7 @@ async function open(id: string) {
     // Not saved yet (a chat with no turns), or a transient failure: start empty.
   }
   if (seq !== opening) return;
+  loadingChat.value = false;
   if (history?.provider) chosen.value = history.provider;
   chat.value = createChat(id, history?.messages ?? []);
   if (history?.running) void chat.value.resumeStream();
@@ -136,6 +172,14 @@ watch(
 function startNew() {
   historyOpen.value = false;
   store.newChat(props.projectId);
+}
+
+async function removeChat(id: string) {
+  try {
+    await store.remove(props.projectId, id);
+  } catch (e) {
+    toast.error(`Couldn't delete the chat: ${errorMessage(e)}`);
+  }
 }
 
 async function refreshTerminal() {
@@ -195,9 +239,11 @@ async function send(text: string) {
 
 function submit(text: string) {
   input.value = "";
-  const full = expandReferences(text, references);
+  const expanded = expandReferences(text, references);
   references.clear();
-  void send(full);
+  const paths = attachments.value.map((a) => a.path);
+  attachments.value = [];
+  void send(attachmentMessage(expanded, paths));
 }
 
 async function stop() {
@@ -247,6 +293,7 @@ defineExpose({ insert, insertReference, send, busy });
         :active-id="activeId"
         :running-id="store.running[projectId] ?? null"
         @pick="store.setActive(projectId, $event)"
+        @remove="removeChat"
       />
       <span class="min-w-0 flex-1 truncate px-1 text-sm">
         {{ chats.find((c) => c.id === activeId)?.title || "New chat" }}
@@ -256,7 +303,16 @@ defineExpose({ insert, insertReference, send, busy });
       </Button>
     </div>
 
-    <Empty v-if="messages.length === 0" class="min-h-0">
+    <div
+      v-if="loadingChat"
+      class="text-muted-foreground flex min-h-0 flex-1 items-center justify-center gap-2 text-sm"
+      role="status"
+      data-testid="chat-loading"
+    >
+      <Spinner class="size-4" aria-hidden="true" />
+      <span>Loading chat…</span>
+    </div>
+    <Empty v-else-if="messages.length === 0" class="min-h-0 px-3 md:px-3">
       <EmptyHeader>
         <EmptyMedia variant="icon"><MessageSquare /></EmptyMedia>
         <EmptyTitle>What should we change?</EmptyTitle>
@@ -306,7 +362,7 @@ defineExpose({ insert, insertReference, send, busy });
           role="status"
           data-testid="chat-working"
         >
-          <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
+          <Spinner class="size-4" aria-hidden="true" />
           <span class="shimmer motion-reduce:shimmer-none">Agent is working…</span>
         </div>
       </Transition>
@@ -324,12 +380,18 @@ defineExpose({ insert, insertReference, send, busy });
         ref="composer"
         v-model="input"
         v-model:provider="provider"
+        v-model:model="model"
         :providers="providers"
+        :models="agentProviders.models"
         :provider-locked="messages.length > 0"
         :streaming="streaming"
         :blocked="terminalRunning ? 'The agent is busy in Terminal' : chat ? null : 'Loading chat'"
+        :attachments="attachments"
+        :attaching="attaching"
         @submit="submit"
         @stop="stop"
+        @attach="attach"
+        @remove-attachment="attachments.splice($event, 1)"
       />
     </div>
   </div>

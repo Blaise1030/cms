@@ -494,7 +494,7 @@ defineExpose({ richEditor: () => richEditor.value, mode, setMode });
           <span class="sr-only">Block type</span>
           <select
             data-testid="body-block-type"
-            class="h-7 cursor-pointer appearance-none rounded-md bg-transparent py-0 pr-7 pl-2 text-sm outline-none hover:bg-accent"
+            class="h-7 cursor-pointer appearance-none rounded-md bg-transparent py-0 pr-7 pl-2 text-sm outline-none transition-all hover:bg-background hover:btn-raised-soft dark:hover:bg-accent/50"
             :value="currentBlock"
             @change="setBlock(($event.target as HTMLSelectElement).value)"
           >

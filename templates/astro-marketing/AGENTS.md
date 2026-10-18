@@ -29,6 +29,10 @@ Static Astro site. The landing page, navigation and footer are written directly 
 - `DESIGN.md` is the design source of truth. When you change styles, update both `DESIGN.md` and the `@theme` block in `src/styles/global.css` (create it if missing).
 - Keep the dev server (`npm run dev`) running as-is; it is managed externally. Edits hot-reload in the live preview — just save the files and stop. Do **not** run `npm run build` (or `astro build`) after ordinary content/component edits; a full build is only for deploy or when the user explicitly asks to verify the production build.
 
+## Checking your work
+
+In a Workbench agent session, check the live preview after editing with `"$WORKBENCH_HOOK_EXE" ctl preview-status` (it prints JSON; `devserver` is `starting`, `ready`, or `crashed`). Edits hot-reload; do not build. If it is `crashed`, run `"$WORKBENCH_HOOK_EXE" ctl restart-preview` once, then tell the user in plain words what happened.
+
 ## Deployment
 
 Push-and-live on Cloudflare Workers (static assets). `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`, and uploads a preview of every pull request branch at a stable per-branch `workers.dev` URL (published as a GitHub deployment + sticky PR comment, see `README.md`); `wrangler.toml` names the Worker and points `[assets]` at `./dist`. Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`.

@@ -78,6 +78,24 @@ describe("PrMenu", () => {
     }
   });
 
+  it("opens menu links in the browser instead of navigating the app", () => {
+    const open = vi.fn();
+    const original = window.open;
+    window.open = open;
+    try {
+      const { w } = mountWith({ ...draft, previewUrl: "https://lw.pages.dev" });
+      const pr = w.find("[data-testid='pr-link']").element as HTMLAnchorElement;
+      expect(pr.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))).toBe(false);
+      expect(open).toHaveBeenCalledWith(draft.url, "_blank", "noopener,noreferrer");
+
+      const preview = w.find("[data-testid='preview-deploy-link']").element as HTMLAnchorElement;
+      expect(preview.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))).toBe(false);
+      expect(open).toHaveBeenCalledWith("https://lw.pages.dev/", "_blank", "noopener,noreferrer");
+    } finally {
+      window.open = original;
+    }
+  });
+
   it("offers Ready for review only for a draft", () => {
     expect(mountWith(draft).w.find(ready).exists()).toBe(true);
     expect(mountWith({ ...draft, state: "open" }).w.find(ready).exists()).toBe(false);

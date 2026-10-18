@@ -7,7 +7,7 @@ use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -15,7 +15,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::{changes, checkpoints};
 use crate::auth;
-use crate::chat::transcript;
+use crate::chat::{models, transcript};
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::projects::STATE_DIR;
@@ -69,6 +69,19 @@ fn truncate_summary(line: &str) -> String {
 pub async fn list_providers(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let providers = providers::load(state.config.agents_config.as_deref())?;
     Ok(Json(json!({ "providers": providers })))
+}
+
+/// `GET /api/terminal/providers/{provider}/models` → `{ models: [{ id, name }] }`; empty when
+/// the CLI cannot list them.
+pub async fn list_models(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let provider = providers::load(state.config.agents_config.as_deref())?
+        .into_iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| ApiError::badreq(format!("unknown provider: {provider_id}")))?;
+    Ok(Json(json!({ "models": models::list(&provider).await })))
 }
 
 #[derive(Deserialize)]
@@ -133,11 +146,11 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
             (provider, session, record)
         }
     };
-    // Agents given `GIT_GUIDE` start changes themselves; other agents need one first.
+    // Agents given `agent_guide()` start changes themselves; other agents need one first.
     let mut guided = providers::gets_git_guide(&provider.id);
     if provider.id == "cursor" {
         if let Err(e) = providers::write_cursor_rule(&project.dir) {
-            eprintln!("workbench: cannot write the Cursor git guide rule: {e}");
+            eprintln!("workbench: cannot write the Cursor agent guide rule: {e}");
             guided = false;
         }
     }
@@ -266,11 +279,11 @@ pub async fn sessions(
     Ok(Json(json!({ "sessions": sessions })))
 }
 
-/// Largest image the agent tab accepts as an attachment.
+/// Largest file the chat accepts as an attachment.
 pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 
-/// `POST /api/terminal/{project}/attachments` with an `image/*` body → `{ path }`, an absolute
-/// path the agent CLI can read. Kept in the daemon's state dir so checkpoints don't commit it.
+/// `POST /api/terminal/{project}/attachments` with an image or document body → `{ path }`, an
+/// absolute path the agent CLI can read. Kept in the daemon's state dir so checkpoints don't commit it.
 pub async fn attach(
     State(state): State<AppState>,
     Path(project): Path<String>,
@@ -286,16 +299,10 @@ pub async fn attach(
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let ext = match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        _ => {
-            return Err(ApiError::badreq(format!(
-                "unsupported attachment type: {mime:?}"
-            )))
-        }
+    let Some(&(_, ext)) = ATTACHMENT_TYPES.iter().find(|(m, _)| *m == mime) else {
+        return Err(ApiError::badreq(format!(
+            "unsupported attachment type: {mime:?}"
+        )));
     };
     let dir = state_dir(&state).join(&project).join("attachments");
     tokio::fs::create_dir_all(&dir).await?;
@@ -303,6 +310,61 @@ pub async fn attach(
     tokio::fs::write(&path, &body).await?;
     Ok(Json(json!({ "path": path })))
 }
+
+/// `GET /api/terminal/{project}/attachments/{name}` → the saved file, so the chat can show it.
+/// Only names [`attach`] generates resolve, which keeps the lookup inside the attachments dir.
+pub async fn attachment(
+    State(state): State<AppState>,
+    Path((project, name)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .projects
+        .get(&project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+    let mime = name
+        .split_once('.')
+        .filter(|(stem, _)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()))
+        .and_then(|(_, ext)| ATTACHMENT_TYPES.iter().find(|(_, e)| *e == ext))
+        .map(|(m, _)| *m)
+        .ok_or_else(|| ApiError::badreq(format!("invalid attachment name: {name}")))?;
+    let path = state_dir(&state)
+        .join(&project)
+        .join("attachments")
+        .join(&name);
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ApiError::enoent(format!("no such attachment: {name}")))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// What the chat may attach, with the extension each is saved under.
+const ATTACHMENT_TYPES: &[(&str, &str)] = &[
+    ("image/png", "png"),
+    ("image/jpeg", "jpg"),
+    ("image/gif", "gif"),
+    ("image/webp", "webp"),
+    ("application/pdf", "pdf"),
+    ("text/plain", "txt"),
+    ("text/markdown", "md"),
+    ("text/csv", "csv"),
+    ("application/json", "json"),
+];
 
 /// `DELETE /api/terminal/{project}` → `{ stopped: true }`.
 pub async fn stop(

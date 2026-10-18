@@ -85,7 +85,7 @@ function open(project: Project) {
 
 <template>
   <div class="flex h-full flex-col">
-    <div v-if="macDesktop" class="h-11 shrink-0" data-tauri-drag-region data-testid="window-drag-strip" />
+    <div v-if="macDesktop" class="h-11 shrink-0 fullscreen:hidden" data-tauri-drag-region data-testid="window-drag-strip" />
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
       <div class="absolute top-3 right-3">
         <GithubAccount />

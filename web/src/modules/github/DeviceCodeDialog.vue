@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +34,7 @@ function copyCode() {
           Copy code and open GitHub
         </Button>
         <p class="text-muted-foreground flex items-center gap-2 text-xs">
-          <Loader2 class="size-3 animate-spin" /> Waiting for approval…
+          <Spinner class="size-4" /> Waiting for approval…
         </p>
       </div>
     </DialogContent>

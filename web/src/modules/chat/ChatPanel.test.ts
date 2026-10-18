@@ -55,16 +55,26 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   calls.push({ method, url, init });
   const path = url.replace(ORIGIN, "");
   if (path === "/api/terminal/providers")
-    return json({ providers: ["cursor", "claude", "codex", "shell"].map((id) => ({ id, command: [id] })) });
+    return json({ providers: ["cursor", "claude", "codex", "opencode", "shell"].map((id) => ({ id, command: [id] })) });
+  const models = path.match(/^\/api\/terminal\/providers\/([^/]+)\/models$/);
+  if (models)
+    return json({
+      models: [
+        { id: `${models[1]}-fast`, name: "Fast" },
+        { id: `${models[1]}-smart`, name: "Smart" },
+      ],
+    });
   if (path === "/api/terminal/p1" && method === "DELETE") {
     terminalRunning = false;
     return json({ stopped: true });
   }
   if (path === "/api/terminal/p1") return json({ running: terminalRunning });
+  if (path === "/api/terminal/p1/attachments" && method === "POST") return json({ path: "/state/p1/attachments/abc123.png" });
   if (path === "/api/chat/p1" && method === "GET")
     return json({ chats: [{ id: "c-old", provider: "claude", title: "Old chat", updatedAt: 1 }], running: null });
   if (path === "/api/chat/p1" && method === "POST") return chatResponse(init);
   if (path === "/api/chat/p1/turn" && method === "DELETE") return json({ stopped: true });
+  if (path === "/api/chat/p1/c-old" && method === "DELETE") return json({ deleted: true });
   const history = path.match(/^\/api\/chat\/p1\/([^/]+)$/);
   if (history && method === "GET") {
     if (historyGate) await historyGate;
@@ -106,6 +116,36 @@ async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
   await flushPromises();
 }
 
+/** The agent and model picker: a portalled popover with a searchable list grouped by agent. */
+function agentPicker(w: Awaited<ReturnType<typeof mountPanel>>) {
+  const trigger = () => w.find("[data-testid='chat-agent']");
+  const list = () => [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-model-item']")];
+  return {
+    label: () => trigger().text(),
+    provider: () => trigger().attributes("data-provider"),
+    disabled: () => trigger().attributes("disabled") !== undefined,
+    groups: () =>
+      [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-agent-group']")].map((g) => g.dataset.provider),
+    open: async () => {
+      await trigger().trigger("click");
+      await flushPromises();
+    },
+    items: () => list().map((i) => i.dataset.value),
+    search: async (text: string) => {
+      const input = document.body.querySelector<HTMLInputElement>("[data-testid='chat-agent-search']")!;
+      input.value = text;
+      input.dispatchEvent(new Event("input"));
+      await flushPromises();
+    },
+    choose: async (id: string) => {
+      list()
+        .find((i) => i.dataset.value === id)!
+        .click();
+      await flushPromises();
+    },
+  };
+}
+
 describe("ChatPanel", () => {
   it("posts the message with the provider and auth, then renders the streamed reply", async () => {
     const w = await mountPanel();
@@ -117,6 +157,23 @@ describe("ChatPanel", () => {
     expect(new Headers(post.init.headers).get("Authorization")).toBe("Bearer tok");
     await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
     expect(w.text()).toContain("hi");
+  });
+
+  it("uploads a picked image and sends its saved path with the message", async () => {
+    const w = await mountPanel();
+    const input = w.find<HTMLInputElement>("[data-testid='chat-attach-input']");
+    expect(input.exists()).toBe(true);
+    const file = new File([new Uint8Array([0x89])], "cat.png", { type: "image/png" });
+    Object.defineProperty(input.element, "files", { value: [file], configurable: true });
+    await input.trigger("change");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-attachment']").text()).toContain("cat.png"));
+    expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/terminal/p1/attachments`)).toBe(true);
+    await w.find("[data-testid='chat-input']").setValue("use this image");
+    await w.find("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    const body = JSON.parse(String(posts()[0]!.init.body));
+    expect(body.messages.at(-1).parts[0].text).toContain("/state/p1/attachments/abc123.png");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-attachment']").exists()).toBe(false));
   });
 
   it("posts only the new message, not the whole conversation", async () => {
@@ -137,15 +194,70 @@ describe("ChatPanel", () => {
     expect(new Headers(posts()[1]!.init.headers).get("Authorization")).toBe("Bearer tok");
   });
 
-  it("lists only chat-capable providers and locks the choice once the chat has messages", async () => {
+  it("groups chat-capable agents and keeps only the chat's agent once it has messages", async () => {
     const w = await mountPanel();
-    const select = w.find<HTMLSelectElement>("[data-testid='chat-provider']");
-    expect([...select.element.options].map((o) => o.value)).toEqual(["cursor", "claude", "codex"]);
-    expect(select.element.disabled).toBe(false);
-    await select.setValue("claude");
+    const picker = agentPicker(w);
+    expect(picker.provider()).toBe("cursor");
+    await picker.open();
+    expect(picker.groups()).toEqual(["cursor", "claude", "codex", "opencode"]);
+    await picker.choose("claude:default");
+    expect(picker.provider()).toBe("claude");
     await send(w, "hi");
     expect(JSON.parse(String(posts()[0]!.init.body)).provider).toBe("claude");
-    expect(w.find<HTMLSelectElement>("[data-testid='chat-provider']").element.disabled).toBe(true);
+    await picker.open();
+    expect(picker.groups()).toEqual(["claude"]);
+    expect(picker.disabled()).toBe(false);
+  });
+
+  it("offers each agent's models after its Default, and sends no model for Default", async () => {
+    const w = await mountPanel();
+    const picker = agentPicker(w);
+    expect(picker.label()).toBe("Cursor");
+    await picker.open();
+    await vi.waitFor(() =>
+      expect(picker.items().filter((v) => v!.startsWith("opencode:"))).toEqual([
+        "opencode:default",
+        "opencode:opencode-fast",
+        "opencode:opencode-smart",
+      ]),
+    );
+    await picker.choose("opencode:default");
+    expect(picker.label()).toBe("OpenCode");
+    await send(w, "hi");
+    const body = JSON.parse(String(posts()[0]!.init.body));
+    expect(body.provider).toBe("opencode");
+    expect(body).not.toHaveProperty("model");
+  });
+
+  it("filters models across agents by the search text", async () => {
+    const w = await mountPanel();
+    const picker = agentPicker(w);
+    await picker.open();
+    await vi.waitFor(() => expect(picker.items()).toContain("codex:codex-smart"));
+    await picker.search("sma");
+    expect(picker.items()).toEqual(["cursor:cursor-smart", "claude:claude-smart", "codex:codex-smart", "opencode:opencode-smart"]);
+    await picker.choose("codex:codex-smart");
+    expect(picker.provider()).toBe("codex");
+    expect(picker.label()).toBe("Smart");
+  });
+
+  it("sends the picked model and lets it change between turns", async () => {
+    const w = await mountPanel();
+    const picker = agentPicker(w);
+    await picker.open();
+    await vi.waitFor(() => expect(picker.items()).toContain("cursor:cursor-smart"));
+    await picker.choose("cursor:cursor-smart");
+    await send(w, "hi");
+    expect(JSON.parse(String(posts()[0]!.init.body)).model).toBe("cursor-smart");
+    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+
+    chatResponse = () => sse([{ type: "start", messageId: "a2" }, ...reply.slice(1)]);
+    await picker.open();
+    await picker.choose("cursor:cursor-fast");
+    await w.find("[data-testid='chat-input']").setValue("again");
+    await w.find("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(posts()).toHaveLength(2));
+    expect(JSON.parse(String(posts()[1]!.init.body)).model).toBe("cursor-fast");
   });
 
   it("stops a running turn on the client and the daemon", async () => {
@@ -324,7 +436,23 @@ describe("ChatPanel", () => {
     expect(calls.some((c) => c.method === "GET" && c.url === `${ORIGIN}/api/chat/p1/c-old`)).toBe(true);
     expect(useChatStore().activeChatId("p1")).toBe("c-old");
     await vi.waitFor(() => expect(w.text()).toContain("Earlier answer"));
-    expect(w.find<HTMLSelectElement>("[data-testid='chat-provider']").element.value).toBe("claude");
+    expect(agentPicker(w).provider()).toBe("claude");
+  });
+
+  it("deletes a chat from the history after confirming", async () => {
+    const w = await mountPanel();
+    await w.find("[data-testid='chat-history-toggle']").trigger("click");
+    await flushPromises();
+    const list = document.body.querySelector("[data-testid='chat-history']")!;
+    const del = list.querySelector<HTMLButtonElement>("[data-testid='chat-history-delete']")!;
+    expect(del.getAttribute("aria-label")).toBe("Delete Old chat");
+    del.click();
+    await flushPromises();
+    const deletes = () => calls.filter((c) => c.method === "DELETE" && c.url === `${ORIGIN}/api/chat/p1/c-old`);
+    expect(deletes()).toHaveLength(0);
+    document.body.querySelector<HTMLButtonElement>("[data-testid='chat-delete-confirm']")!.click();
+    await vi.waitFor(() => expect(deletes()).toHaveLength(1));
+    await vi.waitFor(() => expect(useChatStore().chats.p1).toEqual([]));
   });
 
   it("resumes a turn still running when the chat loads", async () => {
@@ -365,6 +493,18 @@ describe("ChatPanel", () => {
     useChatStore().setActive("p1", id);
     await vi.waitFor(() => expect(w.text()).toContain("Saved reply"));
     expect(calls.slice(before).some((c) => c.method === "GET" && c.url === `${ORIGIN}/api/chat/p1/${id}`)).toBe(true);
+  });
+
+  it("shows a loading indicator while the conversation loads", async () => {
+    let release!: () => void;
+    historyGate = new Promise((r) => (release = r));
+    const w = await mountPanel();
+    expect(w.find("[data-testid='chat-loading']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-suggestion']").exists()).toBe(false);
+    release();
+    await flushPromises();
+    expect(w.find("[data-testid='chat-loading']").exists()).toBe(false);
+    expect(w.findAll("[data-testid='chat-suggestion']")).toHaveLength(3);
   });
 
   it("keeps the typed text and disables Send while the history loads", async () => {

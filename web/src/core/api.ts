@@ -251,6 +251,14 @@ export function createApi(
           "/api/terminal/providers",
         )
       ).providers,
+    /** The models an agent CLI offers; `id` is what its model flag takes. */
+    agentModels: async (provider: string): Promise<{ id: string; name: string }[]> =>
+      (
+        await json<{ models: { id: string; name: string }[] }>(
+          "GET",
+          `/api/terminal/providers/${enc(provider)}/models`,
+        )
+      ).models,
     stopTerminal: (project: string) =>
       json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
     terminalStatus: (project: string) =>
@@ -261,6 +269,9 @@ export function createApi(
     /** Save an image for the agent; resolves to an absolute path on the daemon's machine. */
     attachTerminalImage: async (project: string, image: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/terminal/${enc(project)}/attachments`, { blob: image })).path,
+    /** A saved attachment by file name, for `<img>` (authenticated by the session cookie). */
+    attachmentUrl: (project: string, name: string) =>
+      `${cfg().origin}/api/terminal/${enc(project)}/attachments/${enc(name)}`,
     listChats: (project: string) =>
       json<{ chats: ChatSummary[]; running: string | null }>("GET", `/api/chat/${enc(project)}`),
     chatHistory: (project: string, chatId: string) =>
@@ -268,6 +279,8 @@ export function createApi(
         "GET",
         `/api/chat/${enc(project)}/${enc(chatId)}`,
       ),
+    deleteChat: (project: string, chatId: string) =>
+      json<{ deleted: true }>("DELETE", `/api/chat/${enc(project)}/${enc(chatId)}`),
     /** Stop the project's running chat turn, if any. */
     stopChat: (project: string) =>
       json<{ stopped: boolean }>("DELETE", `/api/chat/${enc(project)}/turn`),

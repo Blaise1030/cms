@@ -124,7 +124,7 @@ async function abandon() {
     <div v-if="session" class="flex min-h-0 flex-1">
       <aside class="border-r w-60 shrink-0 overflow-auto p-3">
         <p class="text-muted-foreground mb-2 text-xs">{{ session.branch }}</p>
-        <button v-for="item in session.files" :key="item.path" type="button" class="hover:bg-accent block w-full rounded px-2 py-2 text-left text-sm" :class="item.path === file?.path ? 'bg-accent' : ''" @click="selectedPath = item.path">
+        <button v-for="item in session.files" :key="item.path" type="button" class="hover:bg-background hover:btn-raised-soft dark:hover:bg-accent/50 block w-full rounded px-2 py-2 text-left text-sm transition-all active:translate-y-px" :class="item.path === file?.path ? 'bg-background btn-raised-soft dark:bg-accent/50' : ''" @click="selectedPath = item.path">
           <span class="block truncate">{{ item.path.split('/').at(-1) }}</span>
           <span class="text-muted-foreground block truncate text-xs">{{ item.path }}</span>
           <span v-if="session.choices[item.path]" class="text-xs">{{ session.choices[item.path] }}</span>

@@ -34,16 +34,16 @@ defineExpose({ root });
     <form v-if="editing" class="grid gap-1 p-1" @submit.prevent="apply" @keydown.esc.prevent="emit('cancel')">
       <div class="flex items-center gap-1">
         <Input v-model="url" data-testid="link-url" placeholder="Paste a URL, /path, or #heading" class="h-8" />
-        <button type="submit" title="Apply" aria-label="Apply" data-testid="link-apply" :disabled="!canApply" class="flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-accent disabled:opacity-40"><Check class="size-4" /></button>
+        <button type="submit" title="Apply" aria-label="Apply" data-testid="link-apply" :disabled="!canApply" class="flex size-8 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50 disabled:opacity-40"><Check class="size-4" /></button>
       </div>
       <Input v-if="askText" v-model="text" data-testid="link-text" placeholder="Link text (defaults to the URL)" class="h-8" />
     </form>
     <div v-else class="flex items-center gap-0.5">
-      <a :href="href" target="_blank" rel="noopener noreferrer" data-testid="link-open" class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+      <a :href="href" target="_blank" rel="noopener noreferrer" data-testid="link-open" class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-all hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50">
         <ExternalLink class="size-3.5 shrink-0" /><span class="truncate">{{ href }}</span>
       </a>
-      <button type="button" title="Edit link" aria-label="Edit link" data-testid="link-edit" class="flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent" @mousedown.prevent @click="emit('edit')"><Pencil class="size-3.5" /></button>
-      <button type="button" title="Remove link" aria-label="Remove link" data-testid="link-remove" class="flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent" @mousedown.prevent @click="emit('remove')"><Unlink class="size-3.5" /></button>
+      <button type="button" title="Edit link" aria-label="Edit link" data-testid="link-edit" class="flex size-7 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50" @mousedown.prevent @click="emit('edit')"><Pencil class="size-3.5" /></button>
+      <button type="button" title="Remove link" aria-label="Remove link" data-testid="link-remove" class="flex size-7 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50" @mousedown.prevent @click="emit('remove')"><Unlink class="size-3.5" /></button>
     </div>
   </div>
 </template>

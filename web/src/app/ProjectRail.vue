@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from "vue-router";
 import { Code, FileText, History, House, MonitorPlay, Palette } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMacDesktop } from "@/lib/desktop";
+import { cn } from "@/lib/utils";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
 const props = defineProps<{ projectId: string }>();
@@ -19,23 +20,28 @@ const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "history", label: "History", icon: History },
 ];
 
-// On desktop the rail starts at the top bar's height (pt-11), below the traffic lights.
+// On desktop the rail starts at the top bar's height (pt-11), below the traffic lights, except
+// in full screen where they are hidden.
 const macDesktop = isMacDesktop();
 
-const item = "relative flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
+const item = "relative flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-all active:translate-y-px hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
+/** The home link sits raised, like the app's other buttons. */
+const raised = "bg-background text-foreground btn-raised-soft dark:bg-accent/50";
+/** The current tab is raised and tinted with the primary colour so it stands out from the rail. */
+const current = "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30";
 </script>
 
 <template>
   <TooltipProvider :delay-duration="300">
     <nav
-      :class="['flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r bg-background pb-2', macDesktop ? 'pt-11' : 'pt-2']"
+      :class="['flex h-full w-14 shrink-0 flex-col items-center gap-1 bg-background pb-2', macDesktop ? 'pt-11 fullscreen:pt-2' : 'pt-2']"
       aria-label="Project"
       :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
       data-testid="project-rail"
     >
       <Tooltip>
         <TooltipTrigger as-child>
-          <RouterLink to="/" :class="[item, 'mb-2 border bg-muted/50 text-foreground']" aria-label="All projects" data-testid="project-rail-home">
+          <RouterLink to="/" :class="[item, raised, 'mb-2']" aria-label="All projects" data-testid="project-rail-home">
             <House />
           </RouterLink>
         </TooltipTrigger>
@@ -46,7 +52,7 @@ const item = "relative flex size-9 items-center justify-center rounded-lg text-m
         <TooltipTrigger as-child>
           <RouterLink
             :to="projectPath(props.projectId, tab.id)"
-            :class="[item, active === tab.id && 'bg-accent text-foreground']"
+            :class="cn(item, active === tab.id && current)"
             :aria-label="tab.label"
             :aria-current="active === tab.id ? 'page' : undefined"
             :data-testid="`workspace-tab-${tab.id}`"

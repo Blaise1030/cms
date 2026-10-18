@@ -2,5 +2,6 @@
 
 pub mod chunk;
 pub mod manager;
+pub mod models;
 pub mod transcript;
 pub mod translate;

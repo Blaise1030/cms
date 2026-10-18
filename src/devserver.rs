@@ -143,6 +143,8 @@ struct Shared {
     projects: Arc<ProjectRegistry>,
     events: EventBus,
     opts: DevServerOptions,
+    /// Why each `crashed` project stopped (output tail); cleared on any other state.
+    crash_messages: std::sync::Mutex<HashMap<String, String>>,
 }
 
 struct Running {
@@ -162,9 +164,20 @@ impl DevServerManager {
                 projects,
                 events,
                 opts,
+                crash_messages: Default::default(),
             }),
             running: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Why the project's dev server stopped, while it is `crashed`.
+    pub fn crash_message(&self, id: &str) -> Option<String> {
+        self.shared
+            .crash_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
     }
 
     /// Whether this manager ever spawns anything.
@@ -252,6 +265,21 @@ impl Shared {
         let Some((prev_state, prev_port)) = self.projects.set_devserver(id, state).await else {
             return;
         };
+        {
+            let mut crashes = self
+                .crash_messages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            match (state, message) {
+                (DevserverStatus::Crashed, Some(m)) => {
+                    crashes.insert(id.to_string(), m.to_string());
+                }
+                (DevserverStatus::Crashed, None) => {}
+                _ => {
+                    crashes.remove(id);
+                }
+            }
+        }
         if prev_state == state && prev_port == port && message.is_none() {
             return;
         }

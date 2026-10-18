@@ -7,6 +7,7 @@
 pub mod claude;
 pub mod codex;
 pub mod cursor;
+pub mod opencode;
 
 use serde_json::Value;
 
@@ -31,13 +32,14 @@ pub fn for_provider(provider_id: &str) -> Option<Box<dyn Translator>> {
         "cursor" => Some(Box::new(cursor::CursorTranslator::default())),
         "claude" => Some(Box::new(claude::ClaudeTranslator::default())),
         "codex" => Some(Box::new(codex::CodexTranslator::default())),
+        "opencode" => Some(Box::new(opencode::OpencodeTranslator::default())),
         _ => None,
     }
 }
 
 /// Whether `provider_id` can run in the chat panel.
 pub fn is_chat_provider(provider_id: &str) -> bool {
-    matches!(provider_id, "cursor" | "claude" | "codex")
+    matches!(provider_id, "cursor" | "claude" | "codex" | "opencode")
 }
 
 /// Classify a failed run: a missing binary, an expired login, or anything else.
@@ -203,13 +205,11 @@ mod tests {
 
     #[test]
     fn chat_providers() {
-        for id in ["cursor", "claude", "codex"] {
+        for id in ["cursor", "claude", "codex", "opencode"] {
             assert!(is_chat_provider(id), "{id}");
+            assert!(for_provider(id).is_some(), "{id}");
         }
-        assert!(!is_chat_provider("opencode"));
-        assert!(for_provider("cursor").is_some());
-        assert!(for_provider("claude").is_some());
-        assert!(for_provider("codex").is_some());
-        assert!(for_provider("opencode").is_none());
+        assert!(!is_chat_provider("fake"));
+        assert!(for_provider("fake").is_none());
     }
 }

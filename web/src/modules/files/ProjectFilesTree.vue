@@ -42,7 +42,7 @@ function mount() {
     searchBlurBehavior: "retain",
     fileTreeSearchMode: "hide-non-matches",
     initialSearchQuery: search,
-    unsafeCSS: `[data-file-tree-search-input] { box-sizing: border-box; min-width: 0; width: 100%; height: 30px; line-height: 30px; }${TREE_SCROLL_FADE_CSS}`,
+    unsafeCSS: `[data-file-tree-search-input] { box-sizing: border-box; min-width: 0; width: 100%; height: 30px; line-height: 30px; background: var(--card); }${TREE_SCROLL_FADE_CSS}`,
     ...(expanded ? { initialExpansion: "closed" as const, initialExpandedPaths: expanded } : { initialExpansion: 1 }),
     flattenEmptyDirectories: true,
     initialSelectedPaths: props.selectedPath ? [props.selectedPath] : [],

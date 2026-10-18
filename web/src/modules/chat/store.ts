@@ -41,6 +41,13 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  /** Delete a chat; the active one is replaced by a new chat. Throws when the daemon refuses. */
+  async function remove(projectId: string, chatId: string) {
+    await daemon.api.deleteChat(projectId, chatId);
+    chats.value[projectId] = (chats.value[projectId] ?? []).filter((c) => c.id !== chatId);
+    if (activeChatId(projectId) === chatId) newChat(projectId);
+  }
+
   const reloadAll = () => Object.keys(chats.value).forEach((id) => void load(id));
 
   const offs = [
@@ -54,5 +61,5 @@ export const useChatStore = defineStore("chat", () => {
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 
-  return { chats, running, activeChatId, setActive, newChat, load };
+  return { chats, running, activeChatId, setActive, newChat, load, remove };
 });

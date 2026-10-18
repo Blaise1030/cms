@@ -112,7 +112,7 @@ function mount() {
     searchBlurBehavior: "retain",
     unsafeCSS: `[data-file-tree-search-input] {
       box-sizing: border-box; min-width: 0; width: 100%;
-      background: transparent; color: var(--trees-fg); font-weight: var(--trees-font-weight-regular);
+      background: var(--card); color: var(--trees-fg); font-weight: var(--trees-font-weight-regular);
       &:hover { background: var(--trees-bg-muted); }
       &:focus-visible, &[data-file-tree-search-input-fake-focus="true"] { outline: none; background: var(--trees-selected-bg); }
     }${TREE_SCROLL_FADE_CSS}`,
@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
   --trees-selected-fg-override: var(--accent-foreground);
   --trees-border-color-override: var(--border);
   --trees-font-family-override: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
-  --trees-padding-inline-override: 8px;
+  --trees-padding-inline-override: 4px;
   --trees-focus-ring-color-override: var(--ring);
   --trees-selected-focused-border-color-override: var(--ring);
 }

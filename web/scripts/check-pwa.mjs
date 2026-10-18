@@ -5,7 +5,7 @@ import {
   isShellEntry,
   SHELL_MAX_BYTES,
   SHELL_MAX_ENTRIES,
-  SHIKI_PACK_NAME,
+  SHIKI_PACK_MARKER,
   shellScripts,
 } from "./pwa-shell.mjs";
 
@@ -41,7 +41,9 @@ if (failures.length === 0) {
   check(shellJs.size > 0, "index.html loads no module script");
   for (const u of precached) {
     check(isShellEntry(u, shellJs), `lazy chunk precached (not app shell): ${u}`);
-    check(!SHIKI_PACK_NAME.test(u), `shiki pack precached: ${u}`);
+    if (u.startsWith("assets/") && u.endsWith(".js")) {
+      check(!SHIKI_PACK_MARKER.test(read(u)), `shiki pack precached: ${u}`);
+    }
   }
   check(
     precached.length <= SHELL_MAX_ENTRIES,

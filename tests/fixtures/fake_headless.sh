@@ -1,6 +1,9 @@
 #!/bin/sh
 # Stand-in headless coding CLI for chat tests: `fake_headless.sh <fixture> [mode] …ignored flags`
-# prints a JSON-lines fixture on stdout.
+# prints a JSON-lines fixture on stdout. With `FAKE_ARGSFILE` set, writes its arguments there.
+if [ -n "$FAKE_ARGSFILE" ]; then
+  printf '%s\n' "$@" > "$FAKE_ARGSFILE"
+fi
 for arg in "$@"; do
   if [ "$arg" = create-chat ]; then
     echo chat-fake-1

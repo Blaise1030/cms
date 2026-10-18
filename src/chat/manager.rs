@@ -53,6 +53,8 @@ pub struct TurnRequest {
     pub dir: PathBuf,
     pub prompt: String,
     pub session: AgentSession,
+    /// The CLI's own model id; `None` keeps its default.
+    pub model: Option<String>,
 }
 
 /// The turn's chunks so far, then the live ones. `None` means the turn is over.
@@ -152,6 +154,7 @@ impl ChatManager {
             &state_dir,
             &req.project_id,
             &req.session,
+            req.model.as_deref(),
         );
         let mut cmd = login_command(&spec.argv, &req.dir);
         cmd.envs(spec.env)

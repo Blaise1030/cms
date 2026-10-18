@@ -3,9 +3,10 @@ import path from "node:path";
 import type { VitePWAOptions } from "vite-plugin-pwa";
 import { isShellEntry, shellScripts } from "./scripts/pwa-shell.mjs";
 
-// Shell selection (positive: only what index.html loads) lives in scripts/pwa-shell.mjs,
-// shared with the post-build check.
+// Shell selection (positive: only what index.html loads) and the Shiki-pack signature live in
+// scripts/pwa-shell.mjs, shared with the post-build check.
 export { isShellEntry, shellScripts };
+export { SHIKI_PACK_MARKER } from "./scripts/pwa-shell.mjs";
 
 /**
  * PWA policy: precache the app shell only (hosted-origin JS/CSS/HTML/icons).

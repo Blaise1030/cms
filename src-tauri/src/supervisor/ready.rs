@@ -59,15 +59,33 @@ mod tests {
 
     #[test]
     fn rejects_missing_or_empty_token() {
-        assert_eq!(parse_ready_line("workbench ready: http://127.0.0.1:51234/"), None);
-        assert_eq!(parse_ready_line("workbench ready: http://127.0.0.1:51234/?t="), None);
+        assert_eq!(
+            parse_ready_line("workbench ready: http://127.0.0.1:51234/"),
+            None
+        );
+        assert_eq!(
+            parse_ready_line("workbench ready: http://127.0.0.1:51234/?t="),
+            None
+        );
     }
 
     #[test]
     fn rejects_non_loopback_host_or_missing_port() {
-        assert_eq!(parse_ready_line("workbench ready: http://0.0.0.0:51234/?t=abc"), None);
-        assert_eq!(parse_ready_line("workbench ready: http://example.com:51234/?t=abc"), None);
-        assert_eq!(parse_ready_line("workbench ready: http://127.0.0.1/?t=abc"), None);
-        assert_eq!(parse_ready_line("workbench ready: https://127.0.0.1:51234/?t=abc"), None);
+        assert_eq!(
+            parse_ready_line("workbench ready: http://0.0.0.0:51234/?t=abc"),
+            None
+        );
+        assert_eq!(
+            parse_ready_line("workbench ready: http://example.com:51234/?t=abc"),
+            None
+        );
+        assert_eq!(
+            parse_ready_line("workbench ready: http://127.0.0.1/?t=abc"),
+            None
+        );
+        assert_eq!(
+            parse_ready_line("workbench ready: https://127.0.0.1:51234/?t=abc"),
+            None
+        );
     }
 }

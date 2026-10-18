@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Loader2, LogIn, RefreshCw, Share2 } from "@lucide/vue";
+import { LogIn, RefreshCw, Share2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
+import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@workbench/utils";
 import PrMenu from "@/modules/changes/PrMenu.vue";
 import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
@@ -45,7 +46,7 @@ async function onShare() {
         :disabled="changes.sharing"
         @click="onShare"
       >
-        <Loader2 v-if="changes.sharing" class="size-4 animate-spin" />
+        <Spinner v-if="changes.sharing" class="size-4" />
         <RefreshCw v-else-if="changes.prUrl" class="size-4" />
         <Share2 v-else class="size-4" />
         {{ label }}
