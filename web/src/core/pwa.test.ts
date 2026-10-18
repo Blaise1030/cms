@@ -4,6 +4,7 @@ import {
   isShellEntry,
   pwaOptions,
   shellScripts,
+  SHIKI_PACK_MARKER,
 } from "../../pwa.config";
 
 // Workbox tests the denylist against `pathname + search`.
@@ -45,6 +46,17 @@ describe("pwa config", () => {
       for (const kept of ["assets/index-A.js", "assets/vendor-B.js", "assets/index-C.css", "index.html", "icons/icon-192.png", "manifest.webmanifest", "registerSW.js"]) {
         expect(isShellEntry(kept, shell), kept).toBe(true);
       }
+    });
+
+    it("spots a shiki pack by its content, whatever the chunk is called", () => {
+      const grammar = 'var r=Object.freeze(JSON.parse(`{"displayName":"C++","name":"cpp-macro"`))';
+      const theme = 'JSON.parse(`{"colors":{},"displayName":"GitHub Light","name":"github-light"}`)';
+      const wasm = "Uint8Array.from(atob(`AGFzbQEAAAABoQEWYAJ/fwF/YAF/AX9g`),t=>t.charCodeAt(0))";
+      for (const pack of [grammar, theme, wasm]) expect(SHIKI_PACK_MARKER.test(pack), pack).toBe(true);
+      // Chunks that share a `dist-` name or decode other base64 must not trip the guard.
+      const vueuse = "function useStorage(){return `vueuse-storage`}";
+      const codemirror = 'Uint8Array.from(atob(Yo),e=>e.charCodeAt(0));throw Error("CodeMirror plugin crashed")';
+      for (const lookalike of [vueuse, codemirror]) expect(SHIKI_PACK_MARKER.test(lookalike), lookalike).toBe(false);
     });
   });
 });
