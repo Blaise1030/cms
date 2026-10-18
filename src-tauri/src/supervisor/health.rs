@@ -65,8 +65,12 @@ mod tests {
 
     #[test]
     fn non_200_or_bad_status_is_unhealthy() {
-        assert!(!is_healthy_response("HTTP/1.0 503 Service Unavailable\r\n\r\n{\"status\":\"ok\"}"));
-        assert!(!is_healthy_response("HTTP/1.0 200 OK\r\n\r\n{\"status\":\"starting\"}"));
+        assert!(!is_healthy_response(
+            "HTTP/1.0 503 Service Unavailable\r\n\r\n{\"status\":\"ok\"}"
+        ));
+        assert!(!is_healthy_response(
+            "HTTP/1.0 200 OK\r\n\r\n{\"status\":\"starting\"}"
+        ));
         assert!(!is_healthy_response("HTTP/1.0 200 OK\r\n\r\nnot json"));
         assert!(!is_healthy_response(""));
     }

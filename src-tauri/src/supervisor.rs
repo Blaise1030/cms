@@ -44,7 +44,9 @@ impl fmt::Display for SupervisorError {
             Self::Spawn(e) => write!(f, "could not start the workbench service: {e}"),
             Self::ExitedBeforeReady => write!(f, "the workbench service exited during startup"),
             Self::ReadyTimeout => write!(f, "the workbench service did not report ready in time"),
-            Self::HealthTimeout => write!(f, "the workbench service did not become healthy in time"),
+            Self::HealthTimeout => {
+                write!(f, "the workbench service did not become healthy in time")
+            }
             Self::Stopped => write!(f, "the workbench service was stopped"),
         }
     }
@@ -272,7 +274,9 @@ fn terminate(running: Running) {
         libc::kill(pid, libc::SIGTERM);
     }
     if !exited.wait(SHUTDOWN_GRACE) {
-        logs::shell(&format!("daemon ignored SIGTERM for {SHUTDOWN_GRACE:?}, killing"));
+        logs::shell(&format!(
+            "daemon ignored SIGTERM for {SHUTDOWN_GRACE:?}, killing"
+        ));
         let _ = child.kill();
     }
 }

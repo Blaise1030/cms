@@ -13,7 +13,12 @@ use zip::{CompressionMethod, ZipWriter};
 
 pub const CAPACITY: usize = 500;
 const REDACTED: &str = "<redacted>";
-const TOKEN_MARKERS: [&str; 4] = ["?t=", "&t=", concat!("--tok", "en="), concat!("--tok", "en ")];
+const TOKEN_MARKERS: [&str; 4] = [
+    "?t=",
+    "&t=",
+    concat!("--tok", "en="),
+    concat!("--tok", "en "),
+];
 
 /// Keeps the most recent `capacity` lines.
 pub struct RingBuffer {
@@ -72,7 +77,11 @@ fn mask_after(s: &str, marker: &str) -> String {
 }
 
 /// Writes a zip holding `daemon.log` and `shell.log`.
-pub fn write_bundle<W: Write + Seek>(out: W, daemon: &str, shell: &str) -> zip::result::ZipResult<()> {
+pub fn write_bundle<W: Write + Seek>(
+    out: W,
+    daemon: &str,
+    shell: &str,
+) -> zip::result::ZipResult<()> {
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     let mut zip = ZipWriter::new(out);
     for (name, text) in [("daemon.log", daemon), ("shell.log", shell)] {
@@ -170,9 +179,16 @@ mod tests {
             .collect();
         names.sort_unstable();
         assert_eq!(names, ["daemon.log", "shell.log"]);
-        for (name, expected) in [("daemon.log", "daemon line\n"), ("shell.log", "shell line\n")] {
+        for (name, expected) in [
+            ("daemon.log", "daemon line\n"),
+            ("shell.log", "shell line\n"),
+        ] {
             let mut text = String::new();
-            archive.by_name(name).unwrap().read_to_string(&mut text).unwrap();
+            archive
+                .by_name(name)
+                .unwrap()
+                .read_to_string(&mut text)
+                .unwrap();
             assert_eq!(text, expected);
         }
     }
