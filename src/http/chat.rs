@@ -25,7 +25,7 @@ use crate::providers::{self, AgentSession};
 use crate::state::AppState;
 use crate::terminal::history::{self, SessionRecord};
 
-const CHAT_PROVIDERS_ONLY: &str = "Chat supports Cursor CLI, Claude Code and Codex";
+const CHAT_PROVIDERS_ONLY: &str = "Chat supports Cursor CLI, Claude Code, Codex and OpenCode";
 
 fn state_dir(state: &AppState) -> PathBuf {
     state.config.projects_dir.join(STATE_DIR)
@@ -54,6 +54,9 @@ struct PostRequest {
     messages: Vec<Value>,
     #[serde(default)]
     provider: Option<String>,
+    /// For this turn only; absent keeps the CLI's default.
+    #[serde(default)]
+    model: Option<String>,
 }
 
 /// Text parts of the last user message, joined by newlines.
@@ -159,6 +162,7 @@ pub async fn post(
             dir: project.dir,
             prompt,
             session,
+            model: req.model.filter(|m| !m.is_empty()),
         },
     )?;
     Ok(sse(sub))
@@ -243,6 +247,36 @@ pub async fn get(
         "provider": record.provider,
         "running": running,
     })))
+}
+
+/// `DELETE /api/chat/{project}/{chat}` → `{ deleted: true }`: drops its transcript and history
+/// record. `conflict` while a Chat turn or the Terminal is using it.
+pub async fn remove(
+    State(state): State<AppState>,
+    Path((project_id, chat_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    check_chat_id(&chat_id)?;
+    project(&state, &project_id).await?;
+    if state.chats.running(&project_id).as_deref() == Some(chat_id.as_str()) {
+        return Err(ApiError::conflict("The agent is working in this chat"));
+    }
+    if state.terminals.status(&project_id).is_some()
+        && state.terminals.history_id(&project_id).as_deref() == Some(chat_id.as_str())
+    {
+        return Err(ApiError::conflict("This chat is open in Terminal"));
+    }
+    let state_dir = state_dir(&state);
+    let removed = history::remove(&state_dir, &project_id, &chat_id)
+        .map_err(|e| ApiError::io(format!("cannot delete the chat: {e}")))?;
+    let removed = match std::fs::remove_file(transcript::path(&state_dir, &project_id, &chat_id)) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => removed,
+        Err(e) => return Err(ApiError::io(format!("cannot delete the chat: {e}"))),
+    };
+    if !removed {
+        return Err(ApiError::enoent(format!("no such chat: {chat_id}")));
+    }
+    Ok(Json(json!({ "deleted": true })))
 }
 
 /// `GET /api/chat/{project}/{chat}/stream` → the running turn's stream, or `204`.

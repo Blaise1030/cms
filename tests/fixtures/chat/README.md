@@ -11,6 +11,13 @@ translators that turn CLI output into chat events. Recorded 2026-10-17.
 | `codex/turn.jsonl`, `codex/resume.jsonl`, `codex/tool-error.jsonl` | Recorded |
 | `claude/login-expired.jsonl` | Recorded (a real run with an expired OAuth login) |
 | `claude/turn.jsonl`, `claude/resume.jsonl`, `claude/tool-error.jsonl` | **Hand-written** |
+| `opencode/turn.jsonl`, `opencode/resume.jsonl`, `opencode/tool-error.jsonl`, `opencode/error.jsonl` | Recorded 2026-10-18 |
+
+OpenCode 1.18.31 ran `opencode run --format json --thinking -m opencode/big-pickle <p>` (resume adds
+`-s <sessionID>`) with `OPENCODE_CONFIG_DIR` holding only `{"permission":"allow"}`. The turn prompt
+adds "using your edit tool" so the recording has an `edit` tool part. `error.jsonl` is `-m nope/fake`
+(exit 1). Scratch paths became `/work/project`. Tool parts arrive only once finished; a failed
+shell command is `status: "completed"` with a non-zero `metadata.exit`.
 
 Claude was not logged in, so its turn, resume and tool-error fixtures are hand-written from Claude
 Code's documented `--output-format stream-json --verbose` shape, with field names taken from the

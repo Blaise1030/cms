@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Component } from "vue";
+import { computed, reactive, type Component } from "vue";
 import type { DynamicToolUIPart, UIMessage } from "ai";
 import { Markdown, type StreamMarkdownParserOptions } from "vue-stream-markdown";
 import "vue-stream-markdown/index.css";
@@ -10,6 +10,7 @@ import {
   FileText,
   Globe,
   MousePointerClick,
+  Paperclip,
   Search,
   SquareTerminal,
   Wrench,
@@ -28,11 +29,22 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import { useDaemon } from "@/core/daemon";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
+import { splitAttachments } from "./attachments";
+import { openWebLink } from "./links";
 import { formatValue, toolLabel, type AgentErrorData, type CheckpointData, type ToolInput } from "./parts";
 import { segmentReferences } from "./references";
 
-defineProps<{ projectId: string; message: UIMessage }>();
+const props = defineProps<{ projectId: string; message: UIMessage }>();
+const daemon = useDaemon();
+
+/** The user's text parts, with the attachment paths ChatPanel appended split back out. */
+const userTexts = computed(() =>
+  props.message.parts.flatMap((p) => (p.type === "text" ? [splitAttachments(p.text)] : [])),
+);
+/** Attached images that failed to load (e.g. a cross-site daemon); shown as file chips. */
+const broken = reactive(new Set<string>());
 
 /** Agent text is untrusted: replacing the parser's default `html` plugin leaves raw HTML as escaped text. */
 const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }] };
@@ -61,9 +73,33 @@ const agentError = (data: unknown) => data as AgentErrorData;
   <Message v-if="message.role === 'user'" align="end">
     <MessageContent>
       <Bubble variant="secondary" align="end">
-        <template v-for="(part, i) in message.parts" :key="i">
-          <BubbleContent v-if="part.type === 'text'" class="whitespace-pre-wrap">
-            <template v-for="(seg, j) in segmentReferences(part.text)" :key="j">
+        <template v-for="(sent, i) in userTexts" :key="i">
+          <div v-if="sent.files.length" class="flex flex-wrap justify-end gap-1.5">
+            <template v-for="f in sent.files" :key="f.name">
+              <a
+                v-if="f.image && !broken.has(f.name)"
+                data-testid="message-attachment"
+                :href="daemon.api.attachmentUrl(projectId, f.name)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block overflow-hidden rounded-lg border"
+              >
+                <img
+                  :src="daemon.api.attachmentUrl(projectId, f.name)"
+                  :alt="`Attached ${f.kind} image`"
+                  class="max-h-48 max-w-full object-contain"
+                  @error="broken.add(f.name)"
+                />
+              </a>
+              <span
+                v-else
+                data-testid="message-attachment"
+                class="bg-secondary inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+              ><Paperclip class="size-3" aria-hidden="true" />{{ f.kind }} file</span>
+            </template>
+          </div>
+          <BubbleContent v-if="sent.text" class="whitespace-pre-wrap">
+            <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">
               <span
                 v-if="seg.kind === 'element'"
                 data-testid="element-tag"
@@ -79,7 +115,7 @@ const agentError = (data: unknown) => data as AgentErrorData;
   </Message>
 
   <Message v-else>
-    <MessageContent>
+    <MessageContent @click.capture="openWebLink">
       <template v-for="(part, i) in message.parts" :key="i">
         <Markdown v-if="part.type === 'text'" :content="part.text" :parser-options="parserOptions" />
 

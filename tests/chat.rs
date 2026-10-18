@@ -112,6 +112,7 @@ fn request(env: &Env, prompt: &str) -> TurnRequest {
         dir: env.dir.clone(),
         prompt: prompt.into(),
         session: AgentSession::Assign("chat-fake-1".into()),
+        model: None,
     }
 }
 
@@ -651,8 +652,8 @@ mod http_routes {
         let cases = [
             (chat_body("../x", Some("cursor"), "hi"), "invalid chat id"),
             (
-                chat_body("fresh", Some("opencode"), "hi"),
-                "Chat supports Cursor CLI, Claude Code and Codex",
+                chat_body("fresh", Some("fake"), "hi"),
+                "Chat supports Cursor CLI, Claude Code, Codex and OpenCode",
             ),
             (
                 chat_body("fresh", None, "hi"),
@@ -686,6 +687,48 @@ mod http_routes {
         )
         .await;
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn model_is_passed_for_that_turn_only() {
+        let args = tempfile::NamedTempFile::new().unwrap();
+        let mut argv = vec![
+            "env".to_string(),
+            format!("FAKE_ARGSFILE={}", args.path().display()),
+        ];
+        argv.extend(fake("default", None));
+        let env = env(argv).await;
+        let read_args = || std::fs::read_to_string(args.path()).unwrap();
+
+        let mut body = chat_body("new-chat", Some("cursor"), "hi");
+        body["model"] = json!("gpt-5.2");
+        read_to_end(send(&env, post_chat(&env, body)).await).await;
+        assert!(
+            read_args().contains("\n--model\ngpt-5.2\n"),
+            "{}",
+            read_args()
+        );
+
+        read_to_end(send(&env, post_chat(&env, chat_body("new-chat", None, "again"))).await).await;
+        assert!(!read_args().contains("--model"), "{}", read_args());
+    }
+
+    #[tokio::test]
+    async fn models_come_from_the_cli() {
+        let script =
+            "printf 'Available models\\n\\nauto - Auto (current, default)\\ngpt-5.2 - GPT-5.2\\n'";
+        let env = env(vec!["sh".into(), "-c".into(), script.into()]).await;
+        let (s, v) = call(&env, "GET", "/api/terminal/providers/cursor/models", None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(
+            v["models"],
+            json!([{"id": "auto", "name": "Auto"}, {"id": "gpt-5.2", "name": "GPT-5.2"}])
+        );
+        let (s, v) = call(&env, "GET", "/api/terminal/providers/fake/models", None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["models"], json!([]));
+        let (s, _) = call(&env, "GET", "/api/terminal/providers/nope/models", None).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -746,6 +789,41 @@ mod http_routes {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn delete_removes_a_chat_that_is_not_running() {
+        let env = env(fake("slow", None)).await;
+        let uri = |id: &str| format!("/api/chat/{}/{id}", env.project);
+
+        let posted = send(&env, post_chat(&env, chat_body(CHAT, None, "slow one"))).await;
+        assert_eq!(posted.status(), StatusCode::OK);
+        let (s, v) = call(&env, "DELETE", &uri(CHAT), None).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        stop_turn(&env).await;
+        drop(posted);
+        let file = transcript::path(&env.state_dir, &env.project, CHAT);
+        assert!(file.is_file());
+
+        let (s, v) = call(&env, "DELETE", &uri(CHAT), None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["deleted"], true);
+        assert!(!file.exists());
+        assert!(workbench::terminal::history::get(&env.state_dir, &env.project, CHAT).is_none());
+        let (s, _) = call(&env, "GET", &uri(CHAT), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = call(&env, "DELETE", &uri(CHAT), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = call(&env, "DELETE", &uri("bad.id"), None).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        let terminal = json!({ "project": env.project, "provider": "fake" });
+        let (s, v) = call(&env, "POST", "/api/terminal", Some(terminal)).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let session = v["sessionId"].as_str().unwrap().to_string();
+        let (s, v) = call(&env, "DELETE", &uri(&session), None).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        env.state.terminals.kill(&env.project).await;
     }
 
     #[tokio::test]

@@ -989,13 +989,75 @@ mod http {
         assert!(!path.starts_with(&env.dir), "{}", path.display());
         assert_eq!(std::fs::read(&path).unwrap(), b"png-bytes");
 
-        let (s, _) = call(
+        let (s, v) = call(
             &app(&env),
             attachment_req(&env.project, "text/plain", b"hi"),
         )
         .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let txt = PathBuf::from(v["path"].as_str().unwrap());
+        assert_eq!(txt.extension().and_then(|e| e.to_str()), Some("txt"));
+        let (s, v) = call(
+            &app(&env),
+            attachment_req(&env.project, "application/pdf", b"%PDF"),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let pdf = PathBuf::from(v["path"].as_str().unwrap());
+        assert_eq!(pdf.extension().and_then(|e| e.to_str()), Some("pdf"));
+        let (s, _) = call(
+            &app(&env),
+            attachment_req(&env.project, "application/octet-stream", b"hi"),
+        )
+        .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
         let (s, _) = call(&app(&env), attachment_req("nope", "image/png", b"x")).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        env.server.abort();
+    }
+
+    fn get_req(uri: &str) -> Request<Body> {
+        Request::builder()
+            .uri(uri)
+            .header(header::HOST, "localhost")
+            .header(header::AUTHORIZATION, format!("Bearer {AUTH_TOKEN}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn saved_attachment_is_served_back_by_name() {
+        let env = http_env(false).await;
+        let (_, v) = call(
+            &app(&env),
+            attachment_req(&env.project, "image/png", b"png-bytes"),
+        )
+        .await;
+        let path = PathBuf::from(v["path"].as_str().unwrap());
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let base = format!("/api/terminal/{}/attachments", env.project);
+
+        let res = app(&env)
+            .oneshot(get_req(&format!("{base}/{name}")))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "image/png");
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&bytes[..], b"png-bytes");
+
+        let (s, _) = call(&app(&env), get_req(&format!("{base}/0123456789abcdef.png"))).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        for bad in ["..%2F..%2Fsecret.png", "notes.png", "0123456789abcdef.svg"] {
+            let (s, _) = call(&app(&env), get_req(&format!("{base}/{bad}"))).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let (s, _) = call(
+            &app(&env),
+            get_req(&format!("/api/terminal/nope/attachments/{name}")),
+        )
+        .await;
         assert_eq!(s, StatusCode::NOT_FOUND);
         env.server.abort();
     }

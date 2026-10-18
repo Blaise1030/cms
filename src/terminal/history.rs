@@ -107,6 +107,20 @@ pub fn update(
     Ok(Some(updated))
 }
 
+/// Drop the record `id`; `Ok(false)` if there was none.
+pub fn remove(state_dir: &Path, project_id: &str, id: &str) -> std::io::Result<bool> {
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let file = path(state_dir, project_id);
+    let mut records = read(&file);
+    let before = records.len();
+    records.retain(|r| r.id != id);
+    if records.len() == before {
+        return Ok(false);
+    }
+    write(&file, records)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +160,18 @@ mod tests {
         );
         assert!(update(dir.path(), "p", "nope", |_| {}).unwrap().is_none());
         assert!(list(dir.path(), "other").is_empty());
+    }
+
+    #[test]
+    fn remove_drops_only_that_record() {
+        let dir = tempfile::tempdir().unwrap();
+        insert(dir.path(), "p", rec("a", 1)).unwrap();
+        insert(dir.path(), "p", rec("b", 2)).unwrap();
+        assert!(remove(dir.path(), "p", "a").unwrap());
+        let ids: Vec<_> = list(dir.path(), "p").into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, ["b"]);
+        assert!(!remove(dir.path(), "p", "a").unwrap());
+        assert!(!remove(dir.path(), "other", "b").unwrap());
     }
 
     #[test]

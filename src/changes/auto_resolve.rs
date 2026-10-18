@@ -610,6 +610,7 @@ impl Runner<'_> {
             &ctx.state_dir,
             &ctx.project_id,
             &AgentSession::Fresh,
+            None,
         );
         let (program, args) = spec.argv.split_first().ok_or(Failure::Unavailable)?;
         let mut agent = Command::new(program);

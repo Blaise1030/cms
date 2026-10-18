@@ -46,6 +46,33 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("shows attached images as previews and other files as chips instead of their paths", async () => {
+    const dir = "/Users/me/workbench-projects/.workbench/p/attachments";
+    const w = await render(
+      [{ type: "text", text: `Test\n${dir}/5d83a351365d7d18.png\n${dir}/0123456789abcdef.pdf` }],
+      "user",
+    );
+    const img = w.find<HTMLImageElement>("[data-testid='message-attachment'] img");
+    expect(img.attributes("src")).toBe("http://127.0.0.1:7800/api/terminal/p/attachments/5d83a351365d7d18.png");
+    const files = w.findAll("[data-testid='message-attachment']");
+    expect(files).toHaveLength(2);
+    expect(files[1]!.text()).toContain("PDF file");
+    expect(w.text()).toContain("Test");
+    expect(w.text()).not.toContain("attachments/");
+    w.unmount();
+  });
+
+  it("falls back to a chip when an attached image can't load", async () => {
+    const w = await render(
+      [{ type: "text", text: "/s/.workbench/p/attachments/5d83a351365d7d18.png" }],
+      "user",
+    );
+    await w.find("[data-testid='message-attachment'] img").trigger("error");
+    expect(w.find("[data-testid='message-attachment'] img").exists()).toBe(false);
+    expect(w.find("[data-testid='message-attachment']").text()).toContain("PNG file");
+    w.unmount();
+  });
+
   it("shows a picked element in a user message as a compact tag", async () => {
     const ref = '[element <section class="mx-auto" id="hero"> "Stop building" in src/Hero.astro:5:69]';
     const shot = "/p/.workbench/site/attachments/4b78.png";
@@ -62,6 +89,19 @@ describe("ChatMessage", () => {
   it("renders a user message's text", async () => {
     const w = await render([{ type: "text", text: "Make the hero bigger" }], "user");
     expect(w.text()).toContain("Make the hero bigger");
+    w.unmount();
+  });
+
+  it("opens a website link in the default browser instead of navigating the app", async () => {
+    const open = vi.fn();
+    window.open = open;
+    const w = await render([{ type: "text", text: "See [the docs](https://example.com/docs) and [local](/preview/p1/)" }]);
+    const links = [...document.body.querySelectorAll("a")];
+    const external = links.find((a) => a.getAttribute("href") === "https://example.com/docs")!;
+    expect(external).toBeDefined();
+    const notPrevented = external.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(notPrevented).toBe(false);
+    expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank", "noopener,noreferrer");
     w.unmount();
   });
 

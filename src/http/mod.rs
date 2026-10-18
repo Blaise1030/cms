@@ -83,6 +83,10 @@ pub fn router(state: AppState) -> Router {
         .route("/node_modules/{*rest}", any(preview::handle_vite_root))
         .route("/src/{*rest}", any(preview::handle_vite_root))
         .route("/api/terminal/providers", get(terminal::list_providers))
+        .route(
+            "/api/terminal/providers/{provider}/models",
+            get(terminal::list_models),
+        )
         .route("/api/terminal", post(terminal::start))
         .route("/api/terminal/turn-end", post(terminal::turn_end))
         .route("/api/ctl/preview-status", post(ctl::preview_status))
@@ -98,9 +102,16 @@ pub fn router(state: AppState) -> Router {
             "/api/terminal/{project}/attachments",
             post(terminal::attach).layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
         )
+        .route(
+            "/api/terminal/{project}/attachments/{name}",
+            get(terminal::attachment),
+        )
         .route("/api/chat/{project}", get(chat::list).post(chat::post))
         .route("/api/chat/{project}/turn", delete(chat::stop))
-        .route("/api/chat/{project}/{chat}", get(chat::get))
+        .route(
+            "/api/chat/{project}/{chat}",
+            get(chat::get).delete(chat::remove),
+        )
         .route("/api/chat/{project}/{chat}/stream", get(chat::resume))
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))

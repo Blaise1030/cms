@@ -59,7 +59,7 @@ async fn reports_git_and_gh_found_and_no_agents_on_search_path() {
         .iter()
         .map(|p| p["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["cursor", "claude", "codex"]);
+    assert_eq!(ids, ["cursor", "claude", "codex", "opencode"]);
     for p in providers {
         assert_eq!(p["available"], false, "{p}");
         assert!(!p["name"].as_str().unwrap().is_empty(), "{p}");
@@ -100,7 +100,12 @@ async fn an_agent_on_the_search_path_is_available() {
         .collect();
     assert_eq!(
         available,
-        [("cursor", false), ("claude", true), ("codex", false)]
+        [
+            ("cursor", false),
+            ("claude", true),
+            ("codex", false),
+            ("opencode", false)
+        ]
     );
 }
 

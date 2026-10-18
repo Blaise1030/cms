@@ -5,18 +5,30 @@ import { readPref, writePref } from "@workbench/utils";
 
 /** Named for the old Terminal tab; kept so users keep their pick. */
 const PROVIDER_KEY = "workbench.terminal.provider";
+const modelKey = (provider: string) => `workbench.chat.model.${provider}`;
 
 export interface AgentProvider {
   id: string;
   command: string[];
 }
 
-/** The agent CLIs the daemon offers, and the user's pick. */
+export interface AgentModel {
+  id: string;
+  name: string;
+}
+
+/** The agent CLIs the daemon offers, their models, and the user's picks. */
 export const useAgentProvidersStore = defineStore("agentProviders", () => {
   const daemon = useDaemon();
 
   const providers = ref<AgentProvider[]>([]);
   const provider = ref<string | null>(readPref(PROVIDER_KEY));
+  /** Per provider; absent until asked, empty when the daemon couldn't list them. */
+  const models = ref<Record<string, AgentModel[]>>({});
+  /** Model picks made this session, by provider; `null` is Default. */
+  const picks = ref<Record<string, string | null>>({});
+  const loaded = new Set<string>();
+  const loading = new Map<string, Promise<void>>();
 
   function setProvider(id: string) {
     provider.value = id;
@@ -35,5 +47,33 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
     }
   }
 
-  return { providers, provider, setProvider, loadProviders };
+  function loadModels(id: string): Promise<void> {
+    if (loaded.has(id)) return Promise.resolve();
+    const pending =
+      loading.get(id) ??
+      (async () => {
+        try {
+          models.value[id] = await daemon.api.agentModels(id);
+          loaded.add(id);
+        } catch {
+          // Offer Default only; the next load asks again.
+          models.value[id] = [];
+        } finally {
+          loading.delete(id);
+        }
+      })();
+    loading.set(id, pending);
+    return pending;
+  }
+
+  function modelPick(id: string): string | null {
+    return id in picks.value ? picks.value[id]! : readPref(modelKey(id));
+  }
+
+  function setModel(id: string, model: string | null) {
+    picks.value[id] = model;
+    writePref(modelKey(id), model);
+  }
+
+  return { providers, provider, models, setProvider, loadProviders, loadModels, modelPick, setModel };
 });
