@@ -222,9 +222,9 @@ Publishing, sharing a change, sending it for a greenlight, giving a greenlight, 
 
 ## Check your work
 `workbench ctl` shows app state you cannot see from files. Run it as `"$WORKBENCH_HOOK_EXE" ctl <command>`; it prints JSON.
-- `"$WORKBENCH_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`. The preview reloads edits by itself; do not run a build.
-- `"$WORKBENCH_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
-- `"$WORKBENCH_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`) and what is not saved yet (`changedPaths`).
+- `"$WORKBENCH_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. The preview reloads edits by itself; do not run a build.
+- `"$WORKBENCH_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause shown in `message`, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
+- `"$WORKBENCH_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
 If `$WORKBENCH_HOOK_EXE` is not set, or the command says to run it inside a Workbench agent session, skip these checks.
 
 ## Edits after a greenlight
@@ -500,6 +500,8 @@ mod tests {
         assert!(g.contains("Never say branch, commit, pull request, or merge"));
         assert!(g.contains("the greenlight no longer covers it"));
         assert!(g.contains("crashed"));
+        assert!(g.contains("the app saves them when your turn ends"));
+        assert!(!g.contains("not saved yet"));
     }
 
     use super::*;

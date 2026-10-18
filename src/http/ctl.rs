@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use crate::changes;
 use crate::error::ApiError;
 use crate::git;
+use crate::projects::DevserverStatus;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -29,18 +30,25 @@ fn authorize(state: &AppState, body: &Bytes) -> Result<String, ApiError> {
     Ok(req.project)
 }
 
-/// `{devserver: "starting"|"ready"|"crashed", port, previewPath}`.
+/// `{devserver: "starting"|"ready"|"crashed", port, previewPath, message?}`; `message` is
+/// the dev server's output tail while `crashed`.
 pub async fn preview_status_value(state: &AppState, project: &str) -> Result<Value, ApiError> {
     let p = state
         .projects
         .get(project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
-    Ok(json!({
+    let mut v = json!({
         "devserver": p.devserver.as_str(),
         "port": p.port,
         "previewPath": format!("/preview/{}/", p.id),
-    }))
+    });
+    if p.devserver == DevserverStatus::Crashed {
+        if let Some(m) = state.devservers.crash_message(&p.id) {
+            v["message"] = m.into();
+        }
+    }
+    Ok(v)
 }
 
 /// `{active: {branch, title} | null, dirty, changedPaths, changes}`. `dirty` counts new
