@@ -2,9 +2,9 @@ import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { ChatSummary } from "@/core/types";
-import { readPref, writePref } from "@workbench/utils";
+import { readPref, writePref } from "@orso/utils";
 
-const activeKey = (projectId: string) => `workbench.chat.active.${projectId}`;
+const activeKey = (projectId: string) => `orso.chat.active.${projectId}`;
 
 export const useChatStore = defineStore("chat", () => {
   const daemon = useDaemon();

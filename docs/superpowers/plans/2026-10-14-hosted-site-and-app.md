@@ -15,7 +15,7 @@
 - SPA base path is exactly `/app/`; routes become `/app/p/:id/...`.
 - Default daemon origin for a non-loopback page: `http://127.0.0.1:7800` (`DEFAULT_DAEMON_ORIGIN`).
 - Pairing link format: `<origin>/app/?daemon=http://<bound>#t=<token>` (the `daemon` param makes non-default `--port` work; the token stays in the fragment); local link: `<ui_url or http://bound>/app/?t=<token>`.
-- Default `--origin` comes from build-time `option_env!("WORKBENCH_SITE_ORIGIN")`; unset → no default.
+- Default `--origin` comes from build-time `option_env!("ORSO_SITE_ORIGIN")`; unset → no default.
 - Preview ticket: 32-byte hex, single-use, TTL 60 s, query param `pt`.
 - Preview cookie: `wb_preview=<secret>; Path=/; HttpOnly; SameSite=None; Secure; Partitioned`; accepted only on `/preview/*` and `is_vite_dev_path` paths.
 - `templates/astro-marketing/` must not change (it is the embedded project scaffold).
@@ -101,7 +101,7 @@ async fn preflight_from_other_origin_gets_no_cors_grant() {
 
 **Interfaces:**
 - Produces in `src/config.rs`:
-  - `pub const DEFAULT_SITE_ORIGIN: Option<&str> = option_env!("WORKBENCH_SITE_ORIGIN");`
+  - `pub const DEFAULT_SITE_ORIGIN: Option<&str> = option_env!("ORSO_SITE_ORIGIN");`
   - `pub fn resolve_origin(cli: Option<String>, no_origin: bool, default: Option<&str>) -> Option<String>` — `no_origin` wins, then `cli`, then `default`; trailing `/` trimmed.
   - `pub fn ready_links(origin: Option<&str>, daemon_base: &str, ui_base: &str, token: Option<&str>) -> Vec<String>` — `daemon_base` is `http://<bound>`, `ui_base` is `ui_url` or `daemon_base`.
 
@@ -123,7 +123,7 @@ assert_eq!(ready_links(None, d, d, None),
 ```
 
 - [ ] **Step 2:** `cargo test --lib config` → FAIL.
-- [ ] **Step 3:** Implement helpers; `main.rs` passes `resolve_origin(origin, no_origin, DEFAULT_SITE_ORIGIN)` into `Config.origin`; `lib.rs` prints each link as `workbench ready: <link>` (hosted line first). Existing e2e fixtures parse the ready line — check `e2e/fixtures/daemon.ts` and make it pick the line containing `/app/?t=`.
+- [ ] **Step 3:** Implement helpers; `main.rs` passes `resolve_origin(origin, no_origin, DEFAULT_SITE_ORIGIN)` into `Config.origin`; `lib.rs` prints each link as `orso ready: <link>` (hosted line first). Existing e2e fixtures parse the ready line — check `e2e/fixtures/daemon.ts` and make it pick the line containing `/app/?t=`.
 - [ ] **Step 4:** `cargo test` → PASS.
 - [ ] **Step 5:** `git commit -m "feat(daemon): default hosted origin and print pairing link"`
 
@@ -266,9 +266,9 @@ assert!(!a.redeem("nope"));
 ### Task 8: `site/` (landing, docs, connect) + Worker + CI
 
 **Files:**
-- Create: `site/` — copy of `templates/astro-marketing/` minus `node_modules/`, `dist/`, `.astro/`, `.github/`, `scripts/workbench-content*`, `AGENTS.md`, `DESIGN.md`; `astro.config.mjs` without `PUBLIC_BASE`/`WORKBENCH_PROXY_PORT`, plus `@astrojs/starlight` with docs at `/docs`.
+- Create: `site/` — copy of `templates/astro-marketing/` minus `node_modules/`, `dist/`, `.astro/`, `.github/`, `scripts/orso-content*`, `AGENTS.md`, `DESIGN.md`; `astro.config.mjs` without `PUBLIC_BASE`/`ORSO_PROXY_PORT`, plus `@astrojs/starlight` with docs at `/docs`.
 - Create: `site/src/pages/connect.astro`, `site/src/content/docs/docs/index.md` (+ `install.md`, `pairing.md`), `site/worker.js`, `site/worker.test.mjs`
-- Modify: `site/wrangler.toml`, `justfile` (`build-site`, `setup`), `.github/workflows/site.yml` (create, from `templates/astro-marketing/.github/workflows/deploy.yml`), `.github/workflows/release.yml` (`WORKBENCH_SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}` on the cargo build step), `.github/workflows/ci.yml` (job that runs `just build-site` and `node --test site/worker.test.mjs`)
+- Modify: `site/wrangler.toml`, `justfile` (`build-site`, `setup`), `.github/workflows/site.yml` (create, from `templates/astro-marketing/.github/workflows/deploy.yml`), `.github/workflows/release.yml` (`ORSO_SITE_ORIGIN: ${{ vars.SITE_ORIGIN }}` on the cargo build step), `.github/workflows/ci.yml` (job that runs `just build-site` and `node --test site/worker.test.mjs`)
 
 **Interfaces:**
 - Produces: `site/worker.js` default export `{ fetch(request, env) }`, using `env.ASSETS.fetch`.
@@ -285,7 +285,7 @@ assert!(!a.redeem("nope"));
 
 - [ ] **Step 2:** `node --test site/worker.test.mjs` → FAIL.
 - [ ] **Step 3:** Implement `worker.js`; `wrangler.toml`: `main = "worker.js"`, `[assets] directory = "./dist"`, `binding = "ASSETS"`, `not_found_handling = "404-page"`, `run_worker_first = ["/app/*"]`.
-- [ ] **Step 4:** Content: landing copy adapted from the template home; `/connect` = install, `workbench serve`, open the printed pairing link, Safari note; docs pages mirror `/connect` plus `--origin`/`--no-origin`.
+- [ ] **Step 4:** Content: landing copy adapted from the template home; `/connect` = install, `orso serve`, open the printed pairing link, Safari note; docs pages mirror `/connect` plus `--origin`/`--no-origin`.
 - [ ] **Step 5:** `justfile` `build-site`: `pnpm -C web build && npm --prefix site ci && npm --prefix site run build && rm -rf site/dist/app && cp -R web/dist site/dist/app`. Run it → `site/dist/index.html`, `site/dist/docs/index.html`, `site/dist/app/index.html` exist.
 - [ ] **Step 6:** `node --test site/worker.test.mjs` → PASS; `git status` shows no change under `templates/astro-marketing/`.
 - [ ] **Step 7:** `git commit -m "feat(site): landing, docs and hosted /app on Cloudflare"`
@@ -309,7 +309,7 @@ assert!(!a.redeem("nope"));
 //   => URL query and hash cleared; home lists projects.
 // Open a project => preview iframe src starts with "http://127.0.0.1:" and contains "?pt=";
 //   frameLocator("iframe").locator("body") contains the template's home heading.
-// localStorage "workbench.daemon" has the token.
+// localStorage "orso.daemon" has the token.
 ```
 
 - [ ] **Step 2:** `just e2e` → new spec FAILs before Tasks 1–7 are in, PASSes after (Chromium).

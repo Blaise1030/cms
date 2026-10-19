@@ -1,7 +1,7 @@
 //! Provider registry: which coding CLIs the daemon can launch in a PTY, and how to
 //! inject each one's turn-end hook.
 //!
-//! Read from `~/.config/workbench/agents.json` (or `--agents-config`):
+//! Read from `~/.config/orso/agents.json` (or `--agents-config`):
 //!
 //! ```json
 //! { "claude": ["npx", "claude"], "opencode": ["opencode"] }
@@ -11,7 +11,7 @@
 //! defaults (Cursor CLI via `cursor-agent`, Claude, Codex, and OpenCode); a present-but-invalid file
 //! is an error. Overriding the base argv keeps the
 //! hook injection (keyed on the id). Unknown ids get no injection; they call
-//! `$WORKBENCH_HOOK_EXE hook turn-end` themselves.
+//! `$ORSO_HOOK_EXE hook turn-end` themselves.
 //!
 //! # Hook mechanics (verified 2026-10-10 against claude 2.1.296, codex-cli 0.162.1,
 //! opencode v2.0.25)
@@ -37,7 +37,7 @@
 //!   attaches to an already-running background service, that server does not see this env var.
 //!
 //! # Headless mechanics ([`headless_spec`], checked 2026-10-15 in a scratch git repo with a
-//! "write `{"ok":true}` to `$WORKBENCH_RESOLVE_RESULT`" prompt)
+//! "write `{"ok":true}` to `$ORSO_RESOLVE_RESULT`" prompt)
 //!
 //! - Cursor CLI 2026.10.14-0f9edde: `cursor-agent -p --force --output-format stream-json
 //!   <prompt>` exited 0 and wrote the file (no `--trust` needed).
@@ -169,13 +169,13 @@ fn sh_quote(s: &str) -> String {
 fn opencode_plugin(exe: &str) -> String {
     let exe_js = serde_json::to_string(exe).unwrap_or_else(|_| "\"\"".into());
     format!(
-        r#"// Written by workbench on every launch. Reports turn end to the daemon.
+        r#"// Written by orso on every launch. Reports turn end to the daemon.
 import {{ execFile }} from "node:child_process"
 
 const exe = {exe_js}
 
 export default {{
-  id: "workbench.turn-end",
+  id: "orso.turn-end",
   setup: async (ctx: any) => {{
     const stop = new AbortController()
     void (async () => {{
@@ -210,12 +210,12 @@ A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its huma
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
 - The app also commits your work automatically at the end of each turn; that is expected."#;
 
-/// The Workbench layer of [`agent_guide`]: who the user is, the words to use with them,
-/// what only they may do, and how to check work with `workbench ctl`. Agent terminals have
-/// the binary at `$WORKBENCH_HOOK_EXE`, not on `PATH`.
-pub const WORKBENCH_GUIDE: &str = r#"# Working in Workbench
+/// The orso layer of [`agent_guide`]: who the user is, the words to use with them,
+/// what only they may do, and how to check work with `orso ctl`. Agent terminals have
+/// the binary at `$ORSO_HOOK_EXE`, not on `PATH`.
+pub const ORSO_GUIDE: &str = r#"# Working in orso
 
-The person you are helping runs a website through Workbench, a no-code app. They are usually not technical.
+The person you are helping runs a website through orso, a no-code app. They are usually not technical.
 
 ## Words to use
 For how their site gets updated, use these words: **change** (a set of edits made together), **greenlight** (a site owner's OK on a change), **ready to publish**, **publish**, and **live** (what visitors see). Never say branch, commit, pull request, or merge to them; describe what happened in plain words.
@@ -224,11 +224,11 @@ For how their site gets updated, use these words: **change** (a set of edits mad
 Publishing, sharing a change, sending it for a greenlight, giving a greenlight, and merging are clicks the person makes in the app. Never publish, share, or greenlight for them, and never do the git equivalent (opening, approving, or merging a pull request, or pushing to main). When a change is done, tell them it is ready to look at in the preview.
 
 ## Check your work
-`workbench ctl` shows app state you cannot see from files. Run it as `"$WORKBENCH_HOOK_EXE" ctl <command>`; it prints JSON.
-- `"$WORKBENCH_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. The preview reloads edits by itself; do not run a build.
-- `"$WORKBENCH_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause shown in `message`, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
-- `"$WORKBENCH_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
-If `$WORKBENCH_HOOK_EXE` is not set, or the command says to run it inside a Workbench agent session, skip these checks.
+`orso ctl` shows app state you cannot see from files. Run it as `"$ORSO_HOOK_EXE" ctl <command>`; it prints JSON.
+- `"$ORSO_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. The preview reloads edits by itself; do not run a build.
+- `"$ORSO_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause shown in `message`, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
+- `"$ORSO_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
+If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
 
 ## Edits after a greenlight
 If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
@@ -236,9 +236,9 @@ If you edit a change after it got a greenlight, the greenlight no longer covers 
 ## When unsure
 If what they want is unclear, ask one short question in plain words before editing."#;
 
-/// Everything a guided agent is told: [`WORKBENCH_GUIDE`] then [`GIT_GUIDE`].
+/// Everything a guided agent is told: [`ORSO_GUIDE`] then [`GIT_GUIDE`].
 pub fn agent_guide() -> String {
-    format!("{WORKBENCH_GUIDE}\n\n{GIT_GUIDE}")
+    format!("{ORSO_GUIDE}\n\n{GIT_GUIDE}")
 }
 
 /// Agents that receive [`agent_guide`] and so may start on `main`: they branch before editing.
@@ -249,7 +249,7 @@ pub fn gets_git_guide(provider_id: &str) -> bool {
 }
 
 /// Where [`write_cursor_rule`] puts [`agent_guide`], relative to the project.
-pub const CURSOR_RULE_PATH: &str = ".cursor/rules/workbench-changes.mdc";
+pub const CURSOR_RULE_PATH: &str = ".cursor/rules/orso-changes.mdc";
 
 /// Cursor CLI has no system-prompt flag but loads `.cursor/rules/*.mdc`: write the guide as
 /// an always-applied rule, and list it in `.git/info/exclude` so it never lands in a commit.
@@ -365,7 +365,7 @@ pub fn launch_spec(
                     dir.to_string_lossy().into_owned(),
                 )),
                 Err(e) => eprintln!(
-                    "workbench: opencode turn-end hook unavailable; checkpoints disabled ({e})"
+                    "orso: opencode turn-end hook unavailable; checkpoints disabled ({e})"
                 ),
             }
         }
@@ -468,7 +468,7 @@ pub fn headless_spec(
                     "OPENCODE_CONFIG_DIR".to_string(),
                     dir.to_string_lossy().into_owned(),
                 )),
-                Err(e) => eprintln!("workbench: opencode headless config unavailable ({e})"),
+                Err(e) => eprintln!("orso: opencode headless config unavailable ({e})"),
             }
         }
         _ => argv.push(prompt.into()),
@@ -478,14 +478,14 @@ pub fn headless_spec(
 
 fn write_opencode_config(dir: &Path, exe: &str, auto_approve: bool) -> std::io::Result<()> {
     std::fs::create_dir_all(dir.join("plugins"))?;
-    std::fs::write(dir.join("plugins/workbench.ts"), opencode_plugin(exe))?;
+    std::fs::write(dir.join("plugins/orso.ts"), opencode_plugin(exe))?;
     write_opencode_json(dir, auto_approve)
 }
 
 /// `opencode.json` in `dir` loading [`agent_guide`] (written next to it) as instructions,
 /// allowing every permission when `allow_all`.
 fn write_opencode_json(dir: &Path, allow_all: bool) -> std::io::Result<()> {
-    let guide = dir.join("workbench-guide.md");
+    let guide = dir.join("orso-guide.md");
     std::fs::write(&guide, agent_guide())?;
     let mut config = serde_json::json!({ "instructions": [guide.to_string_lossy()] });
     if allow_all {
@@ -497,14 +497,14 @@ fn write_opencode_json(dir: &Path, allow_all: bool) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn agent_guide_adds_the_workbench_layer_to_the_git_guide() {
+    fn agent_guide_adds_the_orso_layer_to_the_git_guide() {
         let g = agent_guide();
-        assert!(g.starts_with(WORKBENCH_GUIDE));
+        assert!(g.starts_with(ORSO_GUIDE));
         assert!(g.ends_with(GIT_GUIDE));
-        assert!(g.contains("workbench ctl"));
+        assert!(g.contains("orso ctl"));
         for cmd in ["preview-status", "change-status", "restart-preview"] {
             assert!(
-                g.contains(&format!("\"$WORKBENCH_HOOK_EXE\" ctl {cmd}")),
+                g.contains(&format!("\"$ORSO_HOOK_EXE\" ctl {cmd}")),
                 "{cmd}"
             );
         }
@@ -750,7 +750,7 @@ mod tests {
             )]
         );
         assert!(!s.env.iter().any(|(_, v)| v.contains(".config/opencode")));
-        let plugin = std::fs::read_to_string(cfg.join("plugins/workbench.ts")).unwrap();
+        let plugin = std::fs::read_to_string(cfg.join("plugins/orso.ts")).unwrap();
         assert!(plugin.contains(r#""/x/wb""#) && plugin.contains("turn-end"));
         let config: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(cfg.join("opencode.json")).unwrap())

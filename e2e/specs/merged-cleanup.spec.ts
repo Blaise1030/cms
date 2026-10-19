@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { startChange, terminalCheckpoint } from "../fixtures/daemon";
-import { expect, openPrMenu, test } from "../fixtures/workbench";
+import { expect, openPrMenu, test } from "../fixtures/orso";
 
 const BRANCH = "content/merged-post";
 const FILE = "merged-post.md";
@@ -37,18 +37,18 @@ function mergeOnRemote(bareRemote: string, tmp: string, branch: string) {
 
 test("merged change shows as merged; Clean up returns to updated main", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { origin, token, projectId, projectDir, bareRemote, tmp, github } = workbench;
+  const { origin, token, projectId, projectDir, bareRemote, tmp, github } = orso;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // A change with its own file, shared as a draft PR.
-  await startChange(workbench, "New post: Merged post");
+  await startChange(orso, "New post: Merged post");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Merged post");
-  await terminalCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(orso, "edit the notes");
   fs.writeFileSync(path.join(projectDir, FILE), CONTENT);
   git(projectDir, ["add", FILE]);
   git(projectDir, ["commit", "-m", "checkpoint: merged post"]);

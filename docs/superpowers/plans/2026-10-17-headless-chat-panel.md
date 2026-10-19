@@ -278,7 +278,7 @@
 
 **Interfaces:**
 - Produces (`api.ts`): `listChats(project): Promise<{ chats: ChatSummary[]; running: string | null }>`, `chatHistory(project, chatId): Promise<{ messages: UIMessage[]; provider: string; running: boolean }>`, `stopChat(project)`, `chatUrl(project): string` (`${origin}/api/chat/${enc(project)}`), `authHeaders(): Record<string,string>`.
-- Produces (`store.ts`) `useChatStore`: `activeChatId(projectId): string | null`, `setActive(projectId, chatId)` (persisted under `workbench.chat.active.<projectId>`), `newChat(projectId): string` (`crypto.randomUUID()`), `chats: Record<projectId, ChatSummary[]>`, `running: Record<projectId, string | null>`, `load(projectId)`. Subscribes to `chat.turn` (reload list) and `terminal.session` (set the active chat to the terminal's `sessionId`, so both tabs share the conversation).
+- Produces (`store.ts`) `useChatStore`: `activeChatId(projectId): string | null`, `setActive(projectId, chatId)` (persisted under `orso.chat.active.<projectId>`), `newChat(projectId): string` (`crypto.randomUUID()`), `chats: Record<projectId, ChatSummary[]>`, `running: Record<projectId, string | null>`, `load(projectId)`. Subscribes to `chat.turn` (reload list) and `terminal.session` (set the active chat to the terminal's `sessionId`, so both tabs share the conversation).
 
 - [ ] **Step 1: Failing tests:** `newChat` sets and persists the active id; `chat.turn` for the project calls `listChats` again; `terminal.session` sets `activeChatId` to its `sessionId`; socket decodes `chat.turn` and rejects one without `chatId`.
 - [ ] **Step 2:** `pnpm -C web test src/modules/chat src/core` → FAIL.

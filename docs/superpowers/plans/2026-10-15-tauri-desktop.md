@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship Workbench to non-technical users as a signed, auto-updating macOS desktop app wrapping the existing Rust daemon and Vue UI.
+**Goal:** Ship orso to non-technical users as a signed, auto-updating macOS desktop app wrapping the existing Rust daemon and Vue UI.
 
 **Architecture:** Tauri 2 thin shell. The existing daemon binary ships as a Tauri sidecar; the shell spawns it on an ephemeral port, health-checks `GET /api/health`, and points the webview at the daemon's local HTTP URL. All HTTP/WebSocket/preview traffic keeps the current transport — no Tauri IPC rewrite.
 
@@ -33,10 +33,10 @@
 
 **Files:**
 - Test: `tests/` existing suite only.
-- Verify: `src/lib.rs:85-105` (`serve()` binds `127.0.0.1:<port>`, prints `workbench ready: <url>`), `src/http/health.rs`, `src/lib.rs:38-72` (`serve_on()` graceful shutdown already kills terminals/devservers/watchers on signal).
+- Verify: `src/lib.rs:85-105` (`serve()` binds `127.0.0.1:<port>`, prints `orso ready: <url>`), `src/http/health.rs`, `src/lib.rs:38-72` (`serve_on()` graceful shutdown already kills terminals/devservers/watchers on signal).
 
 **Interfaces:**
-- Produces (confirmed contract for Task 3): sidecar started as `workbench serve --port 0 [--token <hex>]`; readiness = parse the `workbench ready: http://127.0.0.1:<port>/...` stdout line, then poll `GET /api/health` until `{"status":"ok"}`; shutdown = SIGTERM.
+- Produces (confirmed contract for Task 3): sidecar started as `orso serve --port 0 [--token <hex>]`; readiness = parse the `orso ready: http://127.0.0.1:<port>/...` stdout line, then poll `GET /api/health` until `{"status":"ok"}`; shutdown = SIGTERM.
 
 - [ ] **Step 1:** Run `cargo run -- serve --port 0` and confirm the printed ready URL uses a non-7800 ephemeral port and `GET /api/health` on it returns `{"status":"ok"}`.
 - [ ] **Step 2:** Send SIGTERM during an active terminal session; confirm the process exits and no PTY child survives (`pgrep -P`).
@@ -50,11 +50,11 @@
 
 **Interfaces:**
 - Consumes: nothing yet; window opens `about:blank` in this task.
-- Produces: `pnpm --prefix src-tauri tauri build` (or `cargo tauri build` from `src-tauri/`) produces `Workbench.app`; bundle identifier `com.workbench.app`; product name `Workbench`.
+- Produces: `pnpm --prefix src-tauri tauri build` (or `cargo tauri build` from `src-tauri/`) produces `orso.app`; bundle identifier `com.orso.app`; product name `orso`.
 
 - [ ] **Step 1:** Scaffold with the Tauri 2 CLI (`pnpm dlx @tauri-apps/cli@2 init` equivalents done by hand so the existing repo files are not overwritten); pin `tauri` and `@tauri-apps/cli` to the current 2.x releases and commit the lockfiles.
-- [ ] **Step 2:** Configure `tauri.conf.json`: `frontendDist` unused (webview loads the daemon URL, set in Task 3), `bundle.externalBin: ["binaries/workbench"]`, macOS targets `["app", "dmg"]`.
-- [ ] **Step 3:** Add a build helper `src-tauri/scripts/stage-sidecar.sh` that runs `cargo build --release --target <triple>`, copies the daemon binary to `src-tauri/binaries/workbench-<triple>`, and is invoked before `tauri build` in dev docs and CI (Task 6).
+- [ ] **Step 2:** Configure `tauri.conf.json`: `frontendDist` unused (webview loads the daemon URL, set in Task 3), `bundle.externalBin: ["binaries/orso"]`, macOS targets `["app", "dmg"]`.
+- [ ] **Step 3:** Add a build helper `src-tauri/scripts/stage-sidecar.sh` that runs `cargo build --release --target <triple>`, copies the daemon binary to `src-tauri/binaries/orso-<triple>`, and is invoked before `tauri build` in dev docs and CI (Task 6).
 - [ ] **Step 4:** Verify: staged sidecar present, `tauri build` produces an app bundle that opens a blank window; `just test` still passes at the repo root.
 - [ ] **Step 5: Commit** — `feat(desktop): scaffold Tauri shell with daemon sidecar staging`
 
@@ -62,18 +62,18 @@
 
 **Files:**
 - Create: `src-tauri/src/supervisor.rs`, `src-tauri/src/lib.rs` (builder wiring) if the Tauri template splits them; otherwise keep modules under `src-tauri/src/`.
-- Modify: `src-tauri/src/main.rs`, `src-tauri/tauri.conf.json` (sidecar permissions in `src-tauri/capabilities/default.json`: `shell:allow-execute` scoped to the `workbench` sidecar only).
+- Modify: `src-tauri/src/main.rs`, `src-tauri/tauri.conf.json` (sidecar permissions in `src-tauri/capabilities/default.json`: `shell:allow-execute` scoped to the `orso` sidecar only).
 - Test: `src-tauri/src/supervisor.rs` unit tests; manual checks below.
 
 **Interfaces:**
 - Consumes: Task 1 contract (ready-line parse, `/api/health`, SIGTERM).
 - Produces: `Supervisor::start(app) -> Result<DaemonHandle, SupervisorError>`; `DaemonHandle { base_url: String, token: String }`; `DaemonHandle::shutdown()` used by the quit handler and the updater (Task 6); an app event `daemon://failed` carrying a user-readable message after 3 failed restarts.
 
-- [ ] **Step 1: Write failing unit tests** for the pure parts: ready-line parsing (`workbench ready: http://127.0.0.1:51234/?t=abc…` → base URL + token) and restart backoff (delays 1s, 2s, 4s, give up after 3).
+- [ ] **Step 1: Write failing unit tests** for the pure parts: ready-line parsing (`orso ready: http://127.0.0.1:51234/?t=abc…` → base URL + token) and restart backoff (delays 1s, 2s, 4s, give up after 3).
 - [ ] **Step 2:** Run `cargo test --manifest-path src-tauri/Cargo.toml` → FAIL (module missing).
 - [ ] **Step 3: Implement `supervisor.rs`:** spawn sidecar `serve --port 0`, read stdout until the ready line, poll `/api/health` every 250 ms with a 15 s timeout, then navigate the main window to `<base_url>/?t=<token>` (same pairing the hosted app uses). Watch the child; on unexpected exit restart with backoff and re-navigate. On app quit, SIGTERM the child and wait up to 5 s before force-kill.
 - [ ] **Step 4:** Register the single-instance plugin (must be the first plugin registered); a second launch focuses the existing window.
-- [ ] **Step 5:** Run unit tests → PASS. Manual checks: launch app → UI loads with no daemon started by hand; launch again → same window focused; quit → `pgrep workbench` shows no leftover daemon.
+- [ ] **Step 5:** Run unit tests → PASS. Manual checks: launch app → UI loads with no daemon started by hand; launch again → same window focused; quit → `pgrep orso` shows no leftover daemon.
 - [ ] **Step 6: Commit** — `feat(desktop): supervise daemon sidecar with health check and single instance`
 
 ### Task 4: Failure UX — splash, error screen, watchdog recovery, log bundle
@@ -118,7 +118,7 @@
 
 **Interfaces:**
 - Consumes: `DaemonHandle::shutdown()` (Task 3) before applying an update; terminal busy state from `GET /api/terminal/{project}` (`busy`, `src/http/terminal.rs:217`) — the updater defers while any known session is busy and while a turn is active.
-- Produces: signed + notarized `Workbench-<version>-<arch>.dmg` and updater artifacts attached to the existing GitHub Release; existing tarball/Homebrew jobs unchanged.
+- Produces: signed + notarized `orso-<version>-<arch>.dmg` and updater artifacts attached to the existing GitHub Release; existing tarball/Homebrew jobs unchanged.
 
 - [ ] **Step 1:** Generate the updater signing keypair with the Tauri CLI signer; store the private key and password as CI secrets, commit only the public key in `tauri.conf.json`. Document every required secret (updater key, Apple Developer ID certificate, notarization credentials per Tauri's macOS signing guide) in `docs/desktop-release.md`.
 - [ ] **Step 2:** Add the `desktop` release job: for each macOS target, build the web UI, stage the sidecar (Task 2 script), `tauri build`, sign, notarize, and upload `.dmg` + updater artifacts next to the existing tarballs; gate `publish` on it like the existing `build`/`e2e` jobs.

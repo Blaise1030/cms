@@ -17,10 +17,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use workbench::config::Config;
-use workbench::http;
-use workbench::projects::DevserverStatus;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::http;
+use orso::projects::DevserverStatus;
+use orso::state::AppState;
 
 /// Deliberately hostile to rewriting: absolute prefixed URLs, a `<base>`, odd bytes.
 const INDEX: &str = "<!doctype html><html><head><base href=\"/preview/site/\">\

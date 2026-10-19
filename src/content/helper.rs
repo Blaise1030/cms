@@ -1,4 +1,4 @@
-//! Runs the project's template-local content helper (`scripts/workbench-content.mjs`).
+//! Runs the project's template-local content helper (`scripts/orso-content.mjs`).
 //!
 //! The helper never writes project files; it describes, validates, and patches values.
 use crate::{error::ApiError, fs};
@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 
-pub(crate) const SCRIPT: &str = "scripts/workbench-content.mjs";
+pub(crate) const SCRIPT: &str = "scripts/orso-content.mjs";
 
 /// Send one request. The outer error means the helper could not run; the inner error is
 /// the helper's own refusal message (stderr of a failed request).

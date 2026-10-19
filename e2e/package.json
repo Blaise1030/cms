@@ -1,5 +1,5 @@
 {
-  "name": "workbench-e2e",
+  "name": "orso-e2e",
   "private": true,
   "type": "module",
   "scripts": {

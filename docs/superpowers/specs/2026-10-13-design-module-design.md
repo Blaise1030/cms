@@ -22,7 +22,7 @@ way `AGENTS.md` is for conventions.
 ### Assumptions
 
 - `DESIGN.md` lives at the project root, next to `AGENTS.md`.
-- It describes the generated Astro site, not the workbench app's own UI.
+- It describes the generated Astro site, not the orso app's own UI.
 
 ### Out of scope (v1)
 

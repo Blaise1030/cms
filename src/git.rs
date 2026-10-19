@@ -23,10 +23,10 @@ pub struct Identity {
 
 impl Identity {
     /// Used when nobody is signed in.
-    pub fn workbench() -> Self {
+    pub fn orso() -> Self {
         Self {
-            name: "Workbench".into(),
-            email: "workbench@localhost".into(),
+            name: "orso".into(),
+            email: "orso@localhost".into(),
         }
     }
 }
@@ -343,7 +343,7 @@ impl ScopedIndexFiles {
         let temporary = lock
             .parent()
             .unwrap()
-            .join(format!("workbench-index-{:032x}", rand::random::<u128>()));
+            .join(format!("orso-index-{:032x}", rand::random::<u128>()));
         let guard = Self {
             lock,
             temporary,

@@ -3,7 +3,7 @@ import { computed, onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
 import type { DesignDoc, DesignTokens } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { cloneValue, sameValue } from "@/modules/content/draft";
 
 export interface DesignConflict { reason: "stale_content" | "branch_changed"; message: string }

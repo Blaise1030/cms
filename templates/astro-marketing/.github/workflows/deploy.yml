@@ -7,7 +7,7 @@
 #                            (https://<alias>-<worker>.<subdomain>.workers.dev). Recorded as a
 #                            GitHub deployment of the PR head SHA whose status carries the preview
 #                            URL (`environment_url`), plus one sticky PR comment with the link.
-#                            The CMS workbench reads that deployment to show "Preview" next to the
+#                            The CMS orso reads that deployment to show "Preview" next to the
 #                            PR status in its browser bar.
 #
 # One-time setup (repo Settings -> Secrets and variables -> Actions):

@@ -751,7 +751,7 @@ pub async fn delete_entry(state: &AppState, request: DeleteEntry) -> Result<(), 
         if let Err(e) = std::fs::remove_dir_all(&trash) {
             // The delete is committed; only the set-aside copy remains on disk.
             eprintln!(
-                "workbench: deleted {}/{id} but could not remove {}: {e}",
+                "orso: deleted {}/{id} but could not remove {}: {e}",
                 c.name,
                 trash.display()
             );

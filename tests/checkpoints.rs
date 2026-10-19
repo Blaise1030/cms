@@ -6,11 +6,11 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http::checkpoints::{finish_turn, TurnOutcome};
-use workbench::projects::Source;
-use workbench::state::AppState;
-use workbench::{git, http};
+use orso::config::Config;
+use orso::http::checkpoints::{finish_turn, TurnOutcome};
+use orso::projects::Source;
+use orso::state::AppState;
+use orso::{git, http};
 
 fn config(dir: &Path, no_auth: bool) -> Config {
     Config {
@@ -99,7 +99,7 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
         .unwrap()
         .expect("checkpoint");
     assert_eq!(cp.summary, "Update hero");
-    assert_eq!(cp.author, "Workbench");
+    assert_eq!(cp.author, "orso");
     assert_eq!(cp.sha, git_cli(&dir, &["rev-parse", "HEAD"]));
     assert_ne!(cp.sha, base);
     assert_eq!(git_cli(&dir, &["rev-list", "--count", "HEAD"]), "2");
@@ -109,9 +109,9 @@ async fn dirty_tree_creates_checkpoint_and_clean_tree_skips() {
         "checkpoint: Update hero"
     );
 
-    workbench::git::set_identity(
+    orso::git::set_identity(
         &dir,
-        &workbench::git::Identity {
+        &orso::git::Identity {
             name: "Ada".into(),
             email: "ada@example.com".into(),
         },
@@ -163,7 +163,7 @@ async fn log_and_diff_endpoints_match_git() {
     assert_eq!(list.len(), 2);
     assert_eq!(list[0]["sha"], cp.sha);
     assert_eq!(list[0]["summary"], "Edit hero");
-    assert_eq!(list[0]["author"], "Workbench");
+    assert_eq!(list[0]["author"], "orso");
     assert!(list[0]["ts"].as_i64().unwrap() > 1_600_000_000);
     assert!(list[1]["summary"]
         .as_str()
@@ -593,7 +593,7 @@ async fn nested_vcs_dirs_are_blocked_and_hidden_at_any_depth() {
 async fn oversized_files_are_rejected_with_413() {
     let tmp = tempfile::tempdir().unwrap();
     let (app, dir) = project(tmp.path()).await;
-    let max = workbench::fs::MAX_FILE_BYTES as usize;
+    let max = orso::fs::MAX_FILE_BYTES as usize;
     std::fs::write(dir.join("ok.bin"), vec![b'a'; max]).unwrap();
     std::fs::write(dir.join("big.bin"), vec![b'a'; max + 1]).unwrap();
     let (s, _, b) = raw(
@@ -635,7 +635,7 @@ async fn finish_turn_commits_and_lists_files() {
     let st = state(tmp.path());
     let info = st.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    workbench::changes::create(&dir, "New post: Launch week")
+    orso::changes::create(&dir, "New post: Launch week")
         .await
         .unwrap();
     std::fs::write(dir.join("b.md"), "b\n").unwrap();
@@ -669,7 +669,7 @@ async fn finish_turn_blocked_on_main_with_remote() {
                 url: format!("file://{}", bare.display()),
                 env: vec![],
             },
-            &git::Identity::workbench(),
+            &git::Identity::orso(),
         )
         .await
         .unwrap();

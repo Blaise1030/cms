@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the workbench daemon for a target triple and stage it as the Tauri sidecar.
+# Build the orso daemon for a target triple and stage it as the Tauri sidecar.
 # Usage: stage-sidecar.sh [target-triple]   (defaults to the host triple)
 set -euo pipefail
 
@@ -10,5 +10,5 @@ target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 cargo build --release --target "$triple" --manifest-path "$repo_root/Cargo.toml"
 
 mkdir -p "$repo_root/src-tauri/binaries"
-cp "$target_dir/$triple/release/workbench" "$repo_root/src-tauri/binaries/workbench-$triple"
-echo "staged src-tauri/binaries/workbench-$triple"
+cp "$target_dir/$triple/release/orso" "$repo_root/src-tauri/binaries/orso-$triple"
+echo "staged src-tauri/binaries/orso-$triple"

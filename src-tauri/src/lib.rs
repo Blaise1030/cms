@@ -91,7 +91,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building Workbench");
+        .expect("error while building orso");
 
     app.run(|app, event| {
         if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {

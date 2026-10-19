@@ -128,7 +128,7 @@ pub fn daemon(line: &str) {
 pub fn shell(message: &str) {
     let mut store = store();
     let line = redact(message, &store.secrets);
-    eprintln!("workbench-desktop: {line}");
+    eprintln!("orso-desktop: {line}");
     store.shell.push(line);
 }
 
@@ -195,9 +195,9 @@ mod tests {
 
     #[test]
     fn redacts_ready_line_token() {
-        let line = "workbench ready: http://127.0.0.1:51234/?t=deadbeef42";
+        let line = "orso ready: http://127.0.0.1:51234/?t=deadbeef42";
         let out = redact(line, &[]);
-        assert_eq!(out, "workbench ready: http://127.0.0.1:51234/?t=<redacted>");
+        assert_eq!(out, "orso ready: http://127.0.0.1:51234/?t=<redacted>");
     }
 
     #[test]

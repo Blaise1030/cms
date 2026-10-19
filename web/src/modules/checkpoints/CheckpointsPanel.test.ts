@@ -45,7 +45,7 @@ async function mountPanel(start = "/p/p/history") {
   api = {
     listCheckpoints: vi.fn(async () => [
       { sha: "aaaaaaa111", summary: "checkpoint: initial", author: "Ada", ts: 100 },
-      { sha: "bbbbbbb222", summary: "checkpoint: hero", author: "Workbench", ts: 200 },
+      { sha: "bbbbbbb222", summary: "checkpoint: hero", author: "orso", ts: 200 },
     ]),
     checkpointDiff: vi.fn(async () => DIFF),
     restoreCheckpoint: vi.fn(async () => ({ restored: "aaaaaaa111" })),
@@ -84,7 +84,7 @@ describe("CheckpointsPanel", () => {
       expect.stringContaining("checkpoint: initial"),
     ]);
     expect(w.findAll("[data-testid='checkpoint-author']").map((a) => a.text())).toEqual([
-      "Workbench",
+      "orso",
       "Ada",
     ]);
     w.unmount();
@@ -123,7 +123,7 @@ describe("CheckpointsPanel", () => {
     const w = await mountPanel();
     await flushPromises();
     api.listCheckpoints!.mockResolvedValueOnce([
-      { sha: "ddddddd444", summary: "checkpoint: missed", author: "Workbench", ts: 300 },
+      { sha: "ddddddd444", summary: "checkpoint: missed", author: "orso", ts: 300 },
     ]);
     h.daemon.emit({ type: "events.lagged", missed: 2 });
     await flushPromises();

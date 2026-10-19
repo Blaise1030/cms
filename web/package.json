@@ -1,5 +1,5 @@
 {
-  "name": "workbench-web",
+  "name": "orso-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -45,7 +45,7 @@
     "@unovis/vue": "^1.7.1",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^15.0.0",
-    "@workbench/utils": "workspace:*",
+    "@orso/utils": "workspace:*",
     "ai": "7.0.143",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

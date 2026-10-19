@@ -24,7 +24,7 @@ function build(dir, base = "/preview/example/") {
 
 // Missing registry entries or drifted loader roots would hide editable collections.
 test("list reports the collection loaders and content kinds", () => {
-  const result = spawnSync(process.execPath, ["scripts/workbench-content.mjs"], { cwd: root, input: '{"op":"list"}', encoding: "utf8" });
+  const result = spawnSync(process.execPath, ["scripts/orso-content.mjs"], { cwd: root, input: '{"op":"list"}', encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout).collections, [
     { name: "blog", loader: { base: "./src/content/blog/en", pattern: "*.md" }, kind: "markdown" },

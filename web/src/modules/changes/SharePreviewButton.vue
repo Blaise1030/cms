@@ -5,7 +5,7 @@ import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
 import { Spinner } from "@/components/ui/spinner";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import PrMenu from "@/modules/changes/PrMenu.vue";
 import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
 import { useChangesStore } from "@/modules/changes/store";

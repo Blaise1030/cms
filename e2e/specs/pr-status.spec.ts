@@ -1,19 +1,19 @@
 import { startChange, terminalCheckpoint } from "../fixtures/daemon";
-import { expect, openPrMenu, test } from "../fixtures/workbench";
+import { expect, openPrMenu, test } from "../fixtures/orso";
 
 test("browser bar shows PR state, checks and preview link; changes menu shows PR state", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { origin, token, projectId, github } = workbench;
+  const { origin, token, projectId, github } = orso;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await startChange(workbench, "New post: Launch week");
+  await startChange(orso, "New post: Launch week");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  await terminalCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(orso, "edit the notes");
 
   // No PR yet: no status pill.
   await expect(page.getByTestId("pr-status")).toHaveCount(0);

@@ -6,7 +6,7 @@ import { createCollectionSchemas } from '../src/content-schemas.mjs';
 
 const root = new URL('../', import.meta.url);
 function helper(request) {
-  const run = spawnSync(process.execPath, ['scripts/workbench-content.mjs'], {cwd: root, input: JSON.stringify(request), encoding:'utf8'});
+  const run = spawnSync(process.execPath, ['scripts/orso-content.mjs'], {cwd: root, input: JSON.stringify(request), encoding:'utf8'});
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
 }
@@ -37,7 +37,7 @@ test('patch changes YAML values while retaining quotes, comments, CRLF and body 
   assert.equal(helper({op:'patch',collection:'blog',source,fields:{},body:'Changed\n'}).source,source.slice(0,source.indexOf('\r\nBody')-0)+'Changed\n');
 });
 test('unknown transforms and custom refinements are read-only descriptors', async () => {
-  const module = await import('./workbench-content.mjs');
+  const module = await import('./orso-content.mjs');
   assert.equal(typeof module.describeSchema,'function');
   for (const schema of [z.string().transform(v=>v.toUpperCase()),z.string().refine(v=>v==='x')]) {
     const descriptor=module.describeSchema(schema);
@@ -48,13 +48,13 @@ test('unknown transforms and custom refinements are read-only descriptors', asyn
   assert.equal(module.describeSchema(z.number()).type,'number');
 });
 test('helper supports line-delimited requests', () => {
-  const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:'{"op":"list"}\n{"op":"describe"}\n',encoding:'utf8'});
+  const run=spawnSync(process.execPath,['scripts/orso-content.mjs'],{cwd:root,input:'{"op":"list"}\n{"op":"describe"}\n',encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
   assert.equal(run.stdout.trim().split('\n').length,2);
 });
 test('patch validates the complete merged candidate before returning source', () => {
   const source='---\ntitle: Old\ndescription: Kept\npubDate: 2026-10-11\n---\nBody';
-  const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{pubDate:'2026-02-30'}}),encoding:'utf8'});
+  const run=spawnSync(process.execPath,['scripts/orso-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{pubDate:'2026-02-30'}}),encoding:'utf8'});
   assert.notEqual(run.status,0);
   assert.match(run.stderr,/pubDate/);
 });
@@ -105,7 +105,7 @@ for (const [name, frontmatter, fields] of [
 ]) {
   test(`patch safely rejects replacing ${name}`, () => {
     const source='---\ntitle: Post\npubDate: 2026-10-11\n'+frontmatter+'---\nBody';
-    const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields}),encoding:'utf8'});
+    const run=spawnSync(process.execPath,['scripts/orso-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields}),encoding:'utf8'});
     assert.notEqual(run.status,0);
     assert.match(run.stderr,/cannot safely.*comment/i);
     assert.equal(run.stdout,'');
@@ -128,7 +128,7 @@ test('patch unset validates the candidate and rejects malformed or overlapping n
     [{unset:[['title']]}, /unset/],
     [{unset:['title'],fields:{title:'New'}}, /unset/],
   ]) {
-    const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{},...request}),encoding:'utf8'});
+    const run=spawnSync(process.execPath,['scripts/orso-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{},...request}),encoding:'utf8'});
     assert.notEqual(run.status,0);
     assert.match(run.stderr,pattern);
     assert.equal(run.stdout,'');
@@ -146,7 +146,7 @@ test('YAML block and flow tag lists gain and lose items in their own style', () 
 });
 test('YAML lists whose comments cannot be preserved are refused with a Code hint', () => {
   const source='---\ntitle: Post\ndescription: D\npubDate: "2026-10-11"\ntags:\n  - news # first\n  - launch\n---\nBody';
-  const run=spawnSync(process.execPath,['scripts/workbench-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{tags:['launch']}}),encoding:'utf8'});
+  const run=spawnSync(process.execPath,['scripts/orso-content.mjs'],{cwd:root,input:JSON.stringify({op:'patch',collection:'blog',source,fields:{tags:['launch']}}),encoding:'utf8'});
   assert.notEqual(run.status,0);
   assert.match(run.stderr,/edit this field in Code/);
 });

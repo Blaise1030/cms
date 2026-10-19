@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Workbench</title>
+    <title>orso</title>
     <style>
       :root { color-scheme: light dark; }
       body {
@@ -26,9 +26,9 @@
   </head>
   <body data-tauri-drag-region>
     <main>
-      <h1 id="title">Update Workbench</h1>
+      <h1 id="title">Update orso</h1>
       <p>
-        Workbench will stop its background service, install the update and reopen. Running
+        orso will stop its background service, install the update and reopen. Running
         terminal sessions end.
       </p>
       <button id="apply">Restart to update</button>
@@ -41,7 +41,7 @@
       const status = document.getElementById("status");
       const apply = document.getElementById("apply");
       const version = new URLSearchParams(location.search).get("version");
-      if (version) document.getElementById("title").textContent = `Update Workbench to ${version}`;
+      if (version) document.getElementById("title").textContent = `Update orso to ${version}`;
 
       apply.addEventListener("click", async () => {
         apply.disabled = true;

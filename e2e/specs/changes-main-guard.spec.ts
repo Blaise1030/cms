@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { api, startChange, terminalCheckpoint } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -9,9 +9,9 @@ function git(cwd: string, args: string[]): string {
 
 test("GitHub project on main refuses an agent session, then runs on the new branch", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { origin, token, projectId, projectDir } = workbench;
+  const { origin, token, projectId, projectDir } = orso;
   const mainBefore = git(projectDir, ["rev-parse", "main"]);
   expect(git(projectDir, ["branch", "--show-current"])).toBe("main");
 
@@ -21,7 +21,7 @@ test("GitHub project on main refuses an agent session, then runs on the new bran
   expect(body).toContain("CHANGE_REQUIRED");
   expect(body).toContain("Start a change first");
 
-  await startChange(workbench, "New post: Launch week");
+  await startChange(orso, "New post: Launch week");
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Launch week", { timeout: 60_000 });
@@ -29,7 +29,7 @@ test("GitHub project on main refuses an agent session, then runs on the new bran
     .poll(() => git(projectDir, ["branch", "--show-current"]))
     .toBe("content/launch-week");
 
-  await terminalCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(orso, "edit the notes");
 
   await expect
     .poll(() => {
@@ -54,9 +54,9 @@ test("GitHub project on main refuses an agent session, then runs on the new bran
 
 test("local-only project edits main with no Start a change dialog", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { origin, token } = workbench;
+  const { origin, token } = orso;
 
   let created: Response | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {

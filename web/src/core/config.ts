@@ -14,7 +14,7 @@ interface StoredConfig {
   token?: string;
 }
 
-export const STORAGE_KEY = "workbench.daemon";
+export const STORAGE_KEY = "orso.daemon";
 
 export function normalizeOrigin(input: string): string {
   const url = new URL(input.trim());

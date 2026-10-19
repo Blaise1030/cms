@@ -27,8 +27,8 @@
   - `Cancelled` → "You stopped combining."
 - **Deviation from spec (decided during planning):** the result file is written to
   `<job dir>/result.json` outside the worktree (path passed in the prompt and in env
-  `WORKBENCH_RESOLVE_RESULT`), not `.workbench/resolve-result.json` inside it, because projects
-  have no git-excluded `.workbench/` and the file must never enter the merge tree. The provider id
+  `ORSO_RESOLVE_RESULT`), not `.orso/resolve-result.json` inside it, because projects
+  have no git-excluded `.orso/` and the file must never enter the merge tree. The provider id
   is sent by the frontend on start (providers are chosen per browser, not stored per project).
 
 ## Review Focus
@@ -71,7 +71,7 @@
 - Consumes: `Provider`, `LaunchSpec`, `GIT_GUIDE`, opencode dir logic (`state_dir.join(project_id).join("opencode")`, `write_opencode_config`).
 - Produces: `pub fn headless_spec(provider: &Provider, prompt: &str, state_dir: &Path, project_id: &str) -> LaunchSpec` (always auto-approve; no hooks, no session flags).
 
-- [ ] **Step 1: Verify real CLI flags** for every installed CLI, in a scratch git repo, each with a "write `{\"ok\":true}` to $WORKBENCH_RESOLVE_RESULT" prompt:
+- [ ] **Step 1: Verify real CLI flags** for every installed CLI, in a scratch git repo, each with a "write `{\"ok\":true}` to $ORSO_RESOLVE_RESULT" prompt:
   - `claude -p "<prompt>" --output-format stream-json --verbose --dangerously-skip-permissions`
   - `codex exec --json --dangerously-bypass-approvals-and-sandbox "<prompt>"`
   - `cursor-agent -p --force --output-format stream-json "<prompt>"`
@@ -177,7 +177,7 @@
 - Runner (spawned tokio task per job; job dir `std::env::temp_dir()/wb-sync-<session id>`):
   1. **Preparing.** `git worktree add --detach --quiet <job>/site <tip>` in `project_dir`, then `git merge --no-commit --no-ff <incoming>` inside the worktree. Exit 0 or 1 are both fine; anything else is `AgentFailed`.
   2. **Resolving.** Delete `result.json`, build `headless_spec(provider, prompt(...), state_dir, project_id)`, and spawn it:
-     - `cwd` is the worktree; env is the spec env plus `WORKBENCH_RESOLVE_RESULT`;
+     - `cwd` is the worktree; env is the spec env plus `ORSO_RESOLVE_RESULT`;
      - use `process_group(0)` and `kill_on_drop`; stdout/stderr go to `<job>/agent.log`;
      - wait up to `timeouts.agent`.
 
@@ -186,7 +186,7 @@
   4. **Done.** `git write-tree` in the worktree, then `merge_commit(project_dir, tree, tip, incoming, author, "Sync with live site")`. Under `git::lock_for(project_dir)`, call `advance_branch`; its 409 maps to `DraftMoved`. Then `sessions.abandon(session_id)` and `previews.remove_session(session_id)`.
   5. **Always** run `git worktree remove --force <job>/site` and `remove_dir_all(<job>)`. Keep the conflict session on failure.
   6. `cancel` kills the process group and ends the job as `Failed` with `Cancelled`.
-- `tests/fixtures/fake_resolver.sh <mode> … <prompt>` (prompt is the last arg; result path from `$WORKBENCH_RESOLVE_RESULT`):
+- `tests/fixtures/fake_resolver.sh <mode> … <prompt>` (prompt is the last arg; result path from `$ORSO_RESOLVE_RESULT`):
   - `resolved`: `git checkout --ours -- $(git diff --name-only --diff-filter=U)`, then write `{"status":"resolved","summary":"Kept your version"}`.
   - `needs-input`: if the prompt lacks `Answers from the writer:`, write one question `{"id":"q1","text":"Which headline should stay?","options":["Mine","Theirs"]}`. Otherwise write the text after `Which headline should stay?: ` as the whole content of each unmerged file, then write `resolved`.
   - `garbage`: write `not json`.
@@ -355,15 +355,15 @@
 ### Task 9: End-to-end
 
 **Files:**
-- Modify: `e2e/fixtures/daemon.ts:197` (`startWorkbench`: add `"fake-resolver": ["sh", <repo>/tests/fixtures/fake_resolver.sh, "needs-input"]` to `agents.json`)
+- Modify: `e2e/fixtures/daemon.ts:197` (`startorso`: add `"fake-resolver": ["sh", <repo>/tests/fixtures/fake_resolver.sh, "needs-input"]` to `agents.json`)
 - Create: `e2e/specs/sync-auto-resolve.spec.ts`
 - Modify: `e2e/specs/get-latest.spec.ts` and `e2e/specs/conflicts.spec.ts` if they relied on the button sending an agent request or on `ConflictView` auto-opening. `conflicts.spec.ts` now reaches `ConflictView` via the dialog's **Advanced** link, using provider `garbage` or a missing provider.
 
 **Interfaces:**
-- Consumes: the `workbench.ts` fixture (`origin, token, projectId, projectDir, bareRemote`), `pushConflictingMain` and the static build setup from `conflicts.spec.ts`.
+- Consumes: the `orso.ts` fixture (`origin, token, projectId, projectDir, bareRemote`), `pushConflictingMain` and the static build setup from `conflicts.spec.ts`.
 
 - [ ] **Step 1: Write the spec** `sync-auto-resolve.spec.ts`:
-  - `page.addInitScript(() => localStorage.setItem("workbench.terminal.provider", "fake-resolver"))`;
+  - `page.addInitScript(() => localStorage.setItem("orso.terminal.provider", "fake-resolver"))`;
   - create a change through the UI, edit and commit the conflicting file, then `pushConflictingMain`;
   - click `get-latest`; expect `sync-question` with "Which headline should stay?"; choose "Theirs"; **Continue**;
   - expect `sync-done`; **Close**;

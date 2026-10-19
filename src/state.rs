@@ -72,7 +72,7 @@ impl AppState {
             return;
         };
         if let Err(e) = self.watchers.start(id, &p.dir) {
-            eprintln!("workbench: cannot watch {id}: {e}");
+            eprintln!("orso: cannot watch {id}: {e}");
         }
     }
 

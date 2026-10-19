@@ -12,11 +12,11 @@ use serde_json::{json, Value};
 use tokio::process::Command;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::devserver::{DevServerOptions, MAX_RESTARTS};
-use workbench::http;
-use workbench::http::ctl::preview_status_value;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::devserver::{DevServerOptions, MAX_RESTARTS};
+use orso::http;
+use orso::http::ctl::preview_status_value;
+use orso::state::AppState;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -326,13 +326,13 @@ async fn ctl_preview_status_carries_the_crash_output_until_a_restart() {
 /// Make every registry write fail: `projects.json` becomes a directory, so the atomic
 /// rename of the temp file onto it errors.
 fn break_registry_persistence(root: &Path) {
-    let f = root.join(".workbench/projects.json");
+    let f = root.join(".orso/projects.json");
     std::fs::remove_file(&f).unwrap();
     std::fs::create_dir(&f).unwrap();
 }
 
 fn restore_registry_persistence(root: &Path) {
-    std::fs::remove_dir(root.join(".workbench/projects.json")).unwrap();
+    std::fs::remove_dir(root.join(".orso/projects.json")).unwrap();
 }
 
 const WRONG_PORT: &str = r#"
@@ -510,7 +510,7 @@ async fn daemon_restart_resumes_projects_and_reallocates_a_busy_port() {
         format!("/preview/alpha/ {}", ready["alpha"])
     );
     let persisted: Value =
-        serde_json::from_slice(&std::fs::read(root.join(".workbench/projects.json")).unwrap())
+        serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap())
             .unwrap();
     let alpha = persisted
         .as_array()

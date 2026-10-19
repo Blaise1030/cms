@@ -1,4 +1,4 @@
-//! `workbench hook turn-end`: invoked by a coding CLI's turn-end hook; tells the daemon.
+//! `orso hook turn-end`: invoked by a coding CLI's turn-end hook; tells the daemon.
 
 use std::io::{IsTerminal, Read};
 use std::process::ExitCode;
@@ -53,9 +53,9 @@ fn read_stdin() -> String {
 /// Notify the daemon that a turn ended. Never fails the calling CLI: always `SUCCESS`.
 pub async fn turn_end(payload_arg: Option<String>) -> ExitCode {
     let (Ok(url), Ok(project), Ok(token)) = (
-        std::env::var("WORKBENCH_URL"),
-        std::env::var("WORKBENCH_PROJECT"),
-        std::env::var("WORKBENCH_HOOK_TOKEN"),
+        std::env::var("ORSO_URL"),
+        std::env::var("ORSO_PROJECT"),
+        std::env::var("ORSO_HOOK_TOKEN"),
     ) else {
         return ExitCode::SUCCESS;
     };
@@ -84,7 +84,7 @@ pub async fn turn_end(payload_arg: Option<String>) -> ExitCode {
     }
     .await;
     if let Err(e) = result {
-        eprintln!("workbench hook: {e}");
+        eprintln!("orso hook: {e}");
     }
     ExitCode::SUCCESS
 }
@@ -140,7 +140,7 @@ mod tests {
     }
 
     fn clear_env() {
-        for k in ["WORKBENCH_URL", "WORKBENCH_PROJECT", "WORKBENCH_HOOK_TOKEN"] {
+        for k in ["ORSO_URL", "ORSO_PROJECT", "ORSO_HOOK_TOKEN"] {
             unsafe { std::env::remove_var(k) };
         }
     }
@@ -170,9 +170,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         unsafe {
-            std::env::set_var("WORKBENCH_URL", format!("http://{addr}"));
-            std::env::set_var("WORKBENCH_PROJECT", "proj");
-            std::env::set_var("WORKBENCH_HOOK_TOKEN", "tok");
+            std::env::set_var("ORSO_URL", format!("http://{addr}"));
+            std::env::set_var("ORSO_PROJECT", "proj");
+            std::env::set_var("ORSO_HOOK_TOKEN", "tok");
         }
         let code = turn_end(Some(r#"{"input-messages":["a","b"]}"#.into())).await;
         clear_env();

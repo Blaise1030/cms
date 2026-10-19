@@ -129,7 +129,7 @@ describe("createApi", () => {
 });
 
 describe("updateContentEntry", () => {
-  const body = { project: "p", collection: "blog", id: "welcome", branch: "content/a", hash: "h1", fields: {}, body: "![A](workbench-image:c1)\n" };
+  const body = { project: "p", collection: "blog", id: "welcome", branch: "content/a", hash: "h1", fields: {}, body: "![A](orso-image:c1)\n" };
 
   it("sends JSON when the save has no images", async () => {
     const fetchImpl = vi.fn<FetchLike>(async () => json({ id: "welcome" }));

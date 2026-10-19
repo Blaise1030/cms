@@ -1,4 +1,4 @@
-# Multi-writer Workbench — Roadmap
+# Multi-writer orso — Roadmap
 
 Each phase below gets its own implementation plan (`docs/superpowers/plans/`) when it starts,
 and each ships working software on its own.
@@ -6,7 +6,7 @@ and each ships working software on its own.
 ## Decisions and assumptions
 
 - **Everyone runs the daemon locally.** Blog writers, help-doc authors, translators and
-  developers all download `workbench`. There is no hosted CMS (Keystatic/Tina were rejected).
+  developers all download `orso`. There is no hosted CMS (Keystatic/Tina were rejected).
 - **Everyone has a GitHub account.** GitHub is the shared store, the identity, and the review
   surface (pull requests).
 - **Cloudflare access is limited.** Writers never touch Cloudflare. Preview and production
@@ -23,7 +23,7 @@ Plan: `2026-10-02-phase1-github-signin.md`.
 - Sign in with GitHub from the app (OAuth device flow); the session survives restarts.
 - "Open from GitHub": clone any repo the user can access as a project.
 - Commits (checkpoints and the agent's own) are authored by the signed-in person instead of
-  the hardcoded `Workbench` identity.
+  the hardcoded `orso` identity.
 
 ## Phase 2 — Changes, preview links, review
 
@@ -61,7 +61,7 @@ Plan: `2026-10-02-phase1-github-signin.md`.
 
 ## Phase 5 — Packaging and writer mode
 
-- Release binaries (GitHub Releases / Homebrew tap); `workbench` opens the browser already
+- Release binaries (GitHub Releases / Homebrew tap); `orso` opens the browser already
   authenticated (no token copy-paste).
 - Startup checks for Node and git with a friendly install screen.
 - `gh auth token` as a sign-in shortcut when the GitHub CLI is installed.

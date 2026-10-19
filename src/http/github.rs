@@ -45,7 +45,7 @@ pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutco
     Ok(Json(outcome))
 }
 
-/// `POST /api/github/signout`. Projects go back to the `Workbench` identity.
+/// `POST /api/github/signout`. Projects go back to the `orso` identity.
 pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
     state.github.sign_out().await;
     apply_current(&state).await;

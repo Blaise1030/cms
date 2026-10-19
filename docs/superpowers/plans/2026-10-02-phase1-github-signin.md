@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A writer signs in with GitHub inside the workbench, opens any repository they can access as a project, and every commit made in it is authored by them.
+**Goal:** A writer signs in with GitHub inside the orso, opens any repository they can access as a project, and every commit made in it is authored by them.
 
-**Architecture:** A new `github` module in the daemon runs GitHub's OAuth device flow, stores the session in `{projects-dir}/.workbench/github.json` (mode 0600) and talks to the GitHub API with `reqwest`. Git authentication is passed per command through `GIT_CONFIG_*` environment variables (never argv, never repo config). Commit identity moves from the hardcoded `-c user.name=Workbench` to each repo's local `user.name`/`user.email`, which sign-in and sign-out rewrite. The web app gets a GitHub account control in the header, a device-code dialog, and an "Open from GitHub" dialog.
+**Architecture:** A new `github` module in the daemon runs GitHub's OAuth device flow, stores the session in `{projects-dir}/.orso/github.json` (mode 0600) and talks to the GitHub API with `reqwest`. Git authentication is passed per command through `GIT_CONFIG_*` environment variables (never argv, never repo config). Commit identity moves from the hardcoded `-c user.name=orso` to each repo's local `user.name`/`user.email`, which sign-in and sign-out rewrite. The web app gets a GitHub account control in the header, a device-code dialog, and an "Open from GitHub" dialog.
 
 **Tech Stack:** Rust (axum 0.8, tokio, reqwest + rustls, base64), Vue 3 + Pinia + shadcn-vue, Vitest, git ≥ 2.31 (for `GIT_CONFIG_COUNT`).
 
@@ -21,7 +21,7 @@ Roadmap and assumptions: `docs/superpowers/plans/2026-10-02-multi-writer-roadmap
 | `src/git.rs` | `Identity`, `set_identity`, `has_identity`; `run()` stops forcing an identity |
 | `src/projects.rs` | `Source` (template / clone), `create_from`, `repo` field, `apply_identity`, `ensure_identities` |
 | `src/http/projects.rs` | `POST /api/github/clone`; `create` uses the signed-in identity |
-| `src/config.rs`, `src/main.rs` | `GithubConfig`, `--github-client-id` / `WORKBENCH_GITHUB_CLIENT_ID` |
+| `src/config.rs`, `src/main.rs` | `GithubConfig`, `--github-client-id` / `ORSO_GITHUB_CLIENT_ID` |
 | `src/error.rs` | `GITHUB_ERR` code |
 | `src/state.rs`, `src/lib.rs` | `AppState.github`; identity migration at startup |
 | `tests/github.rs` (new) | End-to-end against a fake GitHub server and a local bare repo |
@@ -67,7 +67,7 @@ git commit -m "build: add reqwest, base64 and clap env for GitHub sign-in"
 
 **Files:**
 - Modify: `src/error.rs` (enum `ErrorCode`, `as_str`, `status`, constructors, test `all_codes_match_spec`)
-- Modify: `docs/superpowers/specs/2026-09-29-workbench-lovable-builder-design.md:73`
+- Modify: `docs/superpowers/specs/2026-09-29-orso-lovable-builder-design.md:73`
 - Modify: `web/src/core/types.ts` (`ErrorCode` union and `ERROR_CODES`)
 
 - [ ] **Step 1: Update the failing test first**
@@ -179,14 +179,14 @@ In `src/main.rs`, add to `Command::Serve`:
 
 ```rust
         /// GitHub OAuth App client id (enables "Sign in with GitHub").
-        #[arg(long, env = "WORKBENCH_GITHUB_CLIENT_ID")]
+        #[arg(long, env = "ORSO_GITHUB_CLIENT_ID")]
         github_client_id: Option<String>,
 ```
 
 destructure it in `main`, and set it on the config:
 
 ```rust
-        github: workbench::config::GithubConfig {
+        github: orso::config::GithubConfig {
             client_id: github_client_id,
             ..Default::default()
         },
@@ -210,7 +210,7 @@ git commit -m "feat: GitHub config and --github-client-id"
 
 ### Task 4: Per-repo commit identity
 
-Today `src/git.rs::run` and `src/projects.rs::git` pass `-c user.name=Workbench -c user.email=workbench@localhost` on every call, which overrides any identity. Move identity into each repo's local config.
+Today `src/git.rs::run` and `src/projects.rs::git` pass `-c user.name=orso -c user.email=orso@localhost` on every call, which overrides any identity. Move identity into each repo's local config.
 
 **Files:**
 - Modify: `src/git.rs` (`run`, new `Identity`, `set_identity`, `has_identity`)
@@ -229,9 +229,9 @@ async fn new_projects_carry_a_local_identity_and_it_can_be_replaced() {
     let state = AppState::with_scaffold_install(config(tmp.path(), true), false);
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
 
-    let ada = workbench::git::Identity {
+    let ada = orso::git::Identity {
         name: "Ada Lovelace".into(),
         email: "42+ada@users.noreply.github.com".into(),
     };
@@ -254,18 +254,18 @@ async fn startup_gives_older_projects_a_local_identity() {
 
     state
         .projects
-        .ensure_identities(&workbench::git::Identity::workbench())
+        .ensure_identities(&orso::git::Identity::orso())
         .await;
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
 }
 ```
 
-In `tests/checkpoints.rs`, after the existing `assert_eq!(cp.author, "Workbench");`, add a second checkpoint under a new identity:
+In `tests/checkpoints.rs`, after the existing `assert_eq!(cp.author, "orso");`, add a second checkpoint under a new identity:
 
 ```rust
-    workbench::git::set_identity(
+    orso::git::set_identity(
         &dir,
-        &workbench::git::Identity { name: "Ada".into(), email: "ada@example.com".into() },
+        &orso::git::Identity { name: "Ada".into(), email: "ada@example.com".into() },
     )
     .await
     .unwrap();
@@ -295,10 +295,10 @@ pub struct Identity {
 
 impl Identity {
     /// Used when nobody is signed in.
-    pub fn workbench() -> Self {
+    pub fn orso() -> Self {
         Self {
-            name: "Workbench".into(),
-            email: "workbench@localhost".into(),
+            name: "orso".into(),
+            email: "orso@localhost".into(),
         }
     }
 }
@@ -316,7 +316,7 @@ pub async fn has_identity(dir: &Path) -> bool {
 }
 ```
 
-In `run`, delete the four lines `"-c", "user.name=Workbench", "-c", "user.email=workbench@localhost",` and update its doc comment to say identity comes from the repo's local config.
+In `run`, delete the four lines `"-c", "user.name=orso", "-c", "user.email=orso@localhost",` and update its doc comment to say identity comes from the repo's local config.
 
 - [ ] **Step 4: Implement in `src/projects.rs`**
 
@@ -334,7 +334,7 @@ In `scaffold`, set the identity between `init` and the first commit. Change `sca
     }
 ```
 
-and in `create` call `self.scaffold(&dir, &Identity::workbench())`. Add `use crate::git::Identity;`.
+and in `create` call `self.scaffold(&dir, &Identity::orso())`. Add `use crate::git::Identity;`.
 
 Add to `impl ProjectRegistry`:
 
@@ -348,7 +348,7 @@ Add to `impl ProjectRegistry`:
         let dirs = Self::dirs(&*self.inner.lock().await);
         for dir in dirs {
             if let Err(e) = crate::git::set_identity(&dir, identity).await {
-                eprintln!("workbench: cannot set git identity in {}: {e}", dir.display());
+                eprintln!("orso: cannot set git identity in {}: {e}", dir.display());
             }
         }
     }
@@ -359,7 +359,7 @@ Add to `impl ProjectRegistry`:
         for dir in dirs {
             if !crate::git::has_identity(&dir).await {
                 if let Err(e) = crate::git::set_identity(&dir, identity).await {
-                    eprintln!("workbench: cannot set git identity in {}: {e}", dir.display());
+                    eprintln!("orso: cannot set git identity in {}: {e}", dir.display());
                 }
             }
         }
@@ -373,22 +373,22 @@ In `src/lib.rs::serve_on`, before `state.watch_all().await;`:
 ```rust
     state
         .projects
-        .ensure_identities(&crate::git::Identity::workbench())
+        .ensure_identities(&crate::git::Identity::orso())
         .await;
 ```
 
-(Task 7 replaces `Identity::workbench()` with the signed-in identity.)
+(Task 7 replaces `Identity::orso()` with the signed-in identity.)
 
 - [ ] **Step 6: Run tests**
 
 Run: `cargo test`
-Expected: PASS. If a test builds a repo by hand with `git init` and then calls `git::checkpoint`, give it an identity first with `workbench::git::set_identity(&dir, &workbench::git::Identity::workbench()).await.unwrap();`.
+Expected: PASS. If a test builds a repo by hand with `git init` and then calls `git::checkpoint`, give it an identity first with `orso::git::set_identity(&dir, &orso::git::Identity::orso()).await.unwrap();`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add src tests
-git commit -m "feat: per-repo git identity instead of a forced Workbench author"
+git commit -m "feat: per-repo git identity instead of a forced orso author"
 ```
 
 ---
@@ -466,7 +466,7 @@ Put this above the test module in `src/github.rs`:
 ```rust
 //! GitHub sign-in (OAuth device flow), the signed-in account, and repository access.
 //!
-//! The session (token + profile) lives in `{projects-dir}/.workbench/github.json`, mode 0600.
+//! The session (token + profile) lives in `{projects-dir}/.orso/github.json`, mode 0600.
 //! The token is sent to the GitHub API as a bearer token and to git per command through
 //! `GIT_CONFIG_*` environment variables, so it never appears in argv or in a repo's config.
 
@@ -625,7 +625,7 @@ impl GithubAuth {
             .ok()
             .and_then(|b| serde_json::from_slice::<Session>(&b).ok());
         let http = reqwest::Client::builder()
-            .user_agent("workbench")
+            .user_agent("orso")
             .timeout(Duration::from_secs(30))
             .build()
             .expect("HTTP client");
@@ -651,7 +651,7 @@ impl GithubAuth {
         self.inner.lock().await.session.as_ref().map(|s| s.token.clone())
     }
 
-    /// The signed-in person's commit identity, or [`Identity::workbench`].
+    /// The signed-in person's commit identity, or [`Identity::orso`].
     pub async fn identity(&self) -> Identity {
         self.inner
             .lock()
@@ -659,7 +659,7 @@ impl GithubAuth {
             .session
             .as_ref()
             .map(|s| s.user.identity())
-            .unwrap_or_else(Identity::workbench)
+            .unwrap_or_else(Identity::orso)
     }
 
     /// `{git_url}/{repo}.git` for a validated `owner/name`.
@@ -991,9 +991,9 @@ pub enum Source {
 Rename the body of `create` to `pub async fn create_from(&self, name: &str, source: Source, identity: &Identity) -> Result<ProjectInfo, ApiError>` and keep `create` as the template shortcut the tests use:
 
 ```rust
-    /// New project from the template, authored as [`Identity::workbench`] (tests, defaults).
+    /// New project from the template, authored as [`Identity::orso`] (tests, defaults).
     pub async fn create(&self, name: &str) -> Result<ProjectInfo, ApiError> {
-        self.create_from(name, Source::Template, &Identity::workbench())
+        self.create_from(name, Source::Template, &Identity::orso())
             .await
     }
 ```
@@ -1120,9 +1120,9 @@ use axum::{Json, Router};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::{Config, GithubConfig};
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::{Config, GithubConfig};
+use orso::http;
+use orso::state::AppState;
 
 async fn fake_github() -> String {
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1257,7 +1257,7 @@ async fn sign_in_open_repo_and_author_commits() {
     assert_eq!(body["user"]["login"], "ada");
     assert_eq!(body["user"]["avatarUrl"], "https://avatars.example/ada.png");
 
-    let session = projects.join(".workbench/github.json");
+    let session = projects.join(".orso/github.json");
     let mode = std::fs::metadata(&session).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 
@@ -1293,7 +1293,7 @@ async fn sign_in_open_repo_and_author_commits() {
     let (_, body) = call(&again, req("GET", "/api/github/status", None)).await;
     assert_eq!(body["user"], Value::Null);
     assert!(!session.exists());
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
 }
 
 #[tokio::test]
@@ -1370,10 +1370,10 @@ pub async fn device_poll(State(state): State<AppState>) -> Result<Json<PollOutco
     Ok(Json(outcome))
 }
 
-/// `POST /api/github/signout`. Projects go back to the `Workbench` identity.
+/// `POST /api/github/signout`. Projects go back to the `orso` identity.
 pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
     state.github.sign_out().await;
-    state.projects.apply_identity(&Identity::workbench()).await;
+    state.projects.apply_identity(&Identity::orso()).await;
     Json(json!({ "signedOut": true }))
 }
 
@@ -1454,7 +1454,7 @@ async fn started(state: &AppState, info: ProjectInfo) -> ProjectInfo {
     // `start` marks the project `crashed` (and publishes it) if it cannot supervise, so
     // the response reflects the real state either way; the restart endpoint retries.
     if let Err(e) = state.devservers.start(&info.id).await {
-        eprintln!("workbench: cannot start dev server for {}: {e}", info.id);
+        eprintln!("orso: cannot start dev server for {}: {e}", info.id);
     }
     match state.projects.get(&info.id).await {
         Some(p) => ProjectInfo::from(&p),
@@ -2235,23 +2235,23 @@ Done once per organisation by an admin.
 
 1. GitHub → Settings → Developer settings → **OAuth Apps** → *New OAuth App*
    (for an organisation: Organisation settings → Developer settings).
-   - Application name: `Workbench`
+   - Application name: `orso`
    - Homepage URL: your site or repo URL
    - Authorization callback URL: any URL you control (the device flow does not use it)
 2. Open the app and tick **Enable Device Flow**. Copy the **Client ID** (no secret is needed).
-3. If the organisation restricts OAuth apps, approve Workbench under
+3. If the organisation restricts OAuth apps, approve orso under
    Organisation settings → Third-party access.
 
 Everyone then starts the daemon with the client id:
 
 ```sh
-WORKBENCH_GITHUB_CLIENT_ID=Iv1.xxxxxxxx workbench serve
-# or: workbench serve --github-client-id Iv1.xxxxxxxx
+ORSO_GITHUB_CLIENT_ID=Iv1.xxxxxxxx orso serve
+# or: orso serve --github-client-id Iv1.xxxxxxxx
 ```
 
-**Sign in with GitHub** appears in the top-right. Workbench asks for the `repo` scope
+**Sign in with GitHub** appears in the top-right. orso asks for the `repo` scope
 (clone and push the site repositories) and `read:user` (your name on commits). The token is
-stored in `~/workbench-projects/.workbench/github.json`, readable only by you; **Sign out**
+stored in `~/orso-projects/.orso/github.json`, readable only by you; **Sign out**
 deletes it.
 ````
 
@@ -2273,7 +2273,7 @@ Expected: web build, `cargo test`, web tests and the template build all pass. (`
 
 - [ ] **Step 2: Manual check with a real OAuth App**
 
-1. `WORKBENCH_GITHUB_CLIENT_ID=<id> just dev`, open the printed link.
+1. `ORSO_GITHUB_CLIENT_ID=<id> just dev`, open the printed link.
 2. Click **Sign in with GitHub**, enter the code on github.com, approve. The header shows your avatar and name.
 3. **Open from GitHub** → pick a site repo → it appears and its preview starts.
 4. Ask the agent for a small change; in **History** the new checkpoint shows your name.

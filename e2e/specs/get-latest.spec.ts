@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getLatest, startChange, terminalCheckpoint, type WorkbenchEnv } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { getLatest, startChange, terminalCheckpoint, type orsoEnv } from "../fixtures/daemon";
+import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" }).trim();
@@ -19,7 +19,7 @@ function isAncestor(cwd: string, ancestor: string, descendant: string): boolean 
 }
 
 /** Someone else lands a new page on the remote `main` (no overlap with the changes). */
-function pushToRemoteMain(env: WorkbenchEnv): string {
+function pushToRemoteMain(env: orsoEnv): string {
   const pusher = path.join(env.tmp, "pusher");
   execFileSync("git", ["clone", env.bareRemote, pusher], { stdio: "pipe" });
   fs.writeFileSync(path.join(pusher, "index.html"), "<h1>Fresh from main</h1>\n");
@@ -41,40 +41,40 @@ function pushToRemoteMain(env: WorkbenchEnv): string {
 
 async function newChange(
   page: import("@playwright/test").Page,
-  workbench: WorkbenchEnv,
+  orso: orsoEnv,
   title: string,
   label: string,
 ) {
-  await startChange(workbench, title);
+  await startChange(orso, title);
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText(label);
 }
 
 test("get latest merges new main into every open change without force-pushing", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { origin, token, projectId, projectDir, bareRemote } = workbench;
+  const { origin, token, projectId, projectDir, bareRemote } = orso;
 
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
   // First change: edit + share (pushes the branch to the remote).
-  await newChange(page, workbench, "New post: First change", "First change");
-  await terminalCheckpoint(workbench, "edit the notes");
+  await newChange(page, orso, "New post: First change", "First change");
+  await terminalCheckpoint(orso, "edit the notes");
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   const sharedTip = git(bareRemote, ["rev-parse", "refs/heads/content/first-change"]);
 
   // Second change (active from here on).
-  await newChange(page, workbench, "New post: Second change", "Second change");
-  await terminalCheckpoint(workbench, "edit the notes");
+  await newChange(page, orso, "New post: Second change", "Second change");
+  await terminalCheckpoint(orso, "edit the notes");
 
   const preview = page.frameLocator('[data-testid="preview-frame"]');
   await expect(preview.locator("body")).toContainText("Not found", { timeout: 30_000 });
 
-  const remoteMain = pushToRemoteMain(workbench);
+  const remoteMain = pushToRemoteMain(orso);
 
   // Get latest leaves the checked-out change for later while this project's terminal is live.
   const stop = await fetch(`${origin}/api/terminal/${encodeURIComponent(projectId)}`, {
@@ -85,7 +85,7 @@ test("get latest merges new main into every open change without force-pushing", 
     throw new Error(`stop terminal before get latest failed: ${stop.status} ${await stop.text()}`);
   }
 
-  const result = await getLatest(workbench);
+  const result = await getLatest(orso);
   expect(result.mainUpdated).toBe(true);
   expect(result.updated.map((c) => c.branch).sort()).toEqual([
     "content/first-change",

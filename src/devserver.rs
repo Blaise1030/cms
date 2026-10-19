@@ -39,7 +39,7 @@ const TAIL_CHARS: usize = 800;
 /// How often a running npm dev server checks whether its packages changed.
 const DEPS_POLL: Duration = Duration::from_secs(3);
 /// Fingerprint of the manifests `npm install` last ran against.
-const DEPS_MARKER: &str = "node_modules/.workbench-deps";
+const DEPS_MARKER: &str = "node_modules/.orso-deps";
 
 /// Fingerprint of `package.json` + `package-lock.json`; `None` without a `package.json`.
 fn deps_fingerprint(dir: &std::path::Path) -> Option<String> {
@@ -98,7 +98,7 @@ pub struct DevServerOptions {
     pub launcher: Launcher,
     pub backoff_base: Duration,
     pub stable_after: Duration,
-    /// Daemon listen port; exposed to Astro as `WORKBENCH_PROXY_PORT` so Vite HMR
+    /// Daemon listen port; exposed to Astro as `ORSO_PROXY_PORT` so Vite HMR
     /// connects through the preview proxy instead of the raw Astro port.
     pub proxy_port: u16,
 }
@@ -232,7 +232,7 @@ impl DevServerManager {
     pub async fn resume_all(&self) {
         for p in self.shared.projects.list().await {
             if let Err(e) = self.start(&p.id).await {
-                eprintln!("workbench: cannot start dev server for {}: {e}", p.id);
+                eprintln!("orso: cannot start dev server for {}: {e}", p.id);
             }
         }
     }
@@ -339,7 +339,7 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         if stable {
             crashes = 0;
         }
-        eprintln!("workbench: dev server for {id} died: {message}");
+        eprintln!("orso: dev server for {id} died: {message}");
         if crashes >= MAX_RESTARTS {
             shared
                 .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
@@ -413,7 +413,7 @@ async fn run_once(
         // Own group, so terminating also reaches npm's node grandchild.
         .process_group(0);
     if shared.opts.proxy_port > 0 {
-        cmd.env("WORKBENCH_PROXY_PORT", shared.opts.proxy_port.to_string());
+        cmd.env("ORSO_PROXY_PORT", shared.opts.proxy_port.to_string());
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,

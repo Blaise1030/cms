@@ -20,7 +20,7 @@ const allMissing: SetupStatus = {
     { id: "claude", name: "Claude Code", available: false },
     { id: "codex", name: "Codex", available: false },
   ],
-  projectsDir: "/Users/ada/workbench-projects",
+  projectsDir: "/Users/ada/orso-projects",
 };
 
 const ready: SetupStatus = {
@@ -56,7 +56,7 @@ describe("SetupCheck", () => {
     expect(w.findAll("[data-testid='setup-agent'] a").map((a) => a.text())).toEqual(
       expect.arrayContaining(["Cursor CLI", "Claude Code", "Codex"]),
     );
-    expect(w.text()).toContain("/Users/ada/workbench-projects");
+    expect(w.text()).toContain("/Users/ada/orso-projects");
   });
 
   it("shows every item ready", async () => {

@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{ navigate?: (url: string) => void }>(), 
   navigate: (url: string) => window.location.assign(url),
 });
 
-const update = ref<DesktopUpdate | null>(parseUpdate(window.__WORKBENCH_UPDATE__));
+const update = ref<DesktopUpdate | null>(parseUpdate(window.__ORSO_UPDATE__));
 const dismissed = ref(false);
 
 function onReady(e: Event) {
@@ -32,7 +32,7 @@ onBeforeUnmount(() => window.removeEventListener(UPDATE_EVENT, onReady));
     <Download />
     <AlertTitle>Update ready — restart to apply</AlertTitle>
     <AlertDescription>
-      <p>Workbench {{ update.version }} has been downloaded.</p>
+      <p>orso {{ update.version }} has been downloaded.</p>
       <Button size="sm" data-testid="update-restart" @click="props.navigate(update.applyUrl)">
         Restart to update
       </Button>

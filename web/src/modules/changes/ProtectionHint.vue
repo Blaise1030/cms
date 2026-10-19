@@ -3,7 +3,7 @@ import { ShieldAlert, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "@/modules/changes/store";
 
 const props = defineProps<{ projectId: string }>();

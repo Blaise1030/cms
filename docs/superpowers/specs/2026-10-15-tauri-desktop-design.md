@@ -2,7 +2,7 @@
 
 ## Goal
 
-Ship Workbench to non-technical users as a signed, auto-updating macOS desktop
+Ship orso to non-technical users as a signed, auto-updating macOS desktop
 app. Users download one installer, open the app, and reach a working CMS
 without installing Rust/Node, running a daemon by hand, or using a terminal.
 The existing Rust daemon and Vue UI keep their behaviour; the desktop app is
@@ -22,10 +22,10 @@ an additional shell, not a replacement for the browser/PWA or Homebrew paths.
 ## Architecture
 
 ```
-Workbench.app (Tauri 2)
+orso.app (Tauri 2)
 ├── webview (WKWebView) ──HTTP/WS──▶ http://127.0.0.1:<ephemeral port>
 ├── supervisor: spawn, health-check (/api/health), restart, shutdown
-└── sidecar: workbench serve --port 0  (existing daemon, embeds web UI)
+└── sidecar: orso serve --port 0  (existing daemon, embeds web UI)
         └── PTY children (claude / codex / cursor-agent), git, fs watch
 ```
 

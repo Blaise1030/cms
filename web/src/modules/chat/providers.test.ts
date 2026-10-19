@@ -8,7 +8,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import { useAgentProvidersStore } from "./providers";
 
-const KEY = "workbench.terminal.provider";
+const KEY = "orso.terminal.provider";
 const api = {
   terminalProviders: vi.fn(async () => [
     { id: "claude", command: ["claude"] },

@@ -13,11 +13,11 @@ daemon_port="${2:-7810}"
 cargo build
 triple="$(rustc -vV | sed -n 's/^host: //p')"
 # `tauri dev` needs the bundled sidecar file to exist even though dev mode doesn't run it.
-[[ -f "src-tauri/binaries/workbench-$triple" ]] || src-tauri/scripts/stage-sidecar.sh "$triple"
+[[ -f "src-tauri/binaries/orso-$triple" ]] || src-tauri/scripts/stage-sidecar.sh "$triple"
 
-export WORKBENCH_VITE_PORT="$vite_port" WORKBENCH_DAEMON_PORT="$daemon_port"
-export WORKBENCH_DEV_UI="http://localhost:$vite_port"
-export WORKBENCH_DEV_DAEMON="${WORKBENCH_DEV_DAEMON:-$repo_root/target/debug/workbench}"
+export ORSO_VITE_PORT="$vite_port" ORSO_DAEMON_PORT="$daemon_port"
+export ORSO_DEV_UI="http://localhost:$vite_port"
+export ORSO_DEV_DAEMON="${ORSO_DEV_DAEMON:-$repo_root/target/debug/orso}"
 
 trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT
 pnpm -C web dev &
@@ -28,7 +28,7 @@ until nc -z localhost "$vite_port" 2>/dev/null; do
   sleep 0.5
 done
 
-# Its own identifier, so an open Workbench.app doesn't take it for a second instance.
+# Its own identifier, so an open orso.app doesn't take it for a second instance.
 pnpm --prefix src-tauri tauri dev --no-dev-server \
-  --config '{"identifier":"com.workbench.desktop.dev","productName":"Workbench Dev"}' &
+  --config '{"identifier":"com.orso.desktop.dev","productName":"orso Dev"}' &
 wait

@@ -32,7 +32,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useGithubStore } from "@/modules/github/store";
 import NewProjectDialog from "./NewProjectDialog.vue";
@@ -93,7 +93,7 @@ function open(project: Project) {
       <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
       <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
         <header class="text-center">
-          <h1 class="text-3xl font-light tracking-tight">workbench</h1>
+          <h1 class="text-3xl font-light tracking-tight">orso</h1>
           <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
         </header>
 

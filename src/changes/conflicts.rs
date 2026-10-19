@@ -189,9 +189,9 @@ pub async fn advance_branch(
 
 pub async fn preview_commit(dir: &Path, tree: &str, parent: &str) -> Result<String, ApiError> {
     let env = [
-        ("GIT_AUTHOR_NAME", "Workbench Preview"),
+        ("GIT_AUTHOR_NAME", "orso Preview"),
         ("GIT_AUTHOR_EMAIL", "preview@localhost"),
-        ("GIT_COMMITTER_NAME", "Workbench Preview"),
+        ("GIT_COMMITTER_NAME", "orso Preview"),
         ("GIT_COMMITTER_EMAIL", "preview@localhost"),
         ("GIT_AUTHOR_DATE", "2000-01-01T00:00:00+00:00"),
         ("GIT_COMMITTER_DATE", "2000-01-01T00:00:00+00:00"),

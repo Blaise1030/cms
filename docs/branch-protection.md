@@ -1,13 +1,13 @@
 # Protect `main` so merges need review
 
-Workbench publishes every change as a draft pull request into `main`. Without a branch
+orso publishes every change as a draft pull request into `main`. Without a branch
 protection rule, anyone with push access can merge that pull request (or push to `main`
-directly) without a review. Workbench never sets protection for you; a repository admin
+directly) without a review. orso never sets protection for you; a repository admin
 does it once in GitHub.
 
-## When Workbench shows the hint
+## When orso shows the hint
 
-After **Share preview**, Workbench asks GitHub about `main` in two ways at once: classic
+After **Share preview**, orso asks GitHub about `main` in two ways at once: classic
 branch protection (`GET /repos/{owner}/{repo}/branches/main/protection`) and repository
 rulesets (`GET /repos/{owner}/{repo}/rules/branches/main`).
 
@@ -17,8 +17,8 @@ rulesets (`GET /repos/{owner}/{repo}/rules/branches/main`).
 | classic 404 "Branch not protected", and no ruleset requires a pull request | `main` is unprotected | shown |
 | 403, 404 "Not Found", any error, or no answer within 3 seconds | you are not an admin, or GitHub did not say | hidden |
 
-**Dismiss** hides the hint for that project for good. Workbench remembers it in the
-project registry (`{projects-dir}/.workbench/projects.json`), so it stays hidden after a
+**Dismiss** hides the hint for that project for good. orso remembers it in the
+project registry (`{projects-dir}/.orso/projects.json`), so it stays hidden after a
 reload or restart. Other projects still show it.
 
 ## Add the rule

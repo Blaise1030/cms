@@ -6,9 +6,9 @@ import { VitePWA } from "vite-plugin-pwa";
 import { pwaOptions } from "./pwa.config.ts";
 
 // `just desktop-dev` moves both so it can run next to `just dev`; the desktop shell reads
-// WORKBENCH_DAEMON_PORT too, to start its daemon where this proxies.
-const daemonPort = process.env.WORKBENCH_DAEMON_PORT ?? "7800";
-const uiPort = Number(process.env.WORKBENCH_VITE_PORT ?? 5173);
+// ORSO_DAEMON_PORT too, to start its daemon where this proxies.
+const daemonPort = process.env.ORSO_DAEMON_PORT ?? "7800";
+const uiPort = Number(process.env.ORSO_VITE_PORT ?? 5173);
 
 export default defineConfig({
   plugins: [vue(), tailwindcss(), VitePWA(pwaOptions)],

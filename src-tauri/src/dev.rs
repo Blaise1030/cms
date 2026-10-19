@@ -5,11 +5,11 @@
 use tauri::Url;
 
 /// Vite UI origin, e.g. `http://localhost:5173`.
-const UI_ENV: &str = "WORKBENCH_DEV_UI";
-/// Daemon binary to run instead of the bundled sidecar, e.g. `target/debug/workbench`.
-const DAEMON_ENV: &str = "WORKBENCH_DEV_DAEMON";
+const UI_ENV: &str = "ORSO_DEV_UI";
+/// Daemon binary to run instead of the bundled sidecar, e.g. `target/debug/orso`.
+const DAEMON_ENV: &str = "ORSO_DEV_DAEMON";
 /// The daemon port Vite proxies to; `web/vite.config.ts` reads the same variable.
-const PORT_ENV: &str = "WORKBENCH_DAEMON_PORT";
+const PORT_ENV: &str = "ORSO_DAEMON_PORT";
 const DEFAULT_PORT: &str = "7800";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,7 +48,7 @@ mod tests {
     fn dev_env(name: &str) -> Option<String> {
         match name {
             UI_ENV => Some("http://localhost:5174".into()),
-            DAEMON_ENV => Some("/repo/target/debug/workbench".into()),
+            DAEMON_ENV => Some("/repo/target/debug/orso".into()),
             PORT_ENV => Some("7801".into()),
             _ => None,
         }
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(
             plan_from(dev_env, true),
             Plan {
-                daemon: Some("/repo/target/debug/workbench".into()),
+                daemon: Some("/repo/target/debug/orso".into()),
                 port: "7801".into(),
                 ui: Some(Url::parse("http://localhost:5174").unwrap()),
             }

@@ -120,7 +120,7 @@ pub async fn post(
     let mut guided = providers::gets_git_guide(&provider.id);
     if provider.id == "cursor" {
         if let Err(e) = providers::write_cursor_rule(&project.dir) {
-            eprintln!("workbench: cannot write the Cursor agent guide rule: {e}");
+            eprintln!("orso: cannot write the Cursor agent guide rule: {e}");
             guided = false;
         }
     }

@@ -1,11 +1,11 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useDaemon } from "@/core/daemon";
-import { readPref, writePref } from "@workbench/utils";
+import { readPref, writePref } from "@orso/utils";
 
 /** Named for the old Terminal tab; kept so users keep their pick. */
-const PROVIDER_KEY = "workbench.terminal.provider";
-const modelKey = (provider: string) => `workbench.chat.model.${provider}`;
+const PROVIDER_KEY = "orso.terminal.provider";
+const modelKey = (provider: string) => `orso.chat.model.${provider}`;
 
 export interface AgentProvider {
   id: string;

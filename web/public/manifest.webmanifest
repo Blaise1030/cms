@@ -1,6 +1,6 @@
 {
-  "name": "workbench",
-  "short_name": "workbench",
+  "name": "orso",
+  "short_name": "orso",
   "description": "Local Lovable-style marketing-site builder driven by your own coding agents.",
   "id": "/",
   "start_url": "/",

@@ -25,7 +25,7 @@ describe("chat store", () => {
     const id = store.newChat("site");
     expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     expect(store.activeChatId("site")).toBe(id);
-    expect(window.localStorage.getItem("workbench.chat.active.site")).toBe(id);
+    expect(window.localStorage.getItem("orso.chat.active.site")).toBe(id);
 
     setActivePinia(createPinia());
     expect(useChatStore().activeChatId("site")).toBe(id);
@@ -98,6 +98,6 @@ describe("chat store", () => {
     store.newChat("site");
     h.daemon.emit({ type: "terminal.session", projectId: "site", sessionId: "sess-1" });
     expect(store.activeChatId("site")).toBe("sess-1");
-    expect(window.localStorage.getItem("workbench.chat.active.site")).toBe("sess-1");
+    expect(window.localStorage.getItem("orso.chat.active.site")).toBe("sess-1");
   });
 });

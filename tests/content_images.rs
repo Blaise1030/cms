@@ -9,10 +9,10 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::content::images::{self, ImageFormat, MAX_IMAGE_BYTES};
-use workbench::state::AppState;
-use workbench::{changes, http};
+use orso::config::Config;
+use orso::content::images::{self, ImageFormat, MAX_IMAGE_BYTES};
+use orso::state::AppState;
+use orso::{changes, http};
 
 const WELCOME: &str = "src/content/blog/en/welcome.md";
 const PNG: &[u8] = include_bytes!("fixtures/images/pixel.png");
@@ -111,7 +111,7 @@ struct Part<'a> {
     bytes: &'a [u8],
 }
 
-const BOUNDARY: &str = "workbench-test-boundary-7MA4YWxk";
+const BOUNDARY: &str = "orso-test-boundary-7MA4YWxk";
 
 fn multipart(entry: &Value, parts: &[Part]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -177,7 +177,7 @@ fn head(dir: &Path) -> String {
 }
 
 fn staging_is_empty(dir: &Path) -> bool {
-    let staging = dir.join(".git/workbench-staging");
+    let staging = dir.join(".git/orso-staging");
     !staging.exists() || std::fs::read_dir(staging).unwrap().next().is_none()
 }
 
@@ -280,7 +280,7 @@ async fn markdown_image_saves_entry_and_asset_in_one_scoped_checkpoint() {
     std::fs::write(e.dir.join("README.md"), "unrelated\n").unwrap();
     let opened = read(&e, "blog", "welcome").await;
     let body = format!(
-        "{}\n![A \\[red\\] pixel](workbench-image:img-1)\n",
+        "{}\n![A \\[red\\] pixel](orso-image:img-1)\n",
         opened["body"].as_str().unwrap()
     );
     let entry = update(
@@ -303,7 +303,7 @@ async fn markdown_image_saves_entry_and_asset_in_one_scoped_checkpoint() {
     assert!(v["body"].as_str().unwrap().contains(link), "{}", v["body"]);
     let source = std::fs::read_to_string(e.dir.join(WELCOME)).unwrap();
     assert!(source.contains(link));
-    assert!(!source.contains("workbench-image:"));
+    assert!(!source.contains("orso-image:"));
 
     let committed = git_cli(&e.dir, &["show", "--format=", "--name-only", "HEAD"]);
     let mut committed: Vec<_> = committed.lines().collect();
@@ -320,7 +320,7 @@ async fn frontmatter_image_field_gets_relative_path_with_alt_companion() {
     let entry = update(
         &e,
         &opened,
-        json!({"coverImage": "workbench-image:cover", "coverAlt": "Team photo"}),
+        json!({"coverImage": "orso-image:cover", "coverAlt": "Team photo"}),
         None,
         json!([image("cover", "Team photo", "cover.jpg")]),
     );
@@ -356,7 +356,7 @@ async fn collisions_get_deterministic_unique_names_and_extension_follows_bytes()
     std::fs::write(assets.join("photo.png"), b"existing").unwrap();
     let opened = read(&e, "blog", "welcome").await;
     let body =
-        "![One](workbench-image:a)\n![Two](workbench-image:b)\n![Three](workbench-image:c)\n";
+        "![One](orso-image:a)\n![Two](orso-image:b)\n![Three](orso-image:c)\n";
     let entry = update(
         &e,
         &opened,
@@ -399,8 +399,8 @@ async fn create_with_image_places_it_under_the_new_slug() {
     let e = env().await;
     let entry = json!({
         "project": e.id, "collection": "blog", "slug": "launch", "branch": read(&e, "blog", "welcome").await["branch"],
-        "fields": {"title":"Launch","description":"New","pubDate":"2026-10-12","coverImage":"workbench-image:hero","coverAlt":"Hero"},
-        "body": "Hello\n\n![Chart](workbench-image:chart)\n",
+        "fields": {"title":"Launch","description":"New","pubDate":"2026-10-12","coverImage":"orso-image:hero","coverAlt":"Hero"},
+        "body": "Hello\n\n![Chart](orso-image:chart)\n",
         "images": [image("hero", "Hero", "hero.gif"), image("chart", "Chart", "chart.png")],
     });
     // A body larger than Axum's 2 MB default must fit.
@@ -443,7 +443,7 @@ async fn mislabeled_svg_or_arbitrary_bytes_roll_back_everything() {
     let before = snapshot(&e);
     let opened = read(&e, "blog", "welcome").await;
     for bytes in [SVG, b"GIF89a but not really".as_slice(), &PNG[..30]] {
-        let body = "![Good](workbench-image:good)\n![Bad](workbench-image:bad)\n";
+        let body = "![Good](orso-image:good)\n![Bad](orso-image:bad)\n";
         let entry = update(
             &e,
             &opened,
@@ -484,7 +484,7 @@ async fn oversized_image_is_rejected_with_a_clear_reason() {
         &e,
         &opened,
         json!({}),
-        Some("![Big](workbench-image:big)\n"),
+        Some("![Big](orso-image:big)\n"),
         json!([image("big", "Big", "big.png")]),
     );
     let (s, v) = save(&e, "PUT", entry, &[png_part("big", "big.png", &big)]).await;
@@ -505,13 +505,13 @@ async fn blank_alt_unknown_and_unused_images_are_rejected() {
     let cases = [
         // Blank alt text.
         (
-            Some("![x](workbench-image:a)\n"),
+            Some("![x](orso-image:a)\n"),
             json!([image("a", "  ", "a.png")]),
             "missing_alt",
         ),
         // The body names an image that was not uploaded.
         (
-            Some("![x](workbench-image:zzz)\n"),
+            Some("![x](orso-image:zzz)\n"),
             json!([image("a", "A", "a.png")]),
             "invalid_image",
         ),
@@ -523,7 +523,7 @@ async fn blank_alt_unknown_and_unused_images_are_rejected() {
         ),
         // Metadata without a part.
         (
-            Some("![x](workbench-image:a)\n![y](workbench-image:b)\n"),
+            Some("![x](orso-image:a)\n![y](orso-image:b)\n"),
             json!([image("a", "A", "a.png"), image("b", "B", "b.png")]),
             "invalid_image",
         ),
@@ -546,7 +546,7 @@ async fn schema_validation_failure_rolls_back_staged_assets() {
     let entry = update(
         &e,
         &opened,
-        json!({"coverImage": "workbench-image:cover"}),
+        json!({"coverImage": "orso-image:cover"}),
         None,
         json!([image("cover", "Cover", "cover.png")]),
     );
@@ -569,7 +569,7 @@ async fn io_failure_after_placing_assets_rolls_them_back() {
         &e,
         &opened,
         json!({}),
-        Some("![A](workbench-image:a)\n"),
+        Some("![A](orso-image:a)\n"),
         json!([image("a", "A", "a.png")]),
     );
     let (s, v) = save(&e, "PUT", entry, &[png_part("a", "a.png", PNG)]).await;
@@ -593,7 +593,7 @@ async fn assert_symlink_refused(e: &Env, link: &str) {
         e,
         &opened,
         json!({}),
-        Some("![A](workbench-image:a)\n"),
+        Some("![A](orso-image:a)\n"),
         json!([image("a", "A", "a.png")]),
     );
     let (s, v) = save(e, "PUT", entry, &[png_part("a", "a.png", PNG)]).await;
@@ -624,27 +624,27 @@ async fn symlinked_slug_asset_directory_is_refused() {
 #[tokio::test]
 async fn orphan_staging_and_temp_files_are_cleaned_on_the_next_operation() {
     let e = env().await;
-    let crashed = e.dir.join(".git/workbench-staging/crashed-op");
+    let crashed = e.dir.join(".git/orso-staging/crashed-op");
     std::fs::create_dir_all(&crashed).unwrap();
     std::fs::write(crashed.join("0"), PNG).unwrap();
     let entry_tmp = e
         .dir
-        .join("src/content/blog/en/.welcome.md.99999-0.workbench-tmp");
+        .join("src/content/blog/en/.welcome.md.99999-0.orso-tmp");
     std::fs::write(&entry_tmp, "half").unwrap();
     let assets = e.dir.join("src/assets/blog/welcome");
     std::fs::create_dir_all(&assets).unwrap();
-    let asset_tmp = assets.join(".photo.png.99999-1.workbench-tmp");
+    let asset_tmp = assets.join(".photo.png.99999-1.orso-tmp");
     std::fs::write(&asset_tmp, "half").unwrap();
     // A file the writer owns that merely looks similar stays.
-    let keep = assets.join("notes.workbench-tmp.png");
+    let keep = assets.join("notes.orso-tmp.png");
     std::fs::write(&keep, "keep").unwrap();
     // A delete whose set-aside asset folder could not be removed leaves it behind.
     let trash = e
         .dir
-        .join("src/assets/blog/.old-post.99999-0.workbench-trash");
+        .join("src/assets/blog/.old-post.99999-0.orso-trash");
     std::fs::create_dir_all(trash.join("nested")).unwrap();
     std::fs::write(trash.join("nested/photo.png"), PNG).unwrap();
-    let keep_dir = e.dir.join("src/assets/blog/kept.workbench-trash");
+    let keep_dir = e.dir.join("src/assets/blog/kept.orso-trash");
     std::fs::create_dir_all(&keep_dir).unwrap();
 
     // The next content operation is an ordinary JSON save without images.

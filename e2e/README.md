@@ -1,6 +1,6 @@
 # Playwright e2e
 
-End-to-end tests run against a real `workbench serve` process, the built web UI, a local bare
+End-to-end tests run against a real `orso serve` process, the built web UI, a local bare
 git remote, and a stubbed GitHub API.
 
 ## Run
@@ -17,8 +17,8 @@ just e2e
 |------|------|
 | `fixtures/githubStub.ts` | HTTP stub for device flow, `/user`, `/user/repos`, pulls / PR status, GraphQL `markPullRequestReadyForReview` |
 | `fixtures/bareRemote.ts` | Seeds `acme/site.git` with a `main` branch |
-| `fixtures/daemon.ts` | Starts stub + bare remote + release `workbench serve` (+ fake ACP agent), clones via API |
-| `fixtures/workbench.ts` | Playwright fixture wiring cleanup |
+| `fixtures/daemon.ts` | Starts stub + bare remote + release `orso serve` (+ fake ACP agent), clones via API |
+| `fixtures/orso.ts` | Playwright fixture wiring cleanup |
 
 Fixture helpers create temp dirs under the OS temp directory and remove them in `stop()`.
 

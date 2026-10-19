@@ -12,7 +12,7 @@ export const E2E_TOKEN = "a".repeat(64);
 /** The stream-json turn the e2e `cursor` agent replays (after appending to `notes.md`). */
 export const CURSOR_TURN_FIXTURE = "tests/fixtures/chat/cursor/turn.jsonl";
 
-export type WorkbenchEnv = {
+export type orsoEnv = {
   origin: string;
   token: string;
   projectId: string;
@@ -74,7 +74,7 @@ export async function api(
 
 /** Start a change on the daemon (the UI's New change menu asks the agent instead). */
 export async function createChange(
-  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   title: string,
 ): Promise<void> {
   const res = await api(env.origin, env.token, "POST", "/api/changes", { project: env.projectId, title });
@@ -87,7 +87,7 @@ export async function createChange(
  * cannot act on, so specs start changes here and reload the page to pick them up.
  */
 export async function startChange(
-  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   title: string,
 ): Promise<{ branch: string; title: string }> {
   const res = await api(env.origin, env.token, "POST", "/api/changes", {
@@ -110,7 +110,7 @@ export type ChangesUpdate = {
  * call it here and reload the page, which opens any conflict it left.
  */
 export async function getLatest(
-  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  env: Pick<orsoEnv, "origin" | "token" | "projectId">,
 ): Promise<ChangesUpdate> {
   const res = await api(env.origin, env.token, "POST", "/api/changes/update", {
     project: env.projectId,
@@ -123,7 +123,7 @@ export async function getLatest(
  * Drive a fake CLI turn over the terminal WebSocket: start session, send `edit …`, wait for checkpoint.
  */
 export async function terminalCheckpoint(
-  env: Pick<WorkbenchEnv, "origin" | "token" | "projectId">,
+  env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   text = "edit the notes",
 ): Promise<void> {
   const beforeRes = await api(
@@ -242,9 +242,9 @@ async function signInAndClone(origin: string, token: string): Promise<string> {
   return info.id;
 }
 
-/** Boot release `workbench serve`, stub GitHub, bare remote, fake CLI, and a cloned project. */
-export async function startWorkbench(): Promise<WorkbenchEnv> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-e2e-"));
+/** Boot release `orso serve`, stub GitHub, bare remote, fake CLI, and a cloned project. */
+export async function startorso(): Promise<orsoEnv> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "orso-e2e-"));
   const projectsDir = path.join(tmp, "projects");
   const gitRoot = path.join(tmp, "git");
   fs.mkdirSync(projectsDir, { recursive: true });
@@ -279,7 +279,7 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   );
 
   const child = spawn(
-    path.join(root, "target/release/workbench"),
+    path.join(root, "target/release/orso"),
     [
       "serve",
       "--port",
@@ -295,10 +295,10 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
       cwd: root,
       env: {
         ...process.env,
-        WORKBENCH_GITHUB_CLIENT_ID: "cid",
-        WORKBENCH_GITHUB_API_URL: stub.baseUrl,
-        WORKBENCH_GITHUB_WEB_URL: stub.baseUrl,
-        WORKBENCH_GITHUB_GIT_URL: gitUrl,
+        ORSO_GITHUB_CLIENT_ID: "cid",
+        ORSO_GITHUB_API_URL: stub.baseUrl,
+        ORSO_GITHUB_WEB_URL: stub.baseUrl,
+        ORSO_GITHUB_GIT_URL: gitUrl,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -308,13 +308,13 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
   child.on("exit", (code) => {
     exited = code;
     if (code !== null && code !== 0) {
-      process.stderr.write(`workbench exited ${code}\n`);
+      process.stderr.write(`orso exited ${code}\n`);
     }
   });
 
   const ready = await new Promise<string>((resolve, reject) => {
     const onLine = (line: string) => {
-      const m = line.match(/^workbench ready: (https?:\/\/[^\s/]+(?::\d+)?)/);
+      const m = line.match(/^orso ready: (https?:\/\/[^\s/]+(?::\d+)?)/);
       if (m) resolve(m[1]);
     };
     const rl = readline.createInterface({ input: child.stdout! });
@@ -322,9 +322,9 @@ export async function startWorkbench(): Promise<WorkbenchEnv> {
     child.stderr?.on("data", (b) => process.stderr.write(b));
     child.on("error", reject);
     child.on("exit", (code) => {
-      if (code !== null && code !== 0) reject(new Error(`workbench exited ${code}`));
+      if (code !== null && code !== 0) reject(new Error(`orso exited ${code}`));
     });
-    setTimeout(() => reject(new Error("timed out waiting for workbench ready")), 120_000);
+    setTimeout(() => reject(new Error("timed out waiting for orso ready")), 120_000);
   });
 
   const origin = ready;

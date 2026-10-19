@@ -1,5 +1,5 @@
 //! `POST /api/ctl/*` — app state for the agent running in a project's terminal
-//! (`workbench ctl`). Authenticated like turn-end: the live session's hook token in the
+//! (`orso ctl`). Authenticated like turn-end: the live session's hook token in the
 //! JSON body, no daemon token. Read-only except `restart-preview`.
 
 use axum::body::Bytes;

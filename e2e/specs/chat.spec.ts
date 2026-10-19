@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CURSOR_TURN_FIXTURE, startChange } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 /** The fixture turn's final assistant text, which is both the reply and the checkpoint summary. */
 function fixtureReply(): string {
@@ -19,12 +19,12 @@ function checkpointSummary(text: string): string {
   return chars.length <= 72 ? chars.join("") : `${chars.slice(0, 71).join("")}…`;
 }
 
-test("chat sends a message, shows the reply and a checkpoint", async ({ page, workbench }) => {
-  const { origin, token, projectId } = workbench;
+test("chat sends a message, shows the reply and a checkpoint", async ({ page, orso }) => {
+  const { origin, token, projectId } = orso;
   const reply = fixtureReply();
 
   await page.goto(`${origin}/?t=${token}`);
-  await startChange(workbench, "Chat e2e");
+  await startChange(orso, "Chat e2e");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("chat-panel")).toBeVisible();

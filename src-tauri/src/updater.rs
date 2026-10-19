@@ -14,7 +14,7 @@ use crate::busy;
 use crate::logs;
 use crate::supervisor::Supervisor;
 
-pub const READY_EVENT: &str = "workbench:update-ready";
+pub const READY_EVENT: &str = "orso:update-ready";
 const UPDATE_PAGE: &str = "tauri://localhost/update.html";
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// How often a downloaded update retries reaching the page while sessions are busy.
@@ -88,7 +88,7 @@ async fn check(app: &AppHandle) {
     };
     let update = match update {
         Ok(Some(update)) => update,
-        Ok(None) => return logs::shell("update check: Workbench is up to date"),
+        Ok(None) => return logs::shell("update check: orso is up to date"),
         Err(e) => return logs::shell(&format!("update check failed: {e}")),
     };
     let updates = app.state::<Updates>();
@@ -171,8 +171,8 @@ pub fn notice_script(version: &str) -> String {
     apply.query_pairs_mut().append_pair("version", version);
     let detail = json!({ "version": version, "applyUrl": apply.as_str() });
     format!(
-        "window.__WORKBENCH_UPDATE__ = {detail};\
-         window.dispatchEvent(new CustomEvent({event}, {{ detail: window.__WORKBENCH_UPDATE__ }}));",
+        "window.__ORSO_UPDATE__ = {detail};\
+         window.dispatchEvent(new CustomEvent({event}, {{ detail: window.__ORSO_UPDATE__ }}));",
         event = json!(READY_EVENT),
     )
 }
@@ -221,7 +221,7 @@ mod tests {
             script.contains(r#""applyUrl":"tauri://localhost/update.html?version=1.2.3""#),
             "{script}"
         );
-        assert!(script.contains("window.__WORKBENCH_UPDATE__"), "{script}");
+        assert!(script.contains("window.__ORSO_UPDATE__"), "{script}");
     }
 
     #[test]

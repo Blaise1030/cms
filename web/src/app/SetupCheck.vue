@@ -79,13 +79,13 @@ onMounted(() => {
       <CardHeader>
         <CardTitle>Let's get your Mac ready</CardTitle>
         <CardDescription>
-          Workbench uses a few free tools to save, share and edit your sites. Install anything
+          orso uses a few free tools to save, share and edit your sites. Install anything
           marked "Action needed", then select Recheck.
         </CardDescription>
       </CardHeader>
       <CardContent class="flex flex-col gap-4">
         <p v-if="failed" class="text-destructive text-sm" role="alert" data-testid="setup-error">
-          We couldn't check your setup just now. Make sure Workbench is still running, then select
+          We couldn't check your setup just now. Make sure orso is still running, then select
           Recheck.
         </p>
         <p v-else-if="!status" class="text-muted-foreground text-sm">Checking your setup…</p>
@@ -118,7 +118,7 @@ onMounted(() => {
               </template>
               <template v-else-if="row.key === 'github'">
                 <template v-if="gh.deviceFlow">
-                  <p class="text-muted-foreground">Sign in so Workbench can open your sites and share your changes.</p>
+                  <p class="text-muted-foreground">Sign in so orso can open your sites and share your changes.</p>
                   <Button size="sm" variant="outline" class="self-start" data-testid="setup-sign-in" @click="gh.signIn()">
                     <LogIn /> Sign in with GitHub
                   </Button>

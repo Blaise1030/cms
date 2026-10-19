@@ -1,5 +1,5 @@
 {
-  "name": "workbench",
+  "name": "orso",
   "version": "0.0.0",
   "private": true,
   "description": "Release metadata only: changelogen reads and bumps this version, and the release workflows copy it into Cargo.toml.",

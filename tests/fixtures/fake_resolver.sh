@@ -2,7 +2,7 @@
 # Stand-in headless agent for auto-resolve tests: `fake_resolver.sh <mode> … <prompt>`.
 mode=$1
 for prompt; do :; done
-out=$WORKBENCH_RESOLVE_RESULT
+out=$ORSO_RESOLVE_RESULT
 
 resolved() {
   printf '%s' '{"status":"resolved","summary":"Kept your version"}' > "$out"

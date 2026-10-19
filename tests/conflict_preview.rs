@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use axum::body::to_bytes;
-use workbench::conflict_preview::{ConflictPreviewManager, PreviewState, Source};
+use orso::conflict_preview::{ConflictPreviewManager, PreviewState, Source};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")

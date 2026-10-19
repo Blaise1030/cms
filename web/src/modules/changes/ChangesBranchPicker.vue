@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
 import { PR_STATE_LABEL } from "./prStatus";
 import { useChangesStore } from "./store";

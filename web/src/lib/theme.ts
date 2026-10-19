@@ -1,11 +1,11 @@
 import { computed, readonly, ref, watchEffect } from "vue";
 import { createSharedComposable, usePreferredDark } from "@vueuse/core";
-import { readPref, writePref } from "@workbench/utils";
+import { readPref, writePref } from "@orso/utils";
 
 export type ThemePreference = "light" | "dark" | "system";
 
 /** Also read by the inline script in index.html, which applies the theme before the app loads. */
-export const THEME_KEY = "workbench.theme";
+export const THEME_KEY = "orso.theme";
 
 export const THEME_LABELS: Record<ThemePreference, string> = { light: "Light", dark: "Dark", system: "System" };
 

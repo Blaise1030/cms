@@ -26,7 +26,7 @@ assets (no Worker script; `wrangler.toml` points `[assets]` at `./dist`):
     with `environment_url` = the preview URL (or `failure` if the upload failed);
   - posts one **sticky PR comment** with the preview link, updated on every push.
 
-  The CMS workbench reads that deployment to show a **Preview** link beside the PR status
+  The CMS orso reads that deployment to show a **Preview** link beside the PR status
   ("Draft · Checks pending", "Open · Checks passing", …) in its preview browser bar.
 
 ### One-time setup

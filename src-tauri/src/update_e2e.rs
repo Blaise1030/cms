@@ -17,7 +17,7 @@ use crate::updater;
 
 const HOME_ARG: &str = "--update-e2e-home";
 const LOG_ARG: &str = "--update-e2e-log";
-const AUTO_APPLY_ENV: &str = "WORKBENCH_DESKTOP_UPDATE_E2E_AUTO_APPLY";
+const AUTO_APPLY_ENV: &str = "ORSO_DESKTOP_UPDATE_E2E_AUTO_APPLY";
 const DAEMON_FILE: &str = "update-e2e-daemon.json";
 
 fn arg(name: &str) -> Option<String> {
@@ -84,7 +84,7 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-/// With `WORKBENCH_DESKTOP_UPDATE_E2E_AUTO_APPLY=1`, keeps doing what the
+/// With `ORSO_DESKTOP_UPDATE_E2E_AUTO_APPLY=1`, keeps doing what the
 /// update page's button does (busy re-check included) until it applies.
 pub fn downloaded(app: &AppHandle) {
     if std::env::var(AUTO_APPLY_ENV).as_deref() != Ok("1") {

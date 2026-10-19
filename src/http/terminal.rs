@@ -150,7 +150,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
     let mut guided = providers::gets_git_guide(&provider.id);
     if provider.id == "cursor" {
         if let Err(e) = providers::write_cursor_rule(&project.dir) {
-            eprintln!("workbench: cannot write the Cursor agent guide rule: {e}");
+            eprintln!("orso: cannot write the Cursor agent guide rule: {e}");
             guided = false;
         }
     }
@@ -182,7 +182,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
             ..record
         },
     ) {
-        eprintln!("workbench: cannot save terminal session history: {e}");
+        eprintln!("orso: cannot save terminal session history: {e}");
     }
     Ok(Json(json!({ "running": true, "sessionId": session_id })))
 }
@@ -468,7 +468,7 @@ fn record_turn(state: &AppState, req: &TurnEndRequest) {
         return;
     };
     if let Err(e) = transcript::mark_terminal(&state_dir(state), &req.project, &id) {
-        eprintln!("workbench: cannot mark the chat transcript: {e}");
+        eprintln!("orso: cannot mark the chat transcript: {e}");
     }
     let title = req
         .summary
@@ -491,7 +491,7 @@ fn record_turn(state: &AppState, req: &TurnEndRequest) {
             json!({ "projectId": req.project, "sessionId": id }),
         ),
         Ok(None) => {}
-        Err(e) => eprintln!("workbench: cannot update terminal session history: {e}"),
+        Err(e) => eprintln!("orso: cannot update terminal session history: {e}"),
     }
 }
 

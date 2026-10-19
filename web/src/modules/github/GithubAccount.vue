@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDaemon } from "@/core/daemon";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import DeviceCodeDialog from "./DeviceCodeDialog.vue";
 import { useGithubStore } from "./store";
 

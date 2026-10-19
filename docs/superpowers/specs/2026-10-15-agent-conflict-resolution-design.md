@@ -61,7 +61,7 @@ States: `preparing → resolving → (needs_input → resolving)* → verifying 
    Exact flags are verified against the installed CLIs during planning, as `providers.rs`
    already records for the interactive launches. Raw output goes to a debug log under the state
    dir; it is never shown to the writer.
-3. **Result file.** The agent must write `.workbench/resolve-result.json` in the worktree
+3. **Result file.** The agent must write `.orso/resolve-result.json` in the worktree
    (git-excluded):
    ```json
    {"status":"resolved","summary":"Kept your new headline and Ana's updated prices"}
@@ -74,7 +74,7 @@ States: `preparing → resolving → (needs_input → resolving)* → verifying 
    resolving rounds the job fails.
 5. **Verifying.** All must pass:
    - no conflict markers (`<<<<<<<`, `=======`, `>>>>>>>` at line start) in tracked files;
-   - `git diff --name-only` stays inside the worktree and touches no `.git`/`.workbench` paths
+   - `git diff --name-only` stays inside the worktree and touches no `.git`/`.orso` paths
      beyond the result file;
    - `npm run build` exits 0 in the worktree (dependencies reused the same way conflict previews
      reuse them; 5-minute timeout).

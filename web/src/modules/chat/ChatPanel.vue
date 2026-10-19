@@ -4,7 +4,7 @@ import { Chat } from "@ai-sdk/vue";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { CircleAlert, MessageSquare, Plus } from "@lucide/vue";
 import { toast } from "vue-sonner";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { mapErrorResponse } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import { Alert, AlertDescription } from "@/components/ui/alert";

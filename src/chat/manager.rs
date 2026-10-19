@@ -177,7 +177,7 @@ impl ChatManager {
         let user =
             transcript::user_message(&format!("user-{}", &random_token()[..16]), &req.prompt);
         if let Err(e) = transcript::append(&state_dir, &req.project_id, &req.chat_id, &[user]) {
-            eprintln!("workbench: cannot save the chat transcript: {e}");
+            eprintln!("orso: cannot save the chat transcript: {e}");
         }
         let message_id = format!("msg-{}", &random_token()[..16]);
         let mut stream = Stream {
@@ -302,7 +302,7 @@ impl TurnTask {
             }),
             Ok(TurnOutcome::Unchanged) => {}
             Err(e) => eprintln!(
-                "workbench: chat turn checkpoint failed for {project}: {}",
+                "orso: chat turn checkpoint failed for {project}: {}",
                 e.message
             ),
         }
@@ -317,7 +317,7 @@ impl TurnTask {
         let message = transcript::assemble(&self.message_id, &chunks);
         if let Err(e) = transcript::append(&self.state_dir, project, &self.turn.chat_id, &[message])
         {
-            eprintln!("workbench: cannot save the chat transcript: {e}");
+            eprintln!("orso: cannot save the chat transcript: {e}");
         }
         self.update_history(translator.session_id());
         {
@@ -437,7 +437,7 @@ impl TurnTask {
             },
         );
         if let Err(e) = updated {
-            eprintln!("workbench: cannot save chat session history: {e}");
+            eprintln!("orso: cannot save chat session history: {e}");
         }
     }
 }
@@ -473,7 +473,7 @@ async fn open_log(log: &Path) -> Option<tokio::fs::File> {
     {
         Ok(file) => Some(file),
         Err(e) => {
-            eprintln!("workbench: cannot open chat log {}: {e}", log.display());
+            eprintln!("orso: cannot open chat log {}: {e}", log.display());
             None
         }
     }

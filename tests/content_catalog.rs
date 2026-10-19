@@ -1,5 +1,5 @@
 use std::path::Path;
-use workbench::content::catalog::{list_collections, list_entries, read_entry};
+use orso::content::catalog::{list_collections, list_entries, read_entry};
 
 fn template() -> &'static Path {
     Path::new("templates/astro-marketing")
@@ -63,7 +63,7 @@ async fn helper_failure_is_read_only_and_isolated() {
 async fn unsupported_loader_is_visible_with_reason() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
-    std::fs::write(temp.path().join("scripts/workbench-content.mjs"), "console.log(JSON.stringify({collections:[{name:'remote',loader:{type:'remote'},kind:'json'}]}))").unwrap();
+    std::fs::write(temp.path().join("scripts/orso-content.mjs"), "console.log(JSON.stringify({collections:[{name:'remote',loader:{type:'remote'},kind:'json'}]}))").unwrap();
     let collections = list_collections(temp.path()).await.unwrap();
     assert_eq!(collections[0].name, "remote");
     assert!(!collections[0].editable);
@@ -119,12 +119,12 @@ async fn content_routes_require_project_and_share_auth_boundary() {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
     let temp = tempfile::tempdir().unwrap();
-    let state = workbench::state::AppState::new(workbench::config::Config {
+    let state = orso::state::AppState::new(orso::config::Config {
         projects_dir: temp.path().into(),
         no_auth: true,
         ..Default::default()
     });
-    let app = workbench::http::router(state);
+    let app = orso::http::router(state);
     for endpoint in ["collections", "entries", "entry"] {
         let response = app
             .clone()
@@ -139,13 +139,13 @@ async fn content_routes_require_project_and_share_auth_boundary() {
             .unwrap();
         assert_eq!(response.status(), 404);
     }
-    let state = workbench::state::AppState::new(workbench::config::Config {
+    let state = orso::state::AppState::new(orso::config::Config {
         projects_dir: temp.path().into(),
         token: Some("token".into()),
         no_auth: false,
         ..Default::default()
     });
-    let response = workbench::http::router(state)
+    let response = orso::http::router(state)
         .oneshot(
             Request::builder()
                 .uri("/api/content/collections?project=p")
@@ -167,7 +167,7 @@ async fn unknown_helper_collection_is_read_only_even_with_a_supported_glob() {
         "---\ntitle: Custom\n---\nBody",
     )
     .unwrap();
-    std::fs::write(temp.path().join("scripts/workbench-content.mjs"),"console.log(JSON.stringify({collections:[{name:'custom',loader:{base:'posts',pattern:'*.md'},kind:'markdown'}]}))").unwrap();
+    std::fs::write(temp.path().join("scripts/orso-content.mjs"),"console.log(JSON.stringify({collections:[{name:'custom',loader:{base:'posts',pattern:'*.md'},kind:'markdown'}]}))").unwrap();
     let collections = list_collections(temp.path()).await.unwrap();
     assert!(!collections[0].editable);
     assert!(collections[0]
@@ -188,7 +188,7 @@ async fn unknown_helper_collection_is_read_only_even_with_a_supported_glob() {
 async fn required_unsupported_schema_is_read_only() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
-    std::fs::write(temp.path().join("scripts/workbench-content.mjs"), r#"console.log(JSON.stringify({collections:[{name:'blog',loader:{base:'posts',pattern:'*.md'},kind:'markdown',supportedForEditing:true,fields:{type:'object',properties:{special:{type:'unsupported',required:true,reason:'Unknown transform'}}}}]}))"#).unwrap();
+    std::fs::write(temp.path().join("scripts/orso-content.mjs"), r#"console.log(JSON.stringify({collections:[{name:'blog',loader:{base:'posts',pattern:'*.md'},kind:'markdown',supportedForEditing:true,fields:{type:'object',properties:{special:{type:'unsupported',required:true,reason:'Unknown transform'}}}}]}))"#).unwrap();
     let collections = list_collections(temp.path()).await.unwrap();
     assert!(!collections[0].editable);
     assert_eq!(
@@ -202,7 +202,7 @@ async fn required_unsupported_schema_is_read_only() {
 fn counting_helper(root: &Path, name: &str) {
     std::fs::create_dir_all(root.join("scripts")).unwrap();
     std::fs::write(
-        root.join("scripts/workbench-content.mjs"),
+        root.join("scripts/orso-content.mjs"),
         format!("import {{appendFileSync}} from 'node:fs'; appendFileSync('runs.log','run\\n'); console.log(JSON.stringify({{collections:[{{name:'{name}',loader:{{base:'posts',pattern:'*.md'}},kind:'markdown'}}]}}))"),
     )
     .unwrap();
@@ -224,7 +224,7 @@ fn set_mtime(path: &Path, time: std::time::SystemTime) {
 async fn collections_use_one_helper_run_and_are_cached_until_schema_inputs_change() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let script = root.join("scripts/workbench-content.mjs");
+    let script = root.join("scripts/orso-content.mjs");
     let schemas = root.join("src/content-schemas.mjs");
     let config = root.join("src/content.config.ts");
     std::fs::create_dir_all(root.join("src")).unwrap();

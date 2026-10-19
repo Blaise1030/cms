@@ -1,16 +1,16 @@
-# Workbench
+# orso
 
 Local site builder: a Rust daemon, a Vue SPA, and (on macOS) a Tauri desktop shell.
 Edit content in the UI, chat with a coding agent about a project, preview locally, and
 publish to GitHub Pages. Sync with a live site can hand conflict resolution to the agent.
 
-Repo path is still `Blaise1030/cms`; the product name is **Workbench**.
+Repo path is still `Blaise1030/cms`; the product name is **orso**.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `src/` | Daemon (`workbench` binary): API, preview, terminals, publish, sync |
+| `src/` | Daemon (`orso` binary): API, preview, terminals, publish, sync |
 | `web/` | Vue SPA (embedded in release builds; Vite in dev) |
 | `src-tauri/` | macOS desktop app: overlay title bar, supervises the daemon, in-app updater |
 | `e2e/` | Playwright smoke tests against a release-built daemon |
@@ -56,9 +56,9 @@ just desktop-dev          # Vite :5180, daemon :7810
 ```
 
 Runs `src-tauri/scripts/desktop-dev.sh`: debug daemon, Vite, then `tauri dev` with
-identifier `com.workbench.desktop.dev` (leaves an installed Workbench.app alone).
+identifier `com.orso.desktop.dev` (leaves an installed orso.app alone).
 Shell (`src-tauri/`) edits rebuild and relaunch; daemon (`src/`) edits need a restart.
-Ctrl-C stops everything. Release builds ignore `WORKBENCH_DEV_*`.
+Ctrl-C stops everything. Release builds ignore `ORSO_DEV_*`.
 
 Signing, notarization, updater keys, and cutting a release:
 [docs/desktop-release.md](docs/desktop-release.md).
@@ -67,7 +67,7 @@ Signing, notarization, updater keys, and cutting a release:
 
 The agent panel's chat runs a coding CLI through the daemon. Built-in providers: Cursor CLI
 (`cursor-agent`), Claude (`claude`), and Codex (`codex`). Override in
-`~/.config/workbench/agents.json`, or pass `--agents-config`.
+`~/.config/orso/agents.json`, or pass `--agents-config`.
 
 ### Build and test
 

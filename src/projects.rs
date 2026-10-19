@@ -25,7 +25,7 @@ const MAX_SLUG_LEN: usize = 48;
 /// Upper bound for `npm install` at scaffold time.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Daemon state dir (inside projects-dir; slugs never start with `.`, so no collisions).
-pub(crate) const STATE_DIR: &str = ".workbench";
+pub(crate) const STATE_DIR: &str = ".orso";
 const REGISTRY_FILE: &str = "projects.json";
 /// Staging area for deletes (same filesystem as projects, so moves are atomic renames).
 const TRASH_DIR: &str = "trash";
@@ -103,7 +103,7 @@ impl From<&Project> for ProjectInfo {
     }
 }
 
-/// On-disk record (`{projects-dir}/.workbench/projects.json`). Dir is derived from the id;
+/// On-disk record (`{projects-dir}/.orso/projects.json`). Dir is derived from the id;
 /// devserver status is runtime-only.
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredProject {
@@ -152,7 +152,7 @@ impl ProjectRegistry {
         for dir in dirs {
             if let Err(e) = crate::git::set_identity(&dir, identity).await {
                 eprintln!(
-                    "workbench: cannot set git identity in {}: {e}",
+                    "orso: cannot set git identity in {}: {e}",
                     dir.display()
                 );
             }
@@ -166,7 +166,7 @@ impl ProjectRegistry {
             if !crate::git::has_identity(&dir).await {
                 if let Err(e) = crate::git::set_identity(&dir, identity).await {
                     eprintln!(
-                        "workbench: cannot set git identity in {}: {e}",
+                        "orso: cannot set git identity in {}: {e}",
                         dir.display()
                     );
                 }
@@ -179,7 +179,7 @@ impl ProjectRegistry {
         let (stored, init_error) = match load_stored(&projects_dir) {
             Ok(v) => (v, None),
             Err(e) => {
-                eprintln!("workbench: {e}");
+                eprintln!("orso: {e}");
                 (Vec::new(), Some(e))
             }
         };
@@ -369,9 +369,9 @@ impl ProjectRegistry {
         Ok(())
     }
 
-    /// New project from the template, authored as [`Identity::workbench`] (tests, defaults).
+    /// New project from the template, authored as [`Identity::orso`] (tests, defaults).
     pub async fn create(&self, name: &str) -> Result<ProjectInfo, ApiError> {
-        self.create_from(name, Source::Template, &Identity::workbench())
+        self.create_from(name, Source::Template, &Identity::orso())
             .await
     }
 
@@ -457,12 +457,12 @@ impl ProjectRegistry {
     /// Remove the project and its directory. The caller is responsible for confirmation.
     ///
     /// Staged so the response always matches reality:
-    /// 1. move the project dir into `.workbench/trash/` (atomic rename; failure = nothing changed),
+    /// 1. move the project dir into `.orso/trash/` (atomic rename; failure = nothing changed),
     /// 2. persist the registry without the project — this is the **commit point**;
     ///    if it fails the dir is moved back and the delete fails with the project intact,
     /// 3. best-effort removal of the trashed dir and the project's state dir. Failures here
     ///    are logged and non-fatal: the project is already gone, and leftovers in
-    ///    `.workbench/trash/` are purged on the next start.
+    ///    `.orso/trash/` are purged on the next start.
     pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
         self.check_writable()?;
         let mut inner = self.inner.lock().await;
@@ -513,7 +513,7 @@ impl ProjectRegistry {
         if staged {
             if let Err(e) = tokio::fs::remove_dir_all(&trash).await {
                 eprintln!(
-                    "workbench: deleted project {id} but could not clean {}: {e}",
+                    "orso: deleted project {id} but could not clean {}: {e}",
                     trash.display()
                 );
             }
@@ -523,7 +523,7 @@ impl ProjectRegistry {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => eprintln!(
-                "workbench: deleted project {id} but could not clean {}: {e}",
+                "orso: deleted project {id} but could not clean {}: {e}",
                 state.display()
             ),
         }
@@ -641,7 +641,7 @@ fn load_stored(projects_dir: &Path) -> Result<Vec<StoredProject>, String> {
             match std::fs::rename(&path, &backup) {
                 Ok(()) => {
                     eprintln!(
-                        "workbench: project registry {} is corrupt ({parse}); moved to {}. Starting with an empty registry",
+                        "orso: project registry {} is corrupt ({parse}); moved to {}. Starting with an empty registry",
                         path.display(),
                         backup.display()
                     );
@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn id_validity() {
         assert!(is_valid_id("my-site-2"));
-        for bad in ["", "-x", ".workbench", "a/b", "A", "a b", ".."] {
+        for bad in ["", "-x", ".orso", "a/b", "A", "a b", ".."] {
             assert!(!is_valid_id(bad), "{bad}");
         }
     }

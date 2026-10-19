@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import type { Change } from "@/core/types";
 import { askAgentForNewChange } from "./agentRequests";
 import { useChangesStore } from "./store";

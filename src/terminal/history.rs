@@ -1,6 +1,6 @@
 //! Per-project agent session history, `{state_dir}/{project}/sessions.json`.
 //!
-//! One record per terminal session started from the workbench. `agent_session_id` is the
+//! One record per terminal session started from the orso. `agent_session_id` is the
 //! coding CLI's own conversation id, which is what makes a record resumable: assigned at launch
 //! (Claude `--session-id`, Cursor `create-chat`) or reported later by the turn-end hook
 //! (Codex `thread-id`, OpenCode `session_id`).

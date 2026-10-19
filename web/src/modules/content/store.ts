@@ -3,13 +3,13 @@ import { computed, onScopeDispose, ref, shallowRef } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
 import type { ContentCollection, ContentEntry, ContentEntrySummary, ContentImpact, ContentVersion, FieldDescriptor } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { diffDraft, cloneValue } from "./draft";
 import { startingFields } from "./create";
 import type { PendingImage } from "./ImageDialog.vue";
 
 /** How a submitted entry names a pending image; the daemon swaps in the saved path. */
-const IMAGE_TOKEN = "workbench-image:";
+const IMAGE_TOKEN = "orso-image:";
 
 export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
 /** A new entry being named in the Create dialog. */
@@ -23,7 +23,7 @@ export interface ContentLifecycle {
 const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
 /** File events within this window coalesce into one trailing refresh. */
 export const REFRESH_DELAY_MS = 250;
-const CONTENT_FILES = ["src/content-schemas.mjs", "src/content.config.ts", "scripts/workbench-content.mjs"];
+const CONTENT_FILES = ["src/content-schemas.mjs", "src/content.config.ts", "scripts/orso-content.mjs"];
 /** Whether a changed project path can change the catalog or an entry; "" is the watcher's overflow. */
 export function affectsContent(path: string): boolean {
   return path === "" || CONTENT_FILES.includes(path)

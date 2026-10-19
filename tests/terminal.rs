@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex, MutexGuard, Once};
 use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
-use workbench::config::Config;
-use workbench::events::EventBus;
-use workbench::providers::LaunchSpec;
-use workbench::terminal::{Output, TerminalManager};
+use orso::config::Config;
+use orso::events::EventBus;
+use orso::providers::LaunchSpec;
+use orso::terminal::{Output, TerminalManager};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -30,7 +30,7 @@ fn manager() -> (MutexGuard<'static, ()>, TerminalManager, EventBus) {
     let lock = TERMINAL_TEST_LOCK.lock().unwrap();
     let events = EventBus::new();
     let config = Config {
-        hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
+        hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_orso"))),
         ..Default::default()
     };
     (
@@ -353,7 +353,7 @@ async fn token_matches_only_the_live_session_token() {
         "p1",
         "fake",
         dir.path(),
-        launch(&["sh", "-c", "echo \"TOKEN=$WORKBENCH_HOOK_TOKEN\"; read _"]),
+        launch(&["sh", "-c", "echo \"TOKEN=$ORSO_HOOK_TOKEN\"; read _"]),
     )
     .await
     .unwrap();
@@ -421,7 +421,7 @@ async fn lone_enter_is_busy_until_turn_end() {
 async fn busy_ends_when_output_goes_quiet() {
     let (_lock, _, events) = manager();
     let config = Config {
-        hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
+        hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_orso"))),
         ..Default::default()
     };
     let m = TerminalManager::with_quiet_idle(
@@ -457,13 +457,13 @@ mod http {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tower::ServiceExt;
-    use workbench::config::Config;
-    use workbench::events::EventBus;
-    use workbench::git;
-    use workbench::http;
-    use workbench::http::terminal::commit_message;
-    use workbench::projects::Source;
-    use workbench::state::AppState;
+    use orso::config::Config;
+    use orso::events::EventBus;
+    use orso::git;
+    use orso::http;
+    use orso::http::terminal::commit_message;
+    use orso::projects::Source;
+    use orso::state::AppState;
 
     use super::{fake_cli, word_after, TERMINAL_TEST_LOCK, TIMEOUT};
 
@@ -519,7 +519,7 @@ mod http {
         let agents = root.join("agents.json");
         let cli = fake_cli();
         let agents_json = if token_echo {
-            let script = format!("echo TOKEN=$WORKBENCH_HOOK_TOKEN; exec {cli}");
+            let script = format!("echo TOKEN=$ORSO_HOOK_TOKEN; exec {cli}");
             json!({ "fake": ["sh", "-c", script] })
         } else {
             json!({ "fake": [cli] })
@@ -534,7 +534,7 @@ mod http {
             no_auth: false,
             token: Some(AUTH_TOKEN.into()),
             agents_config: Some(agents),
-            hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_workbench"))),
+            hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_orso"))),
             ..Default::default()
         };
         let state = AppState::with_scaffold_install(config, false);
@@ -543,7 +543,7 @@ mod http {
         let dir = root.join(&info.id);
         let state2 = state.clone();
         let server = tokio::spawn(async move {
-            workbench::serve_on(listener, state2).await.unwrap();
+            orso::serve_on(listener, state2).await.unwrap();
         });
         HttpEnv {
             _pty_lock: pty_lock,
@@ -651,7 +651,7 @@ mod http {
                     url: format!("file://{}", bare.display()),
                     env: vec![],
                 },
-                &git::Identity::workbench(),
+                &git::Identity::orso(),
             )
             .await
             .unwrap();
@@ -1093,12 +1093,12 @@ mod http {
                     url: format!("file://{}", bare.display()),
                     env: vec![],
                 },
-                &git::Identity::workbench(),
+                &git::Identity::orso(),
             )
             .await
             .unwrap();
         let gh_dir = env.root.join(&gh.id);
-        workbench::changes::create(&gh_dir, "New post: Launch week")
+        orso::changes::create(&gh_dir, "New post: Launch week")
             .await
             .unwrap();
         let (s, v) = call_http(

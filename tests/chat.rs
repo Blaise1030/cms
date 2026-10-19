@@ -5,13 +5,13 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
-use workbench::chat::chunk::{AgentErrorCode, UiChunk};
-use workbench::chat::manager::{Subscription, TurnRequest};
-use workbench::chat::transcript;
-use workbench::config::Config;
-use workbench::providers::{self, AgentSession, Provider};
-use workbench::state::AppState;
-use workbench::terminal::history::{self, SessionRecord};
+use orso::chat::chunk::{AgentErrorCode, UiChunk};
+use orso::chat::manager::{Subscription, TurnRequest};
+use orso::chat::transcript;
+use orso::config::Config;
+use orso::providers::{self, AgentSession, Provider};
+use orso::state::AppState;
+use orso::terminal::history::{self, SessionRecord};
 
 const CHAT: &str = "chat1";
 const FIXTURE_SESSION: &str = "34f63cf5-7e32-4205-9b34-72582ec9f80e";
@@ -53,7 +53,7 @@ async fn env(argv: Vec<String>) -> Env {
     let state = AppState::with_scaffold_install(config, false);
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    let state_dir = tmp.path().join(".workbench");
+    let state_dir = tmp.path().join(".orso");
     let now = history::now_ms();
     history::insert(
         &state_dir,
@@ -188,7 +188,7 @@ fn alive(pid: &str) -> bool {
 #[tokio::test]
 async fn turn_streams_and_checkpoints() {
     let env = env(fake("edit", None)).await;
-    workbench::changes::create(&env.dir, "New post")
+    orso::changes::create(&env.dir, "New post")
         .await
         .unwrap();
     let mut events = env.state.events.subscribe();
@@ -347,7 +347,7 @@ async fn server_shutdown_ends_watched_turns() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (trigger, signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(workbench::serve_until(
+    let server = tokio::spawn(orso::serve_until(
         listener,
         env.state.clone(),
         async move {
@@ -428,10 +428,10 @@ mod http_routes {
     use http_body_util::BodyExt;
     use serde_json::{json, Value};
     use tower::ServiceExt;
-    use workbench::chat::transcript;
-    use workbench::projects::Source;
-    use workbench::terminal::Output;
-    use workbench::{git, http};
+    use orso::chat::transcript;
+    use orso::projects::Source;
+    use orso::terminal::Output;
+    use orso::{git, http};
 
     use super::{env, fake, fake_cli, Env, CHAT, WAIT};
 
@@ -599,7 +599,7 @@ mod http_routes {
         assert_eq!(v["running"], Value::Null);
 
         let record =
-            workbench::terminal::history::get(&env.state_dir, &env.project, "new-chat").unwrap();
+            orso::terminal::history::get(&env.state_dir, &env.project, "new-chat").unwrap();
         assert_eq!(record.provider, "cursor");
 
         let (s, _) = call(&env, "GET", "/api/chat/nope", None).await;
@@ -674,7 +674,7 @@ mod http_routes {
             let got = v["error"]["message"].as_str().unwrap_or("");
             assert!(got.contains(message), "{body}: {v}");
         }
-        assert!(workbench::terminal::history::get(&env.state_dir, &env.project, "fresh").is_none());
+        assert!(orso::terminal::history::get(&env.state_dir, &env.project, "fresh").is_none());
         assert_eq!(env.state.chats.running(&env.project), None);
 
         let res = send(
@@ -748,7 +748,7 @@ mod http_routes {
         let body = read_to_end(res).await;
         assert!(body.contains("not_installed"), "{body}");
         let record =
-            workbench::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
+            orso::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
         assert_eq!(
             record.agent_session_id, None,
             "an unconfirmed session id is forgotten"
@@ -809,7 +809,7 @@ mod http_routes {
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(v["deleted"], true);
         assert!(!file.exists());
-        assert!(workbench::terminal::history::get(&env.state_dir, &env.project, CHAT).is_none());
+        assert!(orso::terminal::history::get(&env.state_dir, &env.project, CHAT).is_none());
         let (s, _) = call(&env, "GET", &uri(CHAT), None).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
         let (s, _) = call(&env, "DELETE", &uri(CHAT), None).await;
@@ -899,7 +899,7 @@ mod http_routes {
                     url: format!("file://{}", bare.display()),
                     env: vec![],
                 },
-                &git::Identity::workbench(),
+                &git::Identity::orso(),
             )
             .await
             .unwrap();
@@ -946,7 +946,7 @@ mod http_routes {
 
     #[tokio::test]
     async fn terminal_turn_marks_transcript() {
-        let script = format!("echo TOKEN=$WORKBENCH_HOOK_TOKEN; exec {}", fake_cli());
+        let script = format!("echo TOKEN=$ORSO_HOOK_TOKEN; exec {}", fake_cli());
         let env = env(vec!["sh".into(), "-c".into(), script]).await;
         transcript::append(
             &env.state_dir,

@@ -19,7 +19,7 @@ use backoff::Backoff;
 use ready::ReadyInfo;
 
 pub const FAILED_EVENT: &str = "daemon://failed";
-const SIDECAR: &str = "workbench";
+const SIDECAR: &str = "orso";
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 const MAIN_WINDOW: &str = "main";
@@ -27,7 +27,7 @@ const MAIN_WINDOW: &str = "main";
 const LOCAL_PAGES: &str = "tauri://localhost/";
 /// When set, the log bundle is also written here whenever the daemon is
 /// given up on, for checks that can't drive the save dialog.
-const BUNDLE_ON_FAILURE_ENV: &str = "WORKBENCH_DESKTOP_LOG_BUNDLE_ON_FAILURE";
+const BUNDLE_ON_FAILURE_ENV: &str = "ORSO_DESKTOP_LOG_BUNDLE_ON_FAILURE";
 
 #[derive(Debug)]
 pub enum SupervisorError {
@@ -41,13 +41,13 @@ pub enum SupervisorError {
 impl fmt::Display for SupervisorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Spawn(e) => write!(f, "could not start the workbench service: {e}"),
-            Self::ExitedBeforeReady => write!(f, "the workbench service exited during startup"),
-            Self::ReadyTimeout => write!(f, "the workbench service did not report ready in time"),
+            Self::Spawn(e) => write!(f, "could not start the orso service: {e}"),
+            Self::ExitedBeforeReady => write!(f, "the orso service exited during startup"),
+            Self::ReadyTimeout => write!(f, "the orso service did not report ready in time"),
             Self::HealthTimeout => {
-                write!(f, "the workbench service did not become healthy in time")
+                write!(f, "the orso service did not become healthy in time")
             }
-            Self::Stopped => write!(f, "the workbench service was stopped"),
+            Self::Stopped => write!(f, "the orso service was stopped"),
         }
     }
 }
@@ -118,7 +118,7 @@ impl Supervisor {
         if self.control.is_stopping() || !self.control.failed.swap(false, Ordering::SeqCst) {
             return false;
         }
-        logs::shell("retrying the workbench service");
+        logs::shell("retrying the orso service");
         show_page(app, "splash.html", None);
         let app = app.clone();
         thread::spawn(move || {
@@ -302,7 +302,7 @@ fn launch_with_retries(
             None => {
                 control.fail(
                     app,
-                    format!("Workbench's background service failed to start after 3 restart attempts ({err})."),
+                    format!("orso's background service failed to start after 3 restart attempts ({err})."),
                 );
                 return Err(err);
             }
@@ -427,7 +427,7 @@ fn supervise(
         let Some(delay) = backoff.next_delay() else {
             control.fail(
                 app,
-                "Workbench's background service keeps crashing and was not restarted after 3 attempts.".to_owned(),
+                "orso's background service keeps crashing and was not restarted after 3 attempts.".to_owned(),
             );
             return;
         };

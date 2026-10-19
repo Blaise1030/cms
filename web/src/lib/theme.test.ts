@@ -56,10 +56,10 @@ it("applies and remembers an explicit choice", async () => {
 });
 
 it("restores the stored choice and ignores junk", async () => {
-  localStorage.setItem("workbench.theme", "dark");
+  localStorage.setItem("orso.theme", "dark");
   expect((await load()).theme.preference.value).toBe("dark");
 
   vi.resetModules();
-  localStorage.setItem("workbench.theme", "purple");
+  localStorage.setItem("orso.theme", "purple");
   expect((await load()).theme.preference.value).toBe("system");
 });
