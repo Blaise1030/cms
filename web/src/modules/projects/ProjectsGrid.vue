@@ -93,7 +93,8 @@ function open(project: Project) {
       <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
       <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
         <header class="text-center">
-          <h1 class="text-3xl font-light tracking-tight">orso</h1>
+          <img :src="'/icons/orso-logo.svg?v=chrome-rounded-exact'" alt="" width="64" height="48" class="mx-auto mb-1 h-12 w-16" />
+          <h1 class="text-3xl font-bold tracking-tight">orso</h1>
           <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
         </header>
 
