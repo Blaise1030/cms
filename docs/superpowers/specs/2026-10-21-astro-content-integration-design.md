@@ -120,7 +120,9 @@ page tests. The helper tests are deleted with the helper.
 
 The integration writes `.astro/orso-content.json` under the Astro project root. It is generated during
 `astro sync` and dev-server startup, and regenerated when `src/content.config.*` changes. The write is
-atomic (same-directory temporary file plus rename).
+atomic (same-directory temporary file plus rename). The first write is awaited during dev-server
+setup, so when it succeeds a ready dev server implies the manifest exists; a write failure is logged
+and does not block the site.
 
 ```json
 {
@@ -148,7 +150,9 @@ atomic (same-directory temporary file plus rename).
 - A collection whose loader is not `orsoGlob` is written with `loader: null`; it is listed but
   read-only and has no entries because its base/pattern are unknown.
 - `supportedForEditing` is false when the loader is not `orsoGlob`, the pattern/kind is unsupported,
-  there is no schema, or a required field is an unsupported schema node. `reason` explains why.
+  there is no schema, or a required field is an unsupported schema node. `reason` explains why. A
+  collection whose loader or schema cannot be inspected at all is still listed read-only with the
+  error as its reason; one broken collection does not hide the others.
 - `fields` is the `describeSchema()` projection already used by the editor, including `editor`
   metadata, defaults and requiredness. It is not a validation schema.
 - The manifest contains no secrets. It is gitignored with the rest of `.astro/`.
@@ -192,7 +196,8 @@ Responses:
   preserve the source.
 - `401 {"error":"unauthorized"}` for a missing or wrong token.
 - `404 {"error":"unsupported_collection","message":"..."}` for a collection absent from the current
-  manifest.
+  manifest, and `400` with the same error for a collection that is listed but not
+  `supportedForEditing`.
 - `413` for bodies over 2 MiB (entries themselves are capped at 1 MiB).
 - `405` for any method other than POST.
 - `500 {"error":"internal","message":"..."}` for an unexpected failure. The integration logs the
@@ -219,8 +224,11 @@ schemas for subsequent requests.
   The manifest's `reason` is preserved when a collection is read-only.
 - `entries` and `read_entry` are unchanged: they walk the declared base, read files within the project,
   and keep the existing symlink/path protections.
-- If the dev server is unavailable, the last manifest remains usable for reading. Saves fail with a
-  clear "preview is not running" error and never write.
+- If the dev server is unavailable, the last manifest remains usable for reading. The HTTP collection
+  endpoint overlays runtime availability: it returns `editable: false` with a "start the preview"
+  reason when the project is not `ready` or has no content endpoint, so the editor stays read-only
+  instead of offering a form that cannot save. Saves also fail with a clear "preview is not running"
+  error and never write.
 
 ### Integration client
 
@@ -244,8 +252,8 @@ unavailable, the draft stays in the browser and the daemon reports the failure.
 
 `DevServerManager` generates a 32-byte random token on each `start`, stores it for the project, and
 passes it as `ORSO_CONTENT_TOKEN` to the child. The token is removed on `stop` and shutdown; automatic
-crash restarts inside one supervision keep the same token. The manager exposes a test-only fixed
-endpoint option so tests can run a local fake server without Astro.
+crash restarts inside one supervision keep the same token. Tests use the existing custom-launcher hook
+with a local fake server that reads the injected token and prints a ready line.
 
 ## Scaffold
 
@@ -292,6 +300,9 @@ files are absent.
 
 ## Testing
 
+CI installs `packages/astro`'s locked dependencies before the package and Rust tests; the existing
+template dependency install remains required for the template tests and scaffold tests.
+
 ### Package (`npm test` in `packages/astro/`)
 
 - `orsoGlob` attaches metadata, preserves pass-through options, infers kinds and rejects invalid
@@ -319,9 +330,10 @@ files are absent.
   cache invalidation on manifest change and raw entry reads.
 - Integration-client tests use a local fake endpoint to assert request shape, token use, 200/422/400
   mapping, timeouts and unavailable dev servers.
-- Content mutation, lifecycle and image tests use a fake dev-server process that prints a ready line
-  and serves `/__orso` with the package's patch function and fixture schemas. This exercises the
-  manager's token injection and the daemon's HTTP client without starting Astro for every test.
+- Content mutation, lifecycle, history and image tests use a fake dev-server process that prints a
+  ready line and serves `/__orso` with the package's patch function and fixture schemas. This
+  exercises the manager's token injection and the daemon's HTTP client without starting Astro for
+  every test.
 - One end-to-end test starts the real Astro dev server for a scaffolded project, waits for `ready`,
   reads the generated manifest, creates a change, saves an entry through `/__orso`, and asserts the
   file and checkpoint. The scaffold install/build test continues to verify package copying, path
@@ -351,6 +363,8 @@ Update:
 ## Out of scope
 
 - npm publishing or a release pipeline for `orso-astro`.
+- Automatically adding the integration to cloned or imported projects that were not scaffolded from
+  the template; those projects stay read-only until they add the package and `orso()` themselves.
 - Supporting arbitrary loader shapes that cannot expose `base` and `pattern`.
 - Rich Markdown editing for collections other than the template's existing prose collections.
 - Generating the manifest during `astro build`; `astro sync` and dev are the supported generators.
