@@ -591,13 +591,21 @@ impl ProjectRegistry {
                 // Into the (empty) directory we just created.
                 git_clone(dir, url, env).await?;
                 crate::git::set_identity(dir, identity).await?;
-                // Non-Node repos still open; their dev server will just report crashed.
+                // Non-Node repos and repos with a bad orso.json still open;
+                // their dev server will just report crashed.
                 if self.install
                     && crate::settings::install_dir_lenient(dir)
                         .join("package.json")
                         .exists()
                 {
-                    install(dir).await?;
+                    match crate::settings::load(dir) {
+                        Ok(_) => install(dir).await?,
+                        Err(e) => eprintln!(
+                            "orso: skipping install for {}: {}",
+                            dir.display(),
+                            crate::settings::describe(&e)
+                        ),
+                    }
                 }
             }
         }

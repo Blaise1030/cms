@@ -655,6 +655,55 @@ async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
 }
 
 #[tokio::test]
+async fn clone_with_invalid_settings_still_opens() {
+    use orso::git::Identity;
+    use orso::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-b", "main"]);
+    std::fs::write(src.join("package.json"), "{}").unwrap();
+    std::fs::write(src.join("orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    git(&src, &["add", "-A"]);
+    git(
+        &src,
+        &[
+            "-c",
+            "user.name=Grace",
+            "-c",
+            "user.email=g@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+
+    let projects_dir = tmp.path().join("projects");
+    let state = AppState::with_options(
+        config(&projects_dir, true),
+        true,
+        orso::devserver::DevServerOptions::disabled(),
+    );
+    let info = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", src.display()),
+                env: vec![],
+            },
+            &Identity::orso(),
+        )
+        .await
+        .unwrap();
+    let dir = projects_dir.join(&info.id);
+    assert!(dir.join("orso.json").exists());
+    assert!(!dir.join("node_modules").exists(), "install was skipped");
+}
+
+#[tokio::test]
 async fn failed_clone_leaves_nothing_behind() {
     use orso::git::Identity;
     use orso::projects::Source;
