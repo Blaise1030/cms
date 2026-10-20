@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Once};
 use std::time::{Duration, Instant};
 
-use tokio::sync::broadcast;
 use orso::config::Config;
 use orso::events::EventBus;
 use orso::providers::LaunchSpec;
 use orso::terminal::{Output, TerminalManager};
+use tokio::sync::broadcast;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -453,10 +453,6 @@ mod http {
     use axum::http::{header, Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
     use http_body_util::BodyExt;
-    use serde_json::{json, Value};
-    use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::Message as WsMessage;
-    use tower::ServiceExt;
     use orso::config::Config;
     use orso::events::EventBus;
     use orso::git;
@@ -464,6 +460,10 @@ mod http {
     use orso::http::terminal::commit_message;
     use orso::projects::Source;
     use orso::state::AppState;
+    use serde_json::{json, Value};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tower::ServiceExt;
 
     use super::{fake_cli, word_after, TERMINAL_TEST_LOCK, TIMEOUT};
 

@@ -1,8 +1,8 @@
+use orso::git;
 use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use orso::git;
 
 fn cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

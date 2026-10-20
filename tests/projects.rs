@@ -4,11 +4,11 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 fn config(dir: &Path, no_auth: bool) -> Config {
     Config {
@@ -255,13 +255,7 @@ async fn delete_only_touches_registered_projects() {
     let projects = tmp.path().join("projects");
     let app = app(&projects);
     create(&app, "real").await;
-    for id in [
-        "outside",
-        "..",
-        "%2e%2e",
-        "real/../../outside",
-        ".orso",
-    ] {
+    for id in ["outside", "..", "%2e%2e", "real/../../outside", ".orso"] {
         let (status, _) = call(
             &app,
             req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
@@ -349,9 +343,7 @@ async fn failed_quarantine_blocks_writes_and_keeps_corrupt_file() {
         req("POST", "/api/projects", Some(json!({ "name": "x" }))),
     )
     .await;
-    let serve_err = orso::serve(config(tmp.path(), true))
-        .await
-        .unwrap_err();
+    let serve_err = orso::serve(config(tmp.path(), true)).await.unwrap_err();
     chmod(&state, 0o700);
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{v}");

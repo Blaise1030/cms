@@ -7,12 +7,12 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::content::images::{self, ImageFormat, MAX_IMAGE_BYTES};
 use orso::state::AppState;
 use orso::{changes, http};
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 const WELCOME: &str = "src/content/blog/en/welcome.md";
 const PNG: &[u8] = include_bytes!("fixtures/images/pixel.png");
@@ -432,8 +432,7 @@ async fn collisions_get_deterministic_unique_names_and_extension_follows_bytes()
     std::fs::create_dir_all(&assets).unwrap();
     std::fs::write(assets.join("photo.png"), b"existing").unwrap();
     let opened = read(&e, "blog", "welcome").await;
-    let body =
-        "![One](orso-image:a)\n![Two](orso-image:b)\n![Three](orso-image:c)\n";
+    let body = "![One](orso-image:a)\n![Two](orso-image:b)\n![Three](orso-image:c)\n";
     let entry = update(
         &e,
         &opened,
@@ -716,9 +715,7 @@ async fn orphan_staging_and_temp_files_are_cleaned_on_the_next_operation() {
     let keep = assets.join("notes.orso-tmp.png");
     std::fs::write(&keep, "keep").unwrap();
     // A delete whose set-aside asset folder could not be removed leaves it behind.
-    let trash = e
-        .dir
-        .join("src/assets/blog/.old-post.99999-0.orso-trash");
+    let trash = e.dir.join("src/assets/blog/.old-post.99999-0.orso-trash");
     std::fs::create_dir_all(trash.join("nested")).unwrap();
     std::fs::write(trash.join("nested/photo.png"), PNG).unwrap();
     let keep_dir = e.dir.join("src/assets/blog/kept.orso-trash");

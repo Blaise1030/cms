@@ -6,12 +6,12 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tokio::sync::broadcast::error::TryRecvError;
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tokio::sync::broadcast::error::TryRecvError;
+use tower::ServiceExt;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 

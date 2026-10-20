@@ -6,13 +6,13 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::error::ErrorCode;
 use orso::http;
 use orso::state::AppState;
 use orso::{changes, git};
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 fn git_cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
