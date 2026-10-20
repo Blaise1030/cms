@@ -153,17 +153,18 @@ const CATALOG_INPUTS: [&str; 3] = [
     "src/content.config.ts",
     super::helper::SCRIPT,
 ];
-type CatalogKey = [Option<std::time::SystemTime>; 3];
+type CatalogKey = (String, [Option<std::time::SystemTime>; 3]);
 type CatalogCache = HashMap<PathBuf, (CatalogKey, Vec<ContentCollection>)>;
 static CATALOG: LazyLock<Mutex<CatalogCache>> = LazyLock::new(Default::default);
 fn catalog_key(root: &Path) -> CatalogKey {
     let prefix = crate::settings::site_prefix(root);
     // symlink_metadata: replacing an input with a link also changes the key.
-    CATALOG_INPUTS.map(|path| {
+    let mtimes = CATALOG_INPUTS.map(|path| {
         std::fs::symlink_metadata(root.join(format!("{prefix}{path}")))
             .and_then(|m| m.modified())
             .ok()
-    })
+    });
+    (prefix, mtimes)
 }
 /// The catalog with field descriptors. One `describe` helper run serves both the
 /// collection list and the fields; complete results are cached per project until a schema

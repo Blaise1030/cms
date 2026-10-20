@@ -308,3 +308,29 @@ async fn collections_use_one_helper_run_and_are_cached_until_schema_inputs_chang
     assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
     assert_eq!(runs(root), 4);
 }
+#[tokio::test]
+async fn changing_root_invalidates_the_cached_catalog() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/content-schemas.mjs"), "export {}").unwrap();
+    counting_helper(root, "blog");
+    assert_eq!(
+        list_collections(root).await.unwrap()[0].loader["base"],
+        "posts"
+    );
+
+    // A rename keeps every input's mtime, so only the prefix differs.
+    let site = root.join("site");
+    std::fs::create_dir_all(&site).unwrap();
+    std::fs::write(site.join("astro.config.mjs"), "export default {}").unwrap();
+    for dir in ["src", "scripts"] {
+        std::fs::rename(root.join(dir), site.join(dir)).unwrap();
+    }
+    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    assert_eq!(
+        list_collections(root).await.unwrap()[0].loader["base"],
+        "site/posts"
+    );
+    assert_eq!(runs(&site), 1);
+}
