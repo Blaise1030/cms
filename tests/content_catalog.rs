@@ -40,6 +40,59 @@ async fn template_catalog_and_raw_entries() {
     }
     assert!(read_entry(template(), "blog", "../site").await.is_err());
 }
+fn copy_template(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if matches!(name.to_str(), Some("node_modules" | "dist" | ".git")) {
+            continue;
+        }
+        let to = dst.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            copy_template(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn catalog_under_subfolder_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let site = root.join("site");
+    copy_template(template(), &site);
+    std::os::unix::fs::symlink(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules"),
+        site.join("node_modules"),
+    )
+    .unwrap();
+    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    let collections = list_collections(root).await.unwrap();
+    assert!(collections.iter().all(|c| c.editable), "{collections:?}");
+    let entries = list_entries(root, "blog").await.unwrap();
+    assert!(!entries.is_empty());
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.path.starts_with("site/src/content/blog/en/")),
+        "{entries:?}"
+    );
+    let entry = read_entry(root, "blog", "welcome").await.unwrap();
+    assert_eq!(entry.path, "site/src/content/blog/en/welcome.md");
+    assert_eq!(
+        entry.source,
+        std::fs::read_to_string(site.join("src/content/blog/en/welcome.md")).unwrap()
+    );
+}
+
 #[tokio::test]
 async fn helper_failure_is_read_only_and_isolated() {
     let temp = tempfile::tempdir().unwrap();

@@ -84,8 +84,8 @@ struct Analysis {
     rewrites: Vec<Rewrite>,
 }
 
-fn asset_dir(collection: &str, id: &str) -> String {
-    format!("src/assets/{collection}/{id}")
+fn asset_dir(prefix: &str, collection: &str, id: &str) -> String {
+    format!("{prefix}src/assets/{collection}/{id}")
 }
 
 /// Public URL of an entry under the bundled template routes, when it has one.
@@ -335,9 +335,10 @@ async fn analyze(
     new_id: Option<&str>,
 ) -> Result<Analysis, ApiError> {
     let url = public_url(collection, id);
+    let prefix = crate::settings::site_prefix(root);
     let mut impact = ContentImpact {
         references: vec![],
-        assets: owned_assets(root, &asset_dir(collection, id))?,
+        assets: owned_assets(root, &asset_dir(&prefix, collection, id))?,
         prose_links: vec![],
     };
     let mut rewrites = vec![];
@@ -539,7 +540,11 @@ pub async fn rename_entry(
     if std::fs::symlink_metadata(m::resolve(&root, &new_rel)?).is_ok() {
         return Err(m::duplicate_slug(&c, slug));
     }
-    let (old_assets, new_assets) = (asset_dir(&c.name, id), asset_dir(&c.name, slug));
+    let prefix = crate::settings::site_prefix(&root);
+    let (old_assets, new_assets) = (
+        asset_dir(&prefix, &c.name, id),
+        asset_dir(&prefix, &c.name, slug),
+    );
     if std::fs::symlink_metadata(m::resolve_as(&root, &new_assets, Leaf::Dir)?).is_ok() {
         return Err(assets_taken(&new_assets));
     }
@@ -689,7 +694,7 @@ pub async fn delete_entry(state: &AppState, request: DeleteEntry) -> Result<(), 
     if catalog::hash(&source) != request.hash {
         return Err(m::stale());
     }
-    let assets_rel = asset_dir(&c.name, id);
+    let assets_rel = asset_dir(&crate::settings::site_prefix(&root), &c.name, id);
     let analysis = analyze(&root, &collections, &c.name, id, None).await?;
     if !analysis.impact.references.is_empty() {
         return Err(ApiError::conflict(format!(

@@ -12,11 +12,16 @@ pub(crate) const SCRIPT: &str = "scripts/orso-content.mjs";
 /// Send one request. The outer error means the helper could not run; the inner error is
 /// the helper's own refusal message (stderr of a failed request).
 pub async fn run(root: &Path, request: &Value) -> Result<Result<Value, String>, ApiError> {
+    // The helper lives inside the configured Astro root; invalid settings
+    // fall back to the project root, matching `settings::site_prefix`.
+    let site = crate::settings::load(root)
+        .map(|s| s.site_dir(root))
+        .unwrap_or_else(|_| root.to_path_buf());
     // Verify helper containment before executing project code.
-    fs::read_file(root, SCRIPT).await?;
+    fs::read_file(&site, SCRIPT).await?;
     let mut child = tokio::process::Command::new("node")
         .arg(SCRIPT)
-        .current_dir(root)
+        .current_dir(&site)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -89,6 +89,51 @@ async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
     )
 }
 
+/// Same project, but the whole template moved into `site/` with `orso.json`
+/// pointing at it.
+async fn env_under_subfolder_root() -> Env {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = AppState::with_scaffold_install(
+        Config {
+            port: 0,
+            origin: None,
+            projects_dir: tmp.path().to_path_buf(),
+            no_auth: true,
+            token: None,
+            agents_config: None,
+            ..Default::default()
+        },
+        false,
+    );
+    let info = state.projects.create("Site").await.unwrap();
+    let dir = tmp.path().join(&info.id);
+    let site = dir.join("site");
+    std::fs::create_dir(&site).unwrap();
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .filter(|n| n != ".git" && n != "site")
+        .collect();
+    for name in names {
+        std::fs::rename(dir.join(&name), site.join(&name)).unwrap();
+    }
+    std::fs::write(dir.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    let modules =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
+    std::os::unix::fs::symlink(modules, site.join("node_modules")).unwrap();
+    let exclude = dir.join(".git/info/exclude");
+    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
+    text.push_str("\n/site/node_modules\n");
+    std::fs::write(exclude, text).unwrap();
+    changes::create(&dir, "Add images").await.unwrap();
+    Env {
+        app: http::router(state.clone()),
+        tmp,
+        id: info.id,
+        dir,
+    }
+}
+
 async fn read(e: &Env, collection: &str, id: &str) -> Value {
     let req = Request::builder()
         .uri(format!(
@@ -311,6 +356,38 @@ async fn markdown_image_saves_entry_and_asset_in_one_scoped_checkpoint() {
     assert_eq!(committed, vec![asset, WELCOME]);
     assert!(git_cli(&e.dir, &["status", "--porcelain"]).contains("README.md"));
     assert!(staging_is_empty(&e.dir));
+}
+
+#[tokio::test]
+async fn assets_under_subfolder_root() {
+    let e = env_under_subfolder_root().await;
+    let opened = read(&e, "blog", "welcome").await;
+    let body = format!(
+        "{}\n![A pixel](orso-image:img-1)\n",
+        opened["body"].as_str().unwrap()
+    );
+    let entry = update(
+        &e,
+        &opened,
+        json!({}),
+        Some(&body),
+        json!([image("img-1", "A pixel", "My Photo.png")]),
+    );
+    let (s, v) = save(&e, "PUT", entry, &[png_part("img-1", "My Photo.png", PNG)]).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let asset = "site/src/assets/blog/welcome/my-photo.png";
+    assert_eq!(std::fs::read(e.dir.join(asset)).unwrap(), PNG);
+    assert_eq!(
+        v["images"]["img-1"],
+        json!({"path": asset, "link": "../../../assets/blog/welcome/my-photo.png"})
+    );
+    let committed = git_cli(&e.dir, &["show", "--format=", "--name-only", "HEAD"]);
+    let mut committed: Vec<_> = committed.lines().collect();
+    committed.sort();
+    assert_eq!(
+        committed,
+        vec![asset, "site/src/content/blog/en/welcome.md"]
+    );
 }
 
 #[tokio::test]
