@@ -1,7 +1,9 @@
 # Orso bear artwork
 
 The active `orso-logo.svg`, `orso-mark.svg`, and desktop copy were replaced
-unchanged with the user-supplied `bear_chrome_rounded_exact.svg` on 2026-10-20.
+with the user-supplied `bear_chrome_rounded_exact.svg` on 2026-10-20. Its embedded
+1940×1420 PNG is downscaled to 256 px wide (4× the 64 px display size) and its C2PA
+manifest dropped, keeping the files under the PWA precache budget.
 The source and license notes below describe the earlier artwork only, not the
 replacement SVG.
 
