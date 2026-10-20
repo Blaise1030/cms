@@ -11,7 +11,7 @@ function announce(detail: unknown) {
 }
 
 afterEach(() => {
-  delete (window as { __WORKBENCH_UPDATE__?: unknown }).__WORKBENCH_UPDATE__;
+  delete (window as { __ORSO_UPDATE__?: unknown }).__ORSO_UPDATE__;
 });
 
 describe("UpdateNotice", () => {
@@ -29,7 +29,7 @@ describe("UpdateNotice", () => {
   });
 
   it("shows an update announced before it mounted", () => {
-    (window as { __WORKBENCH_UPDATE__?: unknown }).__WORKBENCH_UPDATE__ = { version: "1.2.3", applyUrl };
+    (window as { __ORSO_UPDATE__?: unknown }).__ORSO_UPDATE__ = { version: "1.2.3", applyUrl };
     const w = mount(UpdateNotice);
     expect(w.find("[data-testid='update-notice']").exists()).toBe(true);
     w.unmount();

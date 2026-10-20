@@ -8,11 +8,11 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::changes::{self, PrMerge};
-use workbench::config::Config;
-use workbench::error::ErrorCode;
-use workbench::http;
-use workbench::state::AppState;
+use orso::changes::{self, PrMerge};
+use orso::config::Config;
+use orso::error::ErrorCode;
+use orso::http;
+use orso::state::AppState;
 
 fn git_cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -334,7 +334,7 @@ async fn cleanup_needs_github_only_when_git_cannot_tell() {
     let work = clone_with_origin(tmp.path());
     let squashed = shared_change(&work, "New post: Squashed", "squashed.md").await;
     merge_on_remote(tmp.path(), &squashed, true);
-    let unknown = || PrMerge::Unknown(workbench::error::ApiError::github("GitHub is down"));
+    let unknown = || PrMerge::Unknown(orso::error::ApiError::github("GitHub is down"));
 
     // Squash merge: only GitHub can say, so its error is the answer.
     let err = changes::cleanup(&work, &squashed, unknown(), &[])
@@ -541,9 +541,9 @@ struct GithubProject {
 /// A signed-in daemon with `acme/site` cloned from a local bare repo, on a shared change
 /// `content/launch` with one commit (pushed).
 async fn github_project() -> GithubProject {
-    use workbench::config::GithubConfig;
-    use workbench::git::Identity;
-    use workbench::projects::Source;
+    use orso::config::GithubConfig;
+    use orso::git::Identity;
+    use orso::projects::Source;
 
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
@@ -555,7 +555,7 @@ async fn github_project() -> GithubProject {
         &git_root,
         &["clone", "--bare", src.to_str().unwrap(), "acme/site.git"],
     );
-    let session = projects.join(".workbench");
+    let session = projects.join(".orso");
     std::fs::create_dir_all(&session).unwrap();
     std::fs::write(
         session.join("github.json"),
@@ -587,7 +587,7 @@ async fn github_project() -> GithubProject {
                 url: format!("file://{}", git_root.join("acme/site.git").display()),
                 env: vec![],
             },
-            &Identity::workbench(),
+            &Identity::orso(),
         )
         .await
         .unwrap();

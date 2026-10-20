@@ -1,9 +1,9 @@
 /**
  * The macOS desktop shell announces a downloaded update by setting
- * `window.__WORKBENCH_UPDATE__` and dispatching this event on `window`. Browsers
+ * `window.__ORSO_UPDATE__` and dispatching this event on `window`. Browsers
  * and the PWA never see it.
  */
-export const UPDATE_EVENT = "workbench:update-ready";
+export const UPDATE_EVENT = "orso:update-ready";
 
 export interface DesktopUpdate {
   version: string;
@@ -13,7 +13,7 @@ export interface DesktopUpdate {
 
 declare global {
   interface Window {
-    __WORKBENCH_UPDATE__?: unknown;
+    __ORSO_UPDATE__?: unknown;
   }
 }
 

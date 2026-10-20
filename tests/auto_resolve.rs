@@ -9,15 +9,15 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::changes::auto_resolve::{
+use orso::changes::auto_resolve::{
     AutoResolveJobs, JobContext, JobState, JobStatus, Timeouts,
 };
-use workbench::changes::conflict_sessions::ConflictSessions;
-use workbench::conflict_preview::ConflictPreviewManager;
-use workbench::events::EventBus;
-use workbench::git::Identity;
-use workbench::providers::Provider;
-use workbench::{config::Config, http, state::AppState};
+use orso::changes::conflict_sessions::ConflictSessions;
+use orso::conflict_preview::ConflictPreviewManager;
+use orso::events::EventBus;
+use orso::git::Identity;
+use orso::providers::Provider;
+use orso::{config::Config, http, state::AppState};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")

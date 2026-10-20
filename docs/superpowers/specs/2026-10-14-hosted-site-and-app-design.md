@@ -2,7 +2,7 @@
 
 ## Goal
 
-Ship Workbench the way tabsh does: one public site with a landing page, docs, and the app at
+Ship orso the way tabsh does: one public site with a landing page, docs, and the app at
 `/app`. Users install and run the desktop daemon locally; the hosted `/app` talks to it from the
 browser. The daemon keeps serving the same UI locally as an offline / Safari fallback.
 
@@ -58,7 +58,7 @@ One Cloudflare Worker (static assets) serves `site/dist`. Unknown paths under `/
 - **`src/static.rs`** serves the embedded SPA under `/app/`: `SPA_ROUTE_PREFIXES` becomes
   `["/app/"]` (assets and icons live under it), and `GET /` redirects to `/app/`.
 - **`src/main.rs` / `src/config.rs`** `origin` defaults to the build-time env
-  `WORKBENCH_SITE_ORIGIN` (`option_env!`; release CI sets it to the production site, local builds
+  `ORSO_SITE_ORIGIN` (`option_env!`; release CI sets it to the production site, local builds
   leave it unset → no default). `--origin <url>` overrides it (preview branches), `--no-origin`
   disables it.
 - **`src/http/mod.rs`** CORS layer additionally:
@@ -100,8 +100,8 @@ when the daemon is cross-site. Fix with a short-lived ticket exchanged for a par
 
 - Copied from `templates/astro-marketing`. The template is the scaffold the daemon embeds into
   every new project (`static.rs` `Template`), so it is **not modified**; `site/` drops the
-  scaffold-only parts (`scripts/workbench-content*`, `.github/`, `AGENTS.md`, `DESIGN.md`,
-  `PUBLIC_BASE`/`WORKBENCH_PROXY_PORT` handling in `astro.config.mjs`).
+  scaffold-only parts (`scripts/orso-content*`, `.github/`, `AGENTS.md`, `DESIGN.md`,
+  `PUBLIC_BASE`/`ORSO_PROXY_PORT` handling in `astro.config.mjs`).
 - Adds Starlight for `/docs/*`; adds `/connect` (install + start + pair instructions).
 - `wrangler.toml`: `main = "worker.js"`, `[assets] directory = "./dist"`, `binding = "ASSETS"`,
   `not_found_handling = "404-page"` (a site-wide SPA fallback would swallow real 404s).
@@ -115,7 +115,7 @@ when the daemon is cross-site. Fix with a short-lived ticket exchanged for a par
   `just build-site` and deploys `site/` to Cloudflare Workers with per-branch previews.
   Branch previews have their own origin, so testing one requires starting the daemon with
   `--origin <preview url>`.
-- `release.yml` sets `WORKBENCH_SITE_ORIGIN` from the repo variable `SITE_ORIGIN` when building
+- `release.yml` sets `ORSO_SITE_ORIGIN` from the repo variable `SITE_ORIGIN` when building
   the daemon.
 - The daemon build keeps embedding `web/dist` (now built with base `/app/`).
 

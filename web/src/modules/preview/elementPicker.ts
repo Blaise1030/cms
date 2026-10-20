@@ -62,7 +62,7 @@ function cssPath(el: Element): string {
   return parts.join(" > ");
 }
 
-/** `/Users/me/workbench-projects/site-1/src/pages/index.astro` → `src/pages/index.astro`. */
+/** `/Users/me/orso-projects/site-1/src/pages/index.astro` → `src/pages/index.astro`. */
 function relativeFile(file: string, projectId: string): string {
   const marker = `/${projectId}/`;
   const at = file.lastIndexOf(marker);
@@ -101,7 +101,7 @@ export function elementPrompt(pick: PickedElement): string {
   return `[element ${pick.tag}${text} ${where}]${shot}`;
 }
 
-const OVERLAY_ID = "__workbench-picker";
+const OVERLAY_ID = "__orso-picker";
 
 /**
  * Hover-highlight elements in a same-origin preview window; a click picks one. Page clicks are

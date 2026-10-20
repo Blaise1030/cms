@@ -8,10 +8,10 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
-use workbench::{changes, git};
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
+use orso::{changes, git};
 
 fn git_cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -158,7 +158,7 @@ async fn create_carries_edits_from_main_but_refuses_from_another_change() {
     );
 
     let err = changes::create(&work, "Another").await.unwrap_err();
-    assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
+    assert_eq!(err.code, orso::error::ErrorCode::Conflict);
     assert!(
         err.message.to_lowercase().contains("checkpoint"),
         "expected checkpoint-first message, got: {}",
@@ -310,7 +310,7 @@ async fn switch_checks_out_and_refuses_dirty() {
 
     std::fs::write(work.join("alpha.md"), "dirty\n").unwrap();
     let err = changes::switch(&work, "content/beta").await.unwrap_err();
-    assert_eq!(err.code, workbench::error::ErrorCode::Conflict);
+    assert_eq!(err.code, orso::error::ErrorCode::Conflict);
     assert!(
         err.message.to_lowercase().contains("checkpoint"),
         "expected checkpoint-first message, got: {}",

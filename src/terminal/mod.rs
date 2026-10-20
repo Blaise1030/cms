@@ -1,7 +1,7 @@
 //! Per-project coding CLIs running in daemon-owned PTYs.
 //!
 //! At most one terminal is live per project. Each runs `$SHELL -lc 'exec <argv>'` (a login
-//! shell, so the user's PATH applies) in the project dir, with the `WORKBENCH_*` variables the
+//! shell, so the user's PATH applies) in the project dir, with the `ORSO_*` variables the
 //! `hook turn-end` subcommand needs. PTY I/O is blocking, so each session has three threads
 //! (after tabsh `src/sessions/pty.rs`):
 //!
@@ -368,10 +368,10 @@ impl TerminalManager {
         // The pane is a real color terminal even when the daemon was launched from a non-TTY.
         cmd.env_remove("NO_COLOR");
         cmd.env_remove("FORCE_COLOR");
-        cmd.env("WORKBENCH_URL", format!("http://127.0.0.1:{}", config.port));
-        cmd.env("WORKBENCH_PROJECT", project_id);
-        cmd.env("WORKBENCH_HOOK_TOKEN", &token);
-        cmd.env("WORKBENCH_HOOK_EXE", config.hook_exe_path());
+        cmd.env("ORSO_URL", format!("http://127.0.0.1:{}", config.port));
+        cmd.env("ORSO_PROJECT", project_id);
+        cmd.env("ORSO_HOOK_TOKEN", &token);
+        cmd.env("ORSO_HOOK_EXE", config.hook_exe_path());
         for (k, v) in &launch.env {
             cmd.env(k, v);
         }

@@ -33,9 +33,9 @@
 
 ### Task 1: Template collections and public routes
 
-**Files:** Modify `templates/astro-marketing/src/content.config.ts`, `src/layouts/Base.astro`, `src/lib/href.ts`, `src/pages/index.astro`, `src/content/site.json`, `package.json`; create `src/content-schemas.mjs`, `scripts/workbench-content.mjs`, `src/pages/[slug].astro`, `src/pages/blog/index.astro`, `src/pages/blog/[slug].astro`, `src/pages/help/index.astro`, `src/pages/help/[slug].astro`, representative `src/content/blog/en/welcome.md`, `src/content/helpDocs/en/getting-started.md`, `scripts/content-pages.test.mjs`; modify `tests/static.rs`.
+**Files:** Modify `templates/astro-marketing/src/content.config.ts`, `src/layouts/Base.astro`, `src/lib/href.ts`, `src/pages/index.astro`, `src/content/site.json`, `package.json`; create `src/content-schemas.mjs`, `scripts/orso-content.mjs`, `src/pages/[slug].astro`, `src/pages/blog/index.astro`, `src/pages/blog/[slug].astro`, `src/pages/help/index.astro`, `src/pages/help/[slug].astro`, representative `src/content/blog/en/welcome.md`, `src/content/helpDocs/en/getting-started.md`, `scripts/content-pages.test.mjs`; modify `tests/static.rs`.
 
-**Interfaces:** Consumes Astro's `getCollection`, `getEntry`, `render`, and existing `Base.astro`. Produces `blog` and `helpDocs` collection exports and the five public routes, using base-aware links. `src/content-schemas.mjs` exports `collectionRegistry` and `createCollectionSchemas(context)`; `scripts/workbench-content.mjs` initially supports `{op:"list"}` on stdin and returns registry names, loader paths, and content kinds as JSON on stdout.
+**Interfaces:** Consumes Astro's `getCollection`, `getEntry`, `render`, and existing `Base.astro`. Produces `blog` and `helpDocs` collection exports and the five public routes, using base-aware links. `src/content-schemas.mjs` exports `collectionRegistry` and `createCollectionSchemas(context)`; `scripts/orso-content.mjs` initially supports `{op:"list"}` on stdin and returns registry names, loader paths, and content kinds as JSON on stdout.
 
 - [ ] **Step 1: Write failing tests.** In `scripts/content-pages.test.mjs`, assert the `list` helper reports all five collection names and loader paths; built output has blog/help indexes and sample articles, Blog newest-first ordering, Help section/order grouping, non-home page rendering, empty-state copy when fixtures are absent, and working base-prefixed links. In `tests/static.rs`, assert new template files are embedded.
 - [ ] **Step 2: Run failure.** Run `npm run build && node --test scripts/content-pages.test.mjs` in the template and `cargo test --test static`; expect missing collections/routes or output.
@@ -57,12 +57,12 @@
 
 ### Task 3: Shared schema helper and source-preserving patches
 
-**Files:** Create `templates/astro-marketing/scripts/workbench-content.test.mjs`; modify `templates/astro-marketing/src/content-schemas.mjs`, `templates/astro-marketing/scripts/workbench-content.mjs`, `templates/astro-marketing/src/content.config.ts`, `templates/astro-marketing/package.json` and lockfile if dependency changes are needed; modify `src/content/catalog.rs`, `tests/content_catalog.rs`.
+**Files:** Create `templates/astro-marketing/scripts/orso-content.test.mjs`; modify `templates/astro-marketing/src/content-schemas.mjs`, `templates/astro-marketing/scripts/orso-content.mjs`, `templates/astro-marketing/src/content.config.ts`, `templates/astro-marketing/package.json` and lockfile if dependency changes are needed; modify `src/content/catalog.rs`, `tests/content_catalog.rs`.
 
 **Interfaces:** Extend Task 1's line-delimited JSON helper with `{op:"describe"}` returning collection/field descriptors, `{op:"validate",collection,fields}` returning `{valid,fields,errors:[{path,message}]}`, and `{op:"patch",collection,source,fields,body}` returning `{source}`. Every schema definition remains shared with Astro; helper never writes files. Descriptors represent strings/dates/enums/literals/booleans/numbers/arrays/objects/discriminated section variants/images/references or `unsupported` with reason.
 
 - [ ] **Step 1: Write failing tests.** Assert helper registry names/loader paths equal `content.config.ts`; valid and invalid Blog/Help samples agree with Astro build validation; `coverAlt` is required with `coverImage`; unknown transforms are read-only; patching one YAML or JSON field preserves untouched comments, key text, quote style, ordering, indentation, line endings, and body bytes. Extend `content_catalog` to assert collection responses include field descriptors.
-- [ ] **Step 2: Run failure.** Run `cd templates/astro-marketing && node --test scripts/workbench-content.test.mjs`; expect missing describe/validate/patch operations.
+- [ ] **Step 2: Run failure.** Run `cd templates/astro-marketing && node --test scripts/orso-content.test.mjs`; expect missing describe/validate/patch operations.
 - [ ] **Step 3: Implement.** Extend the shared schema factory with image/reference metadata and corresponding helper adapters, with contract tests for equivalent validation. Implement `describe`, `validate`, and syntax-aware targeted `patch` without normalizing untouched source. Return field paths from live Zod issues; label unrepresentable required fields unsupported. Have `catalog::list_collections` attach `describe` results and mark required unsupported fields read-only.
 - [ ] **Step 4: Verify.** Run Step 2, `cargo test --test content_catalog`, and `cd templates/astro-marketing && npm run build`; expect pass.
 - [ ] **Step 5: Commit.** Stage only Task 3 paths and commit `feat: share template schemas with content helper`.
@@ -141,12 +141,12 @@
 
 ### Task 10: Browser acceptance flow
 
-**Files:** Create `e2e/specs/content-editor.spec.ts`; modify `e2e/fixtures/workbench.ts`, `web/src/modules/content/store.ts`, and `web/src/modules/preview/store.ts` only where the failing flow identifies a missing fixture or refresh connection.
+**Files:** Create `e2e/specs/content-editor.spec.ts`; modify `e2e/fixtures/orso.ts`, `web/src/modules/content/store.ts`, and `web/src/modules/preview/store.ts` only where the failing flow identifies a missing fixture or refresh connection.
 
 **Interfaces:** Exercises Tasks 1–9 through public UI/API and template Preview; no new product API.
 
 - [ ] **Step 1: Write failing test.** In Playwright, create a local template project, create a change, create and save a Blog article with an image, see it in Content and Preview at `/blog/<slug>`, verify Help index, switch to `main` and confirm the article is absent there, then switch back and confirm the draft remains on the change branch.
 - [ ] **Step 2: Run failure.** Run `cd e2e && npm run e2e -- --grep 'content editor'`; expect missing flow or route.
-- [ ] **Step 3: Implement `refreshForBranch(branch: string): Promise<void>` in `web/src/modules/content/store.ts` and connect the existing branch-change event to Content and Preview reloads.** Add the template-project fixture in `e2e/fixtures/workbench.ts` if the existing fixture cannot create one. Keep the current draft object when the branch changes.
+- [ ] **Step 3: Implement `refreshForBranch(branch: string): Promise<void>` in `web/src/modules/content/store.ts` and connect the existing branch-change event to Content and Preview reloads.** Add the template-project fixture in `e2e/fixtures/orso.ts` if the existing fixture cannot create one. Keep the current draft object when the branch changes.
 - [ ] **Step 4: Verify.** Run the focused Playwright test, template build, `cargo test --test content_catalog --test content_mutation --test content_lifecycle --test content_images`, and `cd web && npm run build`; expect pass.
 - [ ] **Step 5: Commit.** Stage only Task 10 test and integration fixes and commit `test: cover content editor branch preview`.

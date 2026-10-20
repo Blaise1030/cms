@@ -47,7 +47,7 @@ describe("ChatMessage", () => {
   });
 
   it("shows attached images as previews and other files as chips instead of their paths", async () => {
-    const dir = "/Users/me/workbench-projects/.workbench/p/attachments";
+    const dir = "/Users/me/orso-projects/.orso/p/attachments";
     const w = await render(
       [{ type: "text", text: `Test\n${dir}/5d83a351365d7d18.png\n${dir}/0123456789abcdef.pdf` }],
       "user",
@@ -64,7 +64,7 @@ describe("ChatMessage", () => {
 
   it("falls back to a chip when an attached image can't load", async () => {
     const w = await render(
-      [{ type: "text", text: "/s/.workbench/p/attachments/5d83a351365d7d18.png" }],
+      [{ type: "text", text: "/s/.orso/p/attachments/5d83a351365d7d18.png" }],
       "user",
     );
     await w.find("[data-testid='message-attachment'] img").trigger("error");
@@ -75,7 +75,7 @@ describe("ChatMessage", () => {
 
   it("shows a picked element in a user message as a compact tag", async () => {
     const ref = '[element <section class="mx-auto" id="hero"> "Stop building" in src/Hero.astro:5:69]';
-    const shot = "/p/.workbench/site/attachments/4b78.png";
+    const shot = "/p/.orso/site/attachments/4b78.png";
     const w = await render([{ type: "text", text: `${ref} ${shot} make it shorter` }], "user");
     const tag = w.find("[data-testid='element-tag']");
     expect(tag.text()).toBe("section#hero");

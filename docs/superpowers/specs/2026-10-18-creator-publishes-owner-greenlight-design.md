@@ -8,7 +8,7 @@ conflicts).
 
 ## Problem
 
-Workbench's audience is non-technical site owners and content creators, but going live
+orso's audience is non-technical site owners and content creators, but going live
 today leaks Git and GitHub mechanics: change branches, draft PRs, "Ready for review",
 merging on github.com, and branch protection settings. A creator must understand pull
 requests to publish a headline change, and an owner has no in-app moment to approve

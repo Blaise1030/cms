@@ -48,7 +48,7 @@ writers than the chat UI.
 - Chat event kinds `chat.chunk`, `chat.tool`, `chat.plan`, `chat.done`, `chat.error`,
   `permission.request` (from `web/src/core/types.ts` and the socket handling).
 
-`--agents-config` / `~/.config/workbench/agents.json` remain as the override for each provider's
+`--agents-config` / `~/.config/orso/agents.json` remain as the override for each provider's
 base command (see Providers).
 
 ## Architecture
@@ -79,7 +79,7 @@ At most one live terminal per project. Owned by `AppState`, replacing `agents`.
 - **spawn(project, provider)**: checks D6, then opens a PTY (80×24) via `portable-pty` running
   `$SHELL -lc 'exec <argv>'` (login shell so the user's PATH applies; `$SHELL` falls back to the
   passwd shell, then `/bin/sh`, as in `tabsh:src/sessions/pty.rs:279`). cwd is the project dir.
-  Env: `TERM=xterm-256color`, `WORKBENCH_URL`, `WORKBENCH_PROJECT`, `WORKBENCH_HOOK_TOKEN`
+  Env: `TERM=xterm-256color`, `ORSO_URL`, `ORSO_PROJECT`, `ORSO_HOOK_TOKEN`
   (fresh random per session). Fails with `conflict` if a terminal is already live for the project.
 - **I/O**: one writer thread fed by an mpsc channel; one reader thread reading 8 KB chunks,
   appending to a 512 KB scrollback ring and publishing on a broadcast channel (capacity 1024).
@@ -117,8 +117,8 @@ stdin, or from a single trailing argument (Codex `notify` passes JSON as argv). 
 - Claude: `last_assistant_message` if present, otherwise none.
 - OpenCode: whatever the plugin passes.
 
-POSTs `{ project: $WORKBENCH_PROJECT, token: $WORKBENCH_HOOK_TOKEN, summary }` to
-`$WORKBENCH_URL/api/terminal/turn-end`. Missing env (CLI run outside the workbench) → exit 0
+POSTs `{ project: $ORSO_PROJECT, token: $ORSO_HOOK_TOKEN, summary }` to
+`$ORSO_URL/api/terminal/turn-end`. Missing env (CLI run outside the orso) → exit 0
 silently. Network errors → print to stderr, exit 0 (never break the CLI's turn).
 
 ### Checkpoints

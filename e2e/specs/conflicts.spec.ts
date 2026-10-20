@@ -5,7 +5,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 
 import { startChange } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, encoding: "utf8", stdio: "pipe" }).trim();
@@ -30,11 +30,11 @@ async function openAdvanced(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("workbench.terminal.provider", "fake-garbage"));
+  await page.addInitScript(() => localStorage.setItem("orso.terminal.provider", "fake-garbage"));
 });
 
-test("writer resolves a conflicting page with a visible file choice", async ({ page, workbench }) => {
-  const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
+test("writer resolves a conflicting page with a visible file choice", async ({ page, orso }) => {
+  const { origin, token, projectId, projectDir, bareRemote, tmp } = orso;
   const hero = "src/content/sections/hero.mdx";
   fs.mkdirSync(path.join(projectDir, "src/content/sections"), { recursive: true });
   fs.writeFileSync(path.join(projectDir, hero), '<section id="hero"><h1>Base headline</h1></section>\n');
@@ -46,7 +46,7 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   git(projectDir, ["push", "origin", "main"]);
   fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
   await page.goto(`${origin}/?t=${token}`);
-  await startChange(workbench, "New page: Home");
+  await startChange(orso, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
 
@@ -75,10 +75,10 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   expect(fs.readFileSync(path.join(projectDir, hero), "utf8")).toBe('<section id="hero"><h1>Your headline</h1></section>\n');
 });
 
-test("writer can abandon a conflict without moving the branch", async ({ page, workbench }) => {
-  const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
+test("writer can abandon a conflict without moving the branch", async ({ page, orso }) => {
+  const { origin, token, projectId, projectDir, bareRemote, tmp } = orso;
   await page.goto(`${origin}/?t=${token}`);
-  await startChange(workbench, "New page: Home");
+  await startChange(orso, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
   fs.writeFileSync(path.join(projectDir, "index.html"), "<h1>Your headline</h1>\n");
@@ -95,14 +95,14 @@ test("writer can abandon a conflict without moving the branch", async ({ page, w
   expect(git(projectDir, ["status", "--porcelain", "--untracked-files=no"])).toBe("");
 });
 
-test("writer resolves a deleted-versus-edited page by choosing a side", async ({ page, workbench }) => {
-  const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
+test("writer resolves a deleted-versus-edited page by choosing a side", async ({ page, orso }) => {
+  const { origin, token, projectId, projectDir, bareRemote, tmp } = orso;
   fs.writeFileSync(path.join(projectDir, "index.html"), "<h1>Base headline</h1>\n");
   git(projectDir, ["add", "index.html"]);
   git(projectDir, ["commit", "-m", "add home"]);
   git(projectDir, ["push", "origin", "main"]);
   await page.goto(`${origin}/?t=${token}`);
-  await startChange(workbench, "Remove home page");
+  await startChange(orso, "Remove home page");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Remove home page");
   git(projectDir, ["rm", "index.html"]);

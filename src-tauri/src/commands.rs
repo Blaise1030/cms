@@ -17,8 +17,8 @@ pub async fn collect_logs(app: AppHandle) -> Result<Option<String>, String> {
         let Some(choice) = app
             .dialog()
             .file()
-            .set_title("Save Workbench logs")
-            .set_file_name("workbench-logs.zip")
+            .set_title("Save orso logs")
+            .set_file_name("orso-logs.zip")
             .add_filter("Zip archive", &["zip"])
             .blocking_save_file()
         else {

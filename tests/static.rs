@@ -6,10 +6,10 @@ use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
-use workbench::static_files::WebApp;
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
+use orso::static_files::WebApp;
 
 const TOKEN: &str = "abc123";
 
@@ -17,7 +17,7 @@ fn app() -> axum::Router {
     http::router(AppState::new(Config {
         port: 0,
         origin: None,
-        projects_dir: PathBuf::from("/tmp/workbench-test-projects"),
+        projects_dir: PathBuf::from("/tmp/orso-test-projects"),
         no_auth: false,
         token: Some(TOKEN.to_string()),
         agents_config: None,
@@ -106,7 +106,7 @@ async fn paths_outside_the_shell_allowlist_require_a_token() {
 
 #[test]
 fn public_shell_allowlist_is_explicit() {
-    use workbench::static_files::is_public_shell_request as public;
+    use orso::static_files::is_public_shell_request as public;
     assert!(public(&Method::GET, "/"));
     assert!(public(&Method::HEAD, "/p/some-project"));
     assert!(public(&Method::GET, "/assets/anything.js"));
@@ -259,10 +259,10 @@ async fn host_allowlist_still_applies_to_the_shell() {
 
 #[test]
 fn content_editor_template_files_are_embedded() {
-    use workbench::static_files::Template;
+    use orso::static_files::Template;
     for path in [
         "src/content-schemas.mjs",
-        "scripts/workbench-content.mjs",
+        "scripts/orso-content.mjs",
         "src/pages/blog/index.astro",
         "src/pages/blog/[slug].astro",
         "src/pages/help/index.astro",

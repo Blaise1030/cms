@@ -1,6 +1,6 @@
 import { toast } from "vue-sonner";
 import type { Change, ChangesUpdate } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "./store";
 
 function plural(n: number, word: string): string {

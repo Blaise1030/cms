@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import type { Checkpoint } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import type { ParsedDiff } from "./diff";
 
 export const useCheckpointsStore = defineStore("checkpoints", () => {

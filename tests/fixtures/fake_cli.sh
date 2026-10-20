@@ -18,7 +18,7 @@ while IFS= read -r line; do
     "edit "*)
       text=${line#edit }
       printf '%s\n' "$text" >> notes.md
-      "$WORKBENCH_HOOK_EXE" hook turn-end "{\"summary\":\"$text\"}"
+      "$ORSO_HOOK_EXE" hook turn-end "{\"summary\":\"$text\"}"
       echo "TURN-END"
       ;;
     *) echo "ECHO $line" ;;

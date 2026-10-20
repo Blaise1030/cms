@@ -29,13 +29,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import { frameHref, framePath, readPref, writePref } from "@workbench/utils";
+import { frameHref, framePath, readPref, writePref } from "@orso/utils";
 import { attachPicker, describeElement } from "./elementPicker";
 import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
@@ -56,9 +55,6 @@ watch(
   },
   { immediate: true },
 );
-
-watch(() => props.projectId, (id) => void store.loadAgentBusy(id), { immediate: true });
-const agentBusy = computed(() => store.agentBusy[props.projectId] === true);
 
 const state = computed<DevserverState>(
   () => store.status[props.projectId] ?? props.devserver ?? "starting",
@@ -106,7 +102,7 @@ const shell = ref<HTMLElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const history = useFrameHistory();
 /** The last path the frame showed, per project, so the preview reopens where the user left it. */
-const lastPathKey = (projectId: string) => `workbench.preview.path.${projectId}`;
+const lastPathKey = (projectId: string) => `orso.preview.path.${projectId}`;
 const lastPath = ref(readPref(lastPathKey(props.projectId)) ?? "/");
 /** What the address bar shows: the frame's page, or the restored one until the frame reports in. */
 const currentPath = computed(() =>
@@ -290,7 +286,7 @@ function toggleFullscreen() {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
+  <div class="flex h-full min-h-0 flex-col pb-2" data-testid="preview-panel">
     <div ref="shell" class="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-md">
       <TooltipProvider>
         <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
@@ -535,16 +531,6 @@ function toggleFullscreen() {
             @load="onLoad"
           />
         </div>
-      </div>
-
-      <div
-        v-if="agentBusy"
-        class="bg-background/95 text-muted-foreground pointer-events-none absolute top-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1 text-xs shadow-sm"
-        role="status"
-        data-testid="agent-busy"
-      >
-        <Spinner class="size-4" />
-        Agent is working…
       </div>
 
       <div

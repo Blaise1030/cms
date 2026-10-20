@@ -47,12 +47,12 @@ function submit() {
         <CardDescription>
           <template v-if="props.reason === 'rejected'">
             The daemon at <code class="text-foreground">{{ props.origin }}</code> is running but
-            rejected this app. Open the link printed by <code>workbench serve</code> to refresh the
+            rejected this app. Open the link printed by <code>orso serve</code> to refresh the
             token, or paste it below.
           </template>
           <template v-else>
             Nothing is answering at <code class="text-foreground">{{ props.origin }}</code>. Start
-            it with <code class="text-foreground">workbench serve</code>, then retry.
+            it with <code class="text-foreground">orso serve</code>, then retry.
           </template>
         </CardDescription>
       </CardHeader>

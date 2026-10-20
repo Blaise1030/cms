@@ -1,10 +1,10 @@
 //! Images attached to a content save.
 //!
 //! A save may carry uploads keyed by client IDs. The entry refers to each one with a
-//! `workbench-image:<clientId>` token in its body or string fields. Every upload is checked
+//! `orso-image:<clientId>` token in its body or string fields. Every upload is checked
 //! from its bytes alone (signature plus a structural walk; the browser's MIME label and
 //! filename are never trusted), written to a staging directory inside the project
-//! (`.git/workbench-staging/`, same filesystem, ignored by git and the watcher), and given a
+//! (`.git/orso-staging/`, same filesystem, ignored by git and the watcher), and given a
 //! deterministic unique name under `src/assets/<collection>/<slug>/`. Tokens become paths
 //! relative to the entry file before the helper validates the candidate. Only after
 //! validation and the final branch/hash checks are the staged files hard-linked into place
@@ -29,11 +29,11 @@ pub const MAX_SAVE_BYTES: usize = 6 * MAX_IMAGE_BYTES;
 /// Most images one save may carry.
 pub const MAX_IMAGES: usize = 20;
 /// URL scheme the client uses for a pending image in the entry it submits.
-pub const TOKEN_PREFIX: &str = "workbench-image:";
-const STAGING: &str = ".git/workbench-staging";
-const TEMP_SUFFIX: &str = ".workbench-tmp";
-/// Suffix of an asset folder a delete set aside (`.<id>.<pid>-<n>.workbench-trash`).
-pub(super) const TRASH_SUFFIX: &str = ".workbench-trash";
+pub const TOKEN_PREFIX: &str = "orso-image:";
+const STAGING: &str = ".git/orso-staging";
+const TEMP_SUFFIX: &str = ".orso-tmp";
+/// Suffix of an asset folder a delete set aside (`.<id>.<pid>-<n>.orso-trash`).
+pub(super) const TRASH_SUFFIX: &str = ".orso-trash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -412,7 +412,7 @@ fn strings_mut(value: &mut Value, visit: &mut dyn FnMut(&mut String)) {
 
 // ---- Staging and placement --------------------------------------------------------------------
 
-/// A per-save directory under `.git/workbench-staging/`, removed when dropped.
+/// A per-save directory under `.git/orso-staging/`, removed when dropped.
 struct Staging(PathBuf);
 
 impl Staging {
@@ -539,7 +539,10 @@ pub(super) fn prepare(
 
     // Deterministic names: the first free `name.ext`, `name-2.ext`, ... in upload order.
     // Existing names are compared case-insensitively for case-insensitive filesystems.
-    let asset_dir = format!("src/assets/{collection}/{id}");
+    let asset_dir = format!(
+        "{}src/assets/{collection}/{id}",
+        crate::settings::site_prefix(root)
+    );
     let dir = m::resolve_as(root, &asset_dir, Leaf::Dir)?;
     let mut taken: HashSet<String> = HashSet::new();
     if dir.exists() {
@@ -681,9 +684,13 @@ pub(super) fn cleanup_orphans(root: &Path) {
                 }
             }
         }
-        for rel in ["src/content", "src/assets"] {
+        let prefix = crate::settings::site_prefix(root);
+        for rel in [
+            format!("{prefix}src/content"),
+            format!("{prefix}src/assets"),
+        ] {
             // A symlinked or missing tree is never swept.
-            if let Ok(dir) = m::resolve_as(root, rel, Leaf::Dir) {
+            if let Ok(dir) = m::resolve_as(root, &rel, Leaf::Dir) {
                 if dir.exists() {
                     sweep(&dir, 0)?;
                 }
@@ -693,7 +700,7 @@ pub(super) fn cleanup_orphans(root: &Path) {
     };
     if let Err(e) = run() {
         eprintln!(
-            "workbench: could not clean content leftovers in {}: {}",
+            "orso: could not clean content leftovers in {}: {}",
             root.display(),
             e.message
         );

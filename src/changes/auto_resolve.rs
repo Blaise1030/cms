@@ -185,7 +185,7 @@ pub async fn stage_and_verify(
 }
 
 fn fail(e: ApiError) -> Failure {
-    eprintln!("workbench: auto-resolve failed ({e})");
+    eprintln!("orso: auto-resolve failed ({e})");
     Failure::AgentFailed
 }
 
@@ -573,7 +573,7 @@ impl Runner<'_> {
         let conflicted: Vec<String> = session.files.iter().map(|f| f.path.clone()).collect();
         stage_and_verify(&self.site, &session.tip, &session.incoming, &conflicted).await?;
         link_node_modules(&ctx.project_dir, &self.site).map_err(|e| {
-            eprintln!("workbench: auto-resolve cannot link node_modules ({e})");
+            eprintln!("orso: auto-resolve cannot link node_modules ({e})");
             Failure::BuildFailed
         })?;
         let mut build = Command::new("npm");
@@ -617,7 +617,7 @@ impl Runner<'_> {
         agent
             .args(args)
             .envs(spec.env)
-            .env("WORKBENCH_RESOLVE_RESULT", &result_path);
+            .env("ORSO_RESOLVE_RESULT", &result_path);
         match self.run_logged(agent, self.timeouts.agent).await {
             Ok(_) => {}
             Err(RunError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -781,9 +781,9 @@ mod tests {
 
     #[test]
     fn prompt_without_answers_has_no_answer_block() {
-        let p = prompt(Path::new("/tmp/wt/.workbench/resolve-result.json"), &[]);
+        let p = prompt(Path::new("/tmp/wt/.orso/resolve-result.json"), &[]);
         assert!(p.starts_with("You are combining a writer's draft"));
-        assert!(p.contains("/tmp/wt/.workbench/resolve-result.json"));
+        assert!(p.contains("/tmp/wt/.orso/resolve-result.json"));
         assert!(p.contains(r#""status":"resolved""#));
         assert!(p.contains(r#""status":"needs_input""#));
         assert!(!p.contains("Answers from the writer:"));

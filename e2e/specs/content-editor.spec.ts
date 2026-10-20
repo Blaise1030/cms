@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { Page } from "@playwright/test";
 
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 /** A real 8x8 RGB PNG (decodable, so the daemon's byte inspection accepts it). */
 const TINY_PNG = Buffer.from(
@@ -79,10 +79,10 @@ const frame = (page: Page) => page.frameLocator('[data-testid="preview-frame"]')
 
 test("content editor saves a blog article with an image on a change branch and previews it", async ({
   page,
-  workbench,
+  orso,
   templateProject,
 }) => {
-  const { origin, token } = workbench;
+  const { origin, token } = orso;
   const { id: projectId, dir: projectDir } = templateProject;
 
   await page.goto(`${origin}/?t=${token}`);

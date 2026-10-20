@@ -15,7 +15,7 @@
 
 - At most one live terminal per project.
 - PTY initial size 80×24; reader chunk 8 KB; scrollback ring 512 KB; broadcast capacity 1024.
-- Child env: `TERM=xterm-256color`, `WORKBENCH_URL=http://127.0.0.1:{config.port}`, `WORKBENCH_PROJECT`, `WORKBENCH_HOOK_TOKEN` (fresh random per session, 32 hex chars), `WORKBENCH_HOOK_EXE` (absolute path of the hook binary).
+- Child env: `TERM=xterm-256color`, `ORSO_URL=http://127.0.0.1:{config.port}`, `ORSO_PROJECT`, `ORSO_HOOK_TOKEN` (fresh random per session, 32 hex chars), `ORSO_HOOK_EXE` (absolute path of the hook binary).
 - Kill = `SIGTERM` to the child's process group, `SIGKILL` after 2 s, then reap.
 - Never modify user-global CLI config (`~/.claude`, `~/.codex`, `~/.config/opencode`).
 - Hook subcommand always exits 0; it must never break the CLI's turn.
@@ -47,7 +47,7 @@
   - `pub struct LaunchSpec { pub argv: Vec<String>, pub env: Vec<(String, String)> }`
   - `pub fn launch_spec(provider: &Provider, hook_exe: &Path, auto_approve: bool, state_dir: &Path) -> LaunchSpec`
 
-Injection by `provider.id` (appended after the base argv; unknown ids get nothing appended — they call `$WORKBENCH_HOOK_EXE` themselves):
+Injection by `provider.id` (appended after the base argv; unknown ids get nothing appended — they call `$ORSO_HOOK_EXE` themselves):
 
 | id | appended argv | env | auto_approve |
 |----|---------------|-----|--------------|
@@ -57,7 +57,7 @@ Injection by `provider.id` (appended after the base argv; unknown ids get nothin
 
 - [ ] **Step 1: Verify OpenCode and Codex hook mechanics against installed versions** (opencode v2.0.25, codex-cli 0.162.1)
 
-Read `~/Developer/ide/src/cli/setup.md` (OpenCode 2.x plugin). Confirm: (a) the env var that points OpenCode at an extra config dir (expected `OPENCODE_CONFIG_DIR`) and that `plugins/*.ts` in it load; (b) the idle event name (tabsh uses `session.execution.*`); (c) the config key allowing all permissions; (d) that `codex -c 'notify=[...]'` fires without `--dangerously-bypass-hook-trust` (run `codex exec` with a notify pointing at a script that touches a file). Record the answers as a doc comment at the top of `providers.rs`. If (a) or (b) fails, `opencode` launches with no hook and `launch_spec` logs `workbench: opencode turn-end hook unavailable; checkpoints disabled`. If (d) fails, also append `--dangerously-bypass-hook-trust` for codex.
+Read `~/Developer/ide/src/cli/setup.md` (OpenCode 2.x plugin). Confirm: (a) the env var that points OpenCode at an extra config dir (expected `OPENCODE_CONFIG_DIR`) and that `plugins/*.ts` in it load; (b) the idle event name (tabsh uses `session.execution.*`); (c) the config key allowing all permissions; (d) that `codex -c 'notify=[...]'` fires without `--dangerously-bypass-hook-trust` (run `codex exec` with a notify pointing at a script that touches a file). Record the answers as a doc comment at the top of `providers.rs`. If (a) or (b) fails, `opencode` launches with no hook and `launch_spec` logs `orso: opencode turn-end hook unavailable; checkpoints disabled`. If (d) fails, also append `--dangerously-bypass-hook-trust` for codex.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -73,13 +73,13 @@ Read `~/Developer/ide/src/cli/setup.md` (OpenCode 2.x plugin). Confirm: (a) the 
 ```
 
 - [ ] **Step 3: Run** `cargo test --lib providers` — Expected: FAIL (module missing).
-- [ ] **Step 4: Implement** `src/providers.rs`. `opencode` writes the plugin file (contents from Step 1, calling `$WORKBENCH_HOOK_EXE hook turn-end`) on every `launch_spec` call, creating dirs.
+- [ ] **Step 4: Implement** `src/providers.rs`. `opencode` writes the plugin file (contents from Step 1, calling `$ORSO_HOOK_EXE hook turn-end`) on every `launch_spec` call, creating dirs.
 - [ ] **Step 5: Run** `cargo test --lib providers` — Expected: PASS.
 - [ ] **Step 6: Commit** `feat(terminal): provider registry with per-launch turn-end hooks`
 
 ---
 
-### Task 2: `workbench hook turn-end` subcommand
+### Task 2: `orso hook turn-end` subcommand
 
 **Files:**
 - Create: `src/hook.rs` (inline tests)
@@ -88,7 +88,7 @@ Read `~/Developer/ide/src/cli/setup.md` (OpenCode 2.x plugin). Confirm: (a) the 
 **Interfaces:**
 - Produces:
   - `pub fn summary_from_payload(payload: &str) -> Option<String>` — JSON object; first non-empty of: last string in `input-messages` (Codex), `summary` (OpenCode plugin), `last_assistant_message` (Claude). Non-JSON / empty → `None`.
-  - `pub async fn turn_end(payload_arg: Option<String>) -> ExitCode` — payload = `payload_arg` if given, else stdin (read to end, skip if stdin is a TTY). Reads `WORKBENCH_URL`, `WORKBENCH_PROJECT`, `WORKBENCH_HOOK_TOKEN`; any missing → return `ExitCode::SUCCESS` silently. POSTs `{project, token, summary}` to `{url}/api/terminal/turn-end` with `reqwest`, 10 s timeout. Errors/non-2xx → one `workbench hook: …` line on stderr. Always `ExitCode::SUCCESS`.
+  - `pub async fn turn_end(payload_arg: Option<String>) -> ExitCode` — payload = `payload_arg` if given, else stdin (read to end, skip if stdin is a TTY). Reads `ORSO_URL`, `ORSO_PROJECT`, `ORSO_HOOK_TOKEN`; any missing → return `ExitCode::SUCCESS` silently. POSTs `{project, token, summary}` to `{url}/api/terminal/turn-end` with `reqwest`, 10 s timeout. Errors/non-2xx → one `orso hook: …` line on stderr. Always `ExitCode::SUCCESS`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -136,7 +136,7 @@ Env-mutating tests run serially (a `static ENV_LOCK: Mutex<()>`).
 
 Spawn: `$SHELL` (fallback: `getpwuid` shell, then `/bin/sh`) with args `-lc`, `exec <each argv element sh-single-quoted, space-joined>`. Env = Global Constraints vars + `launch.env`. Threads follow `~/Developer/ide/src/sessions/pty.rs:308-413`: writer thread on an mpsc channel, reader thread (8 KB) appending to the ring + modes tracker and broadcasting under one lock, waiter thread on `child.wait()` that broadcasts `Output::Exit(code)`, removes the session, and emits `terminal.exited {projectId, code}`. `portable-pty` makes the child a session leader, so `libc::killpg(pid, SIGTERM)`, wait up to 2 s, then `killpg(pid, SIGKILL)`.
 
-`tests/fixtures/fake_cli.sh` (executable): prints `FAKE-CLI READY`, then loops reading lines from stdin: `size` → prints `stty size`; `argv` → prints each `$@` on its own line; `spawn-child` → starts `sleep 300 &` and prints `CHILD <pid>`; `edit <text>` → appends `<text>` to `notes.md` then runs `"$WORKBENCH_HOOK_EXE" hook turn-end "{\"summary\":\"<text>\"}"` and prints `TURN-END`; anything else → echoes `ECHO <line>`.
+`tests/fixtures/fake_cli.sh` (executable): prints `FAKE-CLI READY`, then loops reading lines from stdin: `size` → prints `stty size`; `argv` → prints each `$@` on its own line; `spawn-child` → starts `sleep 300 &` and prints `CHILD <pid>`; `edit <text>` → appends `<text>` to `notes.md` then runs `"$ORSO_HOOK_EXE" hook turn-end "{\"summary\":\"<text>\"}"` and prints `TURN-END`; anything else → echoes `ECHO <line>`.
 
 - [ ] **Step 1: Write the failing tests** (`tests/terminal.rs`, manager-level; helper `read_until(rx, needle, timeout 10s) -> String`)
 
@@ -171,14 +171,14 @@ Spawn: `$SHELL` (fallback: `getpwuid` shell, then `/bin/sh`) with args `-lc`, `e
 - Consumes: Tasks 1–3; `checkpoints::require_change(&AppState, &str)`; `git::checkpoint(&Path, &str) -> Result<Option<Checkpoint>, ApiError>`; `EventBus::emit(kind, fields)`.
 - Produces routes:
   - `GET /api/terminal/providers` → `{ providers: [{id, command}] }`
-  - `POST /api/terminal` `{project, provider}` → `{running: true}`. Order: project exists (`enoent`) → `require_change` → provider known (`badreq`) → `launch_spec(.., project.auto_approve, {projects_dir}/.workbench)` → `terminals.start`.
+  - `POST /api/terminal` `{project, provider}` → `{running: true}`. Order: project exists (`enoent`) → `require_change` → provider known (`badreq`) → `launch_spec(.., project.auto_approve, {projects_dir}/.orso)` → `terminals.start`.
   - `GET /api/terminal/{project}` → `{running, provider}`
   - `DELETE /api/terminal/{project}` → `{stopped: true}`
   - `GET /api/terminal/{project}/ws` — upgrade; send `Attach.replay` as one binary frame, then forward `Output::Data` as binary and `Output::Exit(c)` as `{"exit":true,"code":c}` then close. Incoming binary → `write`; text `{cols,rows}` → `resize`. `RecvError::Lagged` → close the socket. Never hold a manager lock while sending.
   - `POST /api/terminal/turn-end` `{project, token, summary?}`: bad token → `403` (`ApiError::unauth(..).with_status(403)`); `require_change` fails → emit `checkpoint.blocked {projectId, reason}`, `200 {committed:false}`; else `git::checkpoint(dir, &commit_message(summary, &changed))` → on `Some(cp)` emit `checkpoint.created` with the same fields the ACP path emits (`src/acp.rs:1019-1030`), `200 {committed:true}`; `None` → `200 {committed:false}`. Serialized per project with a `Mutex` map in the handler module.
   - `pub(crate) fn commit_message(summary: Option<&str>, changed: &[String]) -> String` — first line of trimmed summary, truncated to 72 chars on a char boundary (append `…` when truncated, within the 72); empty/None → `Update {n} files: {first 3 paths joined ", "}`. `changed` comes from `git status --porcelain` (add `git::changed_paths(dir) -> Result<Vec<String>, ApiError>` if `git.rs` has nothing equivalent).
 
-- [ ] **Step 1: Write the failing tests** (real listener: bind `127.0.0.1:0`, build `Config { port, hook_exe: Some(env!("CARGO_BIN_EXE_workbench").into()), token: Some(..), agents_config: Some(<file with {"fake":[<fake_cli.sh>]}>) }`, `serve_on` in a task; WS client = `tokio-tungstenite`)
+- [ ] **Step 1: Write the failing tests** (real listener: bind `127.0.0.1:0`, build `Config { port, hook_exe: Some(env!("CARGO_BIN_EXE_orso").into()), token: Some(..), agents_config: Some(<file with {"fake":[<fake_cli.sh>]}>) }`, `serve_on` in a task; WS client = `tokio-tungstenite`)
 
 ```rust
 #[tokio::test] async fn start_refused_on_main_with_remote()      // same error code as tests/change_guard.rs expects for prompt
@@ -215,7 +215,7 @@ Spawn: `$SHELL` (fallback: `getpwuid` shell, then `/bin/sh`) with args `-lc`, `e
   - `bracketedPaste(text: string): string` → `"\x1b[200~" + text + "\x1b[201~"` (in `paste.ts`; strip any `\x1b[201~` inside `text` first)
   - `connectTerminal(opts: { url; onReplay(b: Uint8Array); onData(b: Uint8Array); onExit(code: number|null); onClose(); createSocket?: SocketFactory }): { send(b: Uint8Array|string): void; resize(cols, rows): void; close(): void }` — `binaryType = "arraybuffer"`; the first binary frame goes to `onReplay`, later ones to `onData`.
 
-`TerminalPanel.vue` (`data-testid="terminal-panel"`): idle → provider select (from `terminalProviders`, remembered in `localStorage` key `workbench.terminal.provider`, wrapped in try/catch), auto-approve toggle (emits as ChatPanel did; applies on next start), Start button; start errors shown inline (the change-required message included). Running → xterm + fit addon; await `document.fonts.ready` before `open`; ResizeObserver → `fit()` then `resize`. `onReplay`: set `muted = true`, `term.write(bytes, () => muted = false)`; `term.onData` sends only when `!muted`. Live data batched with `requestAnimationFrame`. `onExit` → overlay `Session ended (code N)` (127 → `` `<command[0]>` not found on PATH ``) with Restart (= Start again). `onClose` without exit → reconnect after 500 ms, 1 s, 2 s, … capped at 10 s. A watch on preview `picked` takes the pick and sends `bracketedPaste(elementPrompt(pick))` then focuses the terminal.
+`TerminalPanel.vue` (`data-testid="terminal-panel"`): idle → provider select (from `terminalProviders`, remembered in `localStorage` key `orso.terminal.provider`, wrapped in try/catch), auto-approve toggle (emits as ChatPanel did; applies on next start), Start button; start errors shown inline (the change-required message included). Running → xterm + fit addon; await `document.fonts.ready` before `open`; ResizeObserver → `fit()` then `resize`. `onReplay`: set `muted = true`, `term.write(bytes, () => muted = false)`; `term.onData` sends only when `!muted`. Live data batched with `requestAnimationFrame`. `onExit` → overlay `Session ended (code N)` (127 → `` `<command[0]>` not found on PATH ``) with Restart (= Start again). `onClose` without exit → reconnect after 500 ms, 1 s, 2 s, … capped at 10 s. A watch on preview `picked` takes the pick and sends `bracketedPaste(elementPrompt(pick))` then focuses the terminal.
 
 - [ ] **Step 1: Write the failing tests**
 

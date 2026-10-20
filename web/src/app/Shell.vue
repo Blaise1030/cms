@@ -50,7 +50,7 @@ watch(
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <ResizablePanelGroup
         direction="horizontal"
-        auto-save-id="workbench-shell"
+        auto-save-id="orso-shell"
         class="min-h-0 flex-1"
       >
         <ResizablePanel

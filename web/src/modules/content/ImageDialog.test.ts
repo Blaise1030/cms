@@ -191,7 +191,7 @@ describe("pending images in the draft", () => {
     await save();
     const [body, images] = update().mock.calls[0]!;
     const clientId = store.pendingImages[0]?.clientId ?? images[0].clientId;
-    expect(body.body).toContain(`![A cat](workbench-image:${clientId})`);
+    expect(body.body).toContain(`![A cat](orso-image:${clientId})`);
     expect(body.body).not.toContain("blob:");
     expect(images).toEqual([expect.objectContaining({ clientId, alt: "A cat", filename: "Cat Photo.png", file: expect.any(File) })]);
     expect(store.pendingImages).toEqual([]);
@@ -228,7 +228,7 @@ describe("pending images in the draft", () => {
     expect(w.get('[data-testid="field-coverImage-uploader"] img').attributes("src")).toBe("blob:http://localhost/preview-1");
     await save();
     const [body, images] = update().mock.calls[0]!;
-    expect(body.fields).toEqual({ coverImage: `workbench-image:${images[0].clientId}`, coverAlt: "Team photo" });
+    expect(body.fields).toEqual({ coverImage: `orso-image:${images[0].clientId}`, coverAlt: "Team photo" });
   });
 
   it("drops a pending image the writer removed before saving", async () => {

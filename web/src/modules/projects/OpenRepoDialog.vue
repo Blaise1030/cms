@@ -18,7 +18,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useGithubStore } from "@/modules/github/store";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";

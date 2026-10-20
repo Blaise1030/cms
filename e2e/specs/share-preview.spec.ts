@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { startChange, terminalCheckpoint } from "../fixtures/daemon";
-import { expect, openPrMenu, test } from "../fixtures/workbench";
+import { expect, openPrMenu, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -9,27 +9,27 @@ function git(cwd: string, args: string[]): string {
 
 async function startChangeAndCheckpoint(
   page: import("@playwright/test").Page,
-  workbench: import("../fixtures/daemon").WorkbenchEnv,
+  orso: import("../fixtures/daemon").orsoEnv,
   title = "New post: Launch week",
 ) {
-  const { origin, token, projectId } = workbench;
+  const { origin, token, projectId } = orso;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await startChange(workbench, title);
+  await startChange(orso, title);
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await terminalCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(orso, "edit the notes");
 }
 
 test("shares a preview: push, draft PR, link; re-share advances remote without second PR", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { projectDir, bareRemote, github } = workbench;
-  await startChangeAndCheckpoint(page, workbench);
+  const { projectDir, bareRemote, github } = orso;
+  await startChangeAndCheckpoint(page, orso);
 
   await page.getByTestId("share-preview").click();
 
@@ -57,7 +57,7 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
 
   const remoteBefore = git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"]);
   // Second append to `notes.md` (fake CLI `edit`); distinct from the first turn's text.
-  await terminalCheckpoint(workbench, "edit late");
+  await terminalCheckpoint(orso, "edit late");
   const localTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   expect(localTip).not.toBe(remoteBefore);
 
@@ -75,17 +75,17 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
   );
 });
 
-test("share preview shows push-access error on 403", async ({ page, workbench }) => {
-  await startChangeAndCheckpoint(page, workbench);
-  workbench.github.setPullsStatus(403);
+test("share preview shows push-access error on 403", async ({ page, orso }) => {
+  await startChangeAndCheckpoint(page, orso);
+  orso.github.setPullsStatus(403);
 
   await page.getByTestId("share-preview").click();
   await expect(page.locator("[data-sonner-toast]")).toContainText("You don't have push access");
 });
 
-test("share preview prompts sign-in on 401", async ({ page, workbench }) => {
-  await startChangeAndCheckpoint(page, workbench);
-  workbench.github.setPullsStatus(401);
+test("share preview prompts sign-in on 401", async ({ page, orso }) => {
+  await startChangeAndCheckpoint(page, orso);
+  orso.github.setPullsStatus(401);
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("share-sign-in")).toBeVisible();

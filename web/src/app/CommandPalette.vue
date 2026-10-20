@@ -5,7 +5,7 @@ import { ListboxFilter } from "reka-ui";
 import { Check, GitBranch, Search } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { CommandDialog, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import { filterGroups, type PaletteGroup, type PaletteItem } from "./palette/filter";

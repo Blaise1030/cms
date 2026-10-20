@@ -1,4 +1,4 @@
-// Wire types for the workbench daemon REST + WebSocket contract.
+// Wire types for the orso daemon REST + WebSocket contract.
 // This file (with api.ts / socket.ts) is the only daemon-aware layer.
 
 export type ErrorCode =
@@ -433,7 +433,7 @@ export interface ContentEntrySummary { collection: string; id: string; path: str
 export interface ContentEntry extends ContentEntrySummary {
   source: string; fields: Record<string, unknown> | null; body: string; branch: string; hash: string;
 }
-/** An image sent with a save; the entry names it with a `workbench-image:<clientId>` token. */
+/** An image sent with a save; the entry names it with a `orso-image:<clientId>` token. */
 export interface ContentImageUpload { clientId: string; alt: string; filename: string; file: Blob }
 /** A saved entry; a save with images also says where each one went, by client ID. */
 export interface SavedContentEntry extends ContentEntry {
@@ -445,4 +445,11 @@ export type DesignTokens = Record<string, unknown>;
 export interface DesignDoc {
   exists: boolean; tokens: DesignTokens; body: string; hash?: string; branch: string;
   starter?: { tokens: DesignTokens; body: string };
+}
+/** The fields of the repo-root `orso.json`; each one falls back to its default when unset. */
+export interface ProjectSettings { root: string; installDir: string; install: string; dev: string }
+/** `settings` is the file as written (unknown keys included); `errors` is keyed by field, `_file` when it is not a JSON object. */
+export interface SettingsDoc {
+  exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;
+  errors: Record<string, string>;
 }

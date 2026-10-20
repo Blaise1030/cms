@@ -30,7 +30,7 @@ it("coalesces a burst of content file events into one trailing refresh", async (
 });
 
 it("refreshes only for content, assets, schema, helper and overflow paths", async () => {
-  for (const path of ["src/content/pages/home.json", "src/content", "src/assets/blog/welcome/a.png", "src/content-schemas.mjs", "scripts/workbench-content.mjs", ""]) expect(affectsContent(path), path).toBe(true);
+  for (const path of ["src/content/pages/home.json", "src/content", "src/assets/blog/welcome/a.png", "src/content-schemas.mjs", "scripts/orso-content.mjs", ""]) expect(affectsContent(path), path).toBe(true);
   for (const path of ["notes.txt", "src/pages/index.astro", "src/contentious.ts", "src/assets-old/x", "node_modules/x/index.js", "dist/index.html", ".git/HEAD"]) expect(affectsContent(path), path).toBe(false);
   const store = useContentStore(); await store.open("p"); catalog.mockClear();
   change("src/pages/index.astro"); change("dist/index.html");

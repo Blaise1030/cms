@@ -1,29 +1,29 @@
 import { startChange, terminalCheckpoint } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 async function startChangeAndCheckpoint(
   page: import("@playwright/test").Page,
-  workbench: import("../fixtures/daemon").WorkbenchEnv,
+  orso: import("../fixtures/daemon").orsoEnv,
 ) {
-  const { origin, token, projectId } = workbench;
+  const { origin, token, projectId } = orso;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await startChange(workbench, "New post: Launch week");
+  await startChange(orso, "New post: Launch week");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await terminalCheckpoint(workbench, "edit the notes");
+  await terminalCheckpoint(orso, "edit the notes");
 }
 
 test("unprotected main: hint after share, dismissal survives reload", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  const { github } = workbench;
+  const { github } = orso;
   github.setMainProtected(false);
-  await startChangeAndCheckpoint(page, workbench);
+  await startChangeAndCheckpoint(page, orso);
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
@@ -38,7 +38,7 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
   const docs = hint.getByTestId("protection-hint-docs");
   await expect(docs).toHaveAttribute("href", "/api/docs/branch-protection");
   // The guide ships with the daemon, so the link works before this doc reaches main.
-  const doc = await page.request.get(`${workbench.origin}/api/docs/branch-protection`);
+  const doc = await page.request.get(`${orso.origin}/api/docs/branch-protection`);
   expect(doc.status()).toBe(200);
   expect(await doc.text()).toContain("# Protect `main` so merges need review");
 
@@ -58,28 +58,28 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
   expect(github.protectionGets()).toBe(1);
 });
 
-test("protected main: no hint after share", async ({ page, workbench }) => {
-  workbench.github.setMainProtected(true);
-  await startChangeAndCheckpoint(page, workbench);
+test("protected main: no hint after share", async ({ page, orso }) => {
+  orso.github.setMainProtected(true);
+  await startChangeAndCheckpoint(page, orso);
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
-  expect(workbench.github.protectionGets()).toBeGreaterThan(0);
+  expect(orso.github.protectionGets()).toBeGreaterThan(0);
 });
 
 test("main protected by a ruleset requiring PRs: no hint after share", async ({
   page,
-  workbench,
+  orso,
 }) => {
-  workbench.github.setMainProtected(false);
-  workbench.github.setMainRulesetRequiresPr(true);
-  await startChangeAndCheckpoint(page, workbench);
+  orso.github.setMainProtected(false);
+  orso.github.setMainRulesetRequiresPr(true);
+  await startChangeAndCheckpoint(page, orso);
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("share-preview")).toBeEnabled();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
-  expect(workbench.github.protectionGets()).toBeGreaterThan(0);
+  expect(orso.github.protectionGets()).toBeGreaterThan(0);
 });

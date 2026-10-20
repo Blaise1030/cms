@@ -9,9 +9,9 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::TryRecvError;
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 

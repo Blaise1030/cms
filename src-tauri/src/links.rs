@@ -78,7 +78,7 @@ fn open_secondary(app: &AppHandle, url: Url) {
     std::thread::spawn(move || {
         let handler_app = app.clone();
         let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
-            .title("Workbench")
+            .title("orso")
             .inner_size(1200.0, 800.0)
             .on_new_window(move |url, _| on_new_window(&handler_app, url))
             .on_document_title_changed(|window, title| {

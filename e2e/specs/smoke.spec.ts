@@ -1,7 +1,7 @@
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
-test("opens a cloned project and shows file tree and preview", async ({ page, workbench }) => {
-  const { origin, token, projectId } = workbench;
+test("opens a cloned project and shows file tree and preview", async ({ page, orso }) => {
+  const { origin, token, projectId } = orso;
   await page.goto(`${origin}/?t=${token}`);
   await page.goto(`${origin}/p/${projectId}`);
 

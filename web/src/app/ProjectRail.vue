@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { Code, FileText, History, House, MonitorPlay, Palette } from "@lucide/vue";
+import { Code, FileText, History, House, MonitorPlay, Palette, Settings } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "design", label: "Design", icon: Palette },
   { id: "code", label: "Code", icon: Code },
   { id: "history", label: "History", icon: History },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 // On desktop the rail starts at the top bar's height (pt-11), below the traffic lights, except

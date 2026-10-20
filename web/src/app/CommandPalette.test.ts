@@ -114,5 +114,5 @@ it("switches the theme", async () => {
   item("theme:dark")!.click();
   await flushPromises();
   expect(document.documentElement.classList.contains("dark")).toBe(true);
-  expect(localStorage.getItem("workbench.theme")).toBe("dark");
+  expect(localStorage.getItem("orso.theme")).toBe("dark");
 });

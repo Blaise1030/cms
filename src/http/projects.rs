@@ -94,7 +94,7 @@ async fn started(state: &AppState, info: ProjectInfo, used: &Identity) -> Projec
     if current != *used {
         if let Some(p) = state.projects.get(&info.id).await {
             if let Err(e) = crate::git::set_identity(&p.dir, &current).await {
-                eprintln!("workbench: cannot update identity for {}: {e}", info.id);
+                eprintln!("orso: cannot update identity for {}: {e}", info.id);
             }
         }
     }
@@ -102,7 +102,7 @@ async fn started(state: &AppState, info: ProjectInfo, used: &Identity) -> Projec
     // `start` marks the project `crashed` (and publishes it) if it cannot supervise, so
     // the response reflects the real state either way; the restart endpoint retries.
     if let Err(e) = state.devservers.start(&info.id).await {
-        eprintln!("workbench: cannot start dev server for {}: {e}", info.id);
+        eprintln!("orso: cannot start dev server for {}: {e}", info.id);
     }
     match state.projects.get(&info.id).await {
         Some(p) => ProjectInfo::from(&p),

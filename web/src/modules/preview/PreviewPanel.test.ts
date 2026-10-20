@@ -80,7 +80,7 @@ describe("PreviewPanel", () => {
     await flushPromises();
     expect(iframe().style.colorScheme).toBe("dark");
     expect(trigger().attributes("data-variant")).toBe("secondary");
-    expect(localStorage.getItem("workbench.preview.dark")).toBe("true");
+    expect(localStorage.getItem("orso.preview.dark")).toBe("true");
     w.unmount();
   });
 
@@ -107,7 +107,7 @@ describe("PreviewPanel", () => {
 
   it("reopens the last visited path for the project", async () => {
     const w = mountPanel();
-    localStorage.setItem("workbench.preview.path.site-1", "/pricing/?plan=pro");
+    localStorage.setItem("orso.preview.path.site-1", "/pricing/?plan=pro");
     w.unmount();
     hDaemon.daemon = createFakeDaemon();
     hDaemon.daemon.config.value = { origin: window.location.origin };
@@ -154,24 +154,6 @@ describe("PreviewPanel", () => {
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
     expect(w.find("iframe").exists()).toBe(true);
-    w.unmount();
-  });
-
-  it("shows when the agent is working, seeded from the terminal status", async () => {
-    const terminalStatus = vi.fn(async () => ({ running: true, provider: "claude", busy: true }));
-    const w = mountPanel("ready", { terminalStatus });
-    await flushPromises();
-    expect(terminalStatus).toHaveBeenCalledWith("site-1");
-    expect(w.find("[data-testid='agent-busy']").exists()).toBe(true);
-    hDaemon.daemon.emit({ type: "terminal.busy", projectId: "site-1", busy: false });
-    await flushPromises();
-    expect(w.find("[data-testid='agent-busy']").exists()).toBe(false);
-    hDaemon.daemon.emit({ type: "terminal.busy", projectId: "site-1", busy: true });
-    await flushPromises();
-    expect(w.find("[data-testid='agent-busy']").exists()).toBe(true);
-    hDaemon.daemon.emit({ type: "terminal.exited", projectId: "site-1", code: 0 });
-    await flushPromises();
-    expect(w.find("[data-testid='agent-busy']").exists()).toBe(false);
     w.unmount();
   });
 

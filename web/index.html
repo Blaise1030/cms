@@ -7,11 +7,11 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>workbench</title>
+    <title>orso</title>
     <script>
       // Mirrors useTheme (src/lib/theme.ts) so the first paint is already in the right theme.
       try {
-        var t = localStorage.getItem("workbench.theme");
+        var t = localStorage.getItem("orso.theme");
         if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.classList.toggle("dark", t === "dark");
       } catch (e) {}

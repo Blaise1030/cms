@@ -1136,6 +1136,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "orso"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "clap",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "notify",
+ "portable-pty",
+ "rand 0.10.3",
+ "reqwest",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tower-http 0.7.1",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2468,34 +2496,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "workbench"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "clap",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "libc",
- "notify",
- "portable-pty",
- "rand 0.10.3",
- "reqwest",
- "rust-embed",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "tower",
- "tower-http 0.7.1",
-]
 
 [[package]]
 name = "writeable"

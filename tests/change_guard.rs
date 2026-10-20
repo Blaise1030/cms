@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use workbench::{changes, git};
+use orso::{changes, git};
 
 fn git_cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

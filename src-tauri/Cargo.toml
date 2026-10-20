@@ -1,15 +1,15 @@
 [package]
-name = "workbench-desktop"
+name = "orso-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "Workbench macOS desktop shell (Tauri) wrapping the workbench daemon sidecar"
+description = "orso macOS desktop shell (Tauri) wrapping the orso daemon sidecar"
 publish = false
 
 # Standalone: keeps the shell out of the root daemon package's build.
 [workspace]
 
 [lib]
-name = "workbench_desktop_lib"
+name = "orso_desktop_lib"
 
 [features]
 # Test-only hooks for scripts/update-e2e.sh. Never enable in release builds.

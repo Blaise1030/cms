@@ -6,12 +6,12 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::changes::conflict_sessions::ConflictSessions;
-use workbench::changes::conflicts::{self, Choice};
-use workbench::config::Config;
-use workbench::conflict_preview::ConflictPreviewManager;
-use workbench::git::Identity;
-use workbench::{http, state::AppState};
+use orso::changes::conflict_sessions::ConflictSessions;
+use orso::changes::conflicts::{self, Choice};
+use orso::config::Config;
+use orso::conflict_preview::ConflictPreviewManager;
+use orso::git::Identity;
+use orso::{http, state::AppState};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -179,7 +179,7 @@ async fn binary_conflict_rejects_both_and_stale_tip_rejects_finish() {
     git(&dir, &["commit", "-m", "later"]);
     let newer_tip = git(&dir, &["rev-parse", "HEAD"]);
     assert!(sessions
-        .finish(&session.id, &Identity::workbench())
+        .finish(&session.id, &Identity::orso())
         .await
         .is_err());
     assert_eq!(git(&dir, &["rev-parse", "content/page"]), newer_tip);
@@ -212,7 +212,7 @@ async fn binary_choice_preserves_exact_bytes() {
         .await
         .unwrap();
     let commit = sessions
-        .finish(&session.id, &Identity::workbench())
+        .finish(&session.id, &Identity::orso())
         .await
         .unwrap();
     let output = Command::new("git")
@@ -269,7 +269,7 @@ async fn deletion_conflict_can_keep_deleted_or_modified_file() {
         .unwrap();
     assert!(git(&dir, &["show", &format!("{}:page.md", modified.tree)]).contains("latest"));
     let merged = sessions
-        .finish(&session.id, &Identity::workbench())
+        .finish(&session.id, &Identity::orso())
         .await
         .unwrap();
     assert_eq!(git(&dir, &["show", &format!("{merged}:page.md")]), "latest");
@@ -319,13 +319,13 @@ async fn finish_checks_result_build_even_when_preview_was_never_opened() {
         .unwrap();
     let previews = ConflictPreviewManager::new();
     let result = sessions
-        .finish_validated(&session.id, &Identity::workbench(), &previews)
+        .finish_validated(&session.id, &Identity::orso(), &previews)
         .await;
     assert!(result.is_err(), "invalid result must prevent a merge");
     assert_eq!(git(&dir, &["rev-parse", "HEAD"]), tip);
     assert!(
         previews
-            .is_invalid(&session.id, workbench::conflict_preview::Source::Result)
+            .is_invalid(&session.id, orso::conflict_preview::Source::Result)
             .await
     );
     previews.remove_session(&session.id).await;

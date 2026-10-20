@@ -5,9 +5,10 @@ import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
 import ContentPanel from "@/modules/content/ContentPanel.vue";
 import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
+import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "design" | "code" | "history";
+export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
 
 const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };
 
@@ -50,6 +51,12 @@ export const routes: RouteRecordRaw[] = [
         component: CheckpointsPanel,
         props: (r) => ({ projectId: r.params.id as string, sha: (r.params.sha as string) || undefined }),
       },
+      {
+        path: "settings",
+        name: "project-settings",
+        component: SettingsPanel,
+        props: (r) => ({ projectId: r.params.id as string }),
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/" },
@@ -83,6 +90,7 @@ export function projectTabFromRoute(name: string | symbol | null | undefined): P
   if (name === "project-design") return "design";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
+  if (name === "project-settings") return "settings";
   return "preview";
 }
 

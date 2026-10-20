@@ -1,11 +1,13 @@
-//! Dev-server supervision: one `npm run dev` per project.
+//! Dev-server supervision: one dev server per project, run from the `dev`
+//! command in `orso.json` (default `npm run dev`) in the configured root.
 //!
 //! A supervisor task per project spawns the dev server on the project's port with
 //! `PUBLIC_BASE=/preview/{id}/`, marks it ready when stdout prints its local URL, restarts
 //! it after crashes (at most [`MAX_RESTARTS`] times, with exponential backoff), and
-//! publishes every transition as a `devserver.status` event.
+//! publishes every transition as a `devserver.status` event. An invalid `orso.json`
+//! parks it as `crashed` until the file loads again.
 //!
-//! The server runs in its own process group so `npm`'s node grandchild dies with it.
+//! The server runs in its own process group so the package manager's node grandchild dies with it.
 //! Lifecycle: it runs from project creation (or daemon start for existing projects) until
 //! the project is deleted or the daemon shuts down, plus manual restarts.
 
@@ -38,34 +40,84 @@ const TAIL_LINES: usize = 20;
 const TAIL_CHARS: usize = 800;
 /// How often a running npm dev server checks whether its packages changed.
 const DEPS_POLL: Duration = Duration::from_secs(3);
-/// Fingerprint of the manifests `npm install` last ran against.
-const DEPS_MARKER: &str = "node_modules/.workbench-deps";
+/// Fingerprint of the manifests the install command last ran against,
+/// relative to the install dir.
+const DEPS_MARKER: &str = "node_modules/.orso-deps";
+/// Lockfiles recognised in the install dir, in priority order.
+const LOCKFILES: &[&str] = &[
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+];
 
-/// Fingerprint of `package.json` + `package-lock.json`; `None` without a `package.json`.
-fn deps_fingerprint(dir: &std::path::Path) -> Option<String> {
+/// `(install_dir, site_dir)` for a project. On invalid settings the install
+/// dir falls back to [`crate::settings::install_dir_lenient`] and the site
+/// dir to the project dir, so the poll keeps running.
+fn deps_dirs(project: &std::path::Path) -> (PathBuf, PathBuf) {
+    match crate::settings::load(project) {
+        Ok(s) => (s.install_path(project), s.site_dir(project)),
+        Err(_) => (
+            crate::settings::install_dir_lenient(project),
+            project.to_path_buf(),
+        ),
+    }
+}
+
+fn deps_marker(project: &std::path::Path) -> PathBuf {
+    deps_dirs(project).0.join(DEPS_MARKER)
+}
+
+/// Fingerprint of `orso.json`, the `package.json` files in the install and
+/// site dirs (deduplicated), and the first present lockfile in the install
+/// dir. `None` only when neither `package.json` exists.
+fn deps_fingerprint(project: &std::path::Path) -> Option<String> {
     use std::hash::{Hash, Hasher};
-    let manifest = std::fs::read(dir.join("package.json")).ok()?;
-    let lock = std::fs::read(dir.join("package-lock.json")).unwrap_or_default();
+    let (install_dir, site_dir) = deps_dirs(project);
+    let install_manifest = std::fs::read(install_dir.join("package.json")).ok();
+    let site_manifest = if site_dir == install_dir {
+        None
+    } else {
+        std::fs::read(site_dir.join("package.json")).ok()
+    };
+    if install_manifest.is_none() && site_manifest.is_none() {
+        return None;
+    }
+    let settings = std::fs::read(project.join(crate::settings::SETTINGS_FILE)).unwrap_or_default();
+    let lock = LOCKFILES
+        .iter()
+        .map(|name| install_dir.join(name))
+        .find(|p| p.is_file())
+        .and_then(|p| std::fs::read(p).ok())
+        .unwrap_or_default();
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    manifest.hash(&mut h);
+    settings.hash(&mut h);
+    install_manifest.unwrap_or_default().hash(&mut h);
+    if site_dir != install_dir {
+        site_manifest.unwrap_or_default().hash(&mut h);
+    }
     lock.hash(&mut h);
     Some(format!("{:016x}", h.finish()))
 }
 
 /// The packages changed since the last install (a sync, a change switch, the agent's git work).
-fn deps_stale(dir: &std::path::Path) -> bool {
-    let Some(now) = deps_fingerprint(dir) else {
+fn deps_stale(project: &std::path::Path) -> bool {
+    let Some(now) = deps_fingerprint(project) else {
         return false;
     };
-    std::fs::read_to_string(dir.join(DEPS_MARKER)).map_or(true, |m| m.trim() != now)
+    std::fs::read_to_string(deps_marker(project)).map_or(true, |m| m.trim() != now)
 }
 
-/// Record the manifests a successful `npm install` in `dir` ran against.
-pub(crate) fn record_deps(dir: &std::path::Path) {
-    if let Some(fp) = deps_fingerprint(dir) {
-        // A package with no dependencies gets no `node_modules` from `npm install`.
-        let _ = std::fs::create_dir_all(dir.join("node_modules"));
-        let _ = std::fs::write(dir.join(DEPS_MARKER), fp);
+/// Record the manifests a successful install for `project` ran against.
+pub(crate) fn record_deps(project: &std::path::Path) {
+    if let Some(fp) = deps_fingerprint(project) {
+        let marker = deps_marker(project);
+        // A package with no dependencies gets no `node_modules` from install.
+        if let Some(parent) = marker.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(marker, fp);
     }
 }
 
@@ -87,8 +139,8 @@ pub type CommandFactory = Arc<dyn Fn(&LaunchSpec) -> Command + Send + Sync>;
 pub enum Launcher {
     /// Do not spawn anything (project status stays `starting`).
     Disabled,
-    /// `npm run dev -- --port N --host 127.0.0.1`.
-    Npm,
+    /// The `dev` command from `orso.json` (defaults to the npm command).
+    Configured,
     /// Test hook: an arbitrary command standing in for the dev server.
     Custom(CommandFactory),
 }
@@ -98,14 +150,14 @@ pub struct DevServerOptions {
     pub launcher: Launcher,
     pub backoff_base: Duration,
     pub stable_after: Duration,
-    /// Daemon listen port; exposed to Astro as `WORKBENCH_PROXY_PORT` so Vite HMR
+    /// Daemon listen port; exposed to Astro as `ORSO_PROXY_PORT` so Vite HMR
     /// connects through the preview proxy instead of the raw Astro port.
     pub proxy_port: u16,
 }
 
 impl DevServerOptions {
-    pub fn npm(proxy_port: u16) -> Self {
-        Self::with_launcher(Launcher::Npm, proxy_port)
+    pub fn configured(proxy_port: u16) -> Self {
+        Self::with_launcher(Launcher::Configured, proxy_port)
     }
 
     pub fn disabled() -> Self {
@@ -126,16 +178,12 @@ impl DevServerOptions {
     }
 }
 
-fn npm_command(spec: &LaunchSpec) -> Command {
-    let mut cmd = Command::new("npm");
-    cmd.args(["run", "dev", "--", "--port"])
-        .arg(spec.port.to_string())
-        // Bind IPv4 loopback explicitly: the proxy dials 127.0.0.1, and `localhost` may
-        // resolve to ::1 only.
-        .args(["--host", "127.0.0.1"])
-        // Astro auto-backgrounds `astro dev` (detached, exit 0) when it detects an AI agent in
-        // the environment, which the supervisor would see as a crash. Keep it in the foreground.
-        .arg("--ignore-lock");
+/// `sh -c <dev command with {port}/{host} substituted>`, run in the site dir.
+fn configured_command(settings: &crate::settings::ProjectSettings, spec: &LaunchSpec) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
+        .arg(settings.dev_command(spec.port))
+        .current_dir(settings.site_dir(&spec.dir));
     cmd
 }
 
@@ -232,7 +280,7 @@ impl DevServerManager {
     pub async fn resume_all(&self) {
         for p in self.shared.projects.list().await {
             if let Err(e) = self.start(&p.id).await {
-                eprintln!("workbench: cannot start dev server for {}: {e}", p.id);
+                eprintln!("orso: cannot start dev server for {}: {e}", p.id);
             }
         }
     }
@@ -310,19 +358,68 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         let outcome = match shared.projects.ensure_free_port(&id).await {
             Ok(p) => {
                 port = p;
+                // A bad orso.json is not fixed by retrying: park as crashed
+                // without spending the crash budget or scheduling a backoff,
+                // until the file loads.
+                let settings = match &shared.opts.launcher {
+                    Launcher::Configured => match crate::settings::load(&project.dir) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            let message = crate::settings::describe(&e);
+                            shared
+                                .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
+                                .await;
+                            if !await_valid_settings(
+                                &shared,
+                                &id,
+                                &project.dir,
+                                port,
+                                message,
+                                &mut stop,
+                            )
+                            .await
+                            {
+                                return;
+                            }
+                            crashes = 0;
+                            continue;
+                        }
+                    },
+                    _ => None,
+                };
                 shared
                     .set_state(&id, DevserverStatus::Starting, port, None)
                     .await;
-                let npm = matches!(shared.opts.launcher, Launcher::Npm);
-                match npm && deps_stale(&project.dir) {
-                    true => match crate::projects::npm_install(&project.dir).await {
-                        Ok(()) => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                let configured = matches!(shared.opts.launcher, Launcher::Configured);
+                match configured && deps_stale(&project.dir) {
+                    true => match crate::projects::install(&project.dir).await {
+                        Ok(()) => {
+                            run_once(
+                                &shared,
+                                &id,
+                                project.dir,
+                                port,
+                                &mut stop,
+                                settings.as_ref(),
+                            )
+                            .await
+                        }
                         Err(e) => Outcome::Died {
                             message: e.message,
                             stable: false,
                         },
                     },
-                    false => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                    false => {
+                        run_once(
+                            &shared,
+                            &id,
+                            project.dir,
+                            port,
+                            &mut stop,
+                            settings.as_ref(),
+                        )
+                        .await
+                    }
                 }
             }
             Err(e) if e.code == ErrorCode::Enoent => return,
@@ -339,7 +436,7 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         if stable {
             crashes = 0;
         }
-        eprintln!("workbench: dev server for {id} died: {message}");
+        eprintln!("orso: dev server for {id} died: {message}");
         if crashes >= MAX_RESTARTS {
             shared
                 .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
@@ -355,6 +452,35 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
             _ = &mut stop => return,
+        }
+    }
+}
+
+/// Poll `orso.json` until it loads (`true`) or we are asked to stop (`false`).
+/// A changed error replaces the crash message.
+async fn await_valid_settings(
+    shared: &Shared,
+    id: &str,
+    dir: &std::path::Path,
+    port: u16,
+    mut message: String,
+    stop: &mut oneshot::Receiver<()>,
+) -> bool {
+    loop {
+        tokio::select! {
+            _ = &mut *stop => return false,
+            _ = tokio::time::sleep(DEPS_POLL) => match crate::settings::load(dir) {
+                Ok(_) => return true,
+                Err(e) => {
+                    let now = crate::settings::describe(&e);
+                    if now != message {
+                        shared
+                            .set_state(id, DevserverStatus::Crashed, port, Some(&now))
+                            .await;
+                        message = now;
+                    }
+                }
+            },
         }
     }
 }
@@ -387,6 +513,7 @@ async fn run_once(
     dir: PathBuf,
     port: u16,
     stop: &mut oneshot::Receiver<()>,
+    settings: Option<&crate::settings::ProjectSettings>,
 ) -> Outcome {
     let spec = LaunchSpec {
         project_id: id.to_string(),
@@ -395,7 +522,15 @@ async fn run_once(
         public_base: format!("/preview/{id}/"),
     };
     let mut cmd = match &shared.opts.launcher {
-        Launcher::Npm => npm_command(&spec),
+        Launcher::Configured => match settings {
+            Some(settings) => configured_command(settings, &spec),
+            None => {
+                return Outcome::Died {
+                    message: "dev server settings were not loaded".into(),
+                    stable: false,
+                }
+            }
+        },
         Launcher::Custom(f) => f(&spec),
         Launcher::Disabled => {
             return Outcome::Died {
@@ -404,8 +539,12 @@ async fn run_once(
             }
         }
     };
+    // `configured_command` already set the site dir; other launchers run in
+    // the project dir.
+    if !matches!(shared.opts.launcher, Launcher::Configured) {
+        cmd.current_dir(&dir);
+    }
     cmd.env("PUBLIC_BASE", &spec.public_base)
-        .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -413,7 +552,7 @@ async fn run_once(
         // Own group, so terminating also reaches npm's node grandchild.
         .process_group(0);
     if shared.opts.proxy_port > 0 {
-        cmd.env("WORKBENCH_PROXY_PORT", shared.opts.proxy_port.to_string());
+        cmd.env("ORSO_PROXY_PORT", shared.opts.proxy_port.to_string());
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -441,7 +580,7 @@ async fn run_once(
     let mut tail = Tail::default();
     let mut ready_at: Option<Instant> = None;
     let mut port = port;
-    let watch_deps = matches!(shared.opts.launcher, Launcher::Npm);
+    let watch_deps = matches!(shared.opts.launcher, Launcher::Configured);
     let mut deps_tick = tokio::time::interval(DEPS_POLL);
     deps_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let outcome = loop {
@@ -621,16 +760,17 @@ mod tests {
     }
 
     #[test]
-    fn npm_command_line() {
+    fn configured_command_line() {
         let spec = LaunchSpec {
             project_id: "site".into(),
             dir: PathBuf::from("/tmp/site"),
             port: 4567,
             public_base: "/preview/site/".into(),
         };
-        let cmd = npm_command(&spec);
+        let settings = crate::settings::ProjectSettings::defaults();
+        let cmd = configured_command(&settings, &spec);
         let std = cmd.as_std();
-        assert_eq!(std.get_program(), "npm");
+        assert_eq!(std.get_program(), "sh");
         let args: Vec<_> = std
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -638,44 +778,142 @@ mod tests {
         assert_eq!(
             args,
             [
-                "run",
-                "dev",
-                "--",
-                "--port",
-                "4567",
-                "--host",
-                "127.0.0.1",
-                "--ignore-lock"
+                "-c",
+                "npm run dev -- --port 4567 --host 127.0.0.1 --ignore-lock"
             ]
+        );
+        assert_eq!(
+            std.get_current_dir(),
+            Some(std::path::Path::new("/tmp/site"))
+        );
+
+        // A configured subfolder root is the process working directory.
+        let settings = crate::settings::ProjectSettings {
+            root: "site".to_string(),
+            ..crate::settings::ProjectSettings::defaults()
+        };
+        let cmd = configured_command(&settings, &spec);
+        assert_eq!(
+            cmd.as_std().get_current_dir(),
+            Some(std::path::Path::new("/tmp/site/site"))
         );
     }
 
     #[test]
-    fn deps_go_stale_when_the_manifests_change() {
+    fn fingerprint_covers_each_lockfile() {
+        // Root-only assertions (the pre-settings behaviour).
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         assert!(!deps_stale(dir), "no package.json: nothing to install");
         std::fs::write(dir.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
         assert!(deps_stale(dir), "never installed");
-        std::fs::create_dir_all(dir.join("node_modules")).unwrap();
         record_deps(dir);
         assert!(!deps_stale(dir));
-        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
-        assert!(deps_stale(dir), "lockfile changed");
-        record_deps(dir);
         std::fs::write(dir.join("package.json"), r#"{"dependencies":{"x":"1"}}"#).unwrap();
         assert!(deps_stale(dir), "manifest changed");
+
+        for lock in [
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path();
+            std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
+            record_deps(dir);
+            assert!(!deps_stale(dir), "{lock}: fresh after record");
+            // A package with no dependencies gets no `node_modules` from install;
+            // record_deps must still leave a readable marker.
+            std::fs::write(dir.join(lock), "{}").unwrap();
+            assert!(deps_stale(dir), "{lock}: writing lockfile makes deps stale");
+        }
     }
 
     #[test]
-    fn deps_stay_fresh_for_a_package_without_dependencies() {
+    fn fingerprint_covers_site_and_install_manifests() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        // `npm install` with no dependencies writes a lockfile but no `node_modules`.
-        std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
-        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        std::fs::create_dir_all(dir.join("site")).unwrap();
+        std::fs::write(dir.join("site/astro.config.mjs"), "export default {};\n").unwrap();
+        std::fs::write(dir.join("orso.json"), r#"{"root":"site","installDir":"."}"#).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name":"root"}"#).unwrap();
+        std::fs::write(dir.join("site/package.json"), r#"{"name":"site"}"#).unwrap();
         record_deps(dir);
         assert!(!deps_stale(dir));
+        std::fs::write(dir.join("site/package.json"), r#"{"name":"site2"}"#).unwrap();
+        assert!(deps_stale(dir), "site manifest changed");
+        record_deps(dir);
+        assert!(!deps_stale(dir));
+        std::fs::write(dir.join("package.json"), r#"{"name":"root2"}"#).unwrap();
+        assert!(deps_stale(dir), "install manifest changed");
+    }
+
+    #[test]
+    fn fingerprint_covers_settings_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
+        record_deps(dir);
+        assert!(!deps_stale(dir));
+        std::fs::write(dir.join("orso.json"), r#"{"install":"true"}"#).unwrap();
+        assert!(deps_stale(dir), "settings appeared");
+        record_deps(dir);
+        assert!(!deps_stale(dir));
+        std::fs::write(dir.join("orso.json"), r#"{"install":"echo hi"}"#).unwrap();
+        assert!(deps_stale(dir), "settings edited");
+        record_deps(dir);
+        assert!(!deps_stale(dir));
+        std::fs::remove_file(dir.join("orso.json")).unwrap();
+        assert!(deps_stale(dir), "settings deleted (branch switch)");
+    }
+
+    #[test]
+    fn marker_lives_in_install_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join("site")).unwrap();
+        std::fs::write(dir.join("site/astro.config.mjs"), "export default {};\n").unwrap();
+        std::fs::write(dir.join("orso.json"), r#"{"root":"site","installDir":"."}"#).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name":"root"}"#).unwrap();
+        std::fs::write(dir.join("site/package.json"), r#"{"name":"site"}"#).unwrap();
+        record_deps(dir);
+        assert!(dir.join("node_modules/.orso-deps").is_file());
+
+        // A distinct installDir gets its own marker.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join("vendor")).unwrap();
+        std::fs::write(dir.join("orso.json"), r#"{"installDir":"vendor"}"#).unwrap();
+        std::fs::write(dir.join("vendor/package.json"), r#"{"name":"v"}"#).unwrap();
+        record_deps(dir);
+        assert!(dir.join("vendor/node_modules/.orso-deps").is_file());
+        assert!(!deps_stale(dir));
+    }
+
+    #[test]
+    fn invalid_settings_still_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("orso.json"), r#"{"dev":"x"}"#).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
+        assert!(deps_fingerprint(dir).is_some());
+        record_deps(dir);
+        assert!(
+            dir.join("node_modules/.orso-deps").is_file(),
+            "default installDir is the project dir"
+        );
+        assert!(!deps_stale(dir));
+    }
+
+    #[test]
+    fn no_manifest_means_never_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        assert!(deps_fingerprint(dir).is_none());
+        assert!(!deps_stale(dir), "non-Node repos never reinstall");
     }
 
     #[test]

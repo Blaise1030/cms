@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { useLocalStorage } from "@vueuse/core";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import type { PickedElement } from "./elementPicker";
 import { crashPrompt, pageErrorPrompt, type PageError } from "./pageErrors";
@@ -25,7 +25,7 @@ export const usePreviewStore = defineStore("preview", () => {
   /** Force right-to-left layout in the preview. */
   const rtl = ref(false);
   /** Preview in dark mode (`prefers-color-scheme: dark` and a `dark` class on `<html>`). */
-  const dark = useLocalStorage("workbench.preview.dark", false);
+  const dark = useLocalStorage("orso.preview.dark", false);
   /** Bumping this remounts the iframe. */
   const reloadNonce = ref(0);
   /** Live dev-server state per project, from `devserver.status` events. */
@@ -35,8 +35,6 @@ export const usePreviewStore = defineStore("preview", () => {
   const error = ref<string | null>(null);
   /** Element-picker mode in the preview frame. */
   const picking = ref(false);
-  /** Whether each project's agent is working on a request, from `terminal.busy` events. */
-  const agentBusy = ref<Record<string, boolean>>({});
 
   function setDevice(next: Device) {
     device.value = next;
@@ -68,16 +66,6 @@ export const usePreviewStore = defineStore("preview", () => {
     outbox.send({ kind: "text", text: crashPrompt(message.value[projectId]) });
   }
 
-  /** Seed the agent's busy state for a project (events keep it current afterwards). */
-  async function loadAgentBusy(projectId: string) {
-    try {
-      const s = await daemon.api.terminalStatus(projectId);
-      agentBusy.value[projectId] ??= s.running && s.busy === true;
-    } catch {
-      // No banner is the safe default.
-    }
-  }
-
   function reload() {
     reloadNonce.value++;
   }
@@ -107,21 +95,12 @@ export const usePreviewStore = defineStore("preview", () => {
   function resync() {
     status.value = {};
     message.value = {};
-    const projects = Object.keys(agentBusy.value);
-    agentBusy.value = {};
-    projects.forEach((id) => void loadAgentBusy(id));
     reload();
   }
 
   const offs = [
     daemon.onReconnected(resync),
     daemon.on("events.lagged", resync),
-    daemon.on("terminal.busy", (e) => {
-      agentBusy.value[e.projectId] = e.busy;
-    }),
-    daemon.on("terminal.exited", (e) => {
-      agentBusy.value[e.projectId] = false;
-    }),
     daemon.on("devserver.status", (e) => {
       const before = status.value[e.projectId];
       status.value[e.projectId] = e.state;
@@ -142,7 +121,6 @@ export const usePreviewStore = defineStore("preview", () => {
     restarting,
     error,
     picking,
-    agentBusy,
     setDevice,
     toggleRtl,
     toggleDark,
@@ -150,7 +128,6 @@ export const usePreviewStore = defineStore("preview", () => {
     pick,
     fixPageError,
     fixCrash,
-    loadAgentBusy,
     reload,
     seed,
     restart,

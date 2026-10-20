@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";
 

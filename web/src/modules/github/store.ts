@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { DeviceStart, GithubRepo, GithubStatus, GithubUser } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 
 export const useGithubStore = defineStore("github", () => {
   const daemon = useDaemon();

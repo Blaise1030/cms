@@ -1,12 +1,12 @@
 import { readonly, ref } from "vue";
 import { createSharedComposable } from "@vueuse/core";
-import { readPref, writePref } from "@workbench/utils";
+import { readPref, writePref } from "@orso/utils";
 
 // Sampled switch packs from kbsim and Mechvibes (MIT, see public/sounds/*/LICENSE), taken from tabsh:
 // five press variants for ordinary keys, picked at random, and their own press/release for the
 // big keys. A null release means press-only samples.
 
-export const TYPING_SOUND_KEY = "workbench.typingSound";
+export const TYPING_SOUND_KEY = "orso.typingSound";
 
 type Special = "space" | "enter" | "back";
 export const SOUND_PACKS = {

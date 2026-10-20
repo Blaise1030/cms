@@ -6,9 +6,9 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
 
 fn config(dir: &Path, no_auth: bool) -> Config {
     Config {
@@ -193,7 +193,7 @@ async fn invalid_create_requests_use_error_envelope() {
     let dirs: Vec<_> = std::fs::read_dir(tmp.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n != ".workbench")
+        .filter(|n| n != ".orso")
         .collect();
     assert!(dirs.is_empty(), "{dirs:?}");
 }
@@ -208,7 +208,7 @@ async fn delete_requires_confirm_then_removes_dir() {
         .to_string();
     let dir = tmp.path().join(&id);
     // Daemon state outside the repo is removed too
-    let state = tmp.path().join(".workbench").join(&id);
+    let state = tmp.path().join(".orso").join(&id);
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(state.join("daemon-state.txt"), "").unwrap();
 
@@ -260,7 +260,7 @@ async fn delete_only_touches_registered_projects() {
         "..",
         "%2e%2e",
         "real/../../outside",
-        ".workbench",
+        ".orso",
     ] {
         let (status, _) = call(
             &app,
@@ -271,7 +271,7 @@ async fn delete_only_touches_registered_projects() {
     }
     assert!(outside.is_dir());
     assert!(projects.join("real").is_dir());
-    assert!(projects.join(".workbench").is_dir());
+    assert!(projects.join(".orso").is_dir());
 }
 
 #[tokio::test]
@@ -314,7 +314,7 @@ fn chmod(path: &Path, mode: u32) {
 #[tokio::test]
 async fn corrupt_registry_is_quarantined_under_a_unique_name() {
     let tmp = tempfile::tempdir().unwrap();
-    let state = tmp.path().join(".workbench");
+    let state = tmp.path().join(".orso");
     std::fs::create_dir_all(&state).unwrap();
     // A pre-existing backup must never be clobbered by a second quarantine.
     std::fs::write(state.join("projects.json.corrupt"), "old").unwrap();
@@ -338,7 +338,7 @@ async fn corrupt_registry_is_quarantined_under_a_unique_name() {
 #[tokio::test]
 async fn failed_quarantine_blocks_writes_and_keeps_corrupt_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let state = tmp.path().join(".workbench");
+    let state = tmp.path().join(".orso");
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(state.join("projects.json"), "{not json").unwrap();
     chmod(&state, 0o500); // readable, but no rename/create inside
@@ -349,7 +349,7 @@ async fn failed_quarantine_blocks_writes_and_keeps_corrupt_file() {
         req("POST", "/api/projects", Some(json!({ "name": "x" }))),
     )
     .await;
-    let serve_err = workbench::serve(config(tmp.path(), true))
+    let serve_err = orso::serve(config(tmp.path(), true))
         .await
         .unwrap_err();
     chmod(&state, 0o700);
@@ -381,7 +381,7 @@ async fn delete_that_fails_to_commit_leaves_project_intact_and_is_retryable() {
         .unwrap()
         .to_string();
     let dir = tmp.path().join(&id);
-    let state = tmp.path().join(".workbench");
+    let state = tmp.path().join(".orso");
     // Make the registry write fail: its temp file path is occupied by a directory.
     std::fs::create_dir(state.join("projects.json.tmp")).unwrap();
 
@@ -415,7 +415,7 @@ async fn cleanup_failure_after_commit_is_non_fatal() {
         .unwrap()
         .to_string();
     // A state dir we cannot fully remove (file inside a read-only subdir).
-    let locked = tmp.path().join(".workbench").join(&id).join("locked");
+    let locked = tmp.path().join(".orso").join(&id).join("locked");
     std::fs::create_dir_all(&locked).unwrap();
     std::fs::write(locked.join("f"), "x").unwrap();
     chmod(&locked, 0o500);
@@ -458,11 +458,11 @@ async fn delete_of_project_whose_dir_vanished_drops_the_entry() {
 #[tokio::test]
 async fn trash_leftovers_are_purged_on_start() {
     let tmp = tempfile::tempdir().unwrap();
-    let leftover = tmp.path().join(".workbench/trash/old-1");
+    let leftover = tmp.path().join(".orso/trash/old-1");
     std::fs::create_dir_all(&leftover).unwrap();
     std::fs::write(leftover.join("f"), "x").unwrap();
     let _ = app(tmp.path());
-    assert!(!tmp.path().join(".workbench/trash").exists());
+    assert!(!tmp.path().join(".orso/trash").exists());
 }
 
 #[tokio::test]
@@ -493,7 +493,7 @@ async fn real_npm_install_and_site_builds() {
     let app = http::router(AppState::with_options(
         config(tmp.path(), true),
         true,
-        workbench::devserver::DevServerOptions::disabled(),
+        orso::devserver::DevServerOptions::disabled(),
     ));
     let body = create(&app, "Real Install").await;
     let dir = tmp.path().join(body["id"].as_str().unwrap());
@@ -523,10 +523,10 @@ async fn new_projects_carry_a_local_identity_and_it_can_be_replaced() {
     let state = AppState::with_scaffold_install(config(tmp.path(), true), false);
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
-    assert_eq!(git(&dir, &["log", "-1", "--format=%an"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
+    assert_eq!(git(&dir, &["log", "-1", "--format=%an"]), "orso");
 
-    let ada = workbench::git::Identity {
+    let ada = orso::git::Identity {
         name: "Ada Lovelace".into(),
         email: "42+ada@users.noreply.github.com".into(),
     };
@@ -552,9 +552,9 @@ async fn startup_gives_older_projects_a_local_identity() {
 
     state
         .projects
-        .ensure_identities(&workbench::git::Identity::workbench())
+        .ensure_identities(&orso::git::Identity::orso())
         .await;
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
 }
 
 #[tokio::test]
@@ -567,18 +567,18 @@ async fn startup_repairs_a_half_written_identity() {
 
     state
         .projects
-        .ensure_identities(&workbench::git::Identity::workbench())
+        .ensure_identities(&orso::git::Identity::orso())
         .await;
     assert_eq!(
         git(&dir, &["config", "--local", "user.email"]),
-        "workbench@localhost"
+        "orso@localhost"
     );
 }
 
 #[tokio::test]
 async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
-    use workbench::git::Identity;
-    use workbench::projects::Source;
+    use orso::git::Identity;
+    use orso::projects::Source;
 
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("src");
@@ -655,9 +655,58 @@ async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
 }
 
 #[tokio::test]
+async fn clone_with_invalid_settings_still_opens() {
+    use orso::git::Identity;
+    use orso::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-b", "main"]);
+    std::fs::write(src.join("package.json"), "{}").unwrap();
+    std::fs::write(src.join("orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    git(&src, &["add", "-A"]);
+    git(
+        &src,
+        &[
+            "-c",
+            "user.name=Grace",
+            "-c",
+            "user.email=g@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+
+    let projects_dir = tmp.path().join("projects");
+    let state = AppState::with_options(
+        config(&projects_dir, true),
+        true,
+        orso::devserver::DevServerOptions::disabled(),
+    );
+    let info = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", src.display()),
+                env: vec![],
+            },
+            &Identity::orso(),
+        )
+        .await
+        .unwrap();
+    let dir = projects_dir.join(&info.id);
+    assert!(dir.join("orso.json").exists());
+    assert!(!dir.join("node_modules").exists(), "install was skipped");
+}
+
+#[tokio::test]
 async fn failed_clone_leaves_nothing_behind() {
-    use workbench::git::Identity;
-    use workbench::projects::Source;
+    use orso::git::Identity;
+    use orso::projects::Source;
 
     let tmp = tempfile::tempdir().unwrap();
     let projects_dir = tmp.path().join("projects");
@@ -671,7 +720,7 @@ async fn failed_clone_leaves_nothing_behind() {
                 url: format!("file://{}/nope.git", tmp.path().display()),
                 env: vec![],
             },
-            &Identity::workbench(),
+            &Identity::orso(),
         )
         .await
         .unwrap_err();

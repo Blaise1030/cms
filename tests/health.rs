@@ -6,15 +6,15 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
 
 fn config(no_auth: bool, token: Option<&str>, origin: Option<&str>) -> Config {
     Config {
         port: 0,
         origin: origin.map(str::to_string),
-        projects_dir: PathBuf::from("/tmp/workbench-test-projects"),
+        projects_dir: PathBuf::from("/tmp/orso-test-projects"),
         no_auth,
         token: token.map(str::to_string),
         agents_config: None,
@@ -45,7 +45,7 @@ async fn health_over_real_socket_returns_200_json() {
     let addr = listener.local_addr().unwrap();
     let state = AppState::new(config(false, Some("abc123"), None));
     tokio::spawn(async move {
-        workbench::serve_on(listener, state).await.unwrap();
+        orso::serve_on(listener, state).await.unwrap();
     });
 
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -73,7 +73,7 @@ async fn health_returns_ok_json_with_version() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = json_of(res).await;
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["version"], workbench::version());
+    assert_eq!(body["version"], orso::version());
 }
 
 #[tokio::test]
@@ -269,7 +269,7 @@ async fn malformed_hosts_are_rejected() {
 #[test]
 fn cli_rejects_token_with_reserved_characters() {
     for bad in ["bad;token", "a b", "x&t=y", "secret"] {
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_workbench"))
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_orso"))
             .args(["serve", "--port", "0", "--token", bad])
             .output()
             .unwrap();
@@ -283,7 +283,7 @@ fn cli_rejects_token_with_reserved_characters() {
 
 #[tokio::test]
 async fn serve_rejects_invalid_token_in_config() {
-    let err = workbench::serve(config(false, Some("a;b"), None))
+    let err = orso::serve(config(false, Some("a;b"), None))
         .await
         .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);

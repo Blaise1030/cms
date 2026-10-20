@@ -3,7 +3,7 @@ import { expandReferences, referenceTag, segmentReferences } from "./references"
 
 const hero =
   '[element <section class="mx-auto max-w-5xl px-8 py-24 text-center" id="hero"> "Stop building. Start launching." in src/components/sections/Hero.astro:5:69]';
-const shot = "/Users/me/workbench-projects/.workbench/astro-marketing/attachments/4b788490f55975c0.png";
+const shot = "/Users/me/orso-projects/.orso/astro-marketing/attachments/4b788490f55975c0.png";
 
 describe("referenceTag", () => {
   it("numbers element tags", () => {

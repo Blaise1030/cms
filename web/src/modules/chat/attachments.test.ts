@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { attachmentMessage, splitAttachments } from "./attachments";
 
-const png = "/Users/me/workbench-projects/.workbench/site/attachments/5d83a351365d7d18.png";
-const pdf = "/Users/me/workbench-projects/.workbench/site/attachments/0123456789abcdef.pdf";
+const png = "/Users/me/orso-projects/.orso/site/attachments/5d83a351365d7d18.png";
+const pdf = "/Users/me/orso-projects/.orso/site/attachments/0123456789abcdef.pdf";
 
 describe("attachments", () => {
   it("appends saved paths to the text, one per line", () => {
@@ -39,7 +39,7 @@ describe("attachments", () => {
       "plain",
       `see ${png} please`,
       `${png}\nthen do this`,
-      "/p/.workbench/site/attachments/4b78.png",
+      "/p/.orso/site/attachments/4b78.png",
     ]) {
       expect(splitAttachments(text)).toEqual({ text, files: [] });
     }

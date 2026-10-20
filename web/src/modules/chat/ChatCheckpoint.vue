@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import type { CheckpointData } from "./parts";
 
 const props = defineProps<{ projectId: string; checkpoint: CheckpointData }>();

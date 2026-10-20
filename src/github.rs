@@ -4,7 +4,7 @@
 //! machine's GitHub CLI login (`cli`). The CLI token is never read: the daemon only runs
 //! `gh api ...` and lets git call `gh auth git-credential`.
 //!
-//! The session (token + profile) lives in `{projects-dir}/.workbench/github.json`, mode 0600.
+//! The session (token + profile) lives in `{projects-dir}/.orso/github.json`, mode 0600.
 //! The token is sent to the GitHub API as a bearer token and to git per command through
 //! `GIT_CONFIG_*` environment variables, so it never appears in argv or in a repo's config.
 
@@ -508,7 +508,7 @@ impl GithubAuth {
             .ok()
             .and_then(|b| serde_json::from_slice::<Session>(&b).ok());
         let http = reqwest::Client::builder()
-            .user_agent("workbench")
+            .user_agent("orso")
             .timeout(Duration::from_secs(30))
             .build()
             .expect("HTTP client");
@@ -668,7 +668,7 @@ impl GithubAuth {
             .map(|s| s.token.clone())
     }
 
-    /// The signed-in person's commit identity, or [`Identity::workbench`]. With the GitHub
+    /// The signed-in person's commit identity, or [`Identity::orso`]. With the GitHub
     /// CLI it is the machine's global git identity when set, else the GitHub profile.
     pub async fn identity(&self) -> Identity {
         if let Some(s) = self.inner.lock().await.session.as_ref() {
@@ -678,7 +678,7 @@ impl GithubAuth {
         match (cli.git_identity, cli.user) {
             (Some(id), _) => id,
             (None, Some(u)) => u.identity(),
-            (None, None) => Identity::workbench(),
+            (None, None) => Identity::orso(),
         }
     }
 
@@ -1773,7 +1773,7 @@ mod tests {
         let st = auth.status().await;
         assert!(!st.configured);
         assert!(st.user.is_none());
-        assert_eq!(auth.identity().await, Identity::workbench());
+        assert_eq!(auth.identity().await, Identity::orso());
     }
 
     /// Never the real `gh`.
@@ -1849,7 +1849,7 @@ mod tests {
         );
         expire(&auth).await;
         assert!(auth.status().await.user.is_none());
-        assert_eq!(auth.identity().await, Identity::workbench());
+        assert_eq!(auth.identity().await, Identity::orso());
         let left = auth.cli.lock().await.as_ref().unwrap().expires - Instant::now();
         assert!(left <= CLI_RETRY);
     }

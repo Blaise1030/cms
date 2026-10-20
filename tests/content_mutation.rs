@@ -9,10 +9,10 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::projects::Source;
-use workbench::state::AppState;
-use workbench::{changes, git, http};
+use orso::config::Config;
+use orso::projects::Source;
+use orso::state::AppState;
+use orso::{changes, git, http};
 
 const WELCOME: &str = "src/content/blog/en/welcome.md";
 
@@ -186,7 +186,7 @@ async fn local_and_github_projects_reject_writes_on_main() {
                 url: format!("file://{}", bare.display()),
                 env: vec![],
             },
-            &git::Identity::workbench(),
+            &git::Identity::orso(),
         )
         .await
         .unwrap();

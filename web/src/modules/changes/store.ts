@@ -3,11 +3,12 @@ import { ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
+import { useSettingsStore } from "@/modules/settings/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { getLatest as syncAgain } from "./getLatest";
 
@@ -93,6 +94,7 @@ export const useChangesStore = defineStore("changes", () => {
       useFilesStore().refresh(),
       branch ? useContentStore().refreshForBranch(branch) : undefined,
       branch ? useDesignStore().refreshForBranch(branch) : undefined,
+      branch ? useSettingsStore().refreshForBranch(branch) : undefined,
     ]);
     usePreviewStore().reload();
   }

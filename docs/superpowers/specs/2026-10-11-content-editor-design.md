@@ -16,7 +16,7 @@ This phase is **template-first**. It covers the template's existing `site`, `pag
 3. Saving an unchanged entry writes nothing and produces no git diff. Editing frontmatter preserves unrelated keys, comments, ordering, quoting, and body text. JSON edits preserve untouched key text, ordering, indentation, and line endings.
 4. Blog and Help docs `.md` bodies have a Tiptap editor with toolbar, slash commands, and a synchronized Raw Markdown view. Unsupported Markdown is kept in Raw view rather than silently lost. Existing `sections` `.mdx` bodies use a raw editor.
 5. Paste, drop, and file-picker image inputs require alt text, save under `src/assets/<collection>/<slug>/`, and insert a relative image link or image-field value. A failed save leaves no new asset or changed entry.
-6. The template serves `/blog`, `/blog/<slug>`, `/help`, and `/help/<slug>` with navigation links. Workbench preview shows branch content; the production deployment remains driven by merges to `main`.
+6. The template serves `/blog`, `/blog/<slug>`, `/help`, and `/help/<slug>` with navigation links. orso preview shows branch content; the production deployment remains driven by merges to `main`.
 
 ## Decisions
 
@@ -44,7 +44,7 @@ New collections use `glob()` with one Markdown file per entry, under `src/conten
 
 The Blog schema includes required `title`, `description`, and `pubDate` (`YYYY-MM-DD`); optional `coverImage` with required `coverAlt` when present; `tags` as an array of strings defaulting to empty; and `relatedPosts` as optional references defaulting to empty. The Help docs schema includes required `title`, `description`, and `section`, plus numeric `order`. The template adds index and article routes for both collections, adds links to the global navigation, and renders Markdown through Astro's content APIs. Blog indexes sort newest first; Help docs group by section and sort by order, then title. Empty indexes have a useful empty state. Only entries on the branch being previewed appear in that preview; production builds from `main`.
 
-## Workbench architecture
+## orso architecture
 
 ### Content view
 

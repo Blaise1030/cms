@@ -21,8 +21,8 @@ import sys
 import threading
 import time
 
-IDENTIFIER = "com.workbench.desktop.updatetest"
-AUTO_APPLY_ENV = "WORKBENCH_DESKTOP_UPDATE_E2E_AUTO_APPLY"
+IDENTIFIER = "com.orso.desktop.updatetest"
+AUTO_APPLY_ENV = "ORSO_DESKTOP_UPDATE_E2E_AUTO_APPLY"
 # Busy from the Enter; ticks for 30 s, then the daemon's 15 s quiet period ends the turn.
 # `sleep 300 &` leaves a PTY descendant that the daemon's shutdown must reap.
 AGENT = "sleep 300 & while read x; do i=0; while [ $i -lt 30 ]; do echo tick $i; i=$((i+1)); sleep 1; done; done; wait"
@@ -211,24 +211,24 @@ def main():
     signal.alarm(OVERALL_TIMEOUT_S)
 
     work = args.work
-    app = os.path.join(work, "Applications", "Workbench.app")
-    exe = os.path.join(app, "Contents", "MacOS", "workbench-desktop")
+    app = os.path.join(work, "Applications", "orso.app")
+    exe = os.path.join(app, "Contents", "MacOS", "orso-desktop")
     home = os.path.join(work, "home")
     log = Log(os.path.join(work, "app.log"))
     daemon_file = os.path.join(home, "update-e2e-daemon.json")
     subprocess.run(["rm", "-rf", home, log.path])
 
-    projects = os.path.join(home, "workbench-projects")
-    os.makedirs(os.path.join(projects, ".workbench"))
+    projects = os.path.join(home, "orso-projects")
+    os.makedirs(os.path.join(projects, ".orso"))
     os.makedirs(os.path.join(projects, "site"))
-    os.makedirs(os.path.join(home, ".config", "workbench"))
-    with open(os.path.join(projects, ".workbench", "projects.json"), "w") as f:
+    os.makedirs(os.path.join(home, ".config", "orso"))
+    with open(os.path.join(projects, ".orso", "projects.json"), "w") as f:
         json.dump([{"id": "site", "name": "Site", "port": free_port()}], f)
-    with open(os.path.join(home, ".config", "workbench", "agents.json"), "w") as f:
+    with open(os.path.join(home, ".config", "orso", "agents.json"), "w") as f:
         json.dump({"fake": ["sh", "-c", AGENT]}, f)
 
     arch = "aarch64" if platform.machine() == "arm64" else "x86_64"
-    tarball = "Workbench-0.0.2.app.tar.gz"
+    tarball = "orso-0.0.2.app.tar.gz"
     with open(os.path.join(work, "serve", tarball + ".sig")) as f:
         signature = f.read().strip()
     manifest = {
@@ -326,7 +326,7 @@ def main():
             check("N+1 daemon healthy", wait_for(lambda: healthy(daemon2["base_url"], daemon2["token"]), 20), daemon2["base_url"])
         new_daemons = [p for p in children(new_pid) if "serve --port 0" in command(p)]
         check("N+1 has exactly one `serve --port 0` child", len(new_daemons) == 1, str(new_daemons))
-        check("N+1's check finds no newer update", wait_for(lambda: log.has("update check: Workbench is up to date"), 30))
+        check("N+1's check finds no newer update", wait_for(lambda: log.has("update check: orso is up to date"), 30))
 
         subprocess.run(["osascript", "-e", f'tell application id "{IDENTIFIER}" to quit'], capture_output=True, timeout=15)
         check("N+1 quit", wait_for(lambda: not alive(new_pid), 20))

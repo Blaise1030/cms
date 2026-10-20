@@ -10,7 +10,7 @@ describe("describeElement", () => {
   it("points at the Astro source file, relative to the project", () => {
     document.body.innerHTML = `
       <main>
-        <section class="hero astro-x7k2pd" data-astro-source-file="/home/me/workbench-projects/site-1/src/components/Hero.astro" data-astro-source-loc="12:3">
+        <section class="hero astro-x7k2pd" data-astro-source-file="/home/me/orso-projects/site-1/src/components/Hero.astro" data-astro-source-loc="12:3">
           <h1 class="title astro-x7k2pd">Build   faster
             sites</h1>
         </section>
@@ -62,7 +62,7 @@ describe("attachPicker", () => {
     const detach = attachPicker(window, onPick, vi.fn());
 
     link.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-    const overlay = document.getElementById("__workbench-picker")!;
+    const overlay = document.getElementById("__orso-picker")!;
     expect(overlay.style.display).toBe("block");
     expect(overlay.textContent).toBe("a");
 
@@ -71,7 +71,7 @@ describe("attachPicker", () => {
     expect(pageClick).not.toHaveBeenCalled();
 
     detach();
-    expect(document.getElementById("__workbench-picker")).toBeNull();
+    expect(document.getElementById("__orso-picker")).toBeNull();
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(pageClick).toHaveBeenCalledOnce();
     expect(onPick).toHaveBeenCalledOnce();

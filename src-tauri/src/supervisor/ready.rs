@@ -1,6 +1,6 @@
 use tauri::Url;
 
-const READY_PREFIX: &str = "workbench ready: ";
+const READY_PREFIX: &str = "orso ready: ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadyInfo {
@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn parses_base_url_port_and_token() {
-        let info = parse_ready_line("workbench ready: http://127.0.0.1:51234/?t=abc123").unwrap();
+        let info = parse_ready_line("orso ready: http://127.0.0.1:51234/?t=abc123").unwrap();
         assert_eq!(info.base_url, "http://127.0.0.1:51234");
         assert_eq!(info.port, 51234);
         assert_eq!(info.token, "abc123");
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn tolerates_trailing_newline() {
-        let info = parse_ready_line("workbench ready: http://127.0.0.1:8080/?t=ff00\n").unwrap();
+        let info = parse_ready_line("orso ready: http://127.0.0.1:8080/?t=ff00\n").unwrap();
         assert_eq!(info.token, "ff00");
     }
 
@@ -60,11 +60,11 @@ mod tests {
     #[test]
     fn rejects_missing_or_empty_token() {
         assert_eq!(
-            parse_ready_line("workbench ready: http://127.0.0.1:51234/"),
+            parse_ready_line("orso ready: http://127.0.0.1:51234/"),
             None
         );
         assert_eq!(
-            parse_ready_line("workbench ready: http://127.0.0.1:51234/?t="),
+            parse_ready_line("orso ready: http://127.0.0.1:51234/?t="),
             None
         );
     }
@@ -72,19 +72,19 @@ mod tests {
     #[test]
     fn rejects_non_loopback_host_or_missing_port() {
         assert_eq!(
-            parse_ready_line("workbench ready: http://0.0.0.0:51234/?t=abc"),
+            parse_ready_line("orso ready: http://0.0.0.0:51234/?t=abc"),
             None
         );
         assert_eq!(
-            parse_ready_line("workbench ready: http://example.com:51234/?t=abc"),
+            parse_ready_line("orso ready: http://example.com:51234/?t=abc"),
             None
         );
         assert_eq!(
-            parse_ready_line("workbench ready: http://127.0.0.1/?t=abc"),
+            parse_ready_line("orso ready: http://127.0.0.1/?t=abc"),
             None
         );
         assert_eq!(
-            parse_ready_line("workbench ready: https://127.0.0.1:51234/?t=abc"),
+            parse_ready_line("orso ready: https://127.0.0.1:51234/?t=abc"),
             None
         );
     }

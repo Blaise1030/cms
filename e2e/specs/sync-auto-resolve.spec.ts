@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { startChange } from "../fixtures/daemon";
-import { expect, test } from "../fixtures/workbench";
+import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, encoding: "utf8", stdio: "pipe" });
@@ -18,8 +18,8 @@ function pushConflictingMain(tmp: string, bareRemote: string, file: string) {
   git(pusher, ["push", "origin", "main"]);
 }
 
-test("syncing a colliding draft asks the writer one question and combines it", async ({ page, workbench }) => {
-  const { origin, token, projectId, projectDir, bareRemote, tmp } = workbench;
+test("syncing a colliding draft asks the writer one question and combines it", async ({ page, orso }) => {
+  const { origin, token, projectId, projectDir, bareRemote, tmp } = orso;
   const file = "index.html";
   fs.writeFileSync(path.join(projectDir, file), "<h1>Base headline</h1>\n");
   const packageJson = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf8")) as { scripts: Record<string, string> };
@@ -30,9 +30,9 @@ test("syncing a colliding draft asks the writer one question and combines it", a
   git(projectDir, ["push", "origin", "main"]);
   fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
 
-  await page.addInitScript(() => localStorage.setItem("workbench.terminal.provider", "fake-resolver"));
+  await page.addInitScript(() => localStorage.setItem("orso.terminal.provider", "fake-resolver"));
   await page.goto(`${origin}/?t=${token}`);
-  await startChange(workbench, "New page: Home");
+  await startChange(orso, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("active-change")).toHaveText("Home");
 

@@ -1,4 +1,4 @@
-//! Runtime configuration for `workbench serve`.
+//! Runtime configuration for `orso serve`.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -64,7 +64,7 @@ pub struct Config {
     /// server, so the link opens the live HMR app rather than the embedded `web/dist` build).
     pub ui_url: Option<String>,
     /// Executable terminal CLIs run as `<exe> hook turn-end`. `None` = this daemon's own
-    /// binary ([`Config::hook_exe_path`]); tests point it at the built `workbench`.
+    /// binary ([`Config::hook_exe_path`]); tests point it at the built `orso`.
     pub hook_exe: Option<PathBuf>,
     /// Directories the setup check searches for git, gh and the agent CLIs, `PATH`-style.
     /// `None` = the daemon's own `PATH`.
@@ -99,7 +99,7 @@ impl Config {
         self.hook_exe
             .clone()
             .or_else(|| std::env::current_exe().ok())
-            .unwrap_or_else(|| PathBuf::from("workbench"))
+            .unwrap_or_else(|| PathBuf::from("orso"))
     }
 
     /// Reject configs whose token is not URL/cookie safe.

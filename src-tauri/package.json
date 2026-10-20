@@ -1,5 +1,5 @@
 {
-  "name": "workbench-desktop",
+  "name": "orso-desktop",
   "private": true,
   "scripts": {
     "tauri": "tauri"

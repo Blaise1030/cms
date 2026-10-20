@@ -1,19 +1,19 @@
-# workbench Lovable-Style Builder Implementation Plan
+# orso Lovable-Style Builder Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a local-first Lovable-style site builder with a Rust daemon, a Vue PWA, ACP agent sessions, live Astro preview, and git checkpoints.
 
-**Architecture:** Start with a single `workbench` Rust crate that owns auth, project lifecycle, agent sessions, preview proxying, checkpoints, and JSON APIs. Pair it with a Vue 3 + Vite PWA in `web/`, and scaffold projects from an embedded Astro marketing template under `templates/astro-marketing/`. Keep the daemon as the source of truth for state, with the web app consuming only REST and WebSocket events from `core/*`.
+**Architecture:** Start with a single `orso` Rust crate that owns auth, project lifecycle, agent sessions, preview proxying, checkpoints, and JSON APIs. Pair it with a Vue 3 + Vite PWA in `web/`, and scaffold projects from an embedded Astro marketing template under `templates/astro-marketing/`. Keep the daemon as the source of truth for state, with the web app consuming only REST and WebSocket events from `core/*`.
 
 **Tech Stack:** Rust, axum, tokio, clap, git CLI, `agent-client-protocol` ACP adapters, Vue 3, TypeScript, Vite, pnpm, Tailwind CSS v4 (`@tailwindcss/vite`), `shadcn-vue`, `vite-plugin-pwa`, Astro, shiki, CodeMirror merge view.
 
-**Spec:** [`docs/superpowers/specs/2026-09-29-workbench-lovable-builder-design.md`](../specs/2026-09-29-workbench-lovable-builder-design.md)
+**Spec:** [`docs/superpowers/specs/2026-09-29-orso-lovable-builder-design.md`](../specs/2026-09-29-orso-lovable-builder-design.md)
 
 **Global Constraints**
 
 - Local-first: code and agent credentials never leave the machine.
-- Single Rust crate named `workbench`.
+- Single Rust crate named `orso`.
 - Web app is Vue 3 + TS + Vite + pnpm.
 - Web app styling uses Tailwind CSS v4 (`@tailwindcss/vite`) and `shadcn-vue` (Reka UI primitives via `pnpm dlx shadcn-vue@latest`).
 - `shadcn-vue` components live under `web/src/components/ui/`; shared helpers under `web/src/lib/utils.ts`.
@@ -161,7 +161,7 @@ import { Button } from "@/components/ui/button";
 
 <template>
   <div class="dark min-h-screen bg-background text-foreground p-4">
-    <Button>workbench</Button>
+    <Button>orso</Button>
   </div>
 </template>
 ```
@@ -182,7 +182,7 @@ Expected: all three succeed; `web/dist` includes Tailwind-styled CSS.
 
 ```bash
 git add Cargo.toml src web templates justfile
-git commit -m "chore: bootstrap workbench with Tailwind and shadcn-vue"
+git commit -m "chore: bootstrap orso with Tailwind and shadcn-vue"
 ```
 
 ### Task 2: Daemon foundation and shared error model
@@ -197,7 +197,7 @@ git commit -m "chore: bootstrap workbench with Tailwind and shadcn-vue"
 
 **Interfaces:**
 - Consumes: the bootstrap binary from Task 1
-- Produces: `workbench serve`, uniform JSON errors, `/api/health`
+- Produces: `orso serve`, uniform JSON errors, `/api/health`
 
 - [ ] **Step 1: Write a failing API test**
 
@@ -313,7 +313,7 @@ Use a scripted stdio JSON-RPC stub to assert initialize, newSession, prompt, per
 
 - [ ] **Step 2: Implement provider registry loading**
 
-Read `~/.config/workbench/agents.json` and expose provider ids and adapter commands.
+Read `~/.config/orso/agents.json` and expose provider ids and adapter commands.
 
 - [ ] **Step 3: Implement one live session per project**
 
@@ -321,7 +321,7 @@ Starting a new session terminates the previous subprocess cleanly.
 
 - [ ] **Step 4: Implement turn streaming and history**
 
-Persist turn summaries to `{projects-dir}/.workbench/{id}/history.jsonl` and emit `chat.chunk`, `chat.tool`, `chat.done`, and `permission.request` events.
+Persist turn summaries to `{projects-dir}/.orso/{id}/history.jsonl` and emit `chat.chunk`, `chat.tool`, `chat.done`, and `permission.request` events.
 
 - [ ] **Step 5: Verify permission handling**
 
@@ -532,6 +532,6 @@ Confirm every spec section is implemented or explicitly deferred by v1 scope.
 
 ```bash
 git add -A
-git commit -m "test: verify workbench v1 end to end"
+git commit -m "test: verify orso v1 end to end"
 ```
 

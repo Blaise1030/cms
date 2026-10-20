@@ -14,9 +14,9 @@ use axum::{Json, Router};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::{Config, GithubConfig};
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::{Config, GithubConfig};
+use orso::http;
+use orso::state::AppState;
 
 async fn fake_github() -> String {
     fake_github_with(false).await
@@ -163,7 +163,7 @@ fn config(projects: &Path, base: &str, git_root: &Path) -> Config {
 
 /// A path that is never an executable: tests must not run the `gh` on this machine.
 fn no_gh() -> std::path::PathBuf {
-    "/nonexistent/workbench-test/gh".into()
+    "/nonexistent/orso-test/gh".into()
 }
 
 const ADA_JSON: &str = r#"{"login":"ada","id":42,"name":"Ada Lovelace","avatar_url":"https://avatars.example/ada.png"}"#;
@@ -280,7 +280,7 @@ async fn sign_in_open_repo_and_author_commits() {
     assert_eq!(body["user"]["login"], "ada");
     assert_eq!(body["user"]["avatarUrl"], "https://avatars.example/ada.png");
 
-    let session = projects.join(".workbench/github.json");
+    let session = projects.join(".orso/github.json");
     let mode = std::fs::metadata(&session).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 
@@ -361,7 +361,7 @@ async fn sign_in_open_repo_and_author_commits() {
     let (_, body) = call(&again, req("GET", "/api/github/status", None)).await;
     assert_eq!(body["user"], Value::Null);
     assert!(!session.exists());
-    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "Workbench");
+    assert_eq!(git(&dir, &["config", "--local", "user.name"]), "orso");
 }
 
 #[tokio::test]
@@ -413,10 +413,10 @@ async fn expired_token_signs_out_on_repos() {
     assert_eq!(body["error"]["code"], "GITHUB_ERR");
     let (_, body) = call(&app, req("GET", "/api/github/status", None)).await;
     assert_eq!(body["user"], Value::Null);
-    assert!(!projects.join(".workbench/github.json").exists());
+    assert!(!projects.join(".orso/github.json").exists());
     assert_eq!(
         git(&fresh, &["config", "--local", "user.name"]),
-        "Workbench"
+        "orso"
     );
 }
 
@@ -522,7 +522,7 @@ async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
     assert!(!cfg.contains("credential") && !cfg.contains("extraheader"));
     assert!(!cfg.contains("tok"));
     // Nothing was persisted: no session file.
-    assert!(!projects.join(".workbench/github.json").exists());
+    assert!(!projects.join(".orso/github.json").exists());
 }
 
 #[tokio::test]
@@ -658,7 +658,7 @@ async fn status_applies_the_cli_identity_to_existing_projects() {
     let gh = fake_gh(&tmp.path().join("bin"), true);
     let global = tmp.path().join("gitconfig");
     std::fs::write(&global, "").unwrap();
-    // The project is made while gh is missing (Workbench identity), then gh appears.
+    // The project is made while gh is missing (orso identity), then gh appears.
     let app_no_gh = http::router(AppState::with_scaffold_install(
         cli_config(&projects, &tmp.path().join("git"), &no_gh()),
         false,
@@ -671,7 +671,7 @@ async fn status_applies_the_cli_identity_to_existing_projects() {
     let fresh = projects.join(made["id"].as_str().unwrap());
     assert_eq!(
         git(&fresh, &["config", "--local", "user.name"]),
-        "Workbench"
+        "orso"
     );
     let mut cfg = cli_config(&projects, &tmp.path().join("git"), &gh);
     cfg.github.git_global_config = Some(global);

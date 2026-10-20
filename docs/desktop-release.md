@@ -1,15 +1,15 @@
 # Desktop (macOS) release
 
-The Workbench desktop app (`src-tauri/`) ships in the same GitHub release as the
+The orso desktop app (`src-tauri/`) ships in the same GitHub release as the
 daemon tarballs. The `desktop` job in `.github/workflows/release.yml` builds it for
 `aarch64-apple-darwin` and `x86_64-apple-darwin`, signs it with the Developer ID
 certificate, notarizes and staples it, and uploads:
 
 | File | Purpose |
 | --- | --- |
-| `Workbench-<version>-<arch>.dmg` | What users download and install. |
-| `Workbench-<version>-<arch>.app.tar.gz` | The bundle the in-app updater installs. |
-| `Workbench-<version>-<arch>.app.tar.gz.sig` | Its updater signature. |
+| `orso-<version>-<arch>.dmg` | What users download and install. |
+| `orso-<version>-<arch>.app.tar.gz` | The bundle the in-app updater installs. |
+| `orso-<version>-<arch>.app.tar.gz.sig` | Its updater signature. |
 | `latest.json` | Written by `publish` (`.github/scripts/desktop-latest-json.sh`); the updater reads `releases/latest/download/latest.json`. |
 
 `<arch>` is `aarch64` or `x86_64`. `publish` waits for `desktop`, so a release never
@@ -26,10 +26,10 @@ just desktop-dev          # Vite :5180, daemon :7810 (defaults clear of just dev
 ```
 
 That runs `src-tauri/scripts/desktop-dev.sh`: builds a debug daemon, starts Vite, then
-`tauri dev` with identifier `com.workbench.desktop.dev` so an open Workbench.app is left
+`tauri dev` with identifier `com.orso.desktop.dev` so an open orso.app is left
 alone. The window shows Vite; `/api`, `/ws` and `/preview` proxy to the daemon. Shell
 (`src-tauri/`) edits rebuild and relaunch; daemon (`src/`) edits need a restart.
-Ctrl-C stops everything. Release builds ignore the `WORKBENCH_DEV_*` env vars.
+Ctrl-C stops everything. Release builds ignore the `ORSO_DEV_*` env vars.
 
 ## Required GitHub secrets
 
@@ -45,13 +45,13 @@ variant of [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/ma
 | `APPLE_ID` | The Apple ID email used for notarization. | Your developer account. |
 | `APPLE_PASSWORD` | An **app-specific password** for that Apple ID (not the account password). | [account.apple.com](https://account.apple.com) → Sign-In and Security → App-Specific Passwords. |
 | `APPLE_TEAM_ID` | The 10-character team id. | Apple Developer → Membership details. |
-| `TAURI_SIGNING_PRIVATE_KEY` | The updater signing private key (file contents). | `~/.tauri/workbench-updater.key` on the maintainer's Mac: `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/workbench-updater.key`. |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password. | `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/workbench-updater.key.password`. |
+| `TAURI_SIGNING_PRIVATE_KEY` | The updater signing private key (file contents). | `~/.tauri/orso-updater.key` on the maintainer's Mac: `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/orso-updater.key`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | That key's password. | `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/orso-updater.key.password`. |
 
 ### The updater key
 
 - Generated with `tauri signer generate`. The private key is
-  `~/.tauri/workbench-updater.key` and its password `~/.tauri/workbench-updater.key.password`
+  `~/.tauri/orso-updater.key` and its password `~/.tauri/orso-updater.key.password`
   (directory `0700`, files `0600`). Neither is ever committed. Back both up somewhere safe
   (a password manager); the GitHub secrets can't be read back.
 - Only the public key is committed, as `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
@@ -91,21 +91,21 @@ errors only go to the shell log (included in **Collect logs**).
 pnpm -C web install --frozen-lockfile && pnpm -C web build   # the daemon embeds web/dist
 src-tauri/scripts/stage-sidecar.sh                           # host triple; or pass one
 pnpm --prefix src-tauri install --frozen-lockfile
-TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/workbench-updater.key)" \
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/workbench-updater.key.password)" \
+TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/orso-updater.key)" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/orso-updater.key.password)" \
   pnpm --prefix src-tauri tauri build --bundles app
 ```
 
 Without the two `TAURI_SIGNING_*` variables the build fails, because `createUpdaterArtifacts`
-is on. Output lands in `src-tauri/target/release/bundle/macos/` (`Workbench.app`,
-`Workbench.app.tar.gz`, `Workbench.app.tar.gz.sig`). Local builds are unsigned unless the
+is on. Output lands in `src-tauri/target/release/bundle/macos/` (`orso.app`,
+`orso.app.tar.gz`, `orso.app.tar.gz.sig`). Local builds are unsigned unless the
 `APPLE_*` variables are set too; never distribute an unsigned build.
 
 ## Local updater end-to-end test
 
 `src-tauri/scripts/update-e2e.sh` exercises the whole update path on one Mac without
 publishing anything. It builds 0.0.1 (N) and 0.0.2 (N+1) under the test bundle id
-`com.workbench.desktop.updatetest`, so it can run next to a real Workbench. The builds go to
+`com.orso.desktop.updatetest`, so it can run next to a real orso. The builds go to
 `/tmp/wb-update-e2e` (~2 GB) with the non-default `update-e2e` cargo feature and a loopback
 update endpoint. The script installs N in `/tmp/wb-update-e2e/Applications` and serves N+1
 from a local `latest.json`. It then checks that N, while a terminal session is busy,
@@ -131,9 +131,9 @@ Not yet done; it needs the Apple secrets and two real releases. Use a test versi
 
 1. [ ] Set all eight secrets above.
 2. [ ] Release N. Confirm the `desktop` jobs pass, including **Verify signature and notarization**,
-       and the release has `Workbench-N-aarch64.dmg`, `Workbench-N-x86_64.dmg`, both
+       and the release has `orso-N-aarch64.dmg`, `orso-N-x86_64.dmg`, both
        `.app.tar.gz` + `.sig` pairs and `latest.json` (its `version` is N and both `url`s download).
-3. [ ] On a clean macOS user account, download the `.dmg` for that Mac, drag Workbench to
+3. [ ] On a clean macOS user account, download the `.dmg` for that Mac, drag orso to
        Applications and open it. Gatekeeper must not warn about an unidentified developer.
 4. [ ] Create or open a project; send a chat message; confirm the preview and chat work.
 5. [ ] Release N+1. Within 6 h, or immediately after relaunching N, the app downloads it.
@@ -144,6 +144,6 @@ Not yet done; it needs the Apple secrets and two real releases. Use a test versi
 8. [ ] Start a turn, open the update page again and click **Restart to update**: it refuses with the
        busy message and **Not now** goes back.
 9. [ ] Idle again: **Restart to update** → the app quits, relaunches as N+1 (About / `Info.plist`),
-       and no `workbench serve` process from N is left (`pgrep -fl 'Workbench.app'`).
+       and no `orso serve` process from N is left (`pgrep -fl 'orso.app'`).
 10. [ ] Projects and chat still work after the update; run `just test` and the e2e suite on the
         release commit.

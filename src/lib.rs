@@ -1,4 +1,4 @@
-//! workbench daemon library.
+//! orso daemon library.
 
 pub mod auth;
 pub mod changes;
@@ -19,6 +19,7 @@ pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod providers;
+pub mod settings;
 pub mod state;
 pub mod terminal;
 pub mod watch;
@@ -123,8 +124,8 @@ pub async fn serve(config: Config) -> std::io::Result<()> {
         None => format!("http://{bound}"),
     };
     match state.config.token.as_deref() {
-        Some(token) if !state.config.no_auth => println!("workbench ready: {base}/?t={token}"),
-        _ => println!("workbench ready: {base}/ (auth disabled)"),
+        Some(token) if !state.config.no_auth => println!("orso ready: {base}/?t={token}"),
+        _ => println!("orso ready: {base}/ (auth disabled)"),
     }
     serve_on(listener, state).await
 }

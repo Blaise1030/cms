@@ -26,7 +26,7 @@ import {
   StepperSeparator,
 } from "@/components/ui/stepper";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { errorMessage } from "@workbench/utils";
+import { errorMessage } from "@orso/utils";
 import { useCheckpointsStore } from "./store";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.

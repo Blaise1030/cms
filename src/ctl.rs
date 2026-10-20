@@ -1,4 +1,4 @@
-//! `workbench ctl`: app state for the agent in a Workbench terminal. Posts the session's
+//! `orso ctl`: app state for the agent in a orso terminal. Posts the session's
 //! hook token to `/api/ctl/*` and prints the daemon's JSON answer.
 
 use std::process::ExitCode;
@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const NOT_IN_SESSION: &str = "workbench ctl: run this inside a Workbench agent session";
+const NOT_IN_SESSION: &str = "orso ctl: run this inside a orso agent session";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::Subcommand)]
 pub enum CtlCommand {
@@ -41,12 +41,12 @@ pub async fn run(cmd: CtlCommand) -> ExitCode {
     run_with(cmd, |k| std::env::var(k).ok()).await
 }
 
-/// Run `cmd` reading `WORKBENCH_*` through `var`: pretty JSON on stdout, errors on stderr.
+/// Run `cmd` reading `ORSO_*` through `var`: pretty JSON on stdout, errors on stderr.
 pub async fn run_with(cmd: CtlCommand, var: impl Fn(&str) -> Option<String>) -> ExitCode {
     let (Some(base), Some(project), Some(token)) = (
-        var("WORKBENCH_URL"),
-        var("WORKBENCH_PROJECT"),
-        var("WORKBENCH_HOOK_TOKEN"),
+        var("ORSO_URL"),
+        var("ORSO_PROJECT"),
+        var("ORSO_HOOK_TOKEN"),
     ) else {
         eprintln!("{NOT_IN_SESSION}");
         return ExitCode::FAILURE;
@@ -58,7 +58,7 @@ pub async fn run_with(cmd: CtlCommand, var: impl Fn(&str) -> Option<String>) -> 
             ExitCode::SUCCESS
         }
         Err(msg) => {
-            eprintln!("workbench ctl: {msg}");
+            eprintln!("orso ctl: {msg}");
             ExitCode::FAILURE
         }
     }
@@ -74,7 +74,7 @@ async fn send(url: &str, body: &Value) -> Result<Value, String> {
         .json(body)
         .send()
         .await
-        .map_err(|e| format!("cannot reach Workbench: {e}"))?;
+        .map_err(|e| format!("cannot reach orso: {e}"))?;
     let status = res.status();
     let v: Value = res.json().await.unwrap_or(Value::Null);
     if status.is_success() {
@@ -129,9 +129,9 @@ mod tests {
 
     fn env(url: &str) -> impl Fn(&str) -> Option<String> {
         let vars: HashMap<&str, String> = [
-            ("WORKBENCH_URL", url.to_string()),
-            ("WORKBENCH_PROJECT", "site".to_string()),
-            ("WORKBENCH_HOOK_TOKEN", "tok".to_string()),
+            ("ORSO_URL", url.to_string()),
+            ("ORSO_PROJECT", "site".to_string()),
+            ("ORSO_HOOK_TOKEN", "tok".to_string()),
         ]
         .into();
         move |k| vars.get(k).cloned()
@@ -160,7 +160,7 @@ mod tests {
     async fn run_without_session_env_fails_and_sends_nothing() {
         let (url, seen) = stub(StatusCode::OK, json!({})).await;
         let full = env(&url);
-        for missing in ["WORKBENCH_URL", "WORKBENCH_PROJECT", "WORKBENCH_HOOK_TOKEN"] {
+        for missing in ["ORSO_URL", "ORSO_PROJECT", "ORSO_HOOK_TOKEN"] {
             let partial = |k: &str| (k != missing).then(|| full(k)).flatten();
             let code = run_with(CtlCommand::PreviewStatus, partial).await;
             assert_eq!(code, ExitCode::FAILURE, "{missing}");

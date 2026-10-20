@@ -2,7 +2,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use workbench::git;
+use orso::git;
 
 fn cli(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

@@ -31,7 +31,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 ## Checking your work
 
-In a Workbench agent session, check the live preview after editing with `"$WORKBENCH_HOOK_EXE" ctl preview-status` (it prints JSON; `devserver` is `starting`, `ready`, or `crashed`). Edits hot-reload; do not build. If it is `crashed`, run `"$WORKBENCH_HOOK_EXE" ctl restart-preview` once, then tell the user in plain words what happened.
+In a orso agent session, check the live preview after editing with `"$ORSO_HOOK_EXE" ctl preview-status` (it prints JSON; `devserver` is `starting`, `ready`, or `crashed`). Edits hot-reload; do not build. If it is `crashed`, run `"$ORSO_HOOK_EXE" ctl restart-preview` once, then tell the user in plain words what happened.
 
 ## Deployment
 

@@ -38,7 +38,7 @@ pub struct SaveEntry {
     pub body: Option<String>,
     /// Optional top-level fields to remove.
     pub unset: Vec<String>,
-    /// Images named by `workbench-image:<clientId>` tokens in `fields` or `body`.
+    /// Images named by `orso-image:<clientId>` tokens in `fields` or `body`.
     pub images: Vec<images::Upload>,
 }
 
@@ -231,7 +231,7 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(),
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let name = target.file_name().unwrap().to_string_lossy();
     let tmp = target.with_file_name(format!(
-        ".{name}.{}-{}.workbench-tmp",
+        ".{name}.{}-{}.orso-tmp",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));

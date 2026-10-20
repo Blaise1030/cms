@@ -75,15 +75,15 @@ jobs:
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         run: |
-          name=workbench-v${{ needs.check.outputs.version }}-${{ matrix.target }}
+          name=orso-v${{ needs.check.outputs.version }}-${{ matrix.target }}
           mkdir "$name"
-          cp target/${{ matrix.target }}/release/workbench README.md CHANGELOG.md "$name/"
+          cp target/${{ matrix.target }}/release/orso README.md CHANGELOG.md "$name/"
           tar -czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
-          path: workbench-*.tar.gz*
+          path: orso-*.tar.gz*
 
   e2e:
     name: Full E2E before release
@@ -187,20 +187,20 @@ jobs:
         run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }}
       - name: Verify signature and notarization
         run: |
-          app=src-tauri/target/${{ matrix.target }}/release/bundle/macos/Workbench.app
+          app=src-tauri/target/${{ matrix.target }}/release/bundle/macos/orso.app
           codesign --verify --deep --strict --verbose=2 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
       - name: Package
         run: |
           bundle=src-tauri/target/${{ matrix.target }}/release/bundle
-          name=Workbench-${{ needs.check.outputs.version }}-${{ matrix.arch }}
+          name=orso-${{ needs.check.outputs.version }}-${{ matrix.arch }}
           mkdir desktop
           dmgs=("$bundle"/dmg/*.dmg)
           [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
           cp "${dmgs[0]}" "desktop/$name.dmg"
-          cp "$bundle/macos/Workbench.app.tar.gz" "desktop/$name.app.tar.gz"
-          cp "$bundle/macos/Workbench.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
+          cp "$bundle/macos/orso.app.tar.gz" "desktop/$name.app.tar.gz"
+          cp "$bundle/macos/orso.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
@@ -232,7 +232,7 @@ jobs:
           awk -v h="## v$VERSION" '$0 == h {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
           gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
       - name: Update the Homebrew formula
-        # Blaise1030/homebrew-tap serves `brew install blaise1030/tap/workbench`;
+        # Blaise1030/homebrew-tap serves `brew install blaise1030/tap/orso`;
         # its deploy key (write access to that repo only) is this secret.
         # Skip (with a warning) rather than fail until the secret is set.
         env:
@@ -247,10 +247,10 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > ~/tap_key
           export GIT_SSH_COMMAND="ssh -i ~/tap_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
           git clone --depth 1 git@github.com:Blaise1030/homebrew-tap.git tap
-          .github/scripts/homebrew-formula.sh "$VERSION" dist > tap/Formula/workbench.rb
+          .github/scripts/homebrew-formula.sh "$VERSION" dist > tap/Formula/orso.rb
           cd tap
-          git add Formula/workbench.rb
+          git add Formula/orso.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "workbench $VERSION"
+          git commit -m "orso $VERSION"
           git push

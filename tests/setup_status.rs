@@ -7,9 +7,9 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use workbench::config::Config;
-use workbench::http;
-use workbench::state::AppState;
+use orso::config::Config;
+use orso::http;
+use orso::state::AppState;
 
 const TOKEN: &str = "abc123";
 
@@ -112,7 +112,7 @@ async fn an_agent_on_the_search_path_is_available() {
 #[tokio::test]
 async fn a_saved_github_session_counts_as_signed_in() {
     let projects = tempfile::tempdir().unwrap();
-    let state_dir = projects.path().join(".workbench");
+    let state_dir = projects.path().join(".orso");
     std::fs::create_dir_all(&state_dir).unwrap();
     std::fs::write(
         state_dir.join("github.json"),
