@@ -357,7 +357,8 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
             Ok(p) => {
                 port = p;
                 // A bad orso.json is not fixed by retrying: park as crashed
-                // without spending the crash budget or scheduling a backoff.
+                // without spending the crash budget or scheduling a backoff,
+                // until the file loads.
                 let settings = match &shared.opts.launcher {
                     Launcher::Configured => match crate::settings::load(&project.dir) {
                         Ok(s) => Some(s),
@@ -366,7 +367,20 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                             shared
                                 .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
                                 .await;
-                            return;
+                            if !await_valid_settings(
+                                &shared,
+                                &id,
+                                &project.dir,
+                                port,
+                                message,
+                                &mut stop,
+                            )
+                            .await
+                            {
+                                return;
+                            }
+                            crashes = 0;
+                            continue;
                         }
                     },
                     _ => None,
@@ -436,6 +450,35 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
             _ = &mut stop => return,
+        }
+    }
+}
+
+/// Poll `orso.json` until it loads (`true`) or we are asked to stop (`false`).
+/// A changed error replaces the crash message.
+async fn await_valid_settings(
+    shared: &Shared,
+    id: &str,
+    dir: &std::path::Path,
+    port: u16,
+    mut message: String,
+    stop: &mut oneshot::Receiver<()>,
+) -> bool {
+    loop {
+        tokio::select! {
+            _ = &mut *stop => return false,
+            _ = tokio::time::sleep(DEPS_POLL) => match crate::settings::load(dir) {
+                Ok(_) => return true,
+                Err(e) => {
+                    let now = crate::settings::describe(&e);
+                    if now != message {
+                        shared
+                            .set_state(id, DevserverStatus::Crashed, port, Some(&now))
+                            .await;
+                        message = now;
+                    }
+                }
+            },
         }
     }
 }

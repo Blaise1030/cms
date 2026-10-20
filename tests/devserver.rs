@@ -595,6 +595,27 @@ async fn invalid_settings_at_resume() {
 }
 
 #[tokio::test]
+async fn fixing_invalid_settings_restarts() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "package.json"), r#"{"name":"site"}"#).unwrap();
+    std::fs::write(env.file("site", "orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+    events.status("site", "crashed").await;
+
+    std::fs::write(
+        env.file("site", "orso.json"),
+        r#"{"install":"true","dev":"echo Local http://127.0.0.1:{port}/; sleep 30"}"#,
+    )
+    .unwrap();
+    events.status("site", "starting").await;
+    events.status("site", "ready").await;
+    assert_eq!(env.devserver_state("site").await, "ready");
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
 async fn settings_change_restarts() {
     let env = env_with(configured());
     env.state.projects.create("Site").await.unwrap();
