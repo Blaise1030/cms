@@ -41,6 +41,14 @@ it("links each tab and marks the current one, including nested pages", async () 
   expect(router.currentRoute.value.path).toBe("/");
 });
 
+it("renders Settings as the last tab, linking to the project's settings", async () => {
+  const { w } = await setup("/p/my%20site/preview");
+  const tabs = w.findAll('[data-testid^="workspace-tab-"]');
+  expect(tabs.at(-1)!.attributes("data-testid")).toBe("workspace-tab-settings");
+  expect(tabs.at(-1)!.attributes("href")).toBe("/p/my%20site/settings");
+  expect(tabs.at(-1)!.attributes("aria-label")).toBe("Settings");
+});
+
 it("keeps its buttons below the macOS traffic lights and drags the window from above them", async () => {
   const rail = async () => (await setup("/p/site/preview")).w.get('[data-testid="project-rail"]');
 

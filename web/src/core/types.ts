@@ -446,3 +446,10 @@ export interface DesignDoc {
   exists: boolean; tokens: DesignTokens; body: string; hash?: string; branch: string;
   starter?: { tokens: DesignTokens; body: string };
 }
+/** The fields of the repo-root `orso.json`; each one falls back to its default when unset. */
+export interface ProjectSettings { root: string; installDir: string; install: string; dev: string }
+/** `settings` is the file as written (unknown keys included); `errors` is keyed by field, `_file` when it is not a JSON object. */
+export interface SettingsDoc {
+  exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;
+  errors: Record<string, string>;
+}
