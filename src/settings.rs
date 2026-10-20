@@ -262,6 +262,27 @@ pub fn describe(errors: &FieldErrors) -> String {
     format!("{SETTINGS_FILE}: {}", parts.join("; "))
 }
 
+/// The configured `installDir` when that field validates on its own, else
+/// the project dir. Used where settings as a whole may be invalid (the
+/// dependency poll) so a valid install folder is still honoured.
+pub fn install_dir_lenient(project: &Path) -> PathBuf {
+    let fallback = || project.to_path_buf();
+    let Ok(content) = std::fs::read_to_string(project.join(SETTINGS_FILE)) else {
+        return fallback();
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&content) else {
+        return fallback();
+    };
+    let mut errors = FieldErrors::new();
+    let Some(value) = string_field(&map, "installDir", &mut errors) else {
+        return fallback();
+    };
+    match validate_dir(project, "installDir", &value, true, false, &mut errors) {
+        Some(normalized) => join_rel(project, &normalized),
+        None => fallback(),
+    }
+}
+
 pub fn site_prefix(project: &Path) -> String {
     load(project).map(|s| s.site_prefix()).unwrap_or_default()
 }
@@ -437,6 +458,24 @@ mod tests {
             custom.dev_command(4567),
             "run --port 4567 --host 127.0.0.1 {other}"
         );
+    }
+
+    #[test]
+    fn install_dir_lenient_cases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert_eq!(install_dir_lenient(dir), dir.to_path_buf());
+        fs::create_dir_all(dir.join("vendor")).unwrap();
+        // Valid installDir wins even when another field is invalid.
+        write_settings(dir, r#"{"installDir":"vendor","dev":"x"}"#);
+        assert_eq!(install_dir_lenient(dir), dir.join("vendor"));
+        // Invalid installDir falls back to the project dir.
+        write_settings(dir, r#"{"installDir":"missing"}"#);
+        assert_eq!(install_dir_lenient(dir), dir.to_path_buf());
+        write_settings(dir, r#"{"installDir":1}"#);
+        assert_eq!(install_dir_lenient(dir), dir.to_path_buf());
+        write_settings(dir, "not json");
+        assert_eq!(install_dir_lenient(dir), dir.to_path_buf());
     }
 
     #[test]

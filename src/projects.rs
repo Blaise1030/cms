@@ -572,7 +572,7 @@ impl ProjectRegistry {
                     .await
                     .map_err(|e| ApiError::io(format!("template copy task failed: {e}")))??;
                 if self.install {
-                    npm_install(dir).await?;
+                    install(dir).await?;
                 }
                 git(dir, &["init", "-b", "main"]).await?;
                 crate::git::set_identity(dir, identity).await?;
@@ -592,8 +592,12 @@ impl ProjectRegistry {
                 git_clone(dir, url, env).await?;
                 crate::git::set_identity(dir, identity).await?;
                 // Non-Node repos still open; their dev server will just report crashed.
-                if self.install && dir.join("package.json").exists() {
-                    npm_install(dir).await?;
+                if self.install
+                    && crate::settings::install_dir_lenient(dir)
+                        .join("package.json")
+                        .exists()
+                {
+                    install(dir).await?;
                 }
             }
         }
@@ -726,25 +730,29 @@ fn allocate_port(inner: &Inner) -> Result<u16, ApiError> {
     Err(ApiError::io("could not allocate an unused port"))
 }
 
-pub(crate) async fn npm_install(dir: &Path) -> Result<(), ApiError> {
-    let child = Command::new("npm")
-        .args(["install", "--no-audit", "--no-fund", "--no-progress"])
-        .current_dir(dir)
+/// Run the configured install command in the configured install dir.
+pub(crate) async fn install(project: &Path) -> Result<(), ApiError> {
+    let settings = crate::settings::load(project)
+        .map_err(|e| ApiError::badreq(crate::settings::describe(&e)))?;
+    let command = settings.install.clone();
+    let child = Command::new("sh")
+        .args(["-c", &command])
+        .current_dir(settings.install_path(project))
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
     let out = tokio::time::timeout(INSTALL_TIMEOUT, child)
         .await
-        .map_err(|_| ApiError::io("npm install timed out"))?
-        .map_err(|e| ApiError::io(format!("failed to run npm install: {e}")))?;
+        .map_err(|_| ApiError::io(format!("{command} timed out")))?
+        .map_err(|e| ApiError::io(format!("failed to run {command}: {e}")))?;
     if !out.status.success() {
         return Err(ApiError::io(format!(
-            "npm install failed ({}): {}",
+            "{command} failed ({}): {}",
             out.status,
             tail(&String::from_utf8_lossy(&out.stderr))
         )));
     }
-    crate::devserver::record_deps(dir);
+    crate::devserver::record_deps(project);
     Ok(())
 }
 
@@ -816,6 +824,20 @@ mod tests {
         assert!(validate_name("   ").is_err());
         assert!(validate_name("a\nb").is_err());
         assert!(validate_name(&"x".repeat(MAX_NAME_LEN + 1)).is_err());
+    }
+
+    #[tokio::test]
+    async fn install_runs_configured_command() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("orso.json"), r#"{"install":"touch installed"}"#).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name":"site"}"#).unwrap();
+        install(dir).await.unwrap();
+        assert!(dir.join("installed").is_file());
+
+        std::fs::write(dir.join("orso.json"), r#"{"install":"exit 3"}"#).unwrap();
+        let err = install(dir).await.unwrap_err();
+        assert!(err.message.starts_with("exit 3 failed"), "{}", err.message);
     }
 
     #[test]
