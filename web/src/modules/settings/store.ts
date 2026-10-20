@@ -42,6 +42,8 @@ export const useSettingsStore = defineStore("settings", () => {
     const base = draftOf(d);
     return SETTINGS_FIELDS.some(key => draft.value[key] !== base[key]);
   });
+  /** A broken file can be overwritten even when the draft shows only defaults. */
+  const canSave = computed(() => dirty.value || (!!doc.value?.exists && Object.keys(doc.value.errors).length > 0));
   const fieldErrors = computed<Record<string, string>>(() => saveErrors.value ?? doc.value?.errors ?? {});
 
   function clearSaveState() { error.value = null; conflict.value = null; needsChange.value = false; saveErrors.value = null; }
@@ -160,7 +162,7 @@ export const useSettingsStore = defineStore("settings", () => {
     const d = doc.value;
     if (!d) throw new Error("No settings are open");
     if (flight?.generation === generation) return flight.promise;
-    if (!dirty.value) return d;
+    if (!canSave.value) return d;
     const mine = { generation, promise: write(d, branch, generation) };
     flight = mine;
     try { return await mine.promise; } finally { if (flight === mine) flight = null; }
@@ -181,7 +183,7 @@ export const useSettingsStore = defineStore("settings", () => {
   onScopeDispose(() => offs.forEach(off => off()));
 
   return {
-    projectId, doc, draft, dirty, loading, saving, error, conflict, needsChange, changedOnDisk, fieldErrors,
+    projectId, doc, draft, dirty, canSave, loading, saving, error, conflict, needsChange, changedOnDisk, fieldErrors,
     open, setField, save, resumeSave, discard, reload, reloadFromDisk, refreshForBranch, canLeave,
   };
 });

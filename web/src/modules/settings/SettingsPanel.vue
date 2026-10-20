@@ -64,7 +64,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         <p class="truncate text-xs text-muted-foreground">{{ store.doc.branch }}</p>
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <Button type="button" variant="ghost" size="sm" data-testid="settings-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
-          <Button type="button" variant="outline" size="sm" data-testid="settings-save" :disabled="!store.dirty || store.saving || devMissingPort" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
+          <Button type="button" variant="outline" size="sm" data-testid="settings-save" :disabled="!store.canSave || store.saving || devMissingPort" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
         </div>
       </header>
       <div class="min-h-0 flex-1 overflow-auto">

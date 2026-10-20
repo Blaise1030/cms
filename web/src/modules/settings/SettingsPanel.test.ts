@@ -103,6 +103,15 @@ describe("SettingsPanel", () => {
     w.unmount();
   });
 
+  it("enables Save on a broken file with a clean draft so it can be repaired", async () => {
+    const { w, fns } = await setup({ settings: vi.fn(async () => doc({ settings: {}, errors: { _file: "invalid JSON" } })) });
+    expect(el(w, "settings-save").attributes("disabled")).toBeUndefined();
+    await el(w, "settings-save").trigger("click");
+    await flushPromises();
+    expect(fns.saveSettings).toHaveBeenCalledWith({ project: "site", branch: "content/a", hash: "h1", settings: {} });
+    w.unmount();
+  });
+
   it("has no file-errors banner for a valid file", async () => {
     const { w } = await setup();
     expect(w.find('[data-testid="settings-file-errors"]').exists()).toBe(false);

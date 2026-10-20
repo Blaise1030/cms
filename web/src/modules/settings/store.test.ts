@@ -58,6 +58,32 @@ describe("settings store", () => {
     expect(store.dirty).toBe(false);
   });
 
+  it("a clean draft has nothing to save for a valid file", async () => {
+    const { store, fns } = setup();
+    await store.open("p");
+    expect(store.canSave).toBe(false);
+    await store.save();
+    expect(fns.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("a file with errors can be saved from a clean draft, overwriting it", async () => {
+    const { store, fns } = setup({ settings: vi.fn(async () => doc({ settings: {}, errors: { _file: "invalid JSON" } })) });
+    await store.open("p");
+    expect(store.dirty).toBe(false);
+    expect(store.canSave).toBe(true);
+    await store.save();
+    expect(fns.saveSettings).toHaveBeenCalledWith({ project: "p", branch: "content/a", hash: "h1", settings: {} });
+  });
+
+  it("a wrong-type known field is dropped by a repair save", async () => {
+    const { store, fns } = setup({ settings: vi.fn(async () => doc({ settings: { root: 1, extra: "" }, errors: { root: "must be a string" } })) });
+    await store.open("p");
+    expect(store.draft.root).toBe("");
+    expect(store.canSave).toBe(true);
+    await store.save();
+    expect(fns.saveSettings).toHaveBeenCalledWith({ project: "p", branch: "content/a", hash: "h1", settings: { extra: "" } });
+  });
+
   it("save on a missing file omits the hash", async () => {
     const { store, fns } = setup({ settings: vi.fn(async () => doc({ exists: false, settings: {}, hash: undefined })) });
     await store.open("p");
