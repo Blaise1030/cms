@@ -59,7 +59,7 @@ impl AppState {
     pub fn with_scaffold_install(config: Config, install: bool) -> Self {
         let proxy_port = config.port;
         let devserver = if install {
-            DevServerOptions::npm(proxy_port)
+            DevServerOptions::configured(proxy_port)
         } else {
             DevServerOptions::disabled()
         };

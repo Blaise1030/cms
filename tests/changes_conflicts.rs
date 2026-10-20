@@ -4,14 +4,14 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::changes::conflict_sessions::ConflictSessions;
 use orso::changes::conflicts::{self, Choice};
 use orso::config::Config;
 use orso::conflict_preview::ConflictPreviewManager;
 use orso::git::Identity;
 use orso::{http, state::AppState};
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")

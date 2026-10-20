@@ -14,6 +14,7 @@ pub mod github;
 pub mod health;
 pub mod history;
 pub mod projects;
+pub mod settings;
 pub mod setup;
 pub mod terminal;
 
@@ -40,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/content/entry/rename", post(content::rename))
         .route("/api/content/entry/impact", post(content::impact))
         .route("/api/design", get(design::get).put(design::put))
+        .route("/api/settings", get(settings::get).put(settings::put))
         .route("/api/content/history", get(history::list))
         .route("/api/content/history/{sha}", get(history::version))
         .route(

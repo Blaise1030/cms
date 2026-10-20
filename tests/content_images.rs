@@ -7,12 +7,12 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::content::images::{self, ImageFormat, MAX_IMAGE_BYTES};
 use orso::state::AppState;
 use orso::{changes, http};
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 const WELCOME: &str = "src/content/blog/en/welcome.md";
 const PNG: &[u8] = include_bytes!("fixtures/images/pixel.png");
@@ -87,6 +87,51 @@ async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
     )
+}
+
+/// Same project, but the whole template moved into `site/` with `orso.json`
+/// pointing at it.
+async fn env_under_subfolder_root() -> Env {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = AppState::with_scaffold_install(
+        Config {
+            port: 0,
+            origin: None,
+            projects_dir: tmp.path().to_path_buf(),
+            no_auth: true,
+            token: None,
+            agents_config: None,
+            ..Default::default()
+        },
+        false,
+    );
+    let info = state.projects.create("Site").await.unwrap();
+    let dir = tmp.path().join(&info.id);
+    let site = dir.join("site");
+    std::fs::create_dir(&site).unwrap();
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .filter(|n| n != ".git" && n != "site")
+        .collect();
+    for name in names {
+        std::fs::rename(dir.join(&name), site.join(&name)).unwrap();
+    }
+    std::fs::write(dir.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    let modules =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
+    std::os::unix::fs::symlink(modules, site.join("node_modules")).unwrap();
+    let exclude = dir.join(".git/info/exclude");
+    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
+    text.push_str("\n/site/node_modules\n");
+    std::fs::write(exclude, text).unwrap();
+    changes::create(&dir, "Add images").await.unwrap();
+    Env {
+        app: http::router(state.clone()),
+        tmp,
+        id: info.id,
+        dir,
+    }
 }
 
 async fn read(e: &Env, collection: &str, id: &str) -> Value {
@@ -314,6 +359,38 @@ async fn markdown_image_saves_entry_and_asset_in_one_scoped_checkpoint() {
 }
 
 #[tokio::test]
+async fn assets_under_subfolder_root() {
+    let e = env_under_subfolder_root().await;
+    let opened = read(&e, "blog", "welcome").await;
+    let body = format!(
+        "{}\n![A pixel](orso-image:img-1)\n",
+        opened["body"].as_str().unwrap()
+    );
+    let entry = update(
+        &e,
+        &opened,
+        json!({}),
+        Some(&body),
+        json!([image("img-1", "A pixel", "My Photo.png")]),
+    );
+    let (s, v) = save(&e, "PUT", entry, &[png_part("img-1", "My Photo.png", PNG)]).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let asset = "site/src/assets/blog/welcome/my-photo.png";
+    assert_eq!(std::fs::read(e.dir.join(asset)).unwrap(), PNG);
+    assert_eq!(
+        v["images"]["img-1"],
+        json!({"path": asset, "link": "../../../assets/blog/welcome/my-photo.png"})
+    );
+    let committed = git_cli(&e.dir, &["show", "--format=", "--name-only", "HEAD"]);
+    let mut committed: Vec<_> = committed.lines().collect();
+    committed.sort();
+    assert_eq!(
+        committed,
+        vec![asset, "site/src/content/blog/en/welcome.md"]
+    );
+}
+
+#[tokio::test]
 async fn frontmatter_image_field_gets_relative_path_with_alt_companion() {
     let e = env().await;
     let opened = read(&e, "blog", "welcome").await;
@@ -355,8 +432,7 @@ async fn collisions_get_deterministic_unique_names_and_extension_follows_bytes()
     std::fs::create_dir_all(&assets).unwrap();
     std::fs::write(assets.join("photo.png"), b"existing").unwrap();
     let opened = read(&e, "blog", "welcome").await;
-    let body =
-        "![One](orso-image:a)\n![Two](orso-image:b)\n![Three](orso-image:c)\n";
+    let body = "![One](orso-image:a)\n![Two](orso-image:b)\n![Three](orso-image:c)\n";
     let entry = update(
         &e,
         &opened,
@@ -639,9 +715,7 @@ async fn orphan_staging_and_temp_files_are_cleaned_on_the_next_operation() {
     let keep = assets.join("notes.orso-tmp.png");
     std::fs::write(&keep, "keep").unwrap();
     // A delete whose set-aside asset folder could not be removed leaves it behind.
-    let trash = e
-        .dir
-        .join("src/assets/blog/.old-post.99999-0.orso-trash");
+    let trash = e.dir.join("src/assets/blog/.old-post.99999-0.orso-trash");
     std::fs::create_dir_all(trash.join("nested")).unwrap();
     std::fs::write(trash.join("nested/photo.png"), PNG).unwrap();
     let keep_dir = e.dir.join("src/assets/blog/kept.orso-trash");

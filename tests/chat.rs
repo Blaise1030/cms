@@ -3,8 +3,6 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
-use tokio::sync::broadcast;
 use orso::chat::chunk::{AgentErrorCode, UiChunk};
 use orso::chat::manager::{Subscription, TurnRequest};
 use orso::chat::transcript;
@@ -12,6 +10,8 @@ use orso::config::Config;
 use orso::providers::{self, AgentSession, Provider};
 use orso::state::AppState;
 use orso::terminal::history::{self, SessionRecord};
+use serde_json::{json, Value};
+use tokio::sync::broadcast;
 
 const CHAT: &str = "chat1";
 const FIXTURE_SESSION: &str = "34f63cf5-7e32-4205-9b34-72582ec9f80e";
@@ -188,9 +188,7 @@ fn alive(pid: &str) -> bool {
 #[tokio::test]
 async fn turn_streams_and_checkpoints() {
     let env = env(fake("edit", None)).await;
-    orso::changes::create(&env.dir, "New post")
-        .await
-        .unwrap();
+    orso::changes::create(&env.dir, "New post").await.unwrap();
     let mut events = env.state.events.subscribe();
 
     let sub = env
@@ -347,13 +345,9 @@ async fn server_shutdown_ends_watched_turns() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (trigger, signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(orso::serve_until(
-        listener,
-        env.state.clone(),
-        async move {
-            let _ = signal.await;
-        },
-    ));
+    let server = tokio::spawn(orso::serve_until(listener, env.state.clone(), async move {
+        let _ = signal.await;
+    }));
 
     let body = json!({
         "id": CHAT,
@@ -426,12 +420,12 @@ mod http_routes {
     use axum::http::{header, HeaderMap, Request, StatusCode};
     use axum::response::Response;
     use http_body_util::BodyExt;
-    use serde_json::{json, Value};
-    use tower::ServiceExt;
     use orso::chat::transcript;
     use orso::projects::Source;
     use orso::terminal::Output;
     use orso::{git, http};
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
 
     use super::{env, fake, fake_cli, Env, CHAT, WAIT};
 
@@ -747,8 +741,7 @@ mod http_routes {
         assert_eq!(res.status(), StatusCode::OK);
         let body = read_to_end(res).await;
         assert!(body.contains("not_installed"), "{body}");
-        let record =
-            orso::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
+        let record = orso::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
         assert_eq!(
             record.agent_session_id, None,
             "an unconfirmed session id is forgotten"

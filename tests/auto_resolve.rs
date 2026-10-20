@@ -7,17 +7,15 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
-use orso::changes::auto_resolve::{
-    AutoResolveJobs, JobContext, JobState, JobStatus, Timeouts,
-};
+use orso::changes::auto_resolve::{AutoResolveJobs, JobContext, JobState, JobStatus, Timeouts};
 use orso::changes::conflict_sessions::ConflictSessions;
 use orso::conflict_preview::ConflictPreviewManager;
 use orso::events::EventBus;
 use orso::git::Identity;
 use orso::providers::Provider;
 use orso::{config::Config, http, state::AppState};
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")

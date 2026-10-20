@@ -16,6 +16,7 @@ import {
   type ContentVersion,
   type DesignDoc,
   type DesignTokens,
+  type SettingsDoc,
   type FileVersion,
   type Change,
   type ChangesUpdate,
@@ -219,6 +220,10 @@ export function createApi(
     /** Omit `hash` to create the file; the daemon refuses a stale hash or changed branch with 409. */
     saveDesign: (body: { project: string; branch: string; hash?: string; tokens: DesignTokens; body: string }) =>
       json<DesignDoc>("PUT", "/api/design", { body }),
+    settings: (project: string) => json<SettingsDoc>("GET", "/api/settings", { query: { project } }),
+    /** Omit `hash` to create the file; the daemon refuses a stale hash with 409 and invalid fields with 400. */
+    saveSettings: (body: { project: string; branch: string; hash?: string; settings: Record<string, unknown> }) =>
+      json<SettingsDoc>("PUT", "/api/settings", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

@@ -8,15 +8,15 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tokio::process::Command;
-use tokio::sync::broadcast;
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::devserver::{DevServerOptions, MAX_RESTARTS};
 use orso::http;
 use orso::http::ctl::preview_status_value;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tokio::process::Command;
+use tokio::sync::broadcast;
+use tower::ServiceExt;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -41,6 +41,13 @@ fn script(body: &'static str) -> DevServerOptions {
         c
     });
     opts.backoff_base = Duration::from_millis(10);
+    opts
+}
+
+/// The configured launcher (`orso.json`), with a shrunk crash backoff.
+fn configured() -> DevServerOptions {
+    let mut opts = DevServerOptions::configured(0);
+    opts.backoff_base = Duration::from_millis(50);
     opts
 }
 
@@ -510,8 +517,7 @@ async fn daemon_restart_resumes_projects_and_reallocates_a_busy_port() {
         format!("/preview/alpha/ {}", ready["alpha"])
     );
     let persisted: Value =
-        serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap())
-            .unwrap();
+        serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap()).unwrap();
     let alpha = persisted
         .as_array()
         .unwrap()
@@ -521,6 +527,117 @@ async fn daemon_restart_resumes_projects_and_reallocates_a_busy_port() {
     assert_eq!(alpha["port"].as_u64().unwrap() as u16, ready["alpha"]);
     drop(squatter);
     state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn configured_dev_command_reaches_ready() {
+    let env = env_with(configured());
+    let info = env.state.projects.create("Site").await.unwrap();
+    let dir = env.file("site", "");
+    std::fs::create_dir_all(dir.join("site")).unwrap();
+    std::fs::write(dir.join("site/astro.config.mjs"), "export default {};\n").unwrap();
+    std::fs::write(
+        dir.join("orso.json"),
+        r#"{"root":"site","dev":"pwd > ../cwd.txt; echo Local http://127.0.0.1:{port}/; sleep 30"}"#,
+    )
+    .unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+
+    let ready = events.status("site", "ready").await;
+    assert_eq!(ready["port"].as_u64().unwrap(), info.port as u64);
+    assert_eq!(env.devserver_state("site").await, "ready");
+    // The process ran with `site` (the configured root) as its cwd.
+    let cwd = std::fs::read_to_string(dir.join("cwd.txt")).unwrap();
+    assert!(cwd.trim().ends_with("/site"), "cwd: {cwd}");
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn invalid_settings_crash_without_retry() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+
+    let crashed = events.status("site", "crashed").await;
+    let msg = crashed["message"].as_str().unwrap();
+    assert!(msg.contains("orso.json: dev must contain {port}"), "{msg}");
+    let seen_at_crash = events.seen.len();
+    // Past 2 x backoff_base (50ms) it must still be parked, with no restart.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(env.devserver_state("site").await, "crashed");
+    while let Ok(ev) = events.rx.try_recv() {
+        let v: Value = serde_json::from_str(&ev).unwrap();
+        if v["type"] == "devserver.status" && v["projectId"] == "site" {
+            events.seen.push(v);
+        }
+    }
+    assert_eq!(events.seen.len(), seen_at_crash, "{:?}", events.seen);
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn invalid_settings_at_resume() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    let mut events = env.events();
+    env.state.devservers.resume_all().await;
+
+    let crashed = events.status("site", "crashed").await;
+    let msg = crashed["message"].as_str().unwrap();
+    assert!(msg.contains("orso.json: dev must contain {port}"), "{msg}");
+    assert_eq!(env.devserver_state("site").await, "crashed");
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn fixing_invalid_settings_restarts() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "package.json"), r#"{"name":"site"}"#).unwrap();
+    std::fs::write(env.file("site", "orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+    events.status("site", "crashed").await;
+
+    std::fs::write(
+        env.file("site", "orso.json"),
+        r#"{"install":"true","dev":"echo Local http://127.0.0.1:{port}/; sleep 30"}"#,
+    )
+    .unwrap();
+    events.status("site", "starting").await;
+    events.status("site", "ready").await;
+    assert_eq!(env.devserver_state("site").await, "ready");
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
+async fn settings_change_restarts() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "package.json"), r#"{"name":"site"}"#).unwrap();
+    std::fs::write(
+        env.file("site", "orso.json"),
+        r#"{"install":"true","dev":"echo Local http://127.0.0.1:{port}/; sleep 30"}"#,
+    )
+    .unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+    events.status("site", "ready").await;
+
+    std::fs::write(
+        env.file("site", "orso.json"),
+        r#"{"install":"true","dev":"echo Local http://127.0.0.1:{port}/; sleep 31"}"#,
+    )
+    .unwrap();
+    // The deps poll notices the edited orso.json: a new starting, then ready.
+    events.status("site", "starting").await;
+    events.status("site", "ready").await;
+    assert_eq!(env.devserver_state("site").await, "ready");
+    env.state.devservers.shutdown().await;
 }
 
 #[tokio::test]

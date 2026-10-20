@@ -48,6 +48,7 @@ describe("router", () => {
     expect(projectTabFromRoute("project-code")).toBe("code");
     expect(projectTabFromRoute("project-history")).toBe("history");
     expect(projectTabFromRoute("project-design")).toBe("design");
+    expect(projectTabFromRoute("project-settings")).toBe("settings");
     expect(projectTabFromRoute("home")).toBe("preview");
   });
 
@@ -56,6 +57,13 @@ describe("router", () => {
     expect(r.name).toBe("project-design");
     expect(r.params.id).toBe("x");
     expect(projectPath("x", "design")).toBe("/p/x/design");
+  });
+
+  it("resolves the settings tab", () => {
+    const r = router().resolve("/p/a/settings");
+    expect(r.name).toBe("project-settings");
+    expect(r.params.id).toBe("a");
+    expect(projectPath("a", "settings")).toBe("/p/a/settings");
   });
 
   it("redirects unknown paths home", async () => {

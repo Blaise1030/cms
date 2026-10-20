@@ -4,11 +4,11 @@ use std::process::Command;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 fn config(dir: &Path, no_auth: bool) -> Config {
     Config {
@@ -255,13 +255,7 @@ async fn delete_only_touches_registered_projects() {
     let projects = tmp.path().join("projects");
     let app = app(&projects);
     create(&app, "real").await;
-    for id in [
-        "outside",
-        "..",
-        "%2e%2e",
-        "real/../../outside",
-        ".orso",
-    ] {
+    for id in ["outside", "..", "%2e%2e", "real/../../outside", ".orso"] {
         let (status, _) = call(
             &app,
             req("DELETE", &format!("/api/projects/{id}?confirm=true"), None),
@@ -349,9 +343,7 @@ async fn failed_quarantine_blocks_writes_and_keeps_corrupt_file() {
         req("POST", "/api/projects", Some(json!({ "name": "x" }))),
     )
     .await;
-    let serve_err = orso::serve(config(tmp.path(), true))
-        .await
-        .unwrap_err();
+    let serve_err = orso::serve(config(tmp.path(), true)).await.unwrap_err();
     chmod(&state, 0o700);
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{v}");
@@ -652,6 +644,55 @@ async fn create_from_clone_copies_the_repo_records_it_and_sets_the_identity() {
         .find(|p| p["name"] == "Other")
         .unwrap();
     assert!(other.get("repo").is_some_and(Value::is_null), "{other}");
+}
+
+#[tokio::test]
+async fn clone_with_invalid_settings_still_opens() {
+    use orso::git::Identity;
+    use orso::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-b", "main"]);
+    std::fs::write(src.join("package.json"), "{}").unwrap();
+    std::fs::write(src.join("orso.json"), r#"{"dev":"pnpm dev"}"#).unwrap();
+    git(&src, &["add", "-A"]);
+    git(
+        &src,
+        &[
+            "-c",
+            "user.name=Grace",
+            "-c",
+            "user.email=g@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+
+    let projects_dir = tmp.path().join("projects");
+    let state = AppState::with_options(
+        config(&projects_dir, true),
+        true,
+        orso::devserver::DevServerOptions::disabled(),
+    );
+    let info = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", src.display()),
+                env: vec![],
+            },
+            &Identity::orso(),
+        )
+        .await
+        .unwrap();
+    let dir = projects_dir.join(&info.id);
+    assert!(dir.join("orso.json").exists());
+    assert!(!dir.join("node_modules").exists(), "install was skipped");
 }
 
 #[tokio::test]

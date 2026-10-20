@@ -43,11 +43,9 @@ pub async fn run(cmd: CtlCommand) -> ExitCode {
 
 /// Run `cmd` reading `ORSO_*` through `var`: pretty JSON on stdout, errors on stderr.
 pub async fn run_with(cmd: CtlCommand, var: impl Fn(&str) -> Option<String>) -> ExitCode {
-    let (Some(base), Some(project), Some(token)) = (
-        var("ORSO_URL"),
-        var("ORSO_PROJECT"),
-        var("ORSO_HOOK_TOKEN"),
-    ) else {
+    let (Some(base), Some(project), Some(token)) =
+        (var("ORSO_URL"), var("ORSO_PROJECT"), var("ORSO_HOOK_TOKEN"))
+    else {
         eprintln!("{NOT_IN_SESSION}");
         return ExitCode::FAILURE;
     };

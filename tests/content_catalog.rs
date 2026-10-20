@@ -1,5 +1,5 @@
-use std::path::Path;
 use orso::content::catalog::{list_collections, list_entries, read_entry};
+use std::path::Path;
 
 fn template() -> &'static Path {
     Path::new("templates/astro-marketing")
@@ -40,6 +40,59 @@ async fn template_catalog_and_raw_entries() {
     }
     assert!(read_entry(template(), "blog", "../site").await.is_err());
 }
+fn copy_template(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if matches!(name.to_str(), Some("node_modules" | "dist" | ".git")) {
+            continue;
+        }
+        let to = dst.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            copy_template(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn catalog_under_subfolder_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let site = root.join("site");
+    copy_template(template(), &site);
+    std::os::unix::fs::symlink(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules"),
+        site.join("node_modules"),
+    )
+    .unwrap();
+    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+
+    let collections = list_collections(root).await.unwrap();
+    assert!(collections.iter().all(|c| c.editable), "{collections:?}");
+    let entries = list_entries(root, "blog").await.unwrap();
+    assert!(!entries.is_empty());
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.path.starts_with("site/src/content/blog/en/")),
+        "{entries:?}"
+    );
+    let entry = read_entry(root, "blog", "welcome").await.unwrap();
+    assert_eq!(entry.path, "site/src/content/blog/en/welcome.md");
+    assert_eq!(
+        entry.source,
+        std::fs::read_to_string(site.join("src/content/blog/en/welcome.md")).unwrap()
+    );
+}
+
 #[tokio::test]
 async fn helper_failure_is_read_only_and_isolated() {
     let temp = tempfile::tempdir().unwrap();
@@ -254,4 +307,30 @@ async fn collections_use_one_helper_run_and_are_cached_until_schema_inputs_chang
     assert_eq!(runs(root), 4);
     assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
     assert_eq!(runs(root), 4);
+}
+#[tokio::test]
+async fn changing_root_invalidates_the_cached_catalog() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/content-schemas.mjs"), "export {}").unwrap();
+    counting_helper(root, "blog");
+    assert_eq!(
+        list_collections(root).await.unwrap()[0].loader["base"],
+        "posts"
+    );
+
+    // A rename keeps every input's mtime, so only the prefix differs.
+    let site = root.join("site");
+    std::fs::create_dir_all(&site).unwrap();
+    std::fs::write(site.join("astro.config.mjs"), "export default {}").unwrap();
+    for dir in ["src", "scripts"] {
+        std::fs::rename(root.join(dir), site.join(dir)).unwrap();
+    }
+    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    assert_eq!(
+        list_collections(root).await.unwrap()[0].loader["base"],
+        "site/posts"
+    );
+    assert_eq!(runs(&site), 1);
 }

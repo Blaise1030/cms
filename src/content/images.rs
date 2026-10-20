@@ -539,7 +539,10 @@ pub(super) fn prepare(
 
     // Deterministic names: the first free `name.ext`, `name-2.ext`, ... in upload order.
     // Existing names are compared case-insensitively for case-insensitive filesystems.
-    let asset_dir = format!("src/assets/{collection}/{id}");
+    let asset_dir = format!(
+        "{}src/assets/{collection}/{id}",
+        crate::settings::site_prefix(root)
+    );
     let dir = m::resolve_as(root, &asset_dir, Leaf::Dir)?;
     let mut taken: HashSet<String> = HashSet::new();
     if dir.exists() {
@@ -681,9 +684,13 @@ pub(super) fn cleanup_orphans(root: &Path) {
                 }
             }
         }
-        for rel in ["src/content", "src/assets"] {
+        let prefix = crate::settings::site_prefix(root);
+        for rel in [
+            format!("{prefix}src/content"),
+            format!("{prefix}src/assets"),
+        ] {
             // A symlinked or missing tree is never swept.
-            if let Ok(dir) = m::resolve_as(root, rel, Leaf::Dir) {
+            if let Ok(dir) = m::resolve_as(root, &rel, Leaf::Dir) {
                 if dir.exists() {
                     sweep(&dir, 0)?;
                 }

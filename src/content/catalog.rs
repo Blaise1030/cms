@@ -51,8 +51,22 @@ async fn helper(root: &Path, op: &str) -> Result<Vec<ContentCollection>, ApiErro
     struct Response {
         collections: Vec<ContentCollection>,
     }
+    let prefix = crate::settings::site_prefix(root);
     serde_json::from_value::<Response>(response)
-        .map(|r| r.collections)
+        .map(|r| {
+            let mut collections = r.collections;
+            // Bases are relative to the Astro root; make them repo-relative
+            // so every caller keeps resolving against the project root.
+            for c in &mut collections {
+                if let Some(base) = c.loader.get("base").and_then(Value::as_str) {
+                    let base = format!("{prefix}{base}");
+                    if let Some(loader) = c.loader.as_object_mut() {
+                        loader.insert("base".into(), Value::String(base));
+                    }
+                }
+            }
+            collections
+        })
         .map_err(|e| ApiError::io(format!("content helper invalid response: {e}")))
 }
 pub(crate) fn supported(c: &ContentCollection) -> bool {
@@ -76,16 +90,12 @@ pub(crate) fn supported(c: &ContentCollection) -> bool {
         }
 }
 /// Known bundled paths are used only to expose raw, read-only files after helper failure.
-fn fallback(reason: String) -> Vec<ContentCollection> {
+fn fallback(reason: String, prefix: &str) -> Vec<ContentCollection> {
+    let blog = format!("{prefix}src/content/blog/en");
+    let help = format!("{prefix}src/content/helpDocs/en");
     [
-        ("blog", "src/content/blog/en", "*.md", "markdown", None),
-        (
-            "helpDocs",
-            "src/content/helpDocs/en",
-            "*.md",
-            "markdown",
-            None,
-        ),
+        ("blog", blog.as_str(), "*.md", "markdown", None),
+        ("helpDocs", help.as_str(), "*.md", "markdown", None),
     ]
     .into_iter()
     .map(|(name, base, pattern, kind, singleton)| ContentCollection {
@@ -143,20 +153,23 @@ const CATALOG_INPUTS: [&str; 3] = [
     "src/content.config.ts",
     super::helper::SCRIPT,
 ];
-type CatalogKey = [Option<std::time::SystemTime>; 3];
+type CatalogKey = (String, [Option<std::time::SystemTime>; 3]);
 type CatalogCache = HashMap<PathBuf, (CatalogKey, Vec<ContentCollection>)>;
 static CATALOG: LazyLock<Mutex<CatalogCache>> = LazyLock::new(Default::default);
 fn catalog_key(root: &Path) -> CatalogKey {
+    let prefix = crate::settings::site_prefix(root);
     // symlink_metadata: replacing an input with a link also changes the key.
-    CATALOG_INPUTS.map(|path| {
-        std::fs::symlink_metadata(root.join(path))
+    let mtimes = CATALOG_INPUTS.map(|path| {
+        std::fs::symlink_metadata(root.join(format!("{prefix}{path}")))
             .and_then(|m| m.modified())
             .ok()
-    })
+    });
+    (prefix, mtimes)
 }
 /// The catalog with field descriptors. One `describe` helper run serves both the
-/// collection list and the fields; complete results are cached per project until a schema
-/// input's mtime changes, so file events do not spawn Node for an unchanged catalog.
+/// collection list and the fields; complete results are cached per project until the site
+/// prefix or a schema input's mtime changes, so file events do not spawn Node for an
+/// unchanged catalog.
 pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
     let key = catalog_key(project_root);
     let cached = CATALOG
@@ -183,7 +196,10 @@ pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollecti
                 listed.iter_mut().for_each(|c| c.fields = Value::Null);
                 finish(listed, Some(&describe_error))
             }
-            Err(e) => fallback(format!("Content helper unavailable: {e}")),
+            Err(e) => fallback(
+                format!("Content helper unavailable: {e}"),
+                &crate::settings::site_prefix(project_root),
+            ),
         },
     };
     Ok(collections)
