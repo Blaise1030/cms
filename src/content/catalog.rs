@@ -167,8 +167,9 @@ fn catalog_key(root: &Path) -> CatalogKey {
     (prefix, mtimes)
 }
 /// The catalog with field descriptors. One `describe` helper run serves both the
-/// collection list and the fields; complete results are cached per project until a schema
-/// input's mtime changes, so file events do not spawn Node for an unchanged catalog.
+/// collection list and the fields; complete results are cached per project until the site
+/// prefix or a schema input's mtime changes, so file events do not spawn Node for an
+/// unchanged catalog.
 pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
     let key = catalog_key(project_root);
     let cached = CATALOG

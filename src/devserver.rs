@@ -1,11 +1,13 @@
-//! Dev-server supervision: one `npm run dev` per project.
+//! Dev-server supervision: one dev server per project, run from the `dev`
+//! command in `orso.json` (default `npm run dev`) in the configured root.
 //!
 //! A supervisor task per project spawns the dev server on the project's port with
 //! `PUBLIC_BASE=/preview/{id}/`, marks it ready when stdout prints its local URL, restarts
 //! it after crashes (at most [`MAX_RESTARTS`] times, with exponential backoff), and
-//! publishes every transition as a `devserver.status` event.
+//! publishes every transition as a `devserver.status` event. An invalid `orso.json`
+//! parks it as `crashed` until the file loads again.
 //!
-//! The server runs in its own process group so `npm`'s node grandchild dies with it.
+//! The server runs in its own process group so the package manager's node grandchild dies with it.
 //! Lifecycle: it runs from project creation (or daemon start for existing projects) until
 //! the project is deleted or the daemon shuts down, plus manual restarts.
 
