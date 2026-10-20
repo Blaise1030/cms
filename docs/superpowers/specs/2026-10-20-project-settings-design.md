@@ -118,13 +118,17 @@ The marker moves to `<installDir>/node_modules/.orso-deps`. The 3-second poll st
 fingerprint stops the server, reinstalls and restarts it. Because `orso.json` is in the fingerprint, a
 settings save, branch switch or agent edit restarts the dev server through the same path.
 
-If `orso.json` does not validate, the fingerprint still uses the default `installDir` so the poll keeps
-running and notices when the file is fixed.
+A settings save therefore also reruns the install. That is accepted: with a lockfile in place the
+install is quick, and it guarantees a changed `install` or `installDir` takes effect.
 
-### Content, images and template checks
+If `orso.json` does not validate, the fingerprint uses the configured `installDir` when that field is
+valid and the default otherwise, so the poll keeps running and notices when the file is fixed.
 
-`src/content/catalog.rs`, `src/content/images.rs` and the template checks in `src/static.rs` resolve
-their `src/...` paths against `root`. Paths in API responses stay relative to the repo root, so the
+### Content and images
+
+The content helper (`scripts/orso-content.mjs`) runs inside `root`, and its collection bases, the
+catalog cache inputs, entry asset folders (`src/assets/{collection}/{id}`) and the leftover sweep
+(`src/content`, `src/assets`) all resolve under `root`. Paths in API responses stay relative to the repo root, so the
 file tree, checkpoints and change diffs keep working unchanged.
 
 ### API
