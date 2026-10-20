@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 use http_body_util::BodyExt;
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
 use orso::static_files::WebApp;
+use tower::ServiceExt;
 
 const TOKEN: &str = "abc123";
 

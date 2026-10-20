@@ -12,11 +12,11 @@ use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::{Config, GithubConfig};
 use orso::http;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 async fn fake_github() -> String {
     fake_github_with(false).await
@@ -414,10 +414,7 @@ async fn expired_token_signs_out_on_repos() {
     let (_, body) = call(&app, req("GET", "/api/github/status", None)).await;
     assert_eq!(body["user"], Value::Null);
     assert!(!projects.join(".orso/github.json").exists());
-    assert_eq!(
-        git(&fresh, &["config", "--local", "user.name"]),
-        "orso"
-    );
+    assert_eq!(git(&fresh, &["config", "--local", "user.name"]), "orso");
 }
 
 #[tokio::test]
@@ -669,10 +666,7 @@ async fn status_applies_the_cli_identity_to_existing_projects() {
     )
     .await;
     let fresh = projects.join(made["id"].as_str().unwrap());
-    assert_eq!(
-        git(&fresh, &["config", "--local", "user.name"]),
-        "orso"
-    );
+    assert_eq!(git(&fresh, &["config", "--local", "user.name"]), "orso");
     let mut cfg = cli_config(&projects, &tmp.path().join("git"), &gh);
     cfg.github.git_global_config = Some(global);
     let app = http::router(AppState::with_scaffold_install(cfg, false));

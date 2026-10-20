@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
+use serde_json::Value;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tower::ServiceExt;
 
 fn config(no_auth: bool, token: Option<&str>, origin: Option<&str>) -> Config {
     Config {

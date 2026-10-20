@@ -151,10 +151,7 @@ impl ProjectRegistry {
         let dirs = Self::dirs(&*self.inner.lock().await);
         for dir in dirs {
             if let Err(e) = crate::git::set_identity(&dir, identity).await {
-                eprintln!(
-                    "orso: cannot set git identity in {}: {e}",
-                    dir.display()
-                );
+                eprintln!("orso: cannot set git identity in {}: {e}", dir.display());
             }
         }
     }
@@ -165,10 +162,7 @@ impl ProjectRegistry {
         for dir in dirs {
             if !crate::git::has_identity(&dir).await {
                 if let Err(e) = crate::git::set_identity(&dir, identity).await {
-                    eprintln!(
-                        "orso: cannot set git identity in {}: {e}",
-                        dir.display()
-                    );
+                    eprintln!("orso: cannot set git identity in {}: {e}", dir.display());
                 }
             }
         }

@@ -171,7 +171,10 @@ async fn save_on_change_writes_and_checkpoints() {
     assert_eq!(v["exists"], true);
     let text = std::fs::read_to_string(e.file()).unwrap();
     let parsed: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(parsed, json!({"install": "pnpm install", "custom": 1, "note": ""}));
+    assert_eq!(
+        parsed,
+        json!({"install": "pnpm install", "custom": 1, "note": ""})
+    );
     assert!(text.ends_with('\n'), "{text}");
     assert_eq!(
         git_cli(&e.dir, &["log", "-1", "--format=%s"]),

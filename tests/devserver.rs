@@ -8,15 +8,15 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tokio::process::Command;
-use tokio::sync::broadcast;
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::devserver::{DevServerOptions, MAX_RESTARTS};
 use orso::http;
 use orso::http::ctl::preview_status_value;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tokio::process::Command;
+use tokio::sync::broadcast;
+use tower::ServiceExt;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -517,8 +517,7 @@ async fn daemon_restart_resumes_projects_and_reallocates_a_busy_port() {
         format!("/preview/alpha/ {}", ready["alpha"])
     );
     let persisted: Value =
-        serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap())
-            .unwrap();
+        serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap()).unwrap();
     let alpha = persisted
         .as_array()
         .unwrap()

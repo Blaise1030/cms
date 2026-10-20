@@ -5,11 +5,11 @@ use std::path::Path;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tower::ServiceExt;
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
+use serde_json::{json, Value};
+use tower::ServiceExt;
 
 const TOKEN: &str = "abc123";
 

@@ -1,5 +1,5 @@
-use std::path::Path;
 use orso::content::catalog::{list_collections, list_entries, read_entry};
+use std::path::Path;
 
 fn template() -> &'static Path {
     Path::new("templates/astro-marketing")
