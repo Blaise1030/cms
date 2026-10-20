@@ -43,7 +43,7 @@ import { useFrameHistory } from "./frameHistory";
 import { type PageError, watchPageErrors } from "./pageErrors";
 import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 
-const props = defineProps<{ projectId: string; devserver?: DevserverState }>();
+const props = defineProps<{ projectId: string; devserver?: DevserverState; port?: number }>();
 
 const store = usePreviewStore();
 const daemon = useDaemon();
@@ -268,8 +268,15 @@ function navigate() {
   else if (frame.value) frame.value.src = new URL(href, src.value).href;
 }
 
+/**
+ * The dev server itself (same `/preview/{id}/` base), not the daemon proxy: a browser tab
+ * has no `wb_session`, and the desktop shell sends other loopback ports to the default browser.
+ */
 function openExternal() {
-  const href = hrefFor(currentPath.value);
+  const page = new URL(hrefFor(currentPath.value));
+  const href = props.port
+    ? `http://127.0.0.1:${props.port}${page.pathname}${page.search}${page.hash}`
+    : page.href;
   window.open(href, "_blank", "noopener");
 }
 

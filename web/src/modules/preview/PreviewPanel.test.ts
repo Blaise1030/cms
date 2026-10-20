@@ -44,6 +44,20 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("opens the site's own dev server in a new tab, so a browser without the session can load it", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    localStorage.setItem("orso.preview.path.site-1", "/blog/?x=1");
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await w.find("button[aria-label='Open in new tab']").trigger("click");
+    expect(open).toHaveBeenCalledWith("http://127.0.0.1:56066/preview/site-1/blog/?x=1", "_blank", "noopener");
+    open.mockRestore();
+    w.unmount();
+  });
+
   it("explains instead of framing a cross-site daemon, with a manual override", async () => {
     const w = mountPanel();
     hDaemon.daemon.config.value = { origin: "https://daemon.invalid:7800" };
