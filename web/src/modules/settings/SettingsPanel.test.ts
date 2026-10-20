@@ -156,6 +156,20 @@ describe("SettingsPanel", () => {
     w.unmount();
   });
 
+  it("after a save shows starting, not the previous crash, until the next status", async () => {
+    const { w } = await setup();
+    useProjectsStore().projects = [{ ...project, devserver: "crashed" }];
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "crashed", message: "orso.json: dev must contain {port}" });
+    await el(w, "settings-install").setValue("pnpm install");
+    await el(w, "settings-save").trigger("click");
+    await flushPromises();
+    expect(el(w, "settings-devserver").text()).toBe("Dev server: starting");
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready" });
+    await flushPromises();
+    expect(el(w, "settings-devserver").text()).toBe("Dev server: ready");
+    w.unmount();
+  });
+
   it("blocks leaving the tab until a dirty draft is discarded", async () => {
     const { w, router } = await setup();
     await el(w, "settings-dev").setValue("pnpm dev --port {port}");

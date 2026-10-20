@@ -24,13 +24,18 @@ const FIELDS: { key: SettingsField; label: string }[] = [
 
 /** Set once a save lands: the dev server restarts with the new settings, and its status is shown from then on. */
 const saved = ref(false);
+/** A save just landed: the restart it causes has not reported yet, so the last known state is stale. */
+const restarting = ref(false);
 const message = ref<string | null>(null);
-const devserver = computed(() => projects.projects.find(p => p.id === props.projectId)?.devserver);
+const devserver = computed(() => restarting.value ? "starting" : projects.projects.find(p => p.id === props.projectId)?.devserver);
 const off = useDaemon().on("devserver.status", (e) => {
-  if (e.projectId === props.projectId) message.value = e.state === "crashed" ? e.message ?? null : null;
+  if (e.projectId !== props.projectId) return;
+  restarting.value = false;
+  message.value = e.state === "crashed" ? e.message ?? null : null;
 });
+function landed() { saved.value = true; restarting.value = true; message.value = null; }
 
-watch(() => props.projectId, id => { saved.value = false; message.value = null; void store.open(id); }, { immediate: true });
+watch(() => props.projectId, id => { saved.value = false; restarting.value = false; message.value = null; void store.open(id); }, { immediate: true });
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 
@@ -44,10 +49,10 @@ function errorFor(key: SettingsField) {
 
 async function save() {
   if (devMissingPort.value) return;
-  try { await store.save(); saved.value = true; } catch { /* recorded on the store; the draft stays */ }
+  try { await store.save(); landed(); } catch { /* recorded on the store; the draft stays */ }
 }
 async function resume(change: Change) {
-  try { await store.resumeSave(change.branch); saved.value = true; } catch { /* recorded on the store */ }
+  try { await store.resumeSave(change.branch); landed(); } catch { /* recorded on the store */ }
 }
 
 function beforeUnload(event: BeforeUnloadEvent) { if (store.dirty) { event.preventDefault(); event.returnValue = ""; } }
