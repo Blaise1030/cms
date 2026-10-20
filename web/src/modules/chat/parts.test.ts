@@ -1,9 +1,44 @@
 import { describe, expect, it } from "vitest";
-import type { DynamicToolUIPart } from "ai";
-import { toolLabel } from "./parts";
+import type { DynamicToolUIPart, UIMessage } from "ai";
+import { groupSteps, stepsTitle, toolLabel, type StepPart } from "./parts";
 
 const tool = (toolName: string, input: Record<string, unknown>) =>
   ({ type: "dynamic-tool", toolName, toolCallId: "t1", state: "input-available", input }) as DynamicToolUIPart;
+
+type Part = UIMessage["parts"][number];
+const done = (toolName: string, state = "output-available") =>
+  ({ type: "dynamic-tool", toolName, toolCallId: "t", state, input: {}, output: "" }) as StepPart;
+const thought = (state?: "streaming" | "done") => ({ type: "reasoning", text: "hm", state }) as StepPart;
+const text = (t: string) => ({ type: "text", text: t }) as Part;
+
+describe("groupSteps", () => {
+  it("collapses each run of reasoning and tool parts into one group, split by other parts", () => {
+    const groups = groupSteps([
+      { type: "step-start" },
+      thought("done"),
+      done("shell"),
+      done("read", "output-error"),
+      text("Fixed it"),
+      done("edit"),
+    ] as Part[]);
+    expect(groups.map((g) => g.kind)).toEqual(["steps", "part", "steps"]);
+    expect(groups[0]).toMatchObject({ kind: "steps", working: false });
+    expect(groups[0]!.kind === "steps" && groups[0]!.steps).toHaveLength(3);
+  });
+
+  it("is working while a tool hasn't finished or reasoning is still streaming", () => {
+    expect(groupSteps([done("shell"), tool("read", {})])[0]).toMatchObject({ working: true });
+    expect(groupSteps([thought("streaming")])[0]).toMatchObject({ working: true });
+  });
+
+  it("titles a group by its step count, or as working", () => {
+    expect(stepsTitle({ kind: "steps", steps: [thought()], working: false })).toBe("Worked through 1 step");
+    expect(stepsTitle({ kind: "steps", steps: [thought(), done("shell")], working: false })).toBe(
+      "Worked through 2 steps",
+    );
+    expect(stepsTitle({ kind: "steps", steps: [thought()], working: true })).toBe("Working…");
+  });
+});
 
 describe("toolLabel", () => {
   it("names read and edit tools by basename", () => {

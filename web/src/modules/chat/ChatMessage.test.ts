@@ -24,6 +24,15 @@ async function render(parts: unknown[], role: UIMessage["role"] = "assistant") {
 const byText = (text: string) =>
   [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
 
+/** Expands the collapsed steps group, then the step inside it at `index`. */
+async function openStep(w: Awaited<ReturnType<typeof render>>, index = 0) {
+  const group = w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']");
+  if (group.attributes("aria-expanded") !== "true") await group.trigger("click");
+  await flushPromises();
+  await w.findAll("[data-testid='chat-steps'] [data-slot='trace-collapsible-content'] [data-slot='trace-collapsible-trigger']")[index]!.trigger("click");
+  await flushPromises();
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -105,12 +114,42 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("collapses a run of steps into one row, keeping the agent's reply outside it", async () => {
+    const w = await render([
+      { type: "step-start" },
+      { type: "reasoning", text: "Pondering", state: "done" },
+      { type: "dynamic-tool", toolName: "shell", toolCallId: "t1", state: "output-available", input: { command: "ls" }, output: "" },
+      { type: "dynamic-tool", toolName: "read", toolCallId: "t2", state: "output-error", input: { path: "/a.md" }, errorText: "nope" },
+      { type: "text", text: "Fixed it" },
+    ]);
+    const steps = w.findAll("[data-testid='chat-steps']");
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.text()).toContain("Worked through 3 steps");
+    expect(w.text()).not.toContain("Thinking");
+    expect(w.text()).not.toContain("Ran ls");
+    expect(w.text()).toContain("Fixed it");
+    await w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']").trigger("click");
+    await flushPromises();
+    expect(w.text()).toContain("Thinking");
+    expect(w.text()).toContain("Ran ls");
+    expect(w.text()).toContain("Read a.md");
+    w.unmount();
+  });
+
+  it("shows a running group as working", async () => {
+    const w = await render([
+      { type: "dynamic-tool", toolName: "shell", toolCallId: "t1", state: "input-available", input: { command: "ls" } },
+    ]);
+    expect(w.find("[data-testid='chat-steps']").text()).toContain("Working…");
+    expect(w.find("[data-testid='chat-steps'] [data-slot='trace-line']").attributes("data-status")).toBe("running");
+    w.unmount();
+  });
+
   it("shows reasoning behind a collapsed Thinking trigger", async () => {
     const w = await render([{ type: "step-start" }, { type: "reasoning", text: "Pondering the layout" }]);
-    expect(w.text()).toContain("Thinking");
     expect(w.text()).not.toContain("Pondering the layout");
-    await w.find("[data-slot='trace-collapsible-trigger']").trigger("click");
-    await flushPromises();
+    await openStep(w);
+    expect(w.text()).toContain("Thinking");
     expect(w.text()).toContain("Pondering the layout");
     w.unmount();
   });
@@ -126,10 +165,11 @@ describe("ChatMessage", () => {
         output: { exitCode: 0, stdout: "built in 2s" },
       },
     ]);
+    await w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']").trigger("click");
+    await flushPromises();
     expect(w.text()).toContain("Ran pnpm build");
     expect(w.find("[data-slot='code-block']").exists()).toBe(false);
-    await w.find("[data-slot='trace-collapsible-trigger']").trigger("click");
-    await flushPromises();
+    await openStep(w);
     const blocks = w.findAll("[data-slot='code-block']");
     expect(blocks.map((b) => b.text()).join("\n")).toContain('"command": "pnpm build"');
     expect(blocks.map((b) => b.text()).join("\n")).toContain('"stdout": "built in 2s"');
@@ -147,9 +187,8 @@ describe("ChatMessage", () => {
         output: "-old\n+new",
       },
     ]);
+    await openStep(w);
     expect(w.text()).toContain("Edited about.md");
-    await w.find("[data-slot='trace-collapsible-trigger']").trigger("click");
-    await flushPromises();
     expect(w.text()).toContain("-old");
     expect(w.text()).not.toContain('"-old');
     w.unmount();
@@ -166,8 +205,7 @@ describe("ChatMessage", () => {
         errorText: "No such file",
       },
     ]);
-    await w.find("[data-slot='trace-collapsible-trigger']").trigger("click");
-    await flushPromises();
+    await openStep(w);
     expect(w.find("[data-testid='tool-error']").text()).toContain("No such file");
     w.unmount();
   });

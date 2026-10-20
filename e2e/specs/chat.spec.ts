@@ -42,6 +42,7 @@ test("chat sends a message, shows the reply and a checkpoint", async ({ page, or
   const panel = page.getByTestId("chat-panel");
   // The reply renders as markdown, so its inline code loses the backticks.
   await expect(panel).toContainText(reply.replaceAll("`", ""), { timeout: 60_000 });
+  await panel.getByText(/^Worked through \d+ steps?$/).click();
   await expect(panel.getByText(/^Edited about\.md/)).toBeVisible();
   await expect(panel.getByText("Saved 1 file")).toBeVisible({ timeout: 60_000 });
 

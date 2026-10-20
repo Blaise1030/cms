@@ -24,6 +24,7 @@ const changes = useChangesStore();
         class="absolute inset-0"
         :project-id="project.id"
         :devserver="project.devserver"
+        :port="project.port"
       />
       <div v-show="tab !== 'preview'" class="absolute inset-0">
         <RouterView />

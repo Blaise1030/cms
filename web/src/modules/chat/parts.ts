@@ -1,4 +1,4 @@
-import type { DynamicToolUIPart } from "ai";
+import type { DynamicToolUIPart, ReasoningUIPart, UIMessage } from "ai";
 
 /** The daemon's normalized tool input: `raw` is the agent's own arguments. */
 export interface ToolInput {
@@ -46,6 +46,43 @@ export function toolLabel(part: DynamicToolUIPart): string {
       return `Used ${rawName(input.raw) ?? "a tool"}`;
   }
 }
+
+type Part = UIMessage["parts"][number];
+export type StepPart = ReasoningUIPart | DynamicToolUIPart;
+export type MessageGroup =
+  | { kind: "steps"; steps: StepPart[]; working: boolean }
+  | { kind: "part"; part: Part };
+
+const isStep = (part: Part): part is StepPart => part.type === "reasoning" || part.type === "dynamic-tool";
+const stepWorking = (part: StepPart) =>
+  part.type === "reasoning"
+    ? part.state === "streaming"
+    : part.state !== "output-available" && part.state !== "output-error";
+
+/** Each run of reasoning and tool parts becomes one steps group; `step-start` markers render nothing. */
+export function groupSteps(parts: Part[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  for (const part of parts) {
+    if (part.type === "step-start") continue;
+    if (!isStep(part)) {
+      groups.push({ kind: "part", part });
+      continue;
+    }
+    const last = groups.at(-1);
+    if (last?.kind === "steps") {
+      last.steps.push(part);
+      last.working ||= stepWorking(part);
+    } else {
+      groups.push({ kind: "steps", steps: [part], working: stepWorking(part) });
+    }
+  }
+  return groups;
+}
+
+export const stepsTitle = (group: Extract<MessageGroup, { kind: "steps" }>) =>
+  group.working
+    ? "Working…"
+    : `Worked through ${group.steps.length} ${group.steps.length === 1 ? "step" : "steps"}`;
 
 /** Strings (diffs, truncated JSON text) show as-is; anything else as pretty JSON. */
 export const formatValue = (value: unknown): string =>
