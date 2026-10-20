@@ -19,6 +19,7 @@ pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod providers;
+pub mod settings;
 pub mod state;
 pub mod terminal;
 pub mod watch;
