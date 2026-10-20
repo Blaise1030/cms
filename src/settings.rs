@@ -326,11 +326,14 @@ pub async fn save(state: &AppState, req: SaveSettings) -> Result<SettingsDoc, Ap
     let _guard = lock.lock().await;
     require_content_change(&root, &req.branch).await?;
 
-    // Empty-string fields mean "unset": drop them before validating/writing.
+    // Empty-string known fields mean "unset": drop them before validating/writing.
     let cleaned: Map<String, Value> = req
         .settings
         .iter()
-        .filter(|(_, v)| !matches!(v, Value::String(s) if s.is_empty()))
+        .filter(|(k, v)| {
+            !(matches!(k.as_str(), "root" | "installDir" | "install" | "dev")
+                && matches!(v, Value::String(s) if s.is_empty()))
+        })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     if let Err(errors) = validate(&root, &cleaned) {
@@ -392,7 +395,10 @@ pub fn describe(errors: &FieldErrors) -> String {
     }
     let parts: Vec<String> = errors
         .iter()
-        .map(|(field, message)| format!("{field} {message}"))
+        .map(|(field, message)| match field.as_str() {
+            "_file" => message.clone(),
+            _ => format!("{field} {message}"),
+        })
         .collect();
     format!("{SETTINGS_FILE}: {}", parts.join("; "))
 }
@@ -622,5 +628,12 @@ mod tests {
         assert!(text.starts_with("orso.json: "), "{text}");
         assert!(text.contains("; "), "{text}");
         assert_eq!(text, "orso.json: dev must contain {port}; root must exist");
+    }
+
+    #[test]
+    fn describe_file_error_without_key() {
+        let mut errors = FieldErrors::new();
+        errors.insert("_file".to_string(), "invalid JSON: eof".to_string());
+        assert_eq!(describe(&errors), "orso.json: invalid JSON: eof");
     }
 }
