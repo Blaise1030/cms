@@ -615,6 +615,41 @@ async fn fixing_invalid_settings_restarts() {
 }
 
 #[tokio::test]
+async fn crashed_server_reinstalls_once_its_packages_change() {
+    let env = env_with(configured());
+    env.state.projects.create("Site").await.unwrap();
+    std::fs::write(env.file("site", "package.json"), r#"{"name":"site"}"#).unwrap();
+    std::fs::write(
+        env.file("site", "orso.json"),
+        r#"{"install":"echo x >> installs.log","dev":"echo x >> spawns.log; [ -f ok ] && echo Local http://127.0.0.1:{port}/ && exec sleep 30; exit 1"}"#,
+    )
+    .unwrap();
+    let mut events = env.events();
+    env.state.devservers.start("site").await.unwrap();
+    events.status("site", "crashed").await;
+    let installs = env.file("site", "installs.log");
+    let spawns = env.file("site", "spawns.log");
+    assert_eq!(lines(&installs).len(), 1);
+    assert_eq!(lines(&spawns).len() as u32, 1 + MAX_RESTARTS);
+
+    // Unchanged packages: still parked after a deps poll.
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    assert_eq!(env.devserver_state("site").await, "crashed");
+    assert_eq!(lines(&spawns).len() as u32, 1 + MAX_RESTARTS);
+
+    // A branch update brings new packages: reinstall, fresh budget, comes up.
+    std::fs::write(env.file("site", "ok"), "").unwrap();
+    std::fs::write(
+        env.file("site", "package.json"),
+        r#"{"name":"site","version":"2"}"#,
+    )
+    .unwrap();
+    events.status("site", "ready").await;
+    assert_eq!(lines(&installs).len(), 2);
+    env.state.devservers.shutdown().await;
+}
+
+#[tokio::test]
 async fn settings_change_restarts() {
     let env = env_with(configured());
     env.state.projects.create("Site").await.unwrap();

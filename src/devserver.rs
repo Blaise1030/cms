@@ -5,7 +5,8 @@
 //! `PUBLIC_BASE=/preview/{id}/`, marks it ready when stdout prints its local URL, restarts
 //! it after crashes (at most [`MAX_RESTARTS`] times, with exponential backoff), and
 //! publishes every transition as a `devserver.status` event. An invalid `orso.json`
-//! parks it as `crashed` until the file loads again.
+//! parks it as `crashed` until the file loads again; a spent crash budget parks it
+//! until its packages change (a sync or change switch), which reinstalls and retries.
 //!
 //! The server runs in its own process group so the package manager's node grandchild dies with it.
 //! Lifecycle: it runs from project creation (or daemon start for existing projects) until
@@ -27,7 +28,8 @@ use crate::error::{ApiError, ErrorCode};
 use crate::events::EventBus;
 use crate::projects::{DevserverStatus, ProjectRegistry};
 
-/// Crash restarts before the server is parked as `crashed` (until a manual restart).
+/// Crash restarts before the server is parked as `crashed` (until a manual restart or,
+/// for the configured launcher, a change to its packages).
 pub const MAX_RESTARTS: u32 = 3;
 /// First restart delay; doubles per consecutive crash (1s, 2s, 4s).
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
@@ -441,7 +443,16 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
             shared
                 .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
                 .await;
-            return;
+            let Some(project) = shared.projects.get(&id).await else {
+                return;
+            };
+            if !matches!(shared.opts.launcher, Launcher::Configured)
+                || !await_deps_change(&project.dir, &mut stop).await
+            {
+                return;
+            }
+            crashes = 0;
+            continue;
         }
         crashes += 1;
         // Back to `starting` for the duration of the backoff.
@@ -452,6 +463,22 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
             _ = &mut stop => return,
+        }
+    }
+}
+
+/// Poll the package fingerprint until it differs from the one the server crashed
+/// with (`true`) or we are asked to stop (`false`).
+async fn await_deps_change(dir: &std::path::Path, stop: &mut oneshot::Receiver<()>) -> bool {
+    let parked = deps_fingerprint(dir);
+    loop {
+        tokio::select! {
+            _ = &mut *stop => return false,
+            _ = tokio::time::sleep(DEPS_POLL) => {
+                if deps_fingerprint(dir) != parked {
+                    return true;
+                }
+            }
         }
     }
 }
