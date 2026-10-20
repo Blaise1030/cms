@@ -30,7 +30,12 @@ test("chat sends a message, shows the reply and a checkpoint", async ({ page, or
   await expect(page.getByTestId("chat-panel")).toBeVisible();
   await expect(page.getByTestId("agent-panel").getByRole("tablist")).toHaveCount(0);
 
-  await page.getByTestId("chat-provider").selectOption("cursor");
+  await page.getByTestId("chat-agent").click();
+  await page
+    .locator("[data-testid='chat-agent-group'][data-provider='cursor'] [data-testid='chat-model-item']")
+    .first()
+    .click();
+  await expect(page.getByTestId("chat-agent")).toHaveAttribute("data-provider", "cursor");
   await page.getByTestId("chat-input").fill("hello");
   await page.getByTestId("chat-send").click();
 
