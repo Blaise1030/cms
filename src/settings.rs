@@ -4,9 +4,17 @@
 //! defaults, empty strings mean "unset", and validation reports per-field
 //! errors so the UI can point at the broken field.
 
-use serde::Serialize;
-use serde_json::{Map, Value};
+use crate::content::catalog;
+use crate::content::lifecycle::{Journal, Undo};
+use crate::content::mutation::{
+    emit_checkpoint, lock_for, project_root, read_current, require_content_change, resolve, stale,
+    write_atomic,
+};
+use crate::{error::ApiError, git, state::AppState};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub const SETTINGS_FILE: &str = "orso.json";
@@ -249,6 +257,133 @@ pub fn load(project: &Path) -> Result<ProjectSettings, FieldErrors> {
             Err(errors)
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsDoc {
+    pub exists: bool,
+    pub settings: Map<String, Value>,
+    pub defaults: ProjectSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    pub branch: String,
+    pub errors: FieldErrors,
+}
+
+#[derive(Deserialize)]
+pub struct SaveSettings {
+    pub project: String,
+    pub branch: String,
+    pub hash: Option<String>,
+    pub settings: Map<String, Value>,
+}
+
+pub async fn read(state: &AppState, project: &str) -> Result<SettingsDoc, ApiError> {
+    let root = project_root(state, project).await?;
+    let path = resolve(&root, SETTINGS_FILE)?;
+    let branch = catalog::current_branch(&root).await?;
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Ok(SettingsDoc {
+            exists: false,
+            settings: Map::new(),
+            defaults: ProjectSettings::defaults(),
+            hash: None,
+            branch,
+            errors: FieldErrors::new(),
+        });
+    }
+    let source = read_current(&path)?;
+    let (settings, errors) = match serde_json::from_str::<Value>(&source) {
+        Ok(Value::Object(map)) => {
+            let errors = validate(&root, &map).err().unwrap_or_default();
+            (map, errors)
+        }
+        Ok(_) => {
+            let mut errors = FieldErrors::new();
+            errors.insert("_file".to_string(), "must be a JSON object".to_string());
+            (Map::new(), errors)
+        }
+        Err(e) => {
+            let mut errors = FieldErrors::new();
+            errors.insert("_file".to_string(), format!("invalid JSON: {e}"));
+            (Map::new(), errors)
+        }
+    };
+    Ok(SettingsDoc {
+        exists: true,
+        settings,
+        defaults: ProjectSettings::defaults(),
+        hash: Some(catalog::hash(&source)),
+        branch,
+        errors,
+    })
+}
+
+pub async fn save(state: &AppState, req: SaveSettings) -> Result<SettingsDoc, ApiError> {
+    let root = project_root(state, &req.project).await?;
+    let lock = lock_for(&root);
+    let _guard = lock.lock().await;
+    require_content_change(&root, &req.branch).await?;
+
+    // Empty-string fields mean "unset": drop them before validating/writing.
+    let cleaned: Map<String, Value> = req
+        .settings
+        .iter()
+        .filter(|(_, v)| !matches!(v, Value::String(s) if s.is_empty()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if let Err(errors) = validate(&root, &cleaned) {
+        let details: Vec<Value> = errors
+            .iter()
+            .map(|(field, message)| json!({ "path": [field], "message": message }))
+            .collect();
+        return Err(ApiError::badreq(describe(&errors))
+            .with_reason("invalid_settings")
+            .with_details(json!(details)));
+    }
+    let source = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&Value::Object(cleaned))
+            .map_err(|e| ApiError::badreq(e.to_string()))?
+    );
+
+    let path = resolve(&root, SETTINGS_FILE)?;
+    let (old, mode) = match (std::fs::symlink_metadata(&path), &req.hash) {
+        (Err(_), None) => (None, 0o644),
+        (Ok(meta), Some(hash)) if meta.is_file() => {
+            let old = read_current(&path)?;
+            if &catalog::hash(&old) != hash {
+                return Err(stale());
+            }
+            // Unlike DESIGN.md, an unparseable file may be repaired here:
+            // the matching hash proves the writer saw its current bytes.
+            (Some(old), meta.permissions().mode() & 0o7777)
+        }
+        _ => return Err(stale()),
+    };
+    write_atomic(&path, source.as_bytes(), mode)?;
+    let mut journal = Journal::default();
+    journal.0.push(match old {
+        Some(bytes) => Undo::Write {
+            path: path.clone(),
+            bytes,
+            mode,
+        },
+        None => Undo::Remove(path.clone()),
+    });
+    let checkpoint = match git::checkpoint_paths(
+        &root,
+        "Updated project settings",
+        &[PathBuf::from(SETTINGS_FILE)],
+    )
+    .await
+    {
+        Ok(cp) => cp,
+        Err(e) => return Err(journal.fail(e)),
+    };
+    emit_checkpoint(state, &req.project, checkpoint);
+    read(state, &req.project).await
 }
 
 pub fn describe(errors: &FieldErrors) -> String {
