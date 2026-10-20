@@ -137,8 +137,8 @@ pub type CommandFactory = Arc<dyn Fn(&LaunchSpec) -> Command + Send + Sync>;
 pub enum Launcher {
     /// Do not spawn anything (project status stays `starting`).
     Disabled,
-    /// `npm run dev -- --port N --host 127.0.0.1`.
-    Npm,
+    /// The `dev` command from `orso.json` (defaults to the npm command).
+    Configured,
     /// Test hook: an arbitrary command standing in for the dev server.
     Custom(CommandFactory),
 }
@@ -154,8 +154,8 @@ pub struct DevServerOptions {
 }
 
 impl DevServerOptions {
-    pub fn npm(proxy_port: u16) -> Self {
-        Self::with_launcher(Launcher::Npm, proxy_port)
+    pub fn configured(proxy_port: u16) -> Self {
+        Self::with_launcher(Launcher::Configured, proxy_port)
     }
 
     pub fn disabled() -> Self {
@@ -176,16 +176,12 @@ impl DevServerOptions {
     }
 }
 
-fn npm_command(spec: &LaunchSpec) -> Command {
-    let mut cmd = Command::new("npm");
-    cmd.args(["run", "dev", "--", "--port"])
-        .arg(spec.port.to_string())
-        // Bind IPv4 loopback explicitly: the proxy dials 127.0.0.1, and `localhost` may
-        // resolve to ::1 only.
-        .args(["--host", "127.0.0.1"])
-        // Astro auto-backgrounds `astro dev` (detached, exit 0) when it detects an AI agent in
-        // the environment, which the supervisor would see as a crash. Keep it in the foreground.
-        .arg("--ignore-lock");
+/// `sh -c <dev command with {port}/{host} substituted>`, run in the site dir.
+fn configured_command(settings: &crate::settings::ProjectSettings, spec: &LaunchSpec) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
+        .arg(settings.dev_command(spec.port))
+        .current_dir(settings.site_dir(&spec.dir));
     cmd
 }
 
@@ -360,19 +356,54 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
         let outcome = match shared.projects.ensure_free_port(&id).await {
             Ok(p) => {
                 port = p;
+                // A bad orso.json is not fixed by retrying: park as crashed
+                // without spending the crash budget or scheduling a backoff.
+                let settings = match &shared.opts.launcher {
+                    Launcher::Configured => match crate::settings::load(&project.dir) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            let message = crate::settings::describe(&e);
+                            shared
+                                .set_state(&id, DevserverStatus::Crashed, port, Some(&message))
+                                .await;
+                            return;
+                        }
+                    },
+                    _ => None,
+                };
                 shared
                     .set_state(&id, DevserverStatus::Starting, port, None)
                     .await;
-                let npm = matches!(shared.opts.launcher, Launcher::Npm);
-                match npm && deps_stale(&project.dir) {
+                let configured = matches!(shared.opts.launcher, Launcher::Configured);
+                match configured && deps_stale(&project.dir) {
                     true => match crate::projects::install(&project.dir).await {
-                        Ok(()) => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                        Ok(()) => {
+                            run_once(
+                                &shared,
+                                &id,
+                                project.dir,
+                                port,
+                                &mut stop,
+                                settings.as_ref(),
+                            )
+                            .await
+                        }
                         Err(e) => Outcome::Died {
                             message: e.message,
                             stable: false,
                         },
                     },
-                    false => run_once(&shared, &id, project.dir, port, &mut stop).await,
+                    false => {
+                        run_once(
+                            &shared,
+                            &id,
+                            project.dir,
+                            port,
+                            &mut stop,
+                            settings.as_ref(),
+                        )
+                        .await
+                    }
                 }
             }
             Err(e) if e.code == ErrorCode::Enoent => return,
@@ -437,6 +468,7 @@ async fn run_once(
     dir: PathBuf,
     port: u16,
     stop: &mut oneshot::Receiver<()>,
+    settings: Option<&crate::settings::ProjectSettings>,
 ) -> Outcome {
     let spec = LaunchSpec {
         project_id: id.to_string(),
@@ -445,7 +477,15 @@ async fn run_once(
         public_base: format!("/preview/{id}/"),
     };
     let mut cmd = match &shared.opts.launcher {
-        Launcher::Npm => npm_command(&spec),
+        Launcher::Configured => match settings {
+            Some(settings) => configured_command(settings, &spec),
+            None => {
+                return Outcome::Died {
+                    message: "dev server settings were not loaded".into(),
+                    stable: false,
+                }
+            }
+        },
         Launcher::Custom(f) => f(&spec),
         Launcher::Disabled => {
             return Outcome::Died {
@@ -454,8 +494,12 @@ async fn run_once(
             }
         }
     };
+    // `configured_command` already set the site dir; other launchers run in
+    // the project dir.
+    if !matches!(shared.opts.launcher, Launcher::Configured) {
+        cmd.current_dir(&dir);
+    }
     cmd.env("PUBLIC_BASE", &spec.public_base)
-        .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -491,7 +535,7 @@ async fn run_once(
     let mut tail = Tail::default();
     let mut ready_at: Option<Instant> = None;
     let mut port = port;
-    let watch_deps = matches!(shared.opts.launcher, Launcher::Npm);
+    let watch_deps = matches!(shared.opts.launcher, Launcher::Configured);
     let mut deps_tick = tokio::time::interval(DEPS_POLL);
     deps_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let outcome = loop {
@@ -671,16 +715,17 @@ mod tests {
     }
 
     #[test]
-    fn npm_command_line() {
+    fn configured_command_line() {
         let spec = LaunchSpec {
             project_id: "site".into(),
             dir: PathBuf::from("/tmp/site"),
             port: 4567,
             public_base: "/preview/site/".into(),
         };
-        let cmd = npm_command(&spec);
+        let settings = crate::settings::ProjectSettings::defaults();
+        let cmd = configured_command(&settings, &spec);
         let std = cmd.as_std();
-        assert_eq!(std.get_program(), "npm");
+        assert_eq!(std.get_program(), "sh");
         let args: Vec<_> = std
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -688,15 +733,24 @@ mod tests {
         assert_eq!(
             args,
             [
-                "run",
-                "dev",
-                "--",
-                "--port",
-                "4567",
-                "--host",
-                "127.0.0.1",
-                "--ignore-lock"
+                "-c",
+                "npm run dev -- --port 4567 --host 127.0.0.1 --ignore-lock"
             ]
+        );
+        assert_eq!(
+            std.get_current_dir(),
+            Some(std::path::Path::new("/tmp/site"))
+        );
+
+        // A configured subfolder root is the process working directory.
+        let settings = crate::settings::ProjectSettings {
+            root: "site".to_string(),
+            ..crate::settings::ProjectSettings::defaults()
+        };
+        let cmd = configured_command(&settings, &spec);
+        assert_eq!(
+            cmd.as_std().get_current_dir(),
+            Some(std::path::Path::new("/tmp/site/site"))
         );
     }
 
