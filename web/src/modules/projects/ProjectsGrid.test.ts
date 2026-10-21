@@ -153,8 +153,8 @@ describe("ProjectsGrid", () => {
       await flushPromises();
       const strip = desktop.get("[data-testid='window-drag-strip']");
       expect(strip.find("[data-testid='account-slot']").exists()).toBe(true);
-      // Its own top offset, not the strip's, so the avatar's centre lands on the traffic lights.
-      expect(strip.get("[data-testid='account-slot']").classes()).toContain("top-0");
+      // Nudged down from the strip's top edge so it does not sit above the traffic lights.
+      expect(strip.get("[data-testid='account-slot']").classes()).toContain("top-1");
       desktop.unmount();
     } finally {
       delete document.documentElement.dataset.desktop;
