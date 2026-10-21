@@ -18,8 +18,9 @@ const emit = defineEmits<{ create: [] }>();
           <span class="bg-foreground/10 h-2 w-full rounded" />
           <span class="bg-foreground/10 min-h-0 flex-1 rounded" />
         </span>
-        <span class="flex items-center gap-2 border-t px-3 py-2.5">
+        <span class="flex flex-col gap-0.5 border-t px-3 py-2.5">
           <span class="text-sm font-medium">Astro marketing</span>
+          <span class="text-muted-foreground text-xs">Astro landing page with blog and help content</span>
         </span>
       </button>
     </div>

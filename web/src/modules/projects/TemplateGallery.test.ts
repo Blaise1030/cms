@@ -9,6 +9,7 @@ describe("TemplateGallery", () => {
     expect(w.text()).toContain("Create from a template");
     const card = w.get("[data-testid='template-astro-marketing']");
     expect(card.text()).toContain("Astro marketing");
+    expect(card.text()).toContain("Astro landing page with blog and help content");
     await card.trigger("click");
     expect(w.emitted("create")).toHaveLength(1);
   });
