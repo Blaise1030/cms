@@ -105,6 +105,8 @@ pub struct RepoInfo {
     pub private: bool,
     pub default_branch: String,
     pub can_push: bool,
+    /// ISO 8601 timestamp of the last push, when GitHub reports one.
+    pub pushed_at: Option<String>,
 }
 
 /// A pull request returned by [`GithubAuth::find_pr`] / [`GithubAuth::create_draft_pr`].
@@ -149,6 +151,7 @@ impl From<ApiRepo> for RepoInfo {
             private: r.private,
             default_branch: r.default_branch,
             can_push: r.permissions.is_some_and(|p| p.push),
+            pushed_at: r.pushed_at,
         }
     }
 }
@@ -168,6 +171,8 @@ struct ApiRepo {
     default_branch: String,
     #[serde(default)]
     permissions: Option<ApiPermissions>,
+    #[serde(default)]
+    pushed_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1719,6 +1724,27 @@ mod tests {
         ] {
             assert!(validate_repo(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn repo_info_exposes_the_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main","pushed_at":"2026-10-20T12:00:00Z"}"#,
+        )
+        .unwrap();
+        let info = RepoInfo::from(api);
+        assert_eq!(info.pushed_at.as_deref(), Some("2026-10-20T12:00:00Z"));
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["pushedAt"], "2026-10-20T12:00:00Z");
+    }
+
+    #[test]
+    fn repo_info_tolerates_a_missing_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main"}"#,
+        )
+        .unwrap();
+        assert_eq!(RepoInfo::from(api).pushed_at, None);
     }
 
     #[test]
