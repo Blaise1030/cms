@@ -65,13 +65,12 @@ afterEach(() => {
 });
 
 describe("ProjectsGrid", () => {
-  it("shows the brand mark and account control in the page header", async () => {
+  it("puts the account control in the page header", async () => {
     const w = mountGrid({ user: { login: "ada", id: 1, name: "Ada", avatarUrl: "" } });
     await flushPromises();
     const header = w.get("[data-testid='page-header']");
-    expect(header.find("svg.paw-mark").classes()).toContain("size-7");
     expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
-    expect(w.find("img[src*='orso-logo']").exists()).toBe(false);
+    expect(header.find("svg.paw-mark").exists()).toBe(false);
     w.unmount();
   });
 

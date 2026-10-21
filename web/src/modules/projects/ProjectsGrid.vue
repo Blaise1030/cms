@@ -20,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import PawMark from "@/app/PawMark.vue";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
@@ -80,16 +79,15 @@ function open(project: Project) {
   <div class="flex h-full flex-col">
     <!-- One title-bar row. On macOS it is the drag region and clears the traffic lights. -->
     <div
-      class="flex h-11 shrink-0 items-start justify-between pt-1"
-      :class="macDesktop ? 'pl-20 pr-3 fullscreen:hidden' : 'px-3'"
+      class="flex h-11 shrink-0 items-start justify-end pt-1"
+      :class="macDesktop ? 'pr-3 fullscreen:hidden' : 'px-3'"
       :data-tauri-drag-region="macDesktop ? '' : undefined"
       data-testid="page-header"
     >
-      <PawMark class="size-7" />
       <div data-testid="account-slot"><GithubAccount /></div>
     </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
-      <div class="mx-auto flex w-full max-w-3xl flex-col gap-12 px-10 pt-16 pb-16">
+      <div class="mx-auto flex w-full max-w-2xl flex-col gap-8 px-10 pt-16 pb-16">
         <section class="flex flex-col gap-3">
           <h2 class="text-lg font-medium">Recent</h2>
 
