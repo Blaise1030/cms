@@ -4,12 +4,13 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
-import type { Project } from "@/core/types";
+import type { GithubUser, Project } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { useGithubStore } from "@/modules/github/store";
 import ProjectsGrid from "./ProjectsGrid.vue";
 
 const p = (id: string, devserver: Project["devserver"]): Project => ({
@@ -24,9 +25,10 @@ const p = (id: string, devserver: Project["devserver"]): Project => ({
 let api: Record<string, ReturnType<typeof vi.fn>>;
 let router: Router;
 
-function mountGrid() {
+function mountGrid({ user = null }: { user?: GithubUser | null } = {}) {
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
+  if (user) useGithubStore().user = user;
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -64,11 +66,11 @@ afterEach(() => {
 
 describe("ProjectsGrid", () => {
   it("shows the brand mark and account control in the page header", async () => {
-    const w = mountGrid();
+    const w = mountGrid({ user: { login: "ada", id: 1, name: "Ada", avatarUrl: "" } });
     await flushPromises();
     const header = w.get("[data-testid='page-header']");
     expect(header.find("svg.paw-mark").classes()).toContain("size-7");
-    expect(header.find("[data-testid='account-slot']").exists()).toBe(true);
+    expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
     expect(w.find("img[src*='orso-logo']").exists()).toBe(false);
     w.unmount();
   });

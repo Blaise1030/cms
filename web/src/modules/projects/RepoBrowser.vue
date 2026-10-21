@@ -17,7 +17,10 @@ const router = useRouter();
 const filter = ref("");
 const opening = ref<string | null>(null);
 const loaded = ref(false);
-const error = ref<string | null>(null);
+/** Whether the daemon has told us who (if anyone) is signed in. */
+const authChecked = ref(gh.user !== null);
+const loadError = ref<string | null>(null);
+const openError = ref<string | null>(null);
 
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
@@ -25,11 +28,13 @@ const shown = computed(() => {
 });
 
 async function load() {
-  error.value = null;
+  // Signing in while the mount-time load is in flight would otherwise fetch twice.
+  if (gh.reposLoading) return;
+  loadError.value = null;
   try {
     await gh.loadRepos();
   } catch (e) {
-    error.value = errorMessage(e);
+    loadError.value = errorMessage(e);
   } finally {
     loaded.value = true;
   }
@@ -43,20 +48,26 @@ async function open(fullName: string) {
     return;
   }
   opening.value = fullName;
-  error.value = null;
+  openError.value = null;
   try {
     const created = await projects.cloneRepo(fullName);
     await router.push(projectPath(created.id));
   } catch (e) {
-    error.value = errorMessage(e);
+    openError.value = errorMessage(e);
   } finally {
     opening.value = null;
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    if (!gh.user) await gh.load();
+  } catch {
+    // A failed check leaves no user; the prompt then says how to sign in.
+  } finally {
+    authChecked.value = true;
+  }
   if (gh.user) void load();
-  else gh.load().catch(() => {});
 });
 
 watch(
@@ -70,7 +81,16 @@ watch(
 <template>
   <section class="flex flex-col gap-3" data-testid="repo-browser">
     <h2 class="text-lg font-medium">Open a project</h2>
-    <div v-if="!gh.user" class="flex flex-col items-start gap-2">
+    <p
+      v-if="!authChecked"
+      class="text-muted-foreground flex items-center gap-2 text-sm"
+      data-testid="repo-auth-loading"
+      role="status"
+    >
+      <Spinner class="size-4" />
+      Checking GitHub sign-in…
+    </p>
+    <div v-else-if="!gh.user" class="flex flex-col items-start gap-2">
       <template v-if="gh.deviceFlow">
         <Button size="sm" data-testid="repo-sign-in" @click="gh.signIn()">Sign in with GitHub</Button>
       </template>
@@ -85,6 +105,7 @@ watch(
           v-if="!loaded || gh.reposLoading"
           class="text-muted-foreground flex items-center gap-2 px-4 py-2.5 text-sm"
           data-testid="repo-loading"
+          role="status"
         >
           <Spinner class="size-4" />
           Loading repositories…
@@ -94,21 +115,31 @@ watch(
           <span v-if="relativeTime(r.pushedAt)" class="text-muted-foreground text-xs">
             {{ relativeTime(r.pushedAt) }}
           </span>
-          <Button variant="outline" size="sm" :disabled="opening !== null" @click="open(r.fullName)">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="opening !== null"
+            :aria-label="opening === r.fullName ? `Opening ${r.fullName}` : `Open ${r.fullName}`"
+            :aria-busy="opening === r.fullName"
+            @click="open(r.fullName)"
+          >
             <Spinner v-if="opening === r.fullName" class="size-3.5" />
             <template v-else>Open</template>
           </Button>
         </div>
         <p
-          v-if="loaded && !gh.reposLoading && shown.length === 0"
+          v-if="loaded && !gh.reposLoading && !loadError && shown.length === 0"
           class="text-muted-foreground px-4 py-2.5 text-sm"
         >
           {{ filter.trim() ? "No repositories match." : "No repositories yet." }}
         </p>
       </div>
-      <p v-if="error" class="text-destructive text-sm" role="alert">
-        {{ error }} <Button variant="link" size="sm" @click="load()">Retry</Button>
-      </p>
     </template>
+    <!-- Outside the branches above: a rejected token signs the user out, but the failure must stay visible. -->
+    <p v-if="loadError" class="text-destructive text-sm" role="alert">
+      {{ loadError }} <Button variant="link" size="sm" @click="load()">Retry</Button>
+    </p>
+    <!-- A clone failure is retried by pressing Open again, so no Retry here (it would reload, not clone). -->
+    <p v-else-if="openError" class="text-destructive text-sm" role="alert">{{ openError }}</p>
   </section>
 </template>
