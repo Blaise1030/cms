@@ -12,7 +12,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,15 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import PawMark from "@/app/PawMark.vue";
 import type { Project } from "@/core/types";
@@ -119,50 +109,47 @@ function open(project: Project) {
             No projects yet.
           </p>
 
-          <ItemGroup v-else class="gap-2" data-testid="project-grid">
-            <!-- The whole row links to the project; the menu stops its clicks from following it. -->
-            <Item
+          <div v-else class="divide-y overflow-hidden rounded-lg border" data-testid="project-grid">
+            <div
               v-for="project in recent"
               :key="project.id"
-              as-child
-              variant="outline"
-              size="sm"
+              :data-testid="`project-${project.id}`"
+              class="flex items-center gap-3 px-4 py-2.5"
             >
-              <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
-                <ItemMedia>
-                  <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
-                    <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
-                    <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
-                  </span>
-                </ItemMedia>
-                <ItemContent class="min-w-0">
-                  <ItemTitle>{{ project.name }}</ItemTitle>
-                  <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Badge variant="outline">localhost:{{ project.port }}</Badge>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        :aria-label="`Actions for ${project.name}`"
-                        @click.stop.prevent
-                        @keydown.enter.stop
-                      >
-                        <EllipsisVertical />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
-                        <Trash2 /> Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </ItemActions>
-              </RouterLink>
-            </Item>
-          </ItemGroup>
+              <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
+                <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
+                <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm">{{ project.name }}</span>
+                <span v-if="project.repo" class="text-muted-foreground block truncate text-xs">
+                  {{ project.repo }}
+                </span>
+              </span>
+              <Button variant="outline" size="sm" as-child>
+                <RouterLink :to="projectPath(project.id)" :aria-label="`Open ${project.name}`">
+                  Open
+                </RouterLink>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="`Actions for ${project.name}`"
+                    @keydown.enter.stop
+                  >
+                    <EllipsisVertical />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
+                    <Trash2 /> Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         </section>
         <RepoBrowser />
         <TemplateGallery @create="showNew = true" />
