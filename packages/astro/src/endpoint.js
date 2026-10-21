@@ -68,6 +68,16 @@ function send(res, status, body, headers = {}) {
 }
 
 /**
+ * Safe server-side detail: `Error#message` only. Inspecting a raw error object
+ * could print request-derived values held on custom properties (for example a
+ * schema error carrying the rejected fields).
+ */
+function describeError(error) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return typeof error === "string" ? error : "unknown error";
+}
+
+/**
  * Discard an unread request body so the connection stays usable after an early
  * rejection; chunks are dropped rather than buffered.
  */
@@ -210,7 +220,7 @@ export function createEndpoint({ token, lookup } = {}) {
         send(res, 413, { error: "payload_too_large", message: error.message });
         return drain(req);
       }
-      console.error("orso content endpoint could not read the request body:", error);
+      console.error(`orso content endpoint could not read the request body: ${describeError(error)}`);
       return send(res, 400, { error: "bad_request", message: "Could not read the request body" });
     }
 
@@ -230,7 +240,7 @@ export function createEndpoint({ token, lookup } = {}) {
         return send(res, 400, { error: "bad_request", message: error.message });
       }
       if (error instanceof HttpError) return send(res, error.status, error.body);
-      console.error("orso content endpoint failed:", error);
+      console.error(`orso content endpoint failed: ${describeError(error)}`);
       return send(res, 500, { error: "internal", message: "The content endpoint failed" });
     }
   };

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, test } from "node:test";
+import { format } from "node:util";
 
 import { z } from "astro/zod";
 import { createEndpoint } from "orso-astro";
@@ -27,12 +28,27 @@ const collections = {
     schema: { safeParse: () => { throw new Error("schema exploded"); } },
     reason: null,
   },
+  leaky: {
+    supportedForEditing: true,
+    kind: "markdown",
+    schema: {
+      safeParse: () => {
+        const error = new Error("schema rejected input");
+        // Custom properties can hold body-derived values; they must never be logged.
+        error.details = { fields: { marker: "body-detail-marker" } };
+        throw error;
+      },
+    },
+    reason: null,
+  },
 };
 
 const lookup = (name) => collections[name];
 
 const endpoint = createEndpoint({ token: TOKEN, lookup });
+let lastRequestHeaders;
 const server = http.createServer((req, res) => {
+  lastRequestHeaders = req.headers;
   endpoint(req, res, () => {
     res.statusCode = 418;
     res.end("next");
@@ -57,6 +73,47 @@ const post = (body, { token = TOKEN, method = "POST", contentType = "application
   });
 
 const json = async (response) => ({ status: response.status, body: await response.json(), headers: response.headers });
+
+/**
+ * Send a chunked request with no Content-Length so the server must enforce the
+ * streamed body cap, and keep writing after the 413 so a reset would surface.
+ */
+function streamPost(payload, { chunkSize = 64 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port: server.address().port,
+        path: "/__orso",
+        method: "POST",
+        headers: { "content-type": "application/json", "x-orso-content-token": TOKEN },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () =>
+          resolve({
+            status: response.statusCode,
+            headers: response.headers,
+            body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          }),
+        );
+        response.on("error", reject);
+      },
+    );
+    let offset = 0;
+    const pump = () => {
+      while (offset < payload.length) {
+        const chunk = payload.slice(offset, offset + chunkSize);
+        offset += chunkSize;
+        if (!request.write(chunk)) return request.once("drain", pump);
+      }
+      request.end();
+    };
+    request.on("error", reject);
+    pump();
+  });
+}
 
 /** A request/response pair for cases a real socket cannot produce (e.g. remoteAddress). */
 function fakeExchange({ url = "/__orso", method = "POST", headers = {}, remoteAddress = "10.1.2.3" } = {}) {
@@ -116,11 +173,13 @@ test("endpoint rejects methods other than POST with 405", async () => {
 
 test("endpoint requires an application/json content type", async () => {
   const response = await post({ op: "validate", collection: "blog", fields: {} }, { contentType: "text/plain" });
-  assert.deepEqual(await json(response), {
-    status: 400,
-    body: { error: "bad_request", message: "Content-Type must be application/json" },
-    headers: response.headers,
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "bad_request",
+    message: "Content-Type must be application/json",
   });
+  assert.match(response.headers.get("content-type"), /^application\/json/);
+  assert.equal(response.headers.get("access-control-allow-origin"), null);
 
   const parameters = await post(
     { op: "validate", collection: "blog", fields: { title: "T", description: "D", pubDate: "2026-10-11" } },
@@ -185,13 +244,23 @@ test("endpoint rejects a Content-Length over 2 MiB with 413 before reading the b
     request.flushHeaders();
   });
   assert.equal(status, 413);
+  assert.equal(lastRequestHeaders["content-length"], String(MAX_BODY + 1));
 });
 
 test("endpoint stops reading a streamed body over 2 MiB with 413", async () => {
-  const response = await post(
+  const response = await streamPost(
     JSON.stringify({ op: "validate", collection: "blog", fields: { title: "x".repeat(MAX_BODY) } }),
   );
+
+  // The server saw a chunked upload, so this exercises the streaming cap rather
+  // than the declared Content-Length check covered above.
+  assert.equal(lastRequestHeaders["content-length"], undefined);
+  assert.equal(lastRequestHeaders["transfer-encoding"], "chunked");
+
   assert.equal(response.status, 413);
+  assert.deepEqual(response.body, { error: "payload_too_large", message: "Request body exceeds 2 MiB" });
+  // Writing continued after the 413 without the server resetting the connection.
+  assert.notEqual(response.headers.connection, "close");
 });
 
 test("endpoint validate returns parsed and defaulted fields with no errors", async () => {
@@ -291,7 +360,8 @@ test("endpoint rejects malformed JSON and unknown operations with 400", async ()
 test("endpoint returns a generic 500 and logs only server-side detail", async () => {
   const logged = [];
   const original = console.error;
-  console.error = (...args) => logged.push(args.map(String).join(" "));
+  // Mirror console.error, which inspects object arguments via util.format.
+  console.error = (...args) => logged.push(format(...args));
   try {
     const response = await post({
       op: "validate",
@@ -303,13 +373,22 @@ test("endpoint returns a generic 500 and logs only server-side detail", async ()
     assert.equal(body.error, "internal");
     assert.ok(typeof body.message === "string" && body.message.length > 0);
     assert.ok(!/body-marker-should-not-be-logged/.test(JSON.stringify(body)));
+
+    // A custom property on the error can carry body-derived values; only
+    // name/message may be logged.
+    const leaky = await post({ op: "validate", collection: "leaky", fields: { marker: "body-detail-marker" } });
+    assert.equal(leaky.status, 500);
+    assert.ok(!/body-detail-marker/.test(JSON.stringify(await leaky.json())));
   } finally {
     console.error = original;
   }
   const text = logged.join("\n");
-  assert.match(text, /schema exploded/);
+  assert.match(text, /Error: schema exploded/);
+  assert.match(text, /Error: schema rejected input/);
   assert.ok(!text.includes(TOKEN));
   assert.ok(!text.includes("body-marker-should-not-be-logged"));
+  assert.ok(!text.includes("body-detail-marker"));
+  assert.ok(!/body-marker-should-not-be-logged|body-detail-marker|\[Object|details/.test(text));
 });
 
 test("endpoint fails closed when the server has no token", async () => {
