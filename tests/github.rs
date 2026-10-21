@@ -84,7 +84,8 @@ async fn fake_github_with(repos_unauthorized: bool) -> String {
                     StatusCode::OK,
                     Json(json!([{
                         "full_name": "acme/site", "private": true,
-                        "default_branch": "main", "permissions": { "push": true }
+                        "default_branch": "main", "permissions": { "push": true },
+                        "pushed_at": "2026-10-20T12:00:00Z"
                     }])),
                 )
             }),
@@ -167,7 +168,7 @@ fn no_gh() -> std::path::PathBuf {
 }
 
 const ADA_JSON: &str = r#"{"login":"ada","id":42,"name":"Ada Lovelace","avatar_url":"https://avatars.example/ada.png"}"#;
-const REPOS_JSON: &str = r#"[{"full_name":"acme/site","private":true,"default_branch":"main","permissions":{"push":true}}]"#;
+const REPOS_JSON: &str = r#"[{"full_name":"acme/site","private":true,"default_branch":"main","permissions":{"push":true},"pushed_at":"2026-10-20T12:00:00Z"}]"#;
 
 /// A fake `gh` in `dir`. `logged_in == false` behaves like a logged-out gh (exit 4).
 fn fake_gh(dir: &Path, logged_in: bool) -> std::path::PathBuf {
@@ -288,7 +289,8 @@ async fn sign_in_open_repo_and_author_commits() {
     assert_eq!(
         body["repos"],
         json!([{
-            "fullName": "acme/site", "private": true, "defaultBranch": "main", "canPush": true
+            "fullName": "acme/site", "private": true, "defaultBranch": "main", "canPush": true,
+            "pushedAt": "2026-10-20T12:00:00Z"
         }])
     );
 
@@ -491,7 +493,8 @@ async fn cli_login_signs_in_lists_repos_and_clones_without_storing_a_token() {
     assert_eq!(
         body["repos"],
         json!([{
-            "fullName": "acme/site", "private": true, "defaultBranch": "main", "canPush": true
+            "fullName": "acme/site", "private": true, "defaultBranch": "main", "canPush": true,
+            "pushedAt": "2026-10-20T12:00:00Z"
         }])
     );
 
