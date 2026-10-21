@@ -22,9 +22,11 @@ const authChecked = ref(gh.user !== null);
 const loadError = ref<string | null>(null);
 const openError = ref<string | null>(null);
 
+const REPO_LIMIT = 5;
+
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  return gh.repos.filter((r) => !q || r.fullName.toLowerCase().includes(q));
+  return gh.repos.filter((r) => !q || r.fullName.toLowerCase().includes(q)).slice(0, REPO_LIMIT);
 });
 
 async function load() {

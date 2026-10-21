@@ -255,4 +255,18 @@ describe("RepoBrowser", () => {
     expect(recent.textContent).toContain("3 days ago");
     expect(never.textContent).not.toMatch(/ago|just now/);
   });
+
+  it("shows at most five repositories", async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      fullName: `acme/repo-${i + 1}`,
+      private: false,
+      defaultBranch: "main",
+      canPush: true,
+      pushedAt: null,
+    }));
+    mountBrowser({ api: { githubRepos: vi.fn(async () => many) } });
+    await flushPromises();
+    expect(items()).toHaveLength(5);
+    expect(items()[0]!.textContent).toContain("acme/repo-1");
+  });
 });

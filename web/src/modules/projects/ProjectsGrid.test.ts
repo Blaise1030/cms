@@ -109,17 +109,18 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("links each row to its project page, but the actions menu does not navigate", async () => {
+  it("opens a project from its row, but the actions menu does not navigate", async () => {
     const w = mountGrid();
     await flushPromises();
     const row = w.find("[data-testid='project-a']");
-    expect(row.element.tagName).toBe("A");
-    expect(row.attributes("href")).toBe("/p/a/preview");
-    expect(row.text()).toContain("localhost:4000");
+    expect(row.text()).toContain("Site a");
+    const open = row.get("a");
+    expect(open.attributes("href")).toBe("/p/a/preview");
+    expect(open.text()).toBe("Open");
     await w.find("[aria-label='Actions for Site a']").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/");
-    await row.trigger("click");
+    await open.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/p/a/preview");
     w.unmount();
