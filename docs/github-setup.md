@@ -5,7 +5,7 @@
 1. Install the [GitHub CLI](https://cli.github.com) (`brew install gh`).
 2. Run `gh auth login` once and follow the prompts.
 3. Start `orso serve`. You are signed in: your avatar and name appear in the top-right,
-   and **Open from GitHub** lists your repositories.
+   and **Open a project** lists your repositories.
 
 No OAuth App or client id is needed, and orso never stores your token: it runs
 `gh api …` for your profile, repositories and pull requests (Share preview, Ready for review,
