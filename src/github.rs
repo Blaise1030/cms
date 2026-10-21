@@ -1748,6 +1748,15 @@ mod tests {
     }
 
     #[test]
+    fn repo_info_tolerates_a_null_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main","pushed_at":null}"#,
+        )
+        .unwrap();
+        assert_eq!(RepoInfo::from(api).pushed_at, None);
+    }
+
+    #[test]
     fn form_bodies_are_percent_encoded() {
         assert_eq!(
             form(&[("client_id", "Iv1.abc"), ("scope", "repo read:user")]),
