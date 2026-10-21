@@ -91,8 +91,8 @@ test("kind inference follows the pattern extension", () => {
   assert.equal(inferKind("*.mdx"), "mdx");
   assert.equal(inferKind("*.json"), "json");
   assert.equal(inferKind("*.txt"), "unknown");
-  assert.equal(isSupportedPattern("*.md"), true);
-  assert.equal(isSupportedPattern("*.txt"), false);
+  assert.equal(isSupportedPattern("markdown", "*.md"), true);
+  assert.equal(isSupportedPattern("unknown", "*.txt"), false);
 });
 
 test("orsoGlob passes generateId, retainBody and deferRender to Astro's glob loader", async () => {

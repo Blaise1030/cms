@@ -56,15 +56,8 @@ export function inferKind(pattern) {
  * flat `*.md`/`*.mdx` pattern, and JSON may use `*.json` or name a single
  * `*.json` filename. Nested patterns such as `**\/*.md` are read-only because
  * the editor cannot tell which files an edit would affect.
- *
- * The one-argument form (`isSupportedPattern(pattern)`) is kept for the
- * package's original API and infers the kind from the pattern itself.
  */
 export function isSupportedPattern(kind, pattern) {
-  if (pattern === undefined) {
-    pattern = kind;
-    kind = inferKind(pattern);
-  }
   if (typeof kind !== "string" || typeof pattern !== "string") return false;
   if (kind === "json") {
     return pattern === "*.json" || (!pattern.includes("*") && pattern.endsWith(".json"));
