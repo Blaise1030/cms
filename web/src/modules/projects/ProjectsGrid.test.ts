@@ -140,6 +140,27 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
+  it("keeps the account control on the traffic-light row on desktop", async () => {
+    const browser = mountGrid();
+    await flushPromises();
+    // No title bar in the browser, so the control floats over the page.
+    expect(browser.get("[data-testid='projects-scroll']").find("[data-testid='account-slot']").exists()).toBe(true);
+    browser.unmount();
+
+    document.documentElement.dataset.desktop = "macos";
+    try {
+      const desktop = mountGrid();
+      await flushPromises();
+      const strip = desktop.get("[data-testid='window-drag-strip']");
+      expect(strip.find("[data-testid='account-slot']").exists()).toBe(true);
+      // Its own top offset, not the strip's, so the avatar's centre lands on the traffic lights.
+      expect(strip.get("[data-testid='account-slot']").classes()).toContain("top-0");
+      desktop.unmount();
+    } finally {
+      delete document.documentElement.dataset.desktop;
+    }
+  });
+
   it("drags the macOS desktop window from a strip along the top, and only there", async () => {
     const browser = mountGrid();
     await flushPromises();
