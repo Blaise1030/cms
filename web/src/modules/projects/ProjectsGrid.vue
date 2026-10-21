@@ -88,8 +88,8 @@ function open(project: Project) {
   <div class="flex h-full flex-col">
     <div v-if="macDesktop" class="relative h-11 shrink-0 fullscreen:hidden" data-tauri-drag-region data-testid="window-drag-strip">
       <!-- macOS centres the traffic lights 14px below the window's top edge; the 28px avatar
-           starts at 0 so its centre lands on that line. -->
-      <div class="absolute top-0 right-3" data-testid="account-slot">
+           starts 4px down so its 20px image shares their top edge. -->
+      <div class="absolute top-1 right-3" data-testid="account-slot">
         <GithubAccount />
       </div>
     </div>
