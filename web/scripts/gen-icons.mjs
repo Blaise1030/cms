@@ -13,7 +13,6 @@ mkdirSync(webIcons, { recursive: true });
 mkdirSync(tauriIcons, { recursive: true });
 
 const BG = [15, 15, 18];
-const FG = [245, 245, 247];
 
 function crc32(buf) {
   let c,
@@ -178,40 +177,73 @@ if (process.argv.includes("--bounds")) {
   process.exit(0);
 }
 
-function onStroke(x, y) {
-  const reach = STROKE / 2;
-  for (const [cx, cy, r] of TOES) if (Math.abs(Math.hypot(x - cx, y - cy) - r) <= reach) return true;
+function strokeDistance(x, y) {
+  let best = Infinity;
+  for (const [cx, cy, r] of TOES) best = Math.min(best, Math.abs(Math.hypot(x - cx, y - cy) - r));
+  if (best <= STROKE / 2) return best; // ink; nothing else can change the classification
   for (const [x1, y1, x2, y2] of PAD_SEGMENTS) {
     const dx = x2 - x1;
     const dy = y2 - y1;
     const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));
-    if (Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) <= reach) return true;
+    best = Math.min(best, Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)));
+    if (best <= STROKE / 2) return best;
   }
-  return false;
+  return best;
 }
 
+// Where a point in the icon's unit square falls on the mark's 24-unit grid.
 // `fill` is the share of the icon the paw's longest side covers.
-function inPaw(u, v, fill) {
+function pawAt(u, v, fill) {
   const span = Math.max(PAW_BOUNDS.maxX - PAW_BOUNDS.minX, PAW_BOUNDS.maxY - PAW_BOUNDS.minY);
   const size = span / fill;
-  return onStroke(PAW_BOUNDS.cx + (u - 0.5) * size, PAW_BOUNDS.cy + (v - 0.5) * size);
+  return [PAW_BOUNDS.cx + (u - 0.5) * size, PAW_BOUNDS.cy + (v - 0.5) * size];
+}
+
+// Cast silver, matching the gradient in PawMark.vue and the standalone SVGs.
+const METAL = [
+  [0, [201, 202, 212]],
+  [0.18, [246, 247, 251]],
+  [0.45, [194, 195, 206]],
+  [0.72, [154, 155, 167]],
+  [1, [111, 112, 124]],
+];
+const RIM = [35, 36, 43];
+const RIM_WIDTH = 0.15;
+
+function mix(a, b, t) {
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t));
+}
+
+function silverAt(x, y) {
+  // Projection onto the gradient's (2,1) -> (22,23) axis.
+  const t = Math.max(0, Math.min(1, ((x - 2) * 20 + (y - 1) * 22) / (20 * 20 + 22 * 22)));
+  let i = 1;
+  while (i < METAL.length - 1 && t > METAL[i][0]) i++;
+  const [t0, c0] = METAL[i - 1];
+  const [t1, c1] = METAL[i];
+  return mix(c0, c1, (t - t0) / (t1 - t0));
 }
 
 // A paw inside a rounded square; `maskable` bleeds to the edges and keeps the paw in the
-// 80% safe zone.
-function icon({ maskable }) {
+// 80% safe zone. `inset` shrinks the square for macOS's 824/1024 app-icon grid.
+function icon({ maskable = false, inset = 0 }) {
   return (u, v) => {
-    if (inPaw(u, v, maskable ? 0.5 : 0.62)) return [...FG, 1];
-    if (maskable || inRoundRect(u, v, 0, 0, 1, 1, 0.22)) return [...BG, 1];
-    return [0, 0, 0, 0];
+    const x = (u - inset) / (1 - 2 * inset);
+    const y = (v - inset) / (1 - 2 * inset);
+    if (!maskable && !inRoundRect(x, y, 0, 0, 1, 1, 185 / 824)) return [0, 0, 0, 0];
+    const [px, py] = pawAt(x, y, maskable ? 0.5 : 0.62);
+    const d = strokeDistance(px, py);
+    if (d <= STROKE / 2) return [...silverAt(px, py), 1];
+    if (d <= STROKE / 2 + RIM_WIDTH) return [...mix(BG, RIM, 0.7), 1];
+    return [...BG, 1];
   };
 }
 
 const raster = (() => {
   const cache = new Map();
-  return (size, maskable = false) => {
-    const key = `${size}:${maskable}`;
-    if (!cache.has(key)) cache.set(key, png(size, icon({ maskable })));
+  return (size, { maskable = false, inset = 0 } = {}) => {
+    const key = `${size}:${maskable}:${inset}`;
+    if (!cache.has(key)) cache.set(key, png(size, icon({ maskable, inset })));
     return cache.get(key);
   };
 })();
@@ -219,17 +251,19 @@ const raster = (() => {
 const pwaFiles = {
   "icon-192.png": raster(192),
   "icon-512.png": raster(512),
-  "maskable-512.png": raster(512, true),
-  "apple-touch-icon.png": raster(180, true),
+  "maskable-512.png": raster(512, { maskable: true }),
+  "apple-touch-icon.png": raster(180, { maskable: true }),
 };
 for (const [name, data] of Object.entries(pwaFiles)) writeFileSync(path.join(webIcons, name), data);
 
+// macOS draws app icons on an 824 px grid inside a 1024 px canvas.
+const MAC_INSET = 100 / 1024;
 const appFiles = {
-  "32x32.png": raster(32),
-  "64x64.png": raster(64),
-  "128x128.png": raster(128),
-  "128x128@2x.png": raster(256),
-  "icon.png": raster(512),
+  "32x32.png": raster(32, { inset: MAC_INSET }),
+  "64x64.png": raster(64, { inset: MAC_INSET }),
+  "128x128.png": raster(128, { inset: MAC_INSET }),
+  "128x128@2x.png": raster(256, { inset: MAC_INSET }),
+  "icon.png": raster(512, { inset: MAC_INSET }),
 };
 for (const [name, data] of Object.entries(appFiles)) writeFileSync(path.join(tauriIcons, name), data);
 
@@ -250,7 +284,7 @@ if (process.platform === "darwin") {
   const dir = mkdtempSync(path.join(tmpdir(), "orso-iconset-"));
   const iconset = `${dir}/orso.iconset`;
   mkdirSync(iconset);
-  for (const [name, size] of ICONSET) writeFileSync(path.join(iconset, name), raster(size));
+  for (const [name, size] of ICONSET) writeFileSync(path.join(iconset, name), raster(size, { inset: MAC_INSET }));
   execFileSync("iconutil", ["-c", "icns", iconset, "-o", path.join(tauriIcons, "icon.icns")]);
   rmSync(dir, { recursive: true });
 } else {

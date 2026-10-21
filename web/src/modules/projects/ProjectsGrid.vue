@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, FolderGit2, PawPrint, Plus, Trash2 } from "@lucide/vue";
+import { EllipsisVertical, FolderGit2, Plus, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -30,6 +30,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
+import PawMark from "@/app/PawMark.vue";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
@@ -93,7 +94,7 @@ function open(project: Project) {
       <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
       <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
         <header class="text-center">
-          <PawPrint class="mx-auto mb-1 size-12" />
+          <PawMark class="mx-auto mb-1 size-12" />
           <h1 class="text-3xl font-bold tracking-tight">orso</h1>
           <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
         </header>

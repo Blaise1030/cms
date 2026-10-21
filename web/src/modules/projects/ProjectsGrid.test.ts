@@ -63,12 +63,13 @@ afterEach(() => {
 });
 
 describe("ProjectsGrid", () => {
-  it("shows the paw-print brand mark in the welcome header", async () => {
+  it("shows the metallic paw-print brand mark in the welcome header", async () => {
     const w = mountGrid();
     await flushPromises();
-    const mark = w.find("svg.lucide-paw-print");
+    const mark = w.find("svg.paw-mark");
     expect(mark.exists()).toBe(true);
     expect(mark.classes()).toContain("size-12");
+    expect(mark.find("linearGradient").exists()).toBe(true);
     expect(w.find("img[src*='orso-logo']").exists()).toBe(false);
     w.unmount();
   });
