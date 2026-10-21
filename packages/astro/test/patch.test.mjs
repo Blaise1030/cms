@@ -141,6 +141,24 @@ test("patchSource writes date-like strings so Astro frontmatter parsing keeps th
   assert.deepEqual(parsed.tags, ["news", "2026-10-12"]);
 });
 
+test("patchSource preserves YAML anchors and aliases when an unrelated field changes", () => {
+  const source = "---\ntitle: &t Anchor\ndescription: *t\npubDate: 2026-10-11\ncoverAlt: Cover\n\n---\nBody\n";
+  assert.equal(blog({ source, fields: { coverAlt: "New" } }), source.replace("coverAlt: Cover", "coverAlt: New"));
+});
+
+test("patchSource refuses an edit that would break a YAML anchor instead of dropping it", () => {
+  const source = "---\ntitle: &t Anchor\ndescription: *t\npubDate: 2026-10-11\n---\nBody\n";
+  assert.throws(
+    () => blog({ source, fields: { title: "Changed" } }),
+    (error) => error instanceof PatchError && error.message === "Patch could not preserve YAML structure",
+  );
+});
+
+test("patchSource preserves blank lines in frontmatter", () => {
+  const source = "---\ntitle: Post\ndescription: Kept\n\npubDate: 2026-10-11\ncoverAlt: Cover\n---\nBody\n";
+  assert.equal(blog({ source, fields: { coverAlt: "New" } }), source.replace("coverAlt: Cover", "coverAlt: New"));
+});
+
 test("patchSource handles MDX frontmatter and body replacement", () => {
   const source = "---\ntitle: Old\ndescription: Kept\npubDate: 2026-10-11\n---\n\n<Widget value={1} />\n";
   assert.equal(
@@ -176,17 +194,47 @@ test("patchSource keeps JSON key order, indentation and quoting for untouched by
   assert.equal(page({ source, fields: {}, body: "ignored\n" }), source);
 });
 
-test("patchSource edits nested JSON leaves and inserts missing keys without reformatting siblings", () => {
+test("patchSource preserves JSON comments while editing other fields", () => {
+  const source = '{\n  // page metadata\n  "title": "Old",\n  /* keep */ "description": "Kept",\n  "tags": ["one"]\n}\n';
+  assert.equal(page({ source, fields: { title: "New" } }), source.replace('"Old"', '"New"'));
+  // The comment on the edited line also survives.
+  const trailing = '{\n  "title": "Old", // heading\n  "description": "Kept"\n}\n';
+  assert.equal(page({ source: trailing, fields: { title: "New" } }), trailing.replace('"Old"', '"New"'));
+  // Inserting a key keeps the leading comment and formats the new line.
+  const commented = '{\n  // page metadata\n  "title": "Page"\n}\n';
+  assert.equal(
+    page({ source: commented, fields: { description: "Added" } }),
+    '{\n  // page metadata\n  "title": "Page",\n  "description": "Added"\n}\n',
+  );
+});
+
+test("patchSource edits nested JSON leaves and inserts missing keys with the source indentation", () => {
   const nested = '{\n  "title": "Page",\n  "menu": { "label": "Home", "href": "/" }\n}\n';
   assert.equal(
     page({ source: nested, fields: { menu: { label: "Start", href: "/" } } }),
     nested.replace('"Home"', '"Start"'),
   );
 
-  const inserted = page({ source: '{\n  "title": "Page"\n}\n', fields: { description: "Added" } });
-  assert.deepEqual(JSON.parse(inserted), { title: "Page", description: "Added" });
-  assert.ok(inserted.indexOf('"title"') < inserted.indexOf('"description"'), inserted);
-  assert.ok(inserted.endsWith("\n}\n"), inserted);
+  const source = '{\n  "title": "Page"\n}\n';
+  assert.equal(
+    page({ source, fields: { description: "Added" } }),
+    '{\n  "title": "Page",\n  "description": "Added"\n}\n',
+  );
+  assert.equal(
+    page({ source: '{\n\t"title": "Page"\n}\n', fields: { description: "Added" } }),
+    '{\n\t"title": "Page",\n\t"description": "Added"\n}\n',
+  );
+  assert.equal(
+    page({ source: '{\r\n  "title": "Page"\r\n}\r\n', fields: { description: "Added" } }),
+    '{\r\n  "title": "Page",\r\n  "description": "Added"\r\n}\r\n',
+  );
+
+  // Inserting into an inline object expands it with the surrounding indentation.
+  const menu = '{\n  "title": "Page",\n  "menu": { "label": "Home" }\n}\n';
+  assert.equal(
+    page({ source: menu, fields: { menu: { label: "Home", href: "/" } } }),
+    '{\n  "title": "Page",\n  "menu": {\n    "label": "Home",\n    "href": "/"\n  }\n}\n',
+  );
 });
 
 test("patchSource splices JSON lists in place using their own separators", () => {

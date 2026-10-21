@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import jsyaml from "js-yaml";
-import { applyEdits, findNodeAtLocation, modify, parseTree } from "jsonc-parser";
+import { applyEdits, findNodeAtLocation, modify, parse, parseTree, printParseErrorCode } from "jsonc-parser";
 import { Document, isMap, isScalar, isSeq, parseDocument, visit } from "yaml";
 
 /** Complete-candidate validation failed; carries Zod-style issue paths. */
@@ -86,16 +86,15 @@ function spliceList(text, items, open, close, { at, remove, insert }, element) {
 }
 
 function patchJson(source, fields, unset, schema) {
-  let previous;
-  try {
-    previous = JSON.parse(source);
-  } catch (error) {
-    throw new PatchError(`Invalid JSON: ${error.message}`);
-  }
+  // jsonc-parser reads JSONC so comments survive edits that never touch them.
+  const parseErrors = [];
+  const previous = parse(source, parseErrors);
+  if (parseErrors.length) throw new PatchError(`Invalid JSON at offset ${parseErrors[0].offset}: ${printParseErrorCode(parseErrors[0].error)}`);
   if (!previous || Array.isArray(previous) || typeof previous !== "object") throw new PatchError("Expected JSON object");
   const next = candidate(previous, fields, unset);
   validateCandidate(schema, next);
   const unit = /^([ \t]+)\S/m.exec(source)?.[1] ?? "  ";
+  const formatting = { formattingOptions: { insertSpaces: !unit.startsWith("\t"), tabSize: unit.length, eol: source.includes("\r\n") ? "\r\n" : "\n" } };
   let result = source;
   for (const { path, value, splice } of changes(previous, next)) {
     const node = findNodeAtLocation(parseTree(result), path);
@@ -106,7 +105,7 @@ function patchJson(source, fields, unset, schema) {
       const element = (value, sibling) => jsonElement(value, sibling && result.slice(sibling.start, sibling.end), /^\s*$/.test(lineIndent) ? lineIndent : "", unit, result.includes("\r\n") ? "\r\n" : "\n");
       result = spliceList(result, items, node.offset + 1, node.offset + node.length - 1, splice, element);
     } else if (node && value !== undefined) result = result.slice(0, node.offset) + JSON.stringify(value) + result.slice(node.offset + node.length);
-    else result = applyEdits(result, modify(result, path, value, {}));
+    else result = applyEdits(result, modify(result, path, value, value === undefined ? {} : formatting));
   }
   return result;
 }
