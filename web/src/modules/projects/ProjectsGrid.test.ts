@@ -63,14 +63,22 @@ afterEach(() => {
 });
 
 describe("ProjectsGrid", () => {
-  it("shows the metallic paw-print brand mark in the welcome header", async () => {
+  it("shows the brand mark and account control in the page header", async () => {
     const w = mountGrid();
     await flushPromises();
-    const mark = w.find("svg.paw-mark");
-    expect(mark.exists()).toBe(true);
-    expect(mark.classes()).toContain("size-12");
-    expect(mark.find("linearGradient").exists()).toBe(true);
+    const header = w.get("[data-testid='page-header']");
+    expect(header.find("svg.paw-mark").classes()).toContain("size-7");
+    expect(header.find("[data-testid='account-slot']").exists()).toBe(true);
     expect(w.find("img[src*='orso-logo']").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("renders the three home sections", async () => {
+    const w = mountGrid();
+    await flushPromises();
+    for (const heading of ["Open a project", "Create from a template", "Recent"]) {
+      expect(w.findAll("h2").map((h) => h.text())).toContain(heading);
+    }
     w.unmount();
   });
 
@@ -103,7 +111,7 @@ describe("ProjectsGrid", () => {
   it("creates a project from the dialog", async () => {
     const w = mountGrid();
     await flushPromises();
-    byText("New project")!.click();
+    await w.get("[data-testid='template-astro-marketing']").trigger("click");
     await flushPromises();
     const input = document.body.querySelector<HTMLInputElement>("input[aria-label='Project name']")!;
     input.value = "Landing";
@@ -140,47 +148,19 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("keeps the account control on the traffic-light row on desktop", async () => {
+  it("keeps the header draggable only on desktop", async () => {
     const browser = mountGrid();
     await flushPromises();
-    // No title bar in the browser, so the control floats over the page.
-    expect(browser.get("[data-testid='projects-scroll']").find("[data-testid='account-slot']").exists()).toBe(true);
+    expect(browser.get("[data-testid='page-header']").attributes("data-tauri-drag-region")).toBeUndefined();
     browser.unmount();
 
     document.documentElement.dataset.desktop = "macos";
     try {
       const desktop = mountGrid();
       await flushPromises();
-      const strip = desktop.get("[data-testid='window-drag-strip']");
-      expect(strip.find("[data-testid='account-slot']").exists()).toBe(true);
-      // Nudged down from the strip's top edge so it does not sit above the traffic lights.
-      expect(strip.get("[data-testid='account-slot']").classes()).toContain("top-1");
-      desktop.unmount();
-    } finally {
-      delete document.documentElement.dataset.desktop;
-    }
-  });
-
-  it("drags the macOS desktop window from a strip along the top, and only there", async () => {
-    const browser = mountGrid();
-    await flushPromises();
-    expect(browser.find("[data-tauri-drag-region]").exists()).toBe(false);
-    browser.unmount();
-
-    document.documentElement.dataset.desktop = "macos";
-    try {
-      const desktop = mountGrid();
-      await flushPromises();
-      expect(desktop.findAll("[data-tauri-drag-region]")).toHaveLength(1);
-      const strip = desktop.get("[data-testid='window-drag-strip']");
-      expect(strip.attributes("data-tauri-drag-region")).toBe("");
-      // Its own row above the scrolling page, so it never covers projects or the scrollbar.
-      expect(strip.classes()).not.toContain("fixed");
-      expect(strip.classes()).not.toContain("absolute");
-      const scroller = desktop.get("[data-testid='projects-scroll']");
-      expect(scroller.element.contains(strip.element)).toBe(false);
-      expect(strip.element.nextElementSibling).toBe(scroller.element);
-      expect(scroller.text()).toContain("Site a");
+      const header = desktop.get("[data-testid='page-header']");
+      expect(header.attributes("data-tauri-drag-region")).toBe("");
+      expect(header.element.nextElementSibling).toBe(desktop.get("[data-testid='projects-scroll']").element);
       desktop.unmount();
     } finally {
       delete document.documentElement.dataset.desktop;
