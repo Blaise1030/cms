@@ -22,6 +22,8 @@ export {
   writeManifest,
 };
 
+export { PatchError, SchemaIssuesError, patchSource } from "./patch.js";
+
 /**
  * Wrap Astro's `glob()` loader and record the options Astro hides.
  *
