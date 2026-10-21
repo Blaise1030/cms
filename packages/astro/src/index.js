@@ -1,8 +1,26 @@
 import { glob } from "astro/loaders";
 
-import { GLOB_META, inferKind, isSupportedPattern, normalizeBase } from "./manifest.js";
+import {
+  GLOB_META,
+  blocked,
+  describeSchema,
+  inferKind,
+  isSupportedPattern,
+  loadContent,
+  normalizeBase,
+  writeManifest,
+} from "./manifest.js";
 
-export { GLOB_META, inferKind, isSupportedPattern, normalizeBase };
+export {
+  GLOB_META,
+  blocked,
+  describeSchema,
+  inferKind,
+  isSupportedPattern,
+  loadContent,
+  normalizeBase,
+  writeManifest,
+};
 
 /**
  * Wrap Astro's `glob()` loader and record the options Astro hides.
