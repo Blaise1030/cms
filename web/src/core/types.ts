@@ -386,6 +386,7 @@ export interface GithubRepo {
   private: boolean;
   defaultBranch: string;
   canPush: boolean;
+  pushedAt: string | null;
 }
 
 export interface ContentCollection {
