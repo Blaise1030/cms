@@ -75,22 +75,37 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("renders the three home sections", async () => {
+  it("shows recent projects first, then the two ways to start one", async () => {
     const w = mountGrid();
     await flushPromises();
-    for (const heading of ["Open a project", "Create from a template", "Recent"]) {
-      expect(w.findAll("h2").map((h) => h.text())).toContain(heading);
-    }
+    expect(w.findAll("h2").map((h) => h.text())).toEqual([
+      "Recent",
+      "Open a project",
+      "Create from a template",
+    ]);
     w.unmount();
   });
 
-  it("lists projects with status badges", async () => {
+  it("lists projects newest first with status badges", async () => {
     const w = mountGrid();
     await flushPromises();
     const cards = w.findAll("[data-testid^='project-']").filter((c) => c.attributes("data-testid") !== "project-grid" && c.attributes("data-testid") !== "project-status");
     expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.attributes("data-testid"))).toEqual(["project-b", "project-a"]);
     const badges = w.findAll("[data-testid='project-status']").map((b) => b.text());
-    expect(badges).toEqual(["Ready", "Crashed"]);
+    expect(badges).toEqual(["Crashed", "Ready"]);
+    w.unmount();
+  });
+
+  it("shows only the five most recent projects", async () => {
+    api.listProjects = vi.fn(async () => ["1", "2", "3", "4", "5", "6", "7"].map((id) => p(id, "ready")));
+    const w = mountGrid();
+    await flushPromises();
+    const rows = w
+      .findAll("[data-testid^='project-']")
+      .map((c) => c.attributes("data-testid")!)
+      .filter((id) => id !== "project-grid" && id !== "project-status");
+    expect(rows).toEqual(["project-7", "project-6", "project-5", "project-4", "project-3"]);
     w.unmount();
   });
 

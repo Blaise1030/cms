@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { EllipsisVertical, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -46,6 +46,10 @@ const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
 const store = useProjectsStore();
 const macDesktop = isMacDesktop();
+
+/** Newest first, capped: the daemon and the store append new projects to the end. */
+const RECENT_LIMIT = 5;
+const recent = computed(() => [...store.projects].reverse().slice(0, RECENT_LIMIT));
 
 const STATUS_DOT: Record<Project["devserver"], string> = {
   starting: "bg-amber-500 animate-pulse",
@@ -96,8 +100,6 @@ function open(project: Project) {
     </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
       <div class="mx-auto flex w-full max-w-3xl flex-col gap-12 px-10 pt-16 pb-16">
-        <RepoBrowser />
-        <TemplateGallery @create="showNew = true" />
         <section class="flex flex-col gap-3">
           <h2 class="text-lg font-medium">Recent</h2>
 
@@ -120,7 +122,7 @@ function open(project: Project) {
           <ItemGroup v-else class="gap-2" data-testid="project-grid">
             <!-- The whole row links to the project; the menu stops its clicks from following it. -->
             <Item
-              v-for="project in store.projects"
+              v-for="project in recent"
               :key="project.id"
               as-child
               variant="outline"
@@ -162,6 +164,8 @@ function open(project: Project) {
             </Item>
           </ItemGroup>
         </section>
+        <RepoBrowser />
+        <TemplateGallery @create="showNew = true" />
       </div>
     </div>
   </div>
