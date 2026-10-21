@@ -23,6 +23,7 @@ export {
 };
 
 export { PatchError, SchemaIssuesError, patchSource } from "./patch.js";
+export { createEndpoint } from "./endpoint.js";
 
 /**
  * Wrap Astro's `glob()` loader and record the options Astro hides.
