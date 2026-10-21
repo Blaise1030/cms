@@ -70,7 +70,7 @@ Open-from-GitHub flow is a modal, and the template is only reachable through a "
 
 - Heading `Create from a template`.
 - Responsive grid (`grid gap-4 sm:grid-cols-2 lg:grid-cols-3`) of template cards.
-- One card for **Astro marketing**: a muted preview area with the Astro glyph (no fabricated
+- One card for **Astro marketing**: a muted wireframe preview (a few placeholder bars, not a fake
   screenshot), the template name, and a one-line description. The whole card is a button that opens
   `NewProjectDialog`.
 
