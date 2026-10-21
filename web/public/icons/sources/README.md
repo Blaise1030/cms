@@ -6,8 +6,8 @@ replaced the Orso bear on 2026-10-21.
 
 The silver is a linear gradient across the mark (`#c9cad4` → `#f6f7fb` → `#6f707c`) laid
 over a dark under-stroke, so the highlights stay readable on a light background. The same
-stops appear in `web/src/app/PawMark.vue`, `../../../../src-tauri/ui/splash.html`, the
-standalone SVGs, and `gen-icons.mjs`; change them together.
+stops appear in `web/src/app/PawMark.vue`, the standalone SVGs, and `gen-icons.mjs`; change
+them together.
 
 - `../orso-logo.svg` and `../orso-mark.svg` — the paw on a 512 px rounded square
   (`#0f0f12`), served as the browser favicon.
@@ -16,7 +16,8 @@ standalone SVGs, and `gen-icons.mjs`; change them together.
   `web/scripts/gen-icons.mjs` (`node web/scripts/gen-icons.mjs`, which also assembles
   `icon.icns` with macOS's `iconutil`). These sit on macOS's 824 px grid inside the 1024 px
   canvas, which is what keeps the Dock icon the same size as other apps.
-- `../../../../src-tauri/ui/splash.html` — inlines the mark rather than loading an asset.
+
+The desktop splash deliberately shows only the loader and the "Starting orso…" text.
 
 Lucide is ISC licensed: https://github.com/lucide-icons/lucide/blob/main/LICENSE
 
