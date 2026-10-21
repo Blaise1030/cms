@@ -666,7 +666,7 @@ Expected: `PWA check ok`.
 
 - [ ] **Step 3: Run the Rust tests**
 
-Run: `cargo test --lib`
+Run: `cargo test`
 Expected: PASS, including `repo_info_exposes_the_push_time` and `repo_info_tolerates_a_missing_push_time`.
 
 - [ ] **Step 4: Confirm a clean tree and report**
