@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, FolderGit2, Plus, Trash2 } from "@lucide/vue";
+import { EllipsisVertical, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -35,9 +35,9 @@ import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
-import { useGithubStore } from "@/modules/github/store";
 import NewProjectDialog from "./NewProjectDialog.vue";
-import OpenRepoDialog from "./OpenRepoDialog.vue";
+import RepoBrowser from "./RepoBrowser.vue";
+import TemplateGallery from "./TemplateGallery.vue";
 import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
 import { projectPath } from "@/router";
@@ -45,7 +45,6 @@ import { projectPath } from "@/router";
 const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
 const store = useProjectsStore();
-const gh = useGithubStore();
 const macDesktop = isMacDesktop();
 
 const STATUS_DOT: Record<Project["devserver"], string> = {
@@ -55,7 +54,6 @@ const STATUS_DOT: Record<Project["devserver"], string> = {
 };
 
 const showNew = ref(false);
-const showOpen = ref(false);
 const pendingDelete = ref<Project | null>(null);
 const deleting = ref(false);
 
@@ -86,34 +84,22 @@ function open(project: Project) {
 
 <template>
   <div class="flex h-full flex-col">
-    <div v-if="macDesktop" class="relative h-11 shrink-0 fullscreen:hidden" data-tauri-drag-region data-testid="window-drag-strip">
-      <!-- macOS centres the traffic lights 14px below the window's top edge; the 28px avatar
-           starts 4px down so its 20px image shares their top edge. -->
-      <div class="absolute top-1 right-3" data-testid="account-slot">
-        <GithubAccount />
-      </div>
+    <!-- One title-bar row. On macOS it is the drag region and clears the traffic lights. -->
+    <div
+      class="flex h-11 shrink-0 items-start justify-between pt-1"
+      :class="macDesktop ? 'pl-20 pr-3 fullscreen:hidden' : 'px-3'"
+      :data-tauri-drag-region="macDesktop ? '' : undefined"
+      data-testid="page-header"
+    >
+      <PawMark class="size-7" />
+      <div data-testid="account-slot"><GithubAccount /></div>
     </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
-      <div v-if="!macDesktop" class="absolute top-3 right-3" data-testid="account-slot">
-        <GithubAccount />
-      </div>
-      <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
-      <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
-        <header class="text-center">
-          <PawMark class="mx-auto mb-1 size-12" />
-          <h1 class="text-3xl font-bold tracking-tight">orso</h1>
-          <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
-        </header>
-
-        <div class="flex gap-2">
-          <Button @click="showNew = true"><Plus /> New project</Button>
-          <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
-            <FolderGit2 /> Open from GitHub
-          </Button>
-        </div>
-
-        <section class="flex w-full max-w-xl flex-col gap-3">
-          <h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
+      <div class="mx-auto flex w-full max-w-3xl flex-col gap-12 px-10 pt-16 pb-16">
+        <RepoBrowser />
+        <TemplateGallery @create="showNew = true" />
+        <section class="flex flex-col gap-3">
+          <h2 class="text-lg font-medium">Recent</h2>
 
           <p v-if="store.error" class="text-destructive text-sm" role="alert">
             {{ store.error }}
@@ -141,37 +127,37 @@ function open(project: Project) {
               size="sm"
             >
               <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
-              <ItemMedia>
-                <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
-                  <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
-                  <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
-                </span>
-              </ItemMedia>
-              <ItemContent class="min-w-0">
-                <ItemTitle>{{ project.name }}</ItemTitle>
-                <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Badge variant="outline">localhost:{{ project.port }}</Badge>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      :aria-label="`Actions for ${project.name}`"
-                      @click.stop.prevent
-                      @keydown.enter.stop
-                    >
-                      <EllipsisVertical />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
-                      <Trash2 /> Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </ItemActions>
+                <ItemMedia>
+                  <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
+                    <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
+                    <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
+                  </span>
+                </ItemMedia>
+                <ItemContent class="min-w-0">
+                  <ItemTitle>{{ project.name }}</ItemTitle>
+                  <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Badge variant="outline">localhost:{{ project.port }}</Badge>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        :aria-label="`Actions for ${project.name}`"
+                        @click.stop.prevent
+                        @keydown.enter.stop
+                      >
+                        <EllipsisVertical />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
+                        <Trash2 /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </ItemActions>
               </RouterLink>
             </Item>
           </ItemGroup>
@@ -181,7 +167,6 @@ function open(project: Project) {
   </div>
 
   <NewProjectDialog v-model:open="showNew" @created="open" />
-  <OpenRepoDialog v-model:open="showOpen" @created="open" />
 
   <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
     <AlertDialogContent>
