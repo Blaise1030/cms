@@ -13,6 +13,7 @@ pub mod error;
 pub mod events;
 pub mod fs;
 pub mod git;
+pub mod git_shim;
 pub mod github;
 pub mod hook;
 pub mod http;

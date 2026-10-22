@@ -199,13 +199,15 @@ export default {{
 /// itself, in the shape the app lists them (`content/*` + branch description as the title).
 pub const GIT_GUIDE: &str = r#"# Changes and syncing (this project is edited through a no-code app)
 
-The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I started a new draft called Pricing page", "I brought in the latest version of the site") — never ask them to run git.
+The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I brought in the latest version of the site") — never ask them to run git.
 
 A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its human title is stored with `git config branch.<branch>.description "<Title>"`. The app lists these as the user's changes.
 
-- Never edit or commit on `main`. Before editing while on `main`, start a change.
-- Start a change: commit any pending work on the current change first (`git add -A && git commit -m "<summary>"`), then branch from the latest main — `git fetch origin main && git checkout -b content/<slug> origin/main` when an `origin` remote exists, otherwise `git checkout -b content/<slug> main` — and set its description. Pick a short title from what the user asked for; if the slug exists, add `-2`, `-3`, ….
+- Only the person switches changes, in the app's change picker. Never switch to a different change yourself — do not run `git checkout <branch>` or `git switch` to move to another change (the app blocks this). Stay on the current change.
+- If the work needs a new change, do not create or switch to one yourself. Propose it in plain words ("I'd start a new draft called …") and ask the person to create it in the app, then continue.
 - Do a new, unrelated request in a new change; keep follow-ups on the current one.
+- Never edit or commit on `main`. If the current change is the live site (`main`), ask the person to create a change first.
+- Save your work as you go: `git add -A && git commit -m "<summary>"` before anything risky, so nothing is lost.
 - Get the latest / sync with main: commit pending work, then `git fetch origin main && git merge origin/main` (just `git merge main` without a remote). If it conflicts, resolve it keeping the intent of both sides, run nothing destructive, and ask the user in plain words when the right result is unclear.
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
 - The app also commits your work automatically at the end of each turn; that is expected."#;
@@ -532,6 +534,14 @@ mod tests {
         assert!(g.contains("crashed"));
         assert!(g.contains("the app saves them when your turn ends"));
         assert!(!g.contains("not saved yet"));
+    }
+
+    #[test]
+    fn git_guide_no_longer_starts_or_switches_changes() {
+        assert!(!agent_guide().contains("git checkout -b"));
+        assert!(!GIT_GUIDE.contains("git checkout -b"));
+        assert!(GIT_GUIDE.contains("Only the person switches changes"));
+        assert!(GIT_GUIDE.contains("Propose it in plain words"));
     }
 
     use super::*;

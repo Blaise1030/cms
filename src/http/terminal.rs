@@ -202,7 +202,7 @@ pub(crate) async fn new_agent_session(provider: &Provider, dir: &FsPath) -> Agen
 async fn create_cursor_chat(provider: &Provider, dir: &FsPath) -> Option<String> {
     let mut argv = provider.command.clone();
     argv.push("create-chat".into());
-    let mut cmd = login_command(&argv, dir);
+    let mut cmd = login_command(&argv, dir, None);
     cmd.kill_on_drop(true).stdin(std::process::Stdio::null());
     let out = tokio::time::timeout(CREATE_CHAT_TIMEOUT, cmd.output())
         .await

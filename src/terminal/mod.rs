@@ -356,12 +356,18 @@ impl TerminalManager {
     ) -> Result<Arc<Session>, Box<dyn std::error::Error + Send + Sync>> {
         let config = &self.inner.config;
         let token = random_token()[..32].to_string();
+        let shim = crate::git_shim::ensure_shim_dir(config);
+        let real_git = crate::git_shim::resolve_system_git();
 
         let spawn_guard = SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let pair = native_pty_system().openpty(INITIAL_SIZE)?;
         let mut cmd = CommandBuilder::new(user_shell());
         cmd.arg("-lc");
-        cmd.arg(exec_line(&launch.argv));
+        let line = match &shim {
+            Some(dir) => exec_line_with_shim(&launch.argv, dir),
+            None => exec_line(&launch.argv),
+        };
+        cmd.arg(line);
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -372,6 +378,7 @@ impl TerminalManager {
         cmd.env("ORSO_PROJECT", project_id);
         cmd.env("ORSO_HOOK_TOKEN", &token);
         cmd.env("ORSO_HOOK_EXE", config.hook_exe_path());
+        cmd.env("ORSO_REAL_GIT", &real_git);
         for (k, v) in &launch.env {
             cmd.env(k, v);
         }
@@ -532,9 +539,19 @@ pub(crate) fn signal_group(pgid: Option<libc::pid_t>, signal: libc::c_int) {
 }
 
 /// `argv` run the way terminals are, through the user's login shell (for its PATH).
-pub fn login_command(argv: &[String], cwd: &Path) -> tokio::process::Command {
+/// `shim_dir`, when given, is prepended to the login shell's `PATH` so agents find the
+/// daemon's `git` launcher first.
+pub fn login_command(
+    argv: &[String],
+    cwd: &Path,
+    shim_dir: Option<&Path>,
+) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(user_shell());
-    cmd.arg("-lc").arg(exec_line(argv)).current_dir(cwd);
+    let line = match shim_dir {
+        Some(dir) => exec_line_with_shim(argv, dir),
+        None => exec_line(argv),
+    };
+    cmd.arg("-lc").arg(line).current_dir(cwd);
     cmd
 }
 
@@ -543,7 +560,7 @@ pub fn login_command(argv: &[String], cwd: &Path) -> tokio::process::Command {
 pub async fn login_path() -> Option<std::ffi::OsString> {
     use std::os::unix::ffi::OsStringExt;
     let argv = ["/usr/bin/printenv".to_string(), "PATH".to_string()];
-    let mut cmd = login_command(&argv, Path::new("/"));
+    let mut cmd = login_command(&argv, Path::new("/"), None);
     cmd.stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
@@ -567,6 +584,16 @@ fn exec_line(argv: &[String]) -> String {
         line.push_str(&sh_quote(arg));
     }
     line
+}
+
+/// `exec <argv>` with `shim_dir` first on `PATH`. The login shell sets `PATH` itself, so
+/// the prepend must be part of the `-c` command, not an env var.
+pub fn exec_line_with_shim(argv: &[String], shim_dir: &Path) -> String {
+    format!(
+        "export PATH={}:\"$PATH\"; {}",
+        sh_quote(&shim_dir.to_string_lossy()),
+        exec_line(argv)
+    )
 }
 
 fn sh_quote(s: &str) -> String {

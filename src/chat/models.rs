@@ -60,7 +60,7 @@ async fn ask(provider: &Provider) -> Option<String> {
     let mut argv = provider.command.clone();
     argv.push("models".into());
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut cmd = login_command(&argv, home.as_deref().unwrap_or(Path::new("/")));
+    let mut cmd = login_command(&argv, home.as_deref().unwrap_or(Path::new("/")), None);
     cmd.stdin(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
