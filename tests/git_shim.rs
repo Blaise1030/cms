@@ -58,6 +58,7 @@ fn head_moving_forms_are_blocked() {
     let log = tmp.path().join("git.log");
     for args in [
         &["checkout", "content/other"][..],
+        &["checkout", "-"][..],
         &["checkout", "-b", "content/x"][..],
         &["checkout", "-B", "content/x"][..],
         &["checkout", "--orphan", "content/x"][..],
@@ -67,7 +68,6 @@ fn head_moving_forms_are_blocked() {
         &["switch", "-c", "content/x"][..],
         &["switch", "--detach"][..],
         &["switch", "-"][..],
-        &["checkout", "main", "--", "file.md"][..],
     ] {
         let out = run_shim(&log, args, false);
         assert_eq!(out.status.code(), Some(1), "args {args:?} should be blocked");
@@ -107,6 +107,8 @@ fn path_only_checkout_does_not_move_head_and_passes_through() {
     let log = tmp.path().join("git.log");
     for (args, expected) in [
         (&["checkout", "--", "content/file.md"][..], vec!["checkout", "--", "content/file.md"]),
+        (&["checkout", "main", "--", "file.md"][..], vec!["checkout", "main", "--", "file.md"]),
+        (&["checkout", "origin/main", "--", "file.md"][..], vec!["checkout", "origin/main", "--", "file.md"]),
         (&["checkout", "-p", "--", "content/file.md"][..], vec!["checkout", "-p", "--", "content/file.md"]),
         (&["checkout", "--ours", "--", "content/file.md"][..], vec!["checkout", "--ours", "--", "content/file.md"]),
     ] {
