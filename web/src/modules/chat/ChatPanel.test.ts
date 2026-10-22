@@ -260,6 +260,16 @@ describe("ChatPanel", () => {
     expect(JSON.parse(String(posts()[1]!.init.body)).model).toBe("cursor-fast");
   });
 
+  it("marks the chat as running in the store while a sent turn is in flight", async () => {
+    chatResponse = (init) => sse(reply, true, init.signal);
+    const w = await mountPanel();
+    const store = useChatStore();
+    expect(store.running.p1 ?? null).toBeNull();
+    await send(w, "hello");
+    expect(store.running.p1).toBe(store.activeChatId("p1"));
+    expect(store.running.p1).toBeTruthy();
+  });
+
   it("stops a running turn on the client and the daemon", async () => {
     chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
     const w = await mountPanel();

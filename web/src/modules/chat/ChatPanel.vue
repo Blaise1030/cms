@@ -144,7 +144,10 @@ async function open(id: string) {
   loadingChat.value = false;
   if (history?.provider) chosen.value = history.provider;
   chat.value = createChat(id, history?.messages ?? []);
-  if (history?.running) void chat.value.resumeStream();
+  if (history?.running) {
+    store.setRunning(props.projectId, id);
+    void chat.value.resumeStream();
+  }
 }
 
 /** Catch up with the saved transcript (a Stop's checkpoint, a terminal turn's marker) unless a turn is streaming here. */
@@ -231,6 +234,7 @@ async function send(text: string) {
       pending = opened;
       await pending;
     } while (pending !== opened);
+    if (chat.value) store.setRunning(props.projectId, chat.value.id);
     await chat.value?.sendMessage({ text: trimmed });
   } finally {
     sending.value = false;
