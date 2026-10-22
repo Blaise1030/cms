@@ -1,7 +1,7 @@
 name: CI
 
-# Every push and pull request checks the daemon, the web app and the template,
-# then runs the Playwright smoke e2e against a real daemon.
+# Every push and pull request checks the daemon, the web app, the template and the
+# orso-astro package, then runs the Playwright smoke e2e against a real daemon.
 on:
   push:
     branches: [main]
@@ -51,11 +51,44 @@ jobs:
           pnpm -C web build
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-      # content_catalog reads templates/astro-marketing via its Node helper, which needs node_modules.
+      # Content tests run packages/astro's real `POST /__orso` endpoint in a fake dev server;
+      # template and scaffold tests copy templates/astro-marketing. Both need node_modules.
+      - name: Install content package deps
+        run: npm --prefix packages/astro ci
       - name: Install template deps
         run: npm --prefix templates/astro-marketing ci
       - name: Test
         run: cargo test --locked
+
+  # The ignored real-npm tests: a scaffolded project's `npm ci` + `astro build`, and a save
+  # through a real Astro dev server's `orso()` integration. Other ignored tests stay out.
+  real-astro:
+    name: Real Astro (scaffold + content save)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The daemon embeds web/dist, so it must exist before Rust compiles.
+      - name: Build the web app
+        run: |
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web build
+      - name: Install content package deps
+        run: npm --prefix packages/astro ci
+      - name: Scaffold, npm ci and astro build
+        run: cargo test --locked --test projects -- --ignored --exact real_npm_install_and_site_builds
+      - name: Save through a real Astro dev server
+        run: cargo test --locked --test content_e2e -- --ignored --exact real_astro_saves_content_through_the_integration
 
   web:
     name: Web
@@ -89,7 +122,24 @@ jobs:
           cache: npm
           cache-dependency-path: templates/astro-marketing/package-lock.json
       - run: npm ci
-      - run: npm run build
+      # Builds the site, then runs scripts/*.test.mjs.
+      - run: npm test
+
+  package:
+    name: orso-astro package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/astro
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/astro/package-lock.json
+      - run: npm ci
+      - run: npm test
 
   e2e:
     name: e2e

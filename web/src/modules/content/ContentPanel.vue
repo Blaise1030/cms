@@ -52,7 +52,7 @@ function showInUrl() {
 function removable(collection: string) {
   return !store.collections.find(x => x.name === collection)?.singleton;
 }
-const canRemove = computed(() => !!store.entry && !!store.descriptor && removable(store.entry.collection));
+const canRemove = computed(() => !!store.entry && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -122,11 +122,12 @@ async function loadEntries(name: string) {
     if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
   } catch { /* the collection keeps the list it last showed */ }
 }
-/** Collections the helper could not describe are left out of the tree and reported once in a toast. */
-const validCollections = computed(() => store.collections.filter(c => !c.reason));
+/** Unsupported collections are left out of the tree and reported once in a toast; ones waiting for the preview stay listed. */
+const unsupported = (c: ContentCollection) => c.supportedForEditing === false;
+const validCollections = computed(() => store.collections.filter(c => !unsupported(c)));
 let reportedInvalid = "";
 watch(() => store.collections, collections => {
-  const invalid = collections.filter(c => c.reason);
+  const invalid = collections.filter(unsupported);
   const key = `${props.projectId}:${invalid.map(c => c.name).join(",")}`;
   if (invalid.length && key !== reportedInvalid) {
     toast.warning(`${invalid.length === 1 ? "1 collection is" : `${invalid.length} collections are`} hidden`, {
@@ -258,7 +259,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <ResizableHandle with-handle class="bg-transparent" />
       <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
-      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && save()" @keydown.esc="history.selectedSha && history.select(null)">
+      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
         <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
@@ -291,6 +292,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </section>
         <p v-if="store.entry && store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <template v-if="store.entry && store.descriptor">
+          <p v-if="store.readOnlyReason" class="mb-3 text-sm text-muted-foreground" role="status" data-testid="content-read-only">{{ store.readOnlyReason }}</p>
           <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
           <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
             <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
@@ -339,6 +341,11 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </div>
         <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
       </template>
+      <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
+        <FileText class="size-8 opacity-50" aria-hidden="true" />
+        <p class="font-medium text-foreground">No content collections</p>
+        <p class="max-w-md">Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.</p>
+      </div>
       <div v-else-if="!store.loading" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground">
         <FileText class="size-8 opacity-50" aria-hidden="true" />
         <p>Select a collection and entry to read its content.</p>
@@ -351,7 +358,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
             <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
             <Button type="button" variant="ghost" size="sm" data-testid="content-discard" :disabled="store.saving" @click="store.discard()">Discard</Button>
-            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving">{{ store.saving ? "Saving…" : "Save" }}</Button>
+            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined">{{ store.saving ? "Saving…" : "Save" }}</Button>
           </div>
         </div>
       </Transition>

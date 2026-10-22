@@ -4,6 +4,7 @@ import { defineComponent, h as render } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import type { DevserverState } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { REFRESH_DELAY_MS, affectsContent, useContentStore } from "./store";
@@ -29,9 +30,9 @@ it("coalesces a burst of content file events into one trailing refresh", async (
   expect(catalog).toHaveBeenCalledTimes(1);
 });
 
-it("refreshes only for content, assets, schema, helper and overflow paths", async () => {
-  for (const path of ["src/content/pages/home.json", "src/content", "src/assets/blog/welcome/a.png", "src/content-schemas.mjs", "scripts/orso-content.mjs", ""]) expect(affectsContent(path), path).toBe(true);
-  for (const path of ["notes.txt", "src/pages/index.astro", "src/contentious.ts", "src/assets-old/x", "node_modules/x/index.js", "dist/index.html", ".git/HEAD"]) expect(affectsContent(path), path).toBe(false);
+it("refreshes only for content, assets, config, integration package and overflow paths", async () => {
+  for (const path of ["src/content/pages/home.json", "src/content", "src/assets/blog/welcome/a.png", "astro.config.mjs", "src/content.config.ts", "packages/astro/src/index.js", ""]) expect(affectsContent(path), path).toBe(true);
+  for (const path of ["src/content-schemas.mjs", "scripts/orso-content.mjs", "notes.txt", "src/pages/index.astro", "src/contentious.ts", "src/assets-old/x", "node_modules/x/index.js", "dist/index.html", ".git/HEAD"]) expect(affectsContent(path), path).toBe(false);
   const store = useContentStore(); await store.open("p"); catalog.mockClear();
   change("src/pages/index.astro"); change("dist/index.html");
   vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
@@ -55,6 +56,24 @@ it("stops refreshing while the Content panel is unmounted and refreshes once on 
   second.unmount();
 });
 
+it("refreshes the catalog once per change in this project's dev server state", async () => {
+  const status = (projectId: string, state: DevserverState) => h.daemon.emit({ type: "devserver.status", projectId, state });
+  const store = useContentStore(); await store.open("p"); catalog.mockClear();
+  status("other", "ready"); status("other", "crashed");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).not.toHaveBeenCalled();
+  status("p", "ready");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(1);
+  status("p", "crashed");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(2);
+  // A restart (or a stop then start) leaves ready through starting.
+  status("p", "starting");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(3);
+});
+
 it("still preserves a dirty draft and flags the on-disk change after a debounced refresh", async () => {
   let onDisk = entry;
   h.daemon = createFakeDaemon({ listContentCollections: catalog, listContentEntries: async () => [entry], contentEntry: async () => onDisk });
@@ -64,6 +83,34 @@ it("still preserves a dirty draft and flags the on-disk change after a debounced
   onDisk = { ...entry, source: "Changed", hash: "h2" };
   change(entry.path); vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
   expect(store.draftSource).toBe("Draft"); expect(store.changedOnDisk).toBe(true);
+});
+
+it.each([
+  ["field", { title: "Edited" }, "B", { fields: { title: "Edited" } }],
+  ["body", { title: "W" }, "Edited body", { fields: {}, body: "Edited body" }],
+])("keeps a dirty %s edit through refreshes while the preview is unavailable, then saves it", async (_edit, draftFields, draftBody, update) => {
+  const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
+  let editable = true;
+  const listContentCollections = vi.fn(async () => [{ name: "blog", kind: "markdown", fields, editable, reason: editable ? null : "Start the preview to edit content" }]);
+  const updateContentEntry = vi.fn(async () => ({ ...entry, fields: draftFields, body: draftBody, hash: "h2" }));
+  h.daemon = createFakeDaemon({ listContentCollections, listContentEntries: async () => [entry], contentEntry: async () => entry, updateContentEntry });
+  setActivePinia(createPinia());
+  const store = useContentStore(); await store.open("p"); await store.selectCollection("blog"); await store.selectEntry("welcome");
+  store.draftFields = { ...draftFields }; store.setBody(draftBody);
+  expect(store.dirty).toBe(true);
+  editable = false;
+  change("src/content/blog/en/other.md"); vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(store.collections[0]?.editable).toBe(false);
+  expect(store.draftFields).toEqual(draftFields); expect(store.draftBody).toBe(draftBody);
+  expect(store.dirty).toBe(true); expect(store.changedOnDisk).toBe(false);
+  expect(store.readOnlyReason).toBe("Start the preview to edit content");
+  editable = true;
+  h.daemon.emit({ type: "events.lagged" } as never); vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(store.draftFields).toEqual(draftFields); expect(store.draftBody).toBe(draftBody);
+  expect(store.dirty).toBe(true); expect(store.readOnlyReason).toBeNull();
+  await store.saveDraft();
+  expect(updateContentEntry).toHaveBeenCalledWith(expect.objectContaining({ ...update, hash: "h1" }));
+  expect(store.dirty).toBe(false);
 });
 
 it("loads reference picker entries once per collection and reloads them in place on refresh", async () => {

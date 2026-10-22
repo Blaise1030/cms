@@ -1,5 +1,6 @@
-//! Embedded assets: the scaffold template (`templates/astro-marketing/`) and the built SPA
-//! (`web/dist`), which the daemon serves as its router fallback.
+//! Embedded assets: the scaffold template (`templates/astro-marketing/`), the `orso-astro`
+//! package it depends on (`packages/astro/`), and the built SPA (`web/dist`), which the daemon
+//! serves as its router fallback.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -132,18 +133,57 @@ pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
 #[exclude = ".DS_Store"]
 pub struct Template;
 
-/// Relative paths of every embedded template file (forward-slash separated).
-pub fn template_paths() -> Vec<String> {
-    let mut v: Vec<String> = Template::iter().map(|p| p.into_owned()).collect();
+/// The `orso-astro` package (`packages/astro/`), copied into every scaffold as
+/// `packages/astro/` so projects install it without the orso checkout.
+#[derive(RustEmbed)]
+#[folder = "packages/astro/"]
+#[exclude = "node_modules/**"]
+#[exclude = "test/**"]
+#[exclude = "package-lock.json"]
+#[exclude = ".DS_Store"]
+pub struct OrsoAstro;
+
+/// The template's dependency spec for `orso-astro` (relative to the orso checkout) and the
+/// spec it must have inside a scaffolded project.
+const ORSO_ASTRO_REPO_SPEC: &str = "file:../../packages/astro";
+const ORSO_ASTRO_SCAFFOLD_SPEC: &str = "file:packages/astro";
+
+fn embed_paths<T: RustEmbed>() -> Vec<String> {
+    let mut v: Vec<String> = T::iter().map(|p| p.into_owned()).collect();
     v.sort();
     v
 }
 
-/// Write the embedded template into `dest` (created if missing). Existing files are overwritten.
+/// Relative paths of every embedded template file (forward-slash separated).
+pub fn template_paths() -> Vec<String> {
+    embed_paths::<Template>()
+}
+
+/// Relative paths of every embedded `orso-astro` file (forward-slash separated).
+pub fn orso_astro_paths() -> Vec<String> {
+    embed_paths::<OrsoAstro>()
+}
+
+/// Write the embedded template into `dest` (created if missing), with the `orso-astro` package
+/// under `dest/packages/astro` and the manifests pointing at it. Existing files are overwritten.
 pub fn extract_template(dest: &Path) -> io::Result<()> {
-    for rel in Template::iter() {
-        let file = Template::get(&rel)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, rel.to_string()))?;
+    extract_embed::<Template>(dest)?;
+    extract_embed::<OrsoAstro>(&safe_join(dest, "packages/astro")?)?;
+    for manifest in ["package.json", "package-lock.json"] {
+        let path = safe_join(dest, manifest)?;
+        let text = std::fs::read_to_string(&path)?;
+        std::fs::write(
+            &path,
+            text.replace(ORSO_ASTRO_REPO_SPEC, ORSO_ASTRO_SCAFFOLD_SPEC),
+        )?;
+    }
+    Ok(())
+}
+
+fn extract_embed<T: RustEmbed>(dest: &Path) -> io::Result<()> {
+    for rel in T::iter() {
+        let file =
+            T::get(&rel).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, rel.to_string()))?;
         let target = safe_join(dest, &rel)?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
@@ -200,6 +240,72 @@ mod tests {
                 .any(|p| p.starts_with("node_modules/") || p.starts_with("dist/")),
             "{paths:?}"
         );
+    }
+
+    #[test]
+    fn template_drops_the_legacy_helper_and_schema_registry() {
+        let paths = template_paths();
+        for gone in [
+            "scripts/orso-content.mjs",
+            "scripts/orso-content.test.mjs",
+            "src/content-schemas.mjs",
+        ] {
+            assert!(!paths.iter().any(|p| p == gone), "still embeds {gone}");
+        }
+        assert!(orso_astro_paths().iter().any(|p| p == "src/index.js"));
+    }
+
+    #[test]
+    fn orso_astro_contains_package_sources_only() {
+        let paths = orso_astro_paths();
+        for want in [
+            "package.json",
+            "README.md",
+            "src/index.js",
+            "src/manifest.js",
+            "src/patch.js",
+            "src/endpoint.js",
+        ] {
+            assert!(paths.iter().any(|p| p == want), "missing {want}: {paths:?}");
+        }
+        assert!(
+            !paths.iter().any(|p| p.starts_with("node_modules/")
+                || p.starts_with("test/")
+                || p == "package-lock.json"),
+            "{paths:?}"
+        );
+    }
+
+    #[test]
+    fn template_does_not_embed_orso_astro() {
+        let paths = template_paths();
+        for want in [
+            "package.json",
+            ".npmrc",
+            "astro.config.mjs",
+            "src/content.config.ts",
+        ] {
+            assert!(paths.iter().any(|p| p == want), "missing {want}: {paths:?}");
+        }
+        assert!(
+            !paths.iter().any(|p| p.starts_with("packages/astro")),
+            "{paths:?}"
+        );
+    }
+
+    #[test]
+    fn extract_template_copies_orso_astro_and_rewrites_manifests() {
+        let tmp = tempfile::tempdir().unwrap();
+        extract_template(tmp.path()).unwrap();
+        assert!(tmp.path().join("packages/astro/src/index.js").is_file());
+        let manifest = std::fs::read_to_string(tmp.path().join("package.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(json["dependencies"]["orso-astro"], "file:packages/astro");
+        let lock = std::fs::read_to_string(tmp.path().join("package-lock.json")).unwrap();
+        for text in [&manifest, &lock] {
+            assert!(!text.contains("file:../../packages/astro"));
+        }
+        assert!(lock.contains("file:packages/astro"));
     }
 
     #[test]

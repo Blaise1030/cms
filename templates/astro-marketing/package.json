@@ -7,16 +7,14 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "npm run build && node --test scripts/*.test.mjs"
+    "test": "npm run build && node --test --test-concurrency=1 scripts/*.test.mjs"
   },
   "dependencies": {
     "@astrojs/mdx": "8.0.2",
     "@tailwindcss/typography": "0.5.20",
     "@tailwindcss/vite": "4.3.3",
     "astro": "7.3.5",
-    "js-yaml": "^4.3.2",
-    "jsonc-parser": "^3.3.1",
-    "tailwindcss": "4.3.3",
-    "yaml": "^2.9.1"
+    "orso-astro": "file:../../packages/astro",
+    "tailwindcss": "4.3.3"
   }
 }

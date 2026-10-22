@@ -3,9 +3,10 @@ set shell := ["zsh", "-cu"]
 default:
     @just --list
 
-# Install web and template dependencies
+# Install web, orso-astro package and template dependencies
 setup:
     pnpm -C web install --frozen-lockfile
+    npm --prefix packages/astro ci
     npm --prefix templates/astro-marketing ci
 
 # Daemon (API on :7800) + Vite dev server (HMR, proxies /api /ws /preview to the daemon).
@@ -29,14 +30,17 @@ build:
     pnpm -C web build
     cargo build --release
 
-# Everything: web build first (the daemon embeds web/dist), then Rust, web unit tests, template
+# Everything: web build first (the daemon embeds web/dist), then Rust (the content tests' fake
+# dev server runs packages/astro, so its deps come first), web unit tests, orso-astro, template
 test:
     pnpm -C web install --frozen-lockfile
     pnpm -C web build
+    npm --prefix packages/astro ci
+    npm --prefix templates/astro-marketing ci
     cargo test
     pnpm -C web test
-    npm --prefix templates/astro-marketing ci
-    npm --prefix templates/astro-marketing run build
+    npm --prefix packages/astro test
+    npm --prefix templates/astro-marketing test
 
 # Playwright smoke e2e (rebuilds the daemon so `web/dist` is embedded).
 e2e:

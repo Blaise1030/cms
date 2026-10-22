@@ -1,14 +1,35 @@
 import { defineCollection } from "astro:content";
-import { glob } from "astro/loaders";
 import { z } from "astro/zod";
-import { collectionRegistry, createCollectionSchemas } from "./content-schemas.mjs";
+import { orsoGlob } from "orso-astro";
 
-// Explicit keys retain Astro's collection-name inference; every loader uses the registry.
-const collection = (name: keyof typeof collectionRegistry) => defineCollection({
-  loader: glob(collectionRegistry[name].loader),
-  schema: (context) => createCollectionSchemas({ z, ...context })[name],
+const blog = defineCollection({
+  loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
+  schema: ({ image }) => z.object({
+    title: z.string(),
+    description: z.string(),
+    pubDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").refine((value) => {
+      const date = new Date(`${value}T00:00:00Z`);
+      return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    }, "Use a valid calendar date").meta({ editor: { type: "date", knownRefinement: true } }),
+    coverImage: image().meta({ editor: { type: "image" } }).optional(),
+    coverAlt: z.string().optional(),
+    tags: z.array(z.string()).default([]),
+    relatedPosts: z.array(z.string().meta({ editor: { type: "reference", collection: "blog" } })).default([]),
+  }).superRefine((post, ctx) => {
+    if (post.coverImage && !post.coverAlt?.trim()) {
+      ctx.addIssue({ code: "custom", path: ["coverAlt"], message: "Describe the cover image" });
+    }
+  }).meta({ editor: { knownRefinement: true } }),
 });
-export const collections = {
-  blog: collection("blog"),
-  helpDocs: collection("helpDocs"),
-};
+
+const helpDocs = defineCollection({
+  loader: orsoGlob({ base: "./src/content/helpDocs/en", pattern: "*.md" }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    section: z.string(),
+    order: z.number(),
+  }),
+});
+
+export const collections = { blog, helpDocs };

@@ -163,8 +163,8 @@ applies its own path-safety and supported-pattern checks before marking a collec
 
 ## Endpoint
 
-The integration mounts an exact `POST /__orso` handler only in dev (and in the temporary Vite server
-used by `astro sync`), and only when `ORSO_CONTENT_TOKEN` is set. `orso()` reads that token from the
+The integration mounts an exact `POST /__orso` handler only in `astro dev`, and only when
+`ORSO_CONTENT_TOKEN` is set. `orso()` reads that token from the
 environment; the daemon generates a fresh random token for each dev-server start and passes it to the
 child process.
 

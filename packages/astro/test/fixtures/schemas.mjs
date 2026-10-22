@@ -1,4 +1,9 @@
-/** Loader paths are project-relative; consumed by Astro and the content helper. */
+/**
+ * Test fixture mirroring the schemas in `templates/astro-marketing/src/content.config.ts`.
+ *
+ * It is intentionally a copy rather than an import: `content.config.ts` imports
+ * `astro:content`, and the package must describe the same schemas the template uses.
+ */
 export const collectionRegistry = {
   blog: { loader: { base: "./src/content/blog/en", pattern: "*.md" }, kind: "markdown" },
   helpDocs: { loader: { base: "./src/content/helpDocs/en", pattern: "*.md" }, kind: "markdown" },

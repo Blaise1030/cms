@@ -100,6 +100,47 @@ it.each(["selection-first", "refresh-first"])("keeps the user's entry selection 
  expect(w.text()).not.toContain("Loading content…");
  w.unmount();
 });
+it("keeps showing a draft's form with Save disabled while the preview is unavailable", async () => {
+ const site = { collection: "site", id: "site", path: "src/content/site.json", kind: "json", source: "{}", fields: { title: "Site" }, branch: "content/a", hash: "h1" };
+ const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
+ let editable = true;
+ const w = await setup({
+  listContentCollections: async () => [{ name: "site", kind: "json", fields, editable, reason: editable ? null : "Start the preview to edit content" }],
+  listContentEntries: async () => [site], contentEntry: async () => site,
+ }, "/p/p/content/site/site"); await flushPromises();
+ await w.get('[data-testid="field-title"]').setValue("Edited"); await flushPromises();
+ expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeUndefined();
+ editable = false;
+ fsChange("src/content/blog/en/other.md"); await flushPromises();
+ expect(w.find('[data-testid="content-form"]').exists()).toBe(true);
+ expect((w.get('[data-testid="field-title"]').element as HTMLInputElement).value).toBe("Edited");
+ expect(w.get('[data-testid="content-read-only"]').text()).toBe("Start the preview to edit content");
+ expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeDefined();
+ editable = true;
+ fsChange("src/content/blog/en/other.md"); await flushPromises();
+ expect(w.find('[data-testid="content-read-only"]').exists()).toBe(false);
+ expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeUndefined();
+ w.unmount();
+});
+it("keeps supported collections in the tree while the preview is down and hides only unsupported ones", async () => {
+ const w = await setup({ listContentCollections: async () => [
+  { name: "blog", kind: "markdown", editable: false, supportedForEditing: true, reason: "Start the preview to edit content" },
+  { name: "legacy", kind: "markdown", editable: false, supportedForEditing: false, reason: "Use orsoGlob() to make this collection editable" },
+ ] }); await flushPromises();
+ const names = w.findAll('[data-testid="content-collection"]').map(c => c.text());
+ expect(names).toContain("blog"); expect(names).not.toContain("legacy");
+ w.unmount();
+});
+it("explains an empty catalog: the site needs the orso-astro integration", async () => {
+ const w = await setup({ listContentCollections: async () => [] }); await flushPromises();
+ const empty = w.get('[data-testid="content-empty-catalog"]').text();
+ for (const part of ["orso-astro", "orso()", "astro.config", "orsoGlob", "src/content.config.ts", "preview starts"]) expect(empty).toContain(part);
+ expect(w.text()).not.toContain("Select a collection and entry");
+ w.unmount();
+ const listed = await setup(); await flushPromises();
+ expect(listed.find('[data-testid="content-empty-catalog"]').exists()).toBe(false);
+ listed.unmount();
+});
 it("clears the previous project's catalog while the next project loads", async () => {
  const w = await setup(); await flushPromises(); const store = useContentStore();
  const opening = store.open("other");
