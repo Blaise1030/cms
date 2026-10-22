@@ -103,7 +103,9 @@ export const useChangesStore = defineStore("changes", () => {
 
   /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
   async function refreshTreeAndPreview(branch?: string) {
-    await Promise.all([
+    // One failing refresh (content cannot be served until the preview is up) must not
+    // block the others or the preview reload: each store surfaces its own error.
+    await Promise.allSettled([
       useFilesStore().refresh(),
       branch ? useContentStore().refreshForBranch(branch) : undefined,
       branch ? useDesignStore().refreshForBranch(branch) : undefined,
