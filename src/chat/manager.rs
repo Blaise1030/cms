@@ -167,7 +167,8 @@ impl ChatManager {
             req.model.as_deref(),
         );
         let token = random_token()[..32].to_string();
-        let mut cmd = login_command(&spec.argv, &req.dir);
+        let shim = crate::git_shim::ensure_shim_dir(&state.config);
+        let mut cmd = login_command(&spec.argv, &req.dir, shim.as_deref());
         cmd.env(
             "ORSO_URL",
             format!("http://127.0.0.1:{}", state.config.port),
@@ -175,6 +176,7 @@ impl ChatManager {
         .env("ORSO_PROJECT", &req.project_id)
         .env("ORSO_HOOK_TOKEN", &token)
         .env("ORSO_HOOK_EXE", state.config.hook_exe_path())
+        .env("ORSO_REAL_GIT", crate::git_shim::resolve_system_git())
         .envs(spec.env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

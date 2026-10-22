@@ -320,7 +320,13 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
         return Err(ApiError::enoent(format!("no such change: {branch}")));
     }
     ensure_clean(dir, "switching changes").await?;
-    run(dir, &["checkout", branch]).await?;
+    // Only the app's checkout is allowed: mark this one invocation (never process-wide).
+    run_env(
+        dir,
+        &["checkout", branch],
+        &[(crate::git_shim::ALLOW_ENV.to_string(), "1".to_string())],
+    )
+    .await?;
     let title = branch_title(dir, branch).await;
     Ok(Change {
         branch: branch.to_string(),

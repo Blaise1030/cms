@@ -64,6 +64,12 @@ enum Command {
         #[command(subcommand)]
         command: orso::ctl::CtlCommand,
     },
+    /// Agent-only git launcher (internal): `orso git-shim -- <git argv>`.
+    #[command(hide = true)]
+    GitShim {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -103,6 +109,7 @@ async fn main() -> ExitCode {
                 event: HookEvent::TurnEnd { payload },
             } => orso::hook::turn_end(payload).await,
             Command::Ctl { command } => orso::ctl::run(command).await,
+            Command::GitShim { args } => orso::git_shim::run(args),
             Command::Serve { .. } => unreachable!(),
         };
     };
