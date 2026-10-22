@@ -197,25 +197,15 @@ async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
     )
 }
 
-/// Content endpoints run the content helper (node), which needs the template's modules.
-fn link_node_modules(dir: &Path) {
-    let modules =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
-    std::os::unix::fs::symlink(modules, dir.join("node_modules")).unwrap();
-    let exclude = dir.join(".git/info/exclude");
-    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-    text.push_str("\n/node_modules\n");
-    std::fs::write(exclude, text).unwrap();
-}
-
-/// A project on a change branch, ready for the content endpoints; returns its ID too.
-async fn content_project(tmp: &Path) -> (axum::Router, std::path::PathBuf, String) {
-    let (app, dir) = project(tmp).await;
+/// A project on a change branch with its fake dev server ready for the content endpoints.
+async fn content_project(tmp: &Path) -> (axum::Router, std::path::PathBuf, String, AppState) {
+    let st = AppState::with_options(config(tmp, true), false, common::fake_devserver());
+    let info = st.projects.create("Site").await.unwrap();
+    let dir = tmp.join(&info.id);
     common::write_content_manifest(&dir, "");
-    link_node_modules(&dir);
+    common::start_fake(&st, &info.id).await;
     changes::create(&dir, "Edit content").await.unwrap();
-    let id = dir.file_name().unwrap().to_string_lossy().to_string();
-    (app, dir, id)
+    (http::router(st.clone()), dir, info.id, st)
 }
 
 fn set_title(dir: &Path, title: &str) {
@@ -246,7 +236,7 @@ fn history_uri(id: &str, entry: &str, sha: Option<&str>) -> String {
 #[tokio::test]
 async fn history_endpoint_lists_versions() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, dir, id) = content_project(tmp.path()).await;
+    let (app, dir, id, st) = content_project(tmp.path()).await;
     set_title(&dir, "Edited");
     git::checkpoint(&dir, "edit welcome")
         .await
@@ -257,12 +247,13 @@ async fn history_endpoint_lists_versions() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["versions"][0]["summary"], "edit welcome");
     assert!(v["versions"][0].get("published").is_some(), "{v}");
+    common::stop_fake(&st, &id).await;
 }
 
 #[tokio::test]
 async fn version_endpoint_returns_parsed_old_content() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, dir, id) = content_project(tmp.path()).await;
+    let (app, dir, id, st) = content_project(tmp.path()).await;
     set_title(&dir, "Old");
     let old = git::checkpoint(&dir, "old").await.unwrap().unwrap();
     set_title(&dir, "New");
@@ -284,12 +275,13 @@ async fn version_endpoint_returns_parsed_old_content() {
         .as_str()
         .unwrap()
         .contains("We're glad you're here"));
+    common::stop_fake(&st, &id).await;
 }
 
 #[tokio::test]
 async fn version_endpoint_404s_for_commit_not_touching_entry() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, dir, id) = content_project(tmp.path()).await;
+    let (app, dir, id, st) = content_project(tmp.path()).await;
     append(&dir, "README.md", "\nOther.\n");
     let other = git::checkpoint(&dir, "other").await.unwrap().unwrap();
 
@@ -299,12 +291,13 @@ async fn version_endpoint_404s_for_commit_not_touching_entry() {
     )
     .await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    common::stop_fake(&st, &id).await;
 }
 
 #[tokio::test]
 async fn version_endpoint_returns_old_content_after_rename() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, dir, id) = content_project(tmp.path()).await;
+    let (app, dir, id, st) = content_project(tmp.path()).await;
     set_title(&dir, "Before rename");
     let before = git::checkpoint(&dir, "before").await.unwrap().unwrap();
 
@@ -328,13 +321,15 @@ async fn version_endpoint_returns_old_content_after_rename() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["path"], WELCOME);
     assert_eq!(v["fields"]["title"], "Before rename");
+    common::stop_fake(&st, &id).await;
 }
 
 #[tokio::test]
 async fn history_requires_collection_and_id() {
     let tmp = tempfile::tempdir().unwrap();
-    let (app, _dir, id) = content_project(tmp.path()).await;
+    let (app, _dir, id, st) = content_project(tmp.path()).await;
     let uri = format!("/api/content/history?project={id}&collection=blog");
     let (s, v) = call(&app, req("GET", &uri, None)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    common::stop_fake(&st, &id).await;
 }

@@ -1,13 +1,14 @@
 //! Rename and delete content entries with their schema references and owned assets.
 //!
 //! Both operations reuse the save guards in [`super::mutation`]: per-project lock, active
-//! `content/*` branch, opened hash, symlink-free paths, and helper validation. Every new
+//! `content/*` branch, opened hash, symlink-free paths, and endpoint validation. Every new
 //! source is computed and validated in memory before the first write; the writes are then
 //! applied with an undo journal so a failed write or checkpoint leaves the files as they
 //! were. A rename or delete is one scoped checkpoint covering the old and new entry paths,
 //! the owned asset files (`src/assets/<collection>/<id>/`), and every rewritten reference.
+use super::integration::{self, PREVIEW_SAVE_REASON};
 use super::mutation::{self as m, Leaf};
-use super::{catalog, helper, images};
+use super::{catalog, images};
 use crate::{error::ApiError, git, state::AppState};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -174,7 +175,7 @@ fn changed_fields(old: &Value, new: Option<Value>) -> Map<String, Value> {
 
 /// Refuse `fields` of `collection/id` when a reference leaf does not name an existing entry
 /// of its target collection (an empty string included): a dangling reference fails the
-/// site build. Issues use the helper's `invalid_schema` `{path, message}` shape.
+/// site build. Issues use the endpoint's `invalid_schema` `{path, message}` shape.
 pub(super) async fn check_references(
     root: &Path,
     collection: &catalog::ContentCollection,
@@ -421,7 +422,7 @@ fn assets_taken(rel: &str) -> ApiError {
         .with_reason("duplicate_slug")
 }
 
-/// Name the entry whose candidate failed helper validation.
+/// Name the entry whose candidate failed endpoint validation.
 fn in_entry(mut e: ApiError, collection: &str, id: &str) -> ApiError {
     e.message = format!("{collection}/{id}: {}", e.message);
     e
@@ -525,6 +526,10 @@ pub async fn rename_entry(
     let branch = m::require_content_change(&root, &request.branch).await?;
     let collections = catalog::list_collections(&root).await?;
     let c = m::editable_in(&collections, &request.collection)?;
+    let endpoint = state
+        .content_endpoint(&request.project)
+        .await?
+        .ok_or_else(|| ApiError::devserver(PREVIEW_SAVE_REASON))?;
     let (id, slug) = (request.id.as_str(), request.slug.as_str());
     guard_lifecycle(&c, "renamed")?;
     m::validate_id(id)?;
@@ -551,7 +556,7 @@ pub async fn rename_entry(
     let analysis = analyze(&root, &collections, &c.name, id, Some(slug)).await?;
 
     // Stage: the renamed entry's owned image paths and self-references, then every
-    // reference holder, each validated by the helper before anything is written.
+    // reference holder, each validated by the endpoint before anything is written.
     let entry_dir = Path::new(&old_rel).parent().unwrap().to_str().unwrap();
     let old_prefix = format!("{}/", relative(entry_dir, &old_assets));
     let new_prefix = format!("{}/", relative(entry_dir, &new_assets));
@@ -583,19 +588,19 @@ pub async fn rename_entry(
         .body
         .replace(&format!("]({old_prefix}"), &format!("]({new_prefix}"));
     let body = (c.kind != "json" && body != parsed.body).then_some(body);
-    let new_source = helper::patch(&root, &c.name, &source, &fields, &[], body.as_deref())
+    let new_source = integration::patch(&endpoint, &c.name, &source, &fields, &[], body.as_deref())
         .await
         .map_err(|e| in_entry(e, &c.name, id))?;
     let mut staged = vec![];
     for r in &analysis.rewrites {
         let e = &r.entry;
-        let next = helper::patch(&root, &e.collection, &e.source, &r.fields, &[], None)
+        let next = integration::patch(&endpoint, &e.collection, &e.source, &r.fields, &[], None)
             .await
             .map_err(|err| in_entry(err, &e.collection, &e.id))?;
         staged.push((e, next));
     }
 
-    // Re-verify immediately before mutating: the helper ran outside git's view.
+    // Re-verify immediately before mutating: the endpoint ran outside git's view.
     m::require_content_change(&root, &request.branch).await?;
     let mut expected = vec![(old_rel.as_str(), source.as_str())];
     expected.extend(

@@ -2,10 +2,12 @@
 //!
 //! Under a per-project lock: require an active change, check the opened branch and hash,
 //! resolve only catalog-declared paths without following symlinks, validate the complete
-//! candidate with the template helper, write through a same-directory temporary file and
-//! rename, then checkpoint only the entry path (plus any images attached through `images`).
+//! candidate through the preview's integration endpoint, write through a same-directory
+//! temporary file and rename, then checkpoint only the entry path (plus any images
+//! attached through `images`).
+use super::integration::{self, PREVIEW_SAVE_REASON};
 use super::lifecycle::{Journal, Undo};
-use super::{catalog, helper, images};
+use super::{catalog, images};
 use crate::{changes, error::ApiError, git, state::AppState};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -252,7 +254,7 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8], mode: u32) -> Result<(),
     result.map_err(ApiError::from)
 }
 
-/// Initial source for a new entry; the helper validates exactly these bytes.
+/// Initial source for a new entry; the endpoint validates exactly these bytes.
 fn render(kind: &str, fields: &Map<String, Value>, body: &str) -> Result<String, ApiError> {
     if kind == "json" {
         if !body.is_empty() {
@@ -384,6 +386,10 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
     if created && std::fs::symlink_metadata(&target).is_ok() {
         return Err(duplicate_slug(&c, &id));
     }
+    let endpoint = state
+        .content_endpoint(&request.project)
+        .await?
+        .ok_or_else(|| ApiError::devserver(PREVIEW_SAVE_REASON))?;
     // Validate and stage attached images, turning their tokens into relative paths.
     let (mut fields, mut body) = (request.fields, request.body);
     let prepared = images::prepare(
@@ -402,7 +408,8 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
             fields.remove(key);
         }
         let initial = render(&c.kind, &fields, body.as_deref().unwrap_or(""))?;
-        let source = helper::patch(&root, &c.name, &initial, &Map::new(), &[], None).await?;
+        let source =
+            integration::patch(&endpoint, &c.name, &initial, &Map::new(), &[], None).await?;
         (None, 0o644, source)
     } else {
         let SaveTarget::Update { hash, .. } = &request.target else {
@@ -418,7 +425,8 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
         } else {
             body.as_deref()
         };
-        let source = helper::patch(&root, &c.name, &old, &fields, &request.unset, body).await?;
+        let source =
+            integration::patch(&endpoint, &c.name, &old, &fields, &request.unset, body).await?;
         if source == old {
             return Ok(SavedEntry {
                 entry: catalog::build_entry(c.name, id, rel, &c.kind, old, branch),
@@ -439,7 +447,7 @@ pub async fn save_entry(state: &AppState, request: SaveEntry) -> Result<SavedEnt
     );
     super::lifecycle::check_references(&root, &c, &id, &saved.fields).await?;
 
-    // Re-verify immediately before mutating: the helper ran outside git's view.
+    // Re-verify immediately before mutating: the endpoint ran outside git's view.
     require_content_change(&root, &request.branch).await?;
     if created {
         if std::fs::symlink_metadata(resolve(&root, &rel)?).is_ok() {

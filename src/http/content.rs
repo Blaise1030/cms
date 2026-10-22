@@ -1,6 +1,7 @@
 use super::{project_dir, query_or_badreq};
 use crate::content::catalog;
 use crate::content::images::{self, ImageMeta, Upload};
+use crate::content::integration::PREVIEW_REASON;
 use crate::content::mutation::{self, DeleteEntry, RenameEntry, SaveEntry, SaveTarget};
 use crate::{error::ApiError, state::AppState};
 use axum::body::Bytes;
@@ -22,9 +23,14 @@ pub async fn collections(
 ) -> Result<Json<Value>, ApiError> {
     let q = query_or_badreq(q)?;
     let root = project_dir(&state, &q.project).await?;
-    Ok(Json(
-        json!({"collections":catalog::list_collections(&root).await?}),
-    ))
+    let mut collections = catalog::list_collections(&root).await?;
+    if state.content_endpoint(&q.project).await?.is_none() {
+        for c in collections.iter_mut().filter(|c| c.editable) {
+            c.editable = false;
+            c.reason = Some(PREVIEW_REASON.into());
+        }
+    }
+    Ok(Json(json!({ "collections": collections })))
 }
 pub async fn entries(
     State(state): State<AppState>,

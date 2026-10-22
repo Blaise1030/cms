@@ -38,26 +38,16 @@ fn git_cli(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn link_node_modules(dir: &Path) {
-    let modules =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
-    std::os::unix::fs::symlink(modules, dir.join("node_modules")).unwrap();
-    let exclude = dir.join(".git/info/exclude");
-    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-    text.push_str("\n/node_modules\n");
-    std::fs::write(exclude, text).unwrap();
-}
-
 struct Env {
     tmp: tempfile::TempDir,
+    state: AppState,
     app: axum::Router,
     id: String,
     dir: PathBuf,
 }
 
-async fn env() -> Env {
-    let tmp = tempfile::tempdir().unwrap();
-    let state = AppState::with_scaffold_install(
+fn state(tmp: &tempfile::TempDir) -> AppState {
+    AppState::with_options(
         Config {
             port: 0,
             origin: None,
@@ -68,15 +58,22 @@ async fn env() -> Env {
             ..Default::default()
         },
         false,
-    );
+        common::fake_devserver(),
+    )
+}
+
+async fn env() -> Env {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = state(&tmp);
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
     common::write_content_manifest(&dir, "");
-    link_node_modules(&dir);
+    common::start_fake(&state, &info.id).await;
     changes::create(&dir, "Add images").await.unwrap();
     Env {
         app: http::router(state.clone()),
         tmp,
+        state,
         id: info.id,
         dir,
     }
@@ -96,18 +93,7 @@ async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
 /// pointing at it.
 async fn env_under_subfolder_root() -> Env {
     let tmp = tempfile::tempdir().unwrap();
-    let state = AppState::with_scaffold_install(
-        Config {
-            port: 0,
-            origin: None,
-            projects_dir: tmp.path().to_path_buf(),
-            no_auth: true,
-            token: None,
-            agents_config: None,
-            ..Default::default()
-        },
-        false,
-    );
+    let state = state(&tmp);
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
     let site = dir.join("site");
@@ -122,17 +108,12 @@ async fn env_under_subfolder_root() -> Env {
     }
     std::fs::write(dir.join("orso.json"), r#"{"root":"site"}"#).unwrap();
     common::write_content_manifest(&dir, "site/");
-    let modules =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
-    std::os::unix::fs::symlink(modules, site.join("node_modules")).unwrap();
-    let exclude = dir.join(".git/info/exclude");
-    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-    text.push_str("\n/site/node_modules\n");
-    std::fs::write(exclude, text).unwrap();
+    common::start_fake(&state, &info.id).await;
     changes::create(&dir, "Add images").await.unwrap();
     Env {
         app: http::router(state.clone()),
         tmp,
+        state,
         id: info.id,
         dir,
     }
@@ -552,6 +533,25 @@ async fn mislabeled_svg_or_arbitrary_bytes_roll_back_everything() {
         );
         assert_untouched(&e, &before);
     }
+}
+
+#[tokio::test]
+async fn image_save_without_a_ready_preview_stages_nothing() {
+    let e = env().await;
+    let before = snapshot(&e);
+    let opened = read(&e, "blog", "welcome").await;
+    common::stop_fake(&e.state, &e.id).await;
+    let entry = update(
+        &e,
+        &opened,
+        json!({}),
+        Some("![Pixel](orso-image:img-1)\n"),
+        json!([image("img-1", "Pixel", "pixel.png")]),
+    );
+    let (s, v) = save(&e, "PUT", entry, &[png_part("img-1", "pixel.png", PNG)]).await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY, "{v}");
+    assert_eq!(v["error"]["code"], "DEVSERVER_ERR", "{v}");
+    assert_untouched(&e, &before);
 }
 
 #[tokio::test]
