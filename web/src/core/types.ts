@@ -394,6 +394,8 @@ export interface ContentCollection {
   kind: "json" | "markdown" | "mdx";
   singleton?: string | null;
   editable: boolean;
+  /** False when the integration cannot edit this collection at all; `editable` also drops while the preview is down. */
+  supportedForEditing?: boolean;
   reason: string | null;
   /** Field descriptors projected from the template schema. */
   fields?: FieldDescriptor;

@@ -122,11 +122,12 @@ async function loadEntries(name: string) {
     if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
   } catch { /* the collection keeps the list it last showed */ }
 }
-/** Read-only collections are left out of the tree and reported once in a toast. */
-const validCollections = computed(() => store.collections.filter(c => !c.reason));
+/** Unsupported collections are left out of the tree and reported once in a toast; ones waiting for the preview stay listed. */
+const unsupported = (c: ContentCollection) => c.supportedForEditing === false;
+const validCollections = computed(() => store.collections.filter(c => !unsupported(c)));
 let reportedInvalid = "";
 watch(() => store.collections, collections => {
-  const invalid = collections.filter(c => c.reason);
+  const invalid = collections.filter(unsupported);
   const key = `${props.projectId}:${invalid.map(c => c.name).join(",")}`;
   if (invalid.length && key !== reportedInvalid) {
     toast.warning(`${invalid.length === 1 ? "1 collection is" : `${invalid.length} collections are`} hidden`, {

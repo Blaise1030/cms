@@ -122,6 +122,15 @@ it("keeps showing a draft's form with Save disabled while the preview is unavail
  expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeUndefined();
  w.unmount();
 });
+it("keeps supported collections in the tree while the preview is down and hides only unsupported ones", async () => {
+ const w = await setup({ listContentCollections: async () => [
+  { name: "blog", kind: "markdown", editable: false, supportedForEditing: true, reason: "Start the preview to edit content" },
+  { name: "legacy", kind: "markdown", editable: false, supportedForEditing: false, reason: "Use orsoGlob() to make this collection editable" },
+ ] }); await flushPromises();
+ const names = w.findAll('[data-testid="content-collection"]').map(c => c.text());
+ expect(names).toContain("blog"); expect(names).not.toContain("legacy");
+ w.unmount();
+});
 it("explains an empty catalog: the site needs the orso-astro integration", async () => {
  const w = await setup({ listContentCollections: async () => [] }); await flushPromises();
  const empty = w.get('[data-testid="content-empty-catalog"]').text();
