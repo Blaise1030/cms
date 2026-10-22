@@ -8,6 +8,7 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
+import { ApiError } from "@/core/api";
 import { useGithubStore } from "@/modules/github/store";
 import type { GithubStatus, Project } from "@/core/types";
 import { useProjectsStore } from "./store";
@@ -95,6 +96,19 @@ describe("RepoBrowser", () => {
     await flushPromises();
     expect(document.body.querySelector("[role='alert']")?.textContent).toContain("clone boom");
     expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("maps a clone access error to the ask-an-owner message", async () => {
+    const cloneProject = vi.fn(async () => {
+      throw new ApiError("SANDBOX", "You don't have push access", 403);
+    });
+    mountBrowser({ api: { cloneProject } });
+    await flushPromises();
+    firstOpen().click();
+    await flushPromises();
+    const alert = document.body.querySelector("[role='alert']");
+    expect(alert?.textContent).toContain("Ask an owner to add you to this site.");
+    expect(alert?.textContent).not.toContain("push access");
   });
 
   it("does not offer a retry that would only refetch the list after a clone failure", async () => {

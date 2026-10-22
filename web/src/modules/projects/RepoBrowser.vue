@@ -9,6 +9,7 @@ import { errorMessage } from "@orso/utils";
 import { useGithubStore } from "@/modules/github/store";
 import { projectPath } from "@/router";
 import { relativeTime } from "@/lib/relativeTime";
+import { openErrorMessage } from "./invite";
 import { useProjectsStore } from "./store";
 
 const gh = useGithubStore();
@@ -56,7 +57,7 @@ async function open(fullName: string) {
     const created = await projects.cloneRepo(fullName);
     await router.push(projectPath(created.id));
   } catch (e) {
-    openError.value = errorMessage(e);
+    openError.value = openErrorMessage(e);
   } finally {
     opening.value = null;
   }

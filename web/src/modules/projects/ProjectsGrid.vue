@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, Trash2 } from "@lucide/vue";
+import { EllipsisVertical, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -25,6 +25,7 @@ import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
+import InviteDialog from "./InviteDialog.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
 import RepoBrowser from "./RepoBrowser.vue";
 import TemplateGallery from "./TemplateGallery.vue";
@@ -48,6 +49,7 @@ const STATUS_DOT: Record<Project["devserver"], string> = {
 };
 
 const showNew = ref(false);
+const inviteProject = ref<Project | null>(null);
 const pendingDelete = ref<Project | null>(null);
 const deleting = ref(false);
 
@@ -150,6 +152,9 @@ function open(project: Project) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem @select="inviteProject = project">
+                      <UserPlus /> Invite
+                    </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
                       <Trash2 /> Delete
                     </DropdownMenuItem>
@@ -166,6 +171,14 @@ function open(project: Project) {
   </div>
 
   <NewProjectDialog v-model:open="showNew" @created="open" />
+
+  <InviteDialog
+    v-if="inviteProject"
+    :open="inviteProject !== null"
+    :name="inviteProject.name"
+    :repo="inviteProject.repo"
+    @update:open="(o) => !o && (inviteProject = null)"
+  />
 
   <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
     <AlertDialogContent>
