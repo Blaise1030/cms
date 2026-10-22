@@ -42,6 +42,7 @@ export const useChangesStore = defineStore("changes", () => {
   const creating = ref(false);
   const sharing = ref(false);
   const markingReady = ref(false);
+  const publishing = ref(false);
   const switching = ref(false);
   const updating = ref(false);
   const cleaningUp = ref(false);
@@ -558,6 +559,38 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /**
+   * Publish the change: push it, share it (opening a pull request if it has none), mark it
+   * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
+   * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
+   * after the usual interval.
+   */
+  async function publish(id: string, branch: string): Promise<void> {
+    publishing.value = true;
+    needsSignIn.value = false;
+    try {
+      const pr = await daemon.api.publishChange(id, branch);
+      projectId.value = id;
+      if (active.value?.branch === branch) {
+        stopStatusPolling();
+        status.value = pr;
+        if (pr) {
+          prUrl.value = pr.url;
+          pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+        }
+      }
+      // The drafts menu drops the published change; the change itself stays until Clean up.
+      await list(id).catch(() => undefined);
+    } catch (e) {
+      if (e instanceof ApiError && e.needsGithubSignIn) {
+        needsSignIn.value = true;
+      }
+      throw e;
+    } finally {
+      publishing.value = false;
+    }
+  }
+
   return {
     projectId,
     active,
@@ -567,6 +600,7 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     markingReady,
+    publishing,
     switching,
     updating,
     cleaningUp,
@@ -608,6 +642,7 @@ export const useChangesStore = defineStore("changes", () => {
     share,
     cleanup,
     markReady,
+    publish,
     refreshStatus,
     stopStatusPolling,
     dismissProtectionHint,

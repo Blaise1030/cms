@@ -348,6 +348,15 @@ export function createApi(
         })
       ).pr,
 
+    /** Publish a change: push it, open + ready its PR if needed, then merge it on GitHub.
+     *  Returns the merged PR's status; the local change stays until it is cleaned up. */
+    publishChange: async (project: string, branch: string): Promise<PrStatus | null> =>
+      (
+        await json<{ pr: PrStatus | null }>("POST", `/api/changes/${enc(branch)}/publish`, {
+          body: { project },
+        })
+      ).pr,
+
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))
         .checkpoints,
