@@ -13,6 +13,7 @@ import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
+import { useChatStore } from "@/modules/chat/store";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -114,6 +115,80 @@ describe("changes store", () => {
     });
     await expect(store.switchTo("site", "content/alpha")).rejects.toBeInstanceOf(ApiError);
     expect(store.error).toMatch(/checkpoint/i);
+  });
+
+  it("switchTo with a chat running defers to a confirm and cancel leaves active unchanged", async () => {
+    const switchChange = vi.fn(async () => ({ branch: "content/new", title: "New" }));
+    const stopChat = vi.fn(async () => ({ stopped: true }));
+    const store = setup({
+      switchChange,
+      stopChat,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    const result = await store.switchTo("site", "content/new");
+
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+    expect(store.pendingSwitch).toEqual({
+      projectId: "site",
+      branch: "content/new",
+      fromTitle: "Old",
+      toTitle: "New",
+    });
+
+    store.cancelSwitch();
+    expect(store.pendingSwitch).toBeNull();
+    expect(store.active).toEqual({ branch: "content/old", title: "Old" });
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(stopChat).not.toHaveBeenCalled();
+  });
+
+  it("confirming the switch stops the chat then switches", async () => {
+    const switchChange = vi.fn(async () => ({ branch: "content/new", title: "New" }));
+    const stopChat = vi.fn(async () => ({ stopped: true }));
+    const store = setup({
+      switchChange,
+      stopChat,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+    vi.spyOn(usePreviewStore(), "reload");
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    const change = await store.confirmSwitch();
+
+    expect(stopChat).toHaveBeenCalledWith("site");
+    expect(switchChange).toHaveBeenCalledWith("site", "content/new");
+    expect(change).toEqual({ branch: "content/new", title: "New" });
+    expect(store.active).toEqual({ branch: "content/new", title: "New" });
+    expect(store.pendingSwitch).toBeNull();
+  });
+
+  it("a failed stop aborts the switch and stays on the old draft", async () => {
+    const switchChange = vi.fn();
+    const stopChat = vi.fn(async () => {
+      throw new ApiError("IO", "could not stop the agent", 500);
+    });
+    const store = setup({ switchChange, stopChat });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    await expect(store.confirmSwitch()).rejects.toBeInstanceOf(ApiError);
+
+    expect(store.error).toMatch(/could not stop the agent/i);
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(store.active).toEqual({ branch: "content/old", title: "Old" });
   });
 
   it("load sets active from GET /api/changes/active", async () => {
