@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
-import type { AutoResolveState, AutoResolveStatus } from "@/core/types";
+import type { AutoResolveState, AutoResolveStatus, PrStatus } from "@/core/types";
 
 const h = vi.hoisted(() => ({
   daemon: null as unknown as FakeDaemon,
@@ -763,6 +763,93 @@ describe("changes store cleanup", () => {
     });
     vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
     await expect(store.cleanup("site", "content/lw")).resolves.toEqual({ mainUpdated: false });
+  });
+});
+
+describe("changes store publish", () => {
+  const pr: PrStatus = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged",
+    checks: "none",
+    previewUrl: null,
+  };
+
+  function publishStore(api: Record<string, unknown> = {}) {
+    return setup({
+      publishChange: vi.fn(async () => pr),
+      listChanges: vi.fn(async () => []),
+      tree: vi.fn(async () => ({ entries: [] })),
+      ...api,
+    });
+  }
+
+  it("publishes the active change and shows the returned status", async () => {
+    const publishChange = vi.fn(async () => pr);
+    const store = publishStore({ publishChange });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      expect(publishChange).toHaveBeenCalledWith("site", "content/lw");
+      expect(store.status).toEqual(pr);
+      expect(store.prUrl).toBe(pr.url);
+      expect(store.publishing).toBe(false);
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("refreshes the change list after publishing", async () => {
+    const listChanges = vi.fn(async () => []);
+    const store = publishStore({ listChanges });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      expect(listChanges).toHaveBeenCalledWith("site");
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("is in flight while the publish request is pending", async () => {
+    let release!: (pr: PrStatus) => void;
+    const publishChange = vi.fn(
+      () => new Promise<PrStatus>((resolve) => (release = resolve)),
+    );
+    const store = publishStore({ publishChange });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      const pending = store.publish("site", "content/lw");
+      expect(store.publishing).toBe(true);
+      release(pr);
+      await expect(pending).resolves.toBeUndefined();
+      expect(store.publishing).toBe(false);
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("surfaces publish failures and keeps the change", async () => {
+    const store = publishStore({
+      publishChange: vi.fn(async () => {
+        throw new ApiError("SANDBOX", "Ask an owner to add you to this site.", 403);
+      }),
+    });
+    store.active = { branch: "content/lw", title: "LW" };
+    await expect(store.publish("site", "content/lw")).rejects.toBeInstanceOf(ApiError);
+    expect(store.active).toEqual({ branch: "content/lw", title: "LW" });
+    expect(store.publishing).toBe(false);
+  });
+
+  it("a publish blocked by a stale session asks for sign-in", async () => {
+    const store = publishStore({
+      publishChange: vi.fn(async () => {
+        throw new ApiError("UNAUTH", "your GitHub session expired — sign in again", 401);
+      }),
+    });
+    store.active = { branch: "content/lw", title: "LW" };
+    await expect(store.publish("site", "content/lw")).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsSignIn).toBe(true);
   });
 });
 
