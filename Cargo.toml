@@ -26,7 +26,7 @@ serde_json = { version = "1.0.151", features = ["preserve_order"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "sync", "rt", "time", "io-util"] }
 tower-http = { version = "0.7.1", features = ["cors"] }
 notify = "8.2.0"
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
 base64 = "0.22"
 futures-util = "0.3"
 portable-pty = "0.9.0"

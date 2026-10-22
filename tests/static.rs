@@ -261,8 +261,9 @@ async fn host_allowlist_still_applies_to_the_shell() {
 fn content_editor_template_files_are_embedded() {
     use orso::static_files::Template;
     for path in [
-        "src/content-schemas.mjs",
-        "scripts/orso-content.mjs",
+        ".npmrc",
+        "astro.config.mjs",
+        "src/content.config.ts",
         "src/pages/blog/index.astro",
         "src/pages/blog/[slug].astro",
         "src/pages/help/index.astro",
@@ -274,5 +275,12 @@ fn content_editor_template_files_are_embedded() {
             Template::get(path).is_some(),
             "missing template file: {path}"
         );
+    }
+    for path in [
+        "src/content-schemas.mjs",
+        "scripts/orso-content.mjs",
+        "scripts/orso-content.test.mjs",
+    ] {
+        assert!(Template::get(path).is_none(), "stale template file: {path}");
     }
 }

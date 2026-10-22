@@ -9,11 +9,13 @@ use crate::changes::conflict_sessions::ConflictSessions;
 use crate::chat::manager::ChatManager;
 use crate::config::Config;
 use crate::conflict_preview::ConflictPreviewManager;
+use crate::content::integration::ContentEndpoint;
 use crate::devserver::{DevServerManager, DevServerOptions};
+use crate::error::ApiError;
 use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
-use crate::projects::ProjectRegistry;
+use crate::projects::{DevserverStatus, ProjectRegistry};
 use crate::terminal::TerminalManager;
 use crate::watch::WatchManager;
 
@@ -81,6 +83,28 @@ impl AppState {
         for p in self.projects.list().await {
             self.watch_project(&p.id).await;
         }
+    }
+
+    /// The project's `POST /__orso` endpoint, while its dev server is ready.
+    pub async fn content_endpoint(
+        &self,
+        project: &str,
+    ) -> Result<Option<ContentEndpoint>, ApiError> {
+        let p = self
+            .projects
+            .get(project)
+            .await
+            .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+        if p.devserver != DevserverStatus::Ready {
+            return Ok(None);
+        }
+        Ok(self
+            .devservers
+            .content_token(project)
+            .map(|token| ContentEndpoint {
+                url: format!("http://127.0.0.1:{}/__orso", p.port),
+                token,
+            }))
     }
 
     /// Full control over scaffolding and dev-server supervision (tests).

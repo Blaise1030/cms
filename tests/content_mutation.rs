@@ -1,5 +1,7 @@
 //! Task 5: safe structured content create/update over HTTP.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -7,6 +9,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use orso::config::Config;
+use orso::content::integration;
 use orso::projects::Source;
 use orso::state::AppState;
 use orso::{changes, git, http};
@@ -30,17 +33,6 @@ fn git_cli(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn link_node_modules(dir: &Path) {
-    let modules =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
-    std::os::unix::fs::symlink(modules, dir.join("node_modules")).unwrap();
-    // `.gitignore` has `node_modules/`, which does not match a symlink.
-    let exclude = dir.join(".git/info/exclude");
-    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-    text.push_str("\n/node_modules\n");
-    std::fs::write(exclude, text).unwrap();
-}
-
 struct Env {
     _tmp: tempfile::TempDir,
     state: AppState,
@@ -49,10 +41,10 @@ struct Env {
     dir: PathBuf,
 }
 
-/// A template project with installed helper dependencies, optionally on a change branch.
+/// A template project with its fake dev server ready, optionally on a change branch.
 async fn env(change: bool) -> Env {
     let tmp = tempfile::tempdir().unwrap();
-    let state = AppState::with_scaffold_install(
+    let state = AppState::with_options(
         Config {
             port: 0,
             origin: None,
@@ -63,10 +55,12 @@ async fn env(change: bool) -> Env {
             ..Default::default()
         },
         false,
+        common::fake_devserver(),
     );
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    link_node_modules(&dir);
+    common::write_content_manifest(&dir, "");
+    common::start_fake(&state, &info.id).await;
     if change {
         changes::create(&dir, "Edit content").await.unwrap();
     }
@@ -190,7 +184,6 @@ async fn local_and_github_projects_reject_writes_on_main() {
         )
         .await
         .unwrap();
-    link_node_modules(&e._tmp.path().join(&gh.id));
     let (s, v) = call(
         &e.app,
         "PUT",
@@ -600,4 +593,61 @@ async fn dangling_and_empty_references_are_refused_without_writes() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+#[tokio::test]
+async fn without_a_ready_preview_collections_are_read_only_and_saves_write_nothing() {
+    let e = env(true).await;
+    let mut readonly =
+        common::manifest_collection("pages", "src/content/pages", "*.md", "markdown", json!({}));
+    readonly["supportedForEditing"] = json!(false);
+    readonly["reason"] = json!("Uses a custom loader");
+    let manifest = e.dir.join(".astro/orso-content.json");
+    let mut m: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    m["collections"].as_array_mut().unwrap().push(readonly);
+    std::fs::write(&manifest, m.to_string()).unwrap();
+    let branch = git_cli(&e.dir, &["branch", "--show-current"]);
+    let entry = read(&e, "blog", "welcome").await;
+    common::stop_fake(&e.state, &e.id).await;
+
+    let uri = format!("/api/content/collections?project={}", e.id);
+    let (s, v) = call(&e.app, "GET", &uri, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let collections = v["collections"].as_array().unwrap();
+    assert_eq!(collections.len(), 3, "{v}");
+    for c in collections {
+        assert_eq!(c["editable"], false, "{c}");
+        let reason = if c["name"] == "pages" {
+            "Uses a custom loader"
+        } else {
+            integration::PREVIEW_REASON
+        };
+        assert_eq!(c["reason"], reason, "{c}");
+    }
+
+    let before = std::fs::read(e.dir.join(WELCOME)).unwrap();
+    let base = head(&e.dir);
+    let (s, v) = call(
+        &e.app,
+        "PUT",
+        "/api/content/entry",
+        Some(json!({"project":e.id,"collection":"blog","id":"welcome","branch":branch,"hash":entry["hash"],"fields":{"title":"Changed"}})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY, "{v}");
+    assert_eq!(v["error"]["code"], "DEVSERVER_ERR");
+    assert_eq!(v["error"]["message"], integration::PREVIEW_SAVE_REASON);
+    let (s, v) = call(
+        &e.app,
+        "POST",
+        "/api/content/entry",
+        Some(post(&e, &branch, "blog", "fresh", post_fields(), "")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY, "{v}");
+    assert_eq!(v["error"]["code"], "DEVSERVER_ERR");
+    assert_eq!(std::fs::read(e.dir.join(WELCOME)).unwrap(), before);
+    assert!(!e.dir.join("src/content/blog/en/fresh.md").exists());
+    assert_eq!(head(&e.dir), base);
+    assert_eq!(git_cli(&e.dir, &["status", "--porcelain"]), "");
 }

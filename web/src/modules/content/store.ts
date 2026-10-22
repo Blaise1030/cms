@@ -23,11 +23,12 @@ export interface ContentLifecycle {
 const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
 /** File events within this window coalesce into one trailing refresh. */
 export const REFRESH_DELAY_MS = 250;
-const CONTENT_FILES = ["src/content-schemas.mjs", "src/content.config.ts", "scripts/orso-content.mjs"];
+const CONTENT_FILES = ["astro.config.mjs", "src/content.config.ts"];
+const CONTENT_DIRS = ["src/content", "src/assets", "packages/astro"];
 /** Whether a changed project path can change the catalog or an entry; "" is the watcher's overflow. */
 export function affectsContent(path: string): boolean {
   return path === "" || CONTENT_FILES.includes(path)
-    || ["src/content", "src/assets"].some(dir => path === dir || path.startsWith(`${dir}/`));
+    || CONTENT_DIRS.some(dir => path === dir || path.startsWith(`${dir}/`));
 }
 
 export const useContentStore = defineStore("content", () => {
@@ -65,9 +66,16 @@ export const useContentStore = defineStore("content", () => {
   }
   /** Which mutation a Create Change resumes. */
   let resumeAction: "save" | "lifecycle" | "create" = "save";
+  const openCollection = computed(() => collections.value.find(x => x.name === entry.value?.collection));
+  /** The open entry's schema. A collection that is read only for now (preview not running) keeps it, so its draft stays a draft. */
   const descriptor = computed<FieldDescriptor | null>(() => {
-    const c = collections.value.find(x => x.name === entry.value?.collection);
-    return c?.editable && c.fields?.type === "object" ? c.fields : null;
+    const c = openCollection.value;
+    return c?.fields?.type === "object" ? c.fields : null;
+  });
+  /** Why the open entry cannot be saved right now, or null when it can. */
+  const readOnlyReason = computed(() => {
+    const c = openCollection.value;
+    return !c || c.editable ? null : c.reason ?? "This collection is read only";
   });
   /** Blog and Help docs Markdown bodies get the rich editor; every other body (section MDX included) stays raw. */
   const richBody = computed(() => !!entry.value && entry.value.kind === "markdown" && RICH_BODY_COLLECTIONS.includes(entry.value.collection));
@@ -393,9 +401,11 @@ export const useContentStore = defineStore("content", () => {
   }
   const offs = [
     daemon.on("fs.change", (e) => { if (e.projectId === projectId.value && affectsContent(e.path)) scheduleRefresh(); }),
+    // Saving needs a ready preview, so any change in its state can change what is editable.
+    daemon.on("devserver.status", (e) => { if (e.projectId === projectId.value) scheduleRefresh(); }),
     daemon.on("events.lagged", scheduleRefresh),
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
 });

@@ -32,7 +32,7 @@ Before sharing previews, protect `main` so merges need review; see
 ### Browser (daemon + Vite)
 
 ```sh
-just setup   # first time: install web and template dependencies
+just setup   # first time: install web, orso-astro package and template dependencies
 just dev     # daemon :7800, Vite :5173
 ```
 
@@ -73,7 +73,7 @@ The agent panel's chat runs a coding CLI through the daemon. Built-in providers:
 
 ```sh
 just build   # SPA (+ PWA check), then release binary that embeds web/dist
-just test    # web build, Rust tests, web unit tests, template build
+just test    # web build, Rust tests, web unit tests, orso-astro package and template tests
 just e2e     # Playwright smoke (rebuilds release daemon with embedded UI)
 ```
 

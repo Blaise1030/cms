@@ -117,6 +117,9 @@ impl ApiError {
     pub fn agent(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::AgentErr, message)
     }
+    pub fn devserver(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::DevserverErr, message)
+    }
     pub fn git(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::GitErr, message)
     }

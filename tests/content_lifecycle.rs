@@ -1,5 +1,7 @@
 //! Task 7: rename and delete content entries with references, owned assets, and checkpoints.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -7,6 +9,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use orso::config::Config;
+use orso::content::integration::PREVIEW_SAVE_REASON;
 use orso::state::AppState;
 use orso::{changes, http};
 use serde_json::{json, Value};
@@ -32,18 +35,8 @@ fn git_cli(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn link_node_modules(dir: &Path) {
-    let modules =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
-    std::os::unix::fs::symlink(modules, dir.join("node_modules")).unwrap();
-    let exclude = dir.join(".git/info/exclude");
-    let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-    text.push_str("\n/node_modules\n");
-    std::fs::write(exclude, text).unwrap();
-}
-
-/// Each test spawns many content-helper (node) processes; running all of them at once
-/// starves the helper of CPU past its 10 s timeout, so cap how many run together.
+/// Each test runs a fake dev server (node) and many endpoint calls; running all of them at
+/// once starves the server of CPU past the 10 s endpoint timeout, so cap how many run together.
 static HELPER_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
 
 struct Env {
@@ -85,7 +78,7 @@ Read [the welcome post](/blog/welcome) first.
 async fn env(change: bool) -> Env {
     let slot = HELPER_SLOTS.acquire().await.unwrap();
     let tmp = tempfile::tempdir().unwrap();
-    let state = AppState::with_scaffold_install(
+    let state = AppState::with_options(
         Config {
             port: 0,
             origin: None,
@@ -96,10 +89,12 @@ async fn env(change: bool) -> Env {
             ..Default::default()
         },
         false,
+        common::fake_devserver(),
     );
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
-    link_node_modules(&dir);
+    common::write_content_manifest(&dir, "");
+    common::start_fake(&state, &info.id).await;
     if change {
         changes::create(&dir, "Edit content").await.unwrap();
     }
@@ -513,6 +508,27 @@ async fn rename_rejects_stale_branch_duplicate_and_invalid_slugs() {
         assert_eq!(v["error"]["reason"], "invalid_slug", "{slug}: {v}");
     }
     assert_eq!(snapshot(&e.dir), before);
+}
+
+#[tokio::test]
+async fn rename_without_a_ready_preview_changes_nothing() {
+    let e = env(true).await;
+    let before = snapshot(&e.dir);
+    let base = head(&e.dir);
+    let hash = read(&e, "blog", "welcome").await["hash"].clone();
+    common::stop_fake(&e.state, &e.id).await;
+    let (s, v) = call(
+        &e.app,
+        "POST",
+        "/api/content/entry/rename",
+        Some(json!({"project":e.id,"collection":"blog","id":"welcome","slug":"hello","branch":e.branch,"hash":hash})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY, "{v}");
+    assert_eq!(v["error"]["code"], "DEVSERVER_ERR", "{v}");
+    assert_eq!(v["error"]["message"], PREVIEW_SAVE_REASON, "{v}");
+    assert_eq!(snapshot(&e.dir), before);
+    assert_eq!(head(&e.dir), base);
 }
 
 #[tokio::test]
