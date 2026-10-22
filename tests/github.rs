@@ -367,6 +367,150 @@ async fn sign_in_open_repo_and_author_commits() {
 }
 
 #[tokio::test]
+async fn publish_pushes_and_merges_the_change_without_cleaning_up() {
+    use axum::extract::Json as AxJson;
+    use axum::routing::put;
+    use std::sync::Mutex;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    let git_root = tmp.path().join("git");
+    bare_repo(&git_root);
+
+    let merges: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let first_merge_fails = Arc::new(AtomicUsize::new(0));
+    let merges2 = merges.clone();
+    let fails2 = first_merge_fails.clone();
+    let github = Router::new()
+        .route(
+            "/login/device/code",
+            post(|| async {
+                Json(json!({
+                    "device_code": "dev123", "user_code": "ABCD-1234",
+                    "verification_uri": "https://github.com/login/device",
+                    "expires_in": 900, "interval": 5
+                }))
+            }),
+        )
+        .route(
+            "/login/oauth/access_token",
+            post(|| async { Json(json!({ "access_token": "tok", "token_type": "bearer" })) }),
+        )
+        .route(
+            "/user",
+            get(|| async {
+                Json(json!({
+                    "login": "ada", "id": 42, "name": "Ada Lovelace",
+                    "avatar_url": "https://avatars.example/ada.png"
+                }))
+            }),
+        )
+        .route(
+            "/repos/acme/site/pulls",
+            get(|| async {
+                Json(json!([{
+                    "number": 4,
+                    "html_url": "https://github.com/acme/site/pull/4",
+                    "title": "Launch week",
+                    "draft": false,
+                    "state": "open",
+                    "head": { "ref": "content/launch-week", "sha": "abc" }
+                }]))
+            }),
+        )
+        .route(
+            "/repos/acme/site/pulls/4/merge",
+            put(move |AxJson(body): AxJson<Value>| {
+                let merges = merges2.clone();
+                let fails = fails2.clone();
+                async move {
+                    merges.lock().unwrap().push(body);
+                    if fails.fetch_add(1, Ordering::SeqCst) == 0 {
+                        (
+                            StatusCode::CONFLICT,
+                            Json(json!({ "message": "Pull Request is not mergeable" })),
+                        )
+                    } else {
+                        (
+                            StatusCode::OK,
+                            Json(json!({
+                                "merged": true,
+                                "message": "Pull Request successfully merged",
+                                "sha": "def"
+                            })),
+                        )
+                    }
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, github).await.unwrap() });
+
+    let app = http::router(AppState::with_scaffold_install(
+        config(&projects, &base, &git_root),
+        false,
+    ));
+    call(&app, req("POST", "/api/github/device", None)).await;
+    let (_, body) = call(&app, req("POST", "/api/github/device/poll", None)).await;
+    assert_eq!(body["status"], "signedIn", "{body}");
+    let (s, info) = call(
+        &app,
+        req(
+            "POST",
+            "/api/github/clone",
+            Some(json!({ "repo": "acme/site" })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{info}");
+    let dir = projects.join("site");
+    git(&dir, &["branch", "content/launch-week"]);
+
+    let publish = || {
+        req(
+            "POST",
+            "/api/changes/content%2Flaunch-week/publish",
+            Some(json!({ "project": "site" })),
+        )
+    };
+
+    // GitHub refusing the merge surfaces as one plain sentence, not GitHub's words.
+    let (s, body) = call(&app, publish()).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.starts_with("Couldn't publish"), "{message}");
+    assert!(message.contains("latest"), "{message}");
+    for jargon in ["branch", "merge", "pull request", "conflict"] {
+        assert!(!message.to_lowercase().contains(jargon), "{message}");
+    }
+
+    let (s, body) = call(&app, publish()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        json!({ "pr": {
+            "number": 4,
+            "url": "https://github.com/acme/site/pull/4",
+            "state": "merged"
+        }})
+    );
+    let sent = merges.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(
+        sent.iter()
+            .all(|b| b == &json!({ "merge_method": "merge" })),
+        "{sent:?}"
+    );
+    // Cleaning up is still the Clean up button's job: the local change is untouched.
+    assert_eq!(
+        git(&dir, &["branch", "--list", "content/launch-week"]),
+        "content/launch-week"
+    );
+    assert_eq!(git(&dir, &["branch", "--show-current"]), "main");
+}
+
+#[tokio::test]
 async fn sign_in_is_unavailable_without_a_client_id() {
     let tmp = tempfile::tempdir().unwrap();
     let cfg = Config {
