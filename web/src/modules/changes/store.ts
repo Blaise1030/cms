@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { onScopeDispose, ref } from "vue";
+import { toast } from "vue-sonner";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
@@ -207,6 +208,7 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   async function performSwitch(id: string, branch: string): Promise<Change> {
+    toast.info("Opening this draft…");
     // The old change's poll must not fire mid-switch.
     stopStatusPolling();
     switching.value = true;
@@ -520,6 +522,13 @@ export const useChangesStore = defineStore("changes", () => {
     await daemon.api.dismissProtectionHint(id);
     protectionHint.value = null;
   }
+
+  // Toast "Updating tools…" only when the installing project is the one the writer has open.
+  const offDepsInstalling = daemon.on("preview.deps_installing", (e) => {
+    if (e.projectId !== projectId.value) return;
+    toast.info("Updating tools for this draft…");
+  });
+  onScopeDispose(() => offDepsInstalling());
 
   /**
    * Mark the change's draft PR ready for review and show the status it returns. No immediate

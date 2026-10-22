@@ -5,8 +5,14 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 import type { AutoResolveState, AutoResolveStatus } from "@/core/types";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+const h = vi.hoisted(() => ({
+  daemon: null as unknown as FakeDaemon,
+  toastInfo: vi.fn(),
+}));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("vue-sonner", () => ({
+  toast: { info: h.toastInfo, success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+}));
 
 import { STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
@@ -28,6 +34,7 @@ const HINT = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("changes store", () => {
@@ -171,6 +178,73 @@ describe("changes store", () => {
     expect(change).toEqual({ branch: "content/new", title: "New" });
     expect(store.active).toEqual({ branch: "content/new", title: "New" });
     expect(store.pendingSwitch).toBeNull();
+  });
+
+  it("switchTo toasts 'Opening this draft…' when it actually switches", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+
+    await store.switchTo("site", "content/alpha");
+
+    expect(h.toastInfo).toHaveBeenCalledWith("Opening this draft…");
+  });
+
+  it("a canceled switch shows no toast", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/new", title: "New" })),
+      stopChat: vi.fn(async () => ({ stopped: true })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    store.cancelSwitch();
+
+    expect(h.toastInfo).not.toHaveBeenCalled();
+  });
+
+  it("confirming a held switch toasts once the switch runs", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/new", title: "New" })),
+      stopChat: vi.fn(async () => ({ stopped: true })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    expect(h.toastInfo).not.toHaveBeenCalled();
+    await store.confirmSwitch();
+    expect(h.toastInfo).toHaveBeenCalledWith("Opening this draft…");
+  });
+
+  it("toasts 'Updating tools for this draft…' when deps install for the open project", async () => {
+    const store = setup();
+    store.projectId = "site";
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "site" });
+
+    expect(h.toastInfo).toHaveBeenCalledWith("Updating tools for this draft…");
+  });
+
+  it("stays quiet when deps install for another project", async () => {
+    const store = setup();
+    store.projectId = "site";
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "other" });
+
+    expect(h.toastInfo).not.toHaveBeenCalled();
   });
 
   it("a failed stop aborts the switch and stays on the old draft", async () => {
