@@ -170,6 +170,26 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
+  it("offers Invite in the project actions with a checklist and collaborators link", async () => {
+    api.listProjects = vi.fn(async () => [{ ...p("a", "ready"), repo: "acme/site" }]);
+    const w = mountGrid();
+    await flushPromises();
+    await w.find("[aria-label='Actions for Site a']").trigger("click");
+    await flushPromises();
+    const item = [...document.body.querySelectorAll("[role='menuitem']")].find((m) =>
+      m.textContent?.includes("Invite"),
+    ) as HTMLElement;
+    expect(item).toBeTruthy();
+    item.click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("Add your teammate on GitHub");
+    expect(document.body.textContent).toContain("They sign in with GitHub");
+    expect(document.body.textContent).toContain("They open this site");
+    const link = document.body.querySelector<HTMLAnchorElement>("[data-testid='invite-collaborators-link']");
+    expect(link?.getAttribute("href")).toBe("https://github.com/acme/site/settings/access");
+    w.unmount();
+  });
+
   it("keeps the header draggable only on desktop", async () => {
     const browser = mountGrid();
     await flushPromises();

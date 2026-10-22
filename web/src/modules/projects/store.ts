@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
+import { toast } from "vue-sonner";
 import { useDaemon } from "@/core/daemon";
 import type { Project } from "@/core/types";
 import { errorMessage } from "@orso/utils";
@@ -42,6 +43,7 @@ export const useProjectsStore = defineStore("projects", () => {
 
   /** Open a GitHub repository as a project (the daemon clones it). */
   async function cloneRepo(repo: string): Promise<Project> {
+    toast.info(`Opening ${repo.split("/").pop() ?? repo}…`);
     creating.value = true;
     try {
       const project = await daemon.api.cloneProject(repo);

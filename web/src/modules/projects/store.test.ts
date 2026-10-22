@@ -4,8 +4,9 @@ import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import type { Project } from "@/core/types";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastInfo: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("vue-sonner", () => ({ toast: { info: h.toastInfo, success: vi.fn(), error: vi.fn() } }));
 
 import { useProjectsStore } from "./store";
 
@@ -88,6 +89,14 @@ describe("projects store", () => {
     setup({ listProjects });
     h.daemon.emit({ type: "events.lagged", missed: 5 });
     await vi.waitFor(() => expect(listProjects).toHaveBeenCalledTimes(1));
+  });
+
+  it("toasts Opening [site] when cloning a repo", async () => {
+    const cloneProject = vi.fn(async () => project("site", { name: "site", repo: "acme/site" }));
+    const store = setup({ cloneProject });
+    const created = await store.cloneRepo("acme/site");
+    expect(h.toastInfo).toHaveBeenCalledWith("Opening site\u2026");
+    expect(created.repo).toBe("acme/site");
   });
 
   it("patches autoApprove", async () => {
