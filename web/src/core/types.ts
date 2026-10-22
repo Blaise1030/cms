@@ -291,6 +291,18 @@ export interface TerminalTurnEvent {
   projectId: string;
 }
 
+/** Remount the preview iframe (agent ctl or turn-end). */
+export interface PreviewReloadEvent {
+  type: "preview.reload";
+  projectId: string;
+}
+
+/** Reload Content collections, entry lists, and the open entry (agent ctl or turn-end). */
+export interface ContentRefreshEvent {
+  type: "content.refresh";
+  projectId: string;
+}
+
 /** The agent started (a request was submitted) or stopped working on a request. */
 export interface TerminalBusyEvent {
   type: "terminal.busy";
@@ -325,6 +337,8 @@ export type DaemonEvent =
   | ChangesUpdatedEvent
   | ChangesAutoResolveEvent
   | TerminalTurnEvent
+  | PreviewReloadEvent
+  | ContentRefreshEvent
   | TerminalBusyEvent
   | ChatTurnEvent
   | EventsLaggedEvent;

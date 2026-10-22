@@ -26,6 +26,8 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "changes.updated": { projectId: "string" },
   "changes.auto_resolve": { projectId: "string", sessionId: "string", state: "string" },
   "terminal.turn": { projectId: "string" },
+  "preview.reload": { projectId: "string" },
+  "content.refresh": { projectId: "string" },
   "terminal.busy": { projectId: "string" },
   "chat.turn": { projectId: "string", chatId: "string" },
   "events.lagged": { missed: "number" },

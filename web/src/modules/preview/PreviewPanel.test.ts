@@ -171,6 +171,19 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("remounts the iframe on preview.reload for this project", async () => {
+    const w = mountPanel("ready");
+    const before = usePreviewStore().reloadNonce;
+    hDaemon.daemon.emit({ type: "preview.reload", projectId: "other" });
+    await flushPromises();
+    expect(usePreviewStore().reloadNonce).toBe(before);
+    hDaemon.daemon.emit({ type: "preview.reload", projectId: "site-1" });
+    await flushPromises();
+    expect(usePreviewStore().reloadNonce).toBe(before + 1);
+    expect(w.find("iframe").exists()).toBe(true);
+    w.unmount();
+  });
+
   it("offers to have the agent fix a crashed dev server", async () => {
     const w = mountPanel("ready");
     hDaemon.daemon.emit({

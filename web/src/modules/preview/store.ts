@@ -101,6 +101,10 @@ export const usePreviewStore = defineStore("preview", () => {
   const offs = [
     daemon.onReconnected(resync),
     daemon.on("events.lagged", resync),
+    daemon.on("preview.reload", (e) => {
+      // Remount when this project's preview is (or was) tracked, or when nothing is seeded yet.
+      if (e.projectId in status.value || Object.keys(status.value).length === 0) reload();
+    }),
     daemon.on("devserver.status", (e) => {
       const before = status.value[e.projectId];
       status.value[e.projectId] = e.state;

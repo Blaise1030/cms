@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import PawMark from "@/app/PawMark.vue";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
@@ -88,67 +89,76 @@ function open(project: Project) {
     </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
       <div class="mx-auto flex w-full max-w-2xl flex-col gap-8 px-10 pt-16 pb-16">
-        <section class="flex flex-col gap-3">
-          <h2 class="text-lg font-medium">Recent</h2>
-
-          <p v-if="store.error" class="text-destructive text-sm" role="alert">
-            {{ store.error }}
-            <Button variant="link" size="sm" @click="store.load()">Retry</Button>
-          </p>
-
-          <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
-            <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
-          </div>
-
-          <p
-            v-else-if="store.loaded && store.projects.length === 0"
-            class="text-muted-foreground text-sm"
-          >
-            No projects yet.
-          </p>
-
-          <div v-else class="divide-y overflow-hidden rounded-lg border" data-testid="project-grid">
-            <div
-              v-for="project in recent"
-              :key="project.id"
-              :data-testid="`project-${project.id}`"
-              class="flex items-center gap-3 px-4 py-2.5"
-            >
-              <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
-                <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
-                <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm">{{ project.name }}</span>
-                <span v-if="project.repo" class="text-muted-foreground block truncate text-xs">
-                  {{ project.repo }}
-                </span>
-              </span>
-              <Button variant="outline" size="sm" as-child>
-                <RouterLink :to="projectPath(project.id)" :aria-label="`Open ${project.name}`">
-                  Open
-                </RouterLink>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="`Actions for ${project.name}`"
-                    @keydown.enter.stop
-                  >
-                    <EllipsisVertical />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
-                    <Trash2 /> Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+        <div class="flex flex-col gap-8">
+          <header class="mb-2 flex items-center gap-4" data-testid="home-brand">
+            <PawMark class="text-muted-foreground size-7 shrink-0" data-testid="home-logo" />
+            <div class="min-w-0 leading-tight">
+              <h1 class="text-lg font-semibold tracking-tight">orso</h1>
+              <p class="text-muted-foreground text-sm">Build and edit your sites with an AI agent</p>
             </div>
-          </div>
-        </section>
+          </header>
+          <section class="flex flex-col gap-3">
+            <h2 class="text-lg font-medium">Recent</h2>
+
+            <p v-if="store.error" class="text-destructive text-sm" role="alert">
+              {{ store.error }}
+              <Button variant="link" size="sm" @click="store.load()">Retry</Button>
+            </p>
+
+            <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
+              <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
+            </div>
+
+            <p
+              v-else-if="store.loaded && store.projects.length === 0"
+              class="text-muted-foreground text-sm"
+            >
+              No projects yet.
+            </p>
+
+            <div v-else class="bg-card divide-y overflow-hidden rounded-lg border shadow-sm" data-testid="project-grid">
+              <div
+                v-for="project in recent"
+                :key="project.id"
+                :data-testid="`project-${project.id}`"
+                class="flex items-center gap-3 px-4 py-2.5"
+              >
+                <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
+                  <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
+                  <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm">{{ project.name }}</span>
+                  <span v-if="project.repo" class="text-muted-foreground block truncate text-xs">
+                    {{ project.repo }}
+                  </span>
+                </span>
+                <Button variant="outline" size="sm" as-child>
+                  <RouterLink :to="projectPath(project.id)" :aria-label="`Open ${project.name}`">
+                    Open
+                  </RouterLink>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="`Actions for ${project.name}`"
+                      @keydown.enter.stop
+                    >
+                      <EllipsisVertical />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </section>
+        </div>
         <RepoBrowser />
         <TemplateGallery @create="showNew = true" />
       </div>

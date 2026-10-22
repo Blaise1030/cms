@@ -10,9 +10,9 @@ const store = useChangesStore();
 
 <template>
   <Button
-    variant="secondary"
+    variant="outline"
     size="icon"
-    class="size-7"
+    class="bg-card size-7"
     data-testid="get-latest"
     aria-label="Sync with live site"
     title="Sync with live site"

@@ -232,9 +232,108 @@ async fn turn_streams_and_checkpoints() {
         .map(|v| &v["busy"])
         .collect();
     assert_eq!(busy, [&json!(true), &json!(false)], "{seen:?}");
+    assert!(
+        seen.iter().any(|v| v["type"] == "preview.reload"),
+        "missing preview.reload: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|v| v["type"] == "content.refresh"),
+        "missing content.refresh: {seen:?}"
+    );
     assert_eq!(seen.last().unwrap()["chatId"], CHAT);
     assert_eq!(env.state.chats.running(&env.project), None);
     assert!(env.state.chats.subscribe(&env.project, CHAT).is_none());
+}
+
+#[tokio::test]
+async fn chat_turn_exposes_hook_env_for_ctl() {
+    use axum::body::Body;
+    use axum::http::{header, Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("orso-env.txt");
+    let pidfile = tmp.path().join("child.pid");
+    let script = format!(
+        "printf '%s\\n' \"$ORSO_HOOK_TOKEN\" \"$ORSO_URL\" \"$ORSO_PROJECT\" \"$ORSO_HOOK_EXE\" > '{}'; exec sh '{}' '{}' slow",
+        out.display(),
+        fixtures().join("fake_headless.sh").display(),
+        fixtures().join("chat/cursor/turn.jsonl").display(),
+    );
+    let env = env(vec![
+        "env".into(),
+        format!("FAKE_PIDFILE={}", pidfile.display()),
+        "sh".into(),
+        "-c".into(),
+        script,
+    ])
+    .await;
+    let _sub = env
+        .state
+        .chats
+        .start(env.state.clone(), request(&env, "hook env"))
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    let text = loop {
+        let text = std::fs::read_to_string(&out).unwrap_or_default();
+        if text.lines().count() >= 4 {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "hook env never written");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let mut lines = text.lines();
+    let token = lines.next().unwrap().to_string();
+    let url = lines.next().unwrap().to_string();
+    let project = lines.next().unwrap().to_string();
+    let exe = lines.next().unwrap().to_string();
+    assert_eq!(token.len(), 32, "{token}");
+    assert!(env.state.chats.token_matches(&env.project, &token));
+    assert!(!env.state.chats.token_matches(&env.project, "0".repeat(32).as_str()));
+    assert_eq!(project, env.project);
+    assert_eq!(url, format!("http://127.0.0.1:{}", env.state.config.port));
+    assert!(!exe.is_empty(), "{exe}");
+
+    let mut rx = env.state.events.subscribe();
+    let app = orso::http::router(env.state.clone());
+    let (s, body) = {
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ctl/refresh-preview")
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "project": env.project, "token": token }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+        )
+    };
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "ok": true }));
+    let ev = loop {
+        let text = tokio::time::timeout(WAIT, rx.recv())
+            .await
+            .expect("no preview.reload")
+            .unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        if v["type"] == "preview.reload" {
+            break v;
+        }
+    };
+    assert_eq!(ev["projectId"], env.project);
+
+    env.state.chats.stop(&env.project).await;
 }
 
 #[tokio::test]

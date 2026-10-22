@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 
-use super::{changes, checkpoints};
+use super::{changes, checkpoints, ctl};
 use crate::auth;
 use crate::chat::{models, transcript};
 use crate::config::random_token;
@@ -510,6 +510,9 @@ pub async fn turn_end(State(state): State<AppState>, body: Bytes) -> Result<Json
     state
         .events
         .emit("terminal.turn", json!({ "projectId": req.project }));
+    // Same-branch edits still need the Content panel and preview iframe refreshed.
+    ctl::emit_preview_reload(&state, &req.project);
+    ctl::emit_content_refresh(&state, &req.project);
 
     let outcome = checkpoints::finish_turn(&state, &req.project, req.summary.as_deref()).await?;
     let committed = matches!(outcome, checkpoints::TurnOutcome::Committed { .. });

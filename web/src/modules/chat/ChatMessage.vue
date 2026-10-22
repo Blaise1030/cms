@@ -80,9 +80,10 @@ const agentError = (data: unknown) => data as AgentErrorData;
 </script>
 
 <template>
-  <Message v-if="message.role === 'user'" align="end">
+  <!-- Padding keeps btn-raised-soft's shadow inside the scroller item (content-visibility clips paint). -->
+  <Message v-if="message.role === 'user'" align="end" class="p-1">
     <MessageContent>
-      <Bubble variant="secondary" align="end">
+      <Bubble variant="tinted" align="end">
         <template v-for="(sent, i) in userTexts" :key="i">
           <div v-if="sent.files.length" class="flex flex-wrap justify-end gap-1.5">
             <template v-for="f in sent.files" :key="f.name">

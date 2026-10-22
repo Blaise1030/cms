@@ -20,7 +20,6 @@ export interface ContentLifecycle {
   impact: ContentImpact | null; slug: string; busy: boolean; error: string | null;
 }
 
-const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
 /** File events within this window coalesce into one trailing refresh. */
 export const REFRESH_DELAY_MS = 250;
 const CONTENT_FILES = ["astro.config.mjs", "src/content.config.ts"];
@@ -77,8 +76,8 @@ export const useContentStore = defineStore("content", () => {
     const c = openCollection.value;
     return !c || c.editable ? null : c.reason ?? "This collection is read only";
   });
-  /** Blog and Help docs Markdown bodies get the rich editor; every other body (section MDX included) stays raw. */
-  const richBody = computed(() => !!entry.value && entry.value.kind === "markdown" && RICH_BODY_COLLECTIONS.includes(entry.value.collection));
+  /** Markdown bodies get the rich editor; MDX and JSON stay raw. */
+  const richBody = computed(() => entry.value?.kind === "markdown");
   /** Body text from the body editor; it only reports real edits, so opening an entry never dirties it. */
   function setBody(body: string) { draftBody.value = body; }
   /** Put an earlier version into the draft; nothing is written until Save. */
@@ -403,6 +402,8 @@ export const useContentStore = defineStore("content", () => {
     daemon.on("fs.change", (e) => { if (e.projectId === projectId.value && affectsContent(e.path)) scheduleRefresh(); }),
     // Saving needs a ready preview, so any change in its state can change what is editable.
     daemon.on("devserver.status", (e) => { if (e.projectId === projectId.value) scheduleRefresh(); }),
+    // Agent ctl / turn-end: re-fetch collections, entry lists, and the open entry now.
+    daemon.on("content.refresh", (e) => { if (e.projectId === projectId.value) void refresh(); }),
     daemon.on("events.lagged", scheduleRefresh),
     daemon.onReconnected(scheduleRefresh),
   ];
