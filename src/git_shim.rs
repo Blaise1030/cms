@@ -37,28 +37,75 @@ pub fn shim_dir(projects_dir: &Path) -> PathBuf {
 /// Path restores (`checkout -- <path>` and `checkout <tree-ish> -- <path>`) and every
 /// non-checkout command pass through.
 pub fn is_head_moving(args: &[String]) -> bool {
-    match args.first().map(String::as_str) {
-        Some("checkout") => checkout_moves_head(&args[1..]),
-        Some("switch") => !args[1..].is_empty(),
+    // Global options (`git -C <dir> checkout ...`) precede the subcommand; skip them.
+    let Some(start) = subcommand_start(args) else {
+        return false;
+    };
+    match args[start].as_str() {
+        "checkout" => checkout_moves_head(&args[start + 1..]),
+        "switch" => !args[start + 1..].is_empty(),
         _ => false,
     }
 }
 
+/// Index of the subcommand in a full `git` argv (without the leading `git`), skipping
+/// global options. `None` when the argv is only global options.
+fn subcommand_start(args: &[String]) -> Option<usize> {
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        match a.as_str() {
+            // Options taking the next argument as their value.
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path" => i += 2,
+            // Attached-value forms (`--git-dir=<dir>`, `-C<dir>`).
+            _ if a.starts_with("--git-dir=")
+                || a.starts_with("--work-tree=")
+                || a.starts_with("--namespace=")
+                || a.starts_with("--exec-path=")
+                || (a.starts_with("-C") && a.len() > 2) =>
+            {
+                i += 1
+            }
+            // Flags without a value.
+            "-P" | "--no-pager" | "--paginate" | "--no-replace-objects" | "--bare" => i += 1,
+            _ => return Some(i),
+        }
+    }
+    None
+}
+
 fn checkout_moves_head(args: &[String]) -> bool {
-    // Branch-creating/detaching forms always move HEAD.
-    if args
-        .iter()
-        .any(|a| matches!(a.as_str(), "-b" | "-B" | "--orphan" | "--detach"))
+    // Split at the first `--`: with a pathspec after it this is a path restore and HEAD
+    // stays put; a trailing `--` with nothing after it changes nothing, so the form
+    // before it decides (`checkout other --` still switches).
+    let (head, paths) = match args.iter().position(|a| a == "--") {
+        Some(pos) => (&args[..pos], &args[pos + 1..]),
+        None => (args, &[][..]),
+    };
+    if !paths.is_empty()
+        && !head.iter().any(|a| {
+            matches!(a.as_str(), "-b" | "-B" | "--orphan")
+                || a.starts_with("--orphan=")
+                || (a.starts_with("-b") && a.len() > 2)
+                || (a.starts_with("-B") && a.len() > 2)
+        })
     {
+        return false;
+    }
+    let eval = if paths.is_empty() { head } else { args };
+    // Branch-creating/detaching forms always move HEAD (attached values included).
+    if eval.iter().any(|a| {
+        matches!(a.as_str(), "-b" | "-B" | "--orphan" | "--detach")
+            || a.starts_with("--orphan=")
+            || (a.starts_with("-b") && a.len() > 2)
+            || (a.starts_with("-B") && a.len() > 2)
+    }) {
         return true;
     }
-    // `checkout <tree-ish> -- <pathspec>` only overwrites the index/worktree for those
-    // paths and leaves HEAD alone; any `--` makes this a path restore, not a switch.
-    if args.iter().any(|a| a == "--") {
+    if !paths.is_empty() {
         return false;
     }
     // No `--`: a branch argument switches HEAD. `-` is an alias for the previous branch.
-    args.iter().any(|a| a == "-" || !a.starts_with('-'))
+    head.iter().any(|a| a == "-" || !a.starts_with('-'))
 }
 
 /// Ensure the `git` launcher exists in [`shim_dir`] and return that dir. `None` when there
@@ -211,6 +258,14 @@ mod tests {
             &["switch", "-C", "content/x"][..],
             &["switch", "--detach"][..],
             &["switch", "-"][..],
+            &["-C", "/tmp", "checkout", "main"][..],
+            &["-c", "user.name=x", "checkout", "main"][..],
+            &["--git-dir=/tmp/x/.git", "checkout", "main"][..],
+            &["--git-dir", "/tmp/x/.git", "checkout", "main"][..],
+            &["checkout", "-bfoo", "main"][..],
+            &["checkout", "--orphan=foo"][..],
+            &["checkout", "other", "--"][..],
+            &["-C", "/tmp", "switch", "main"][..],
         ] {
             assert!(is_head_moving(&v(blocked)), "{blocked:?} must be blocked");
         }
@@ -235,6 +290,9 @@ mod tests {
             &["checkout", "--ours", "--", "content/file.md"][..],
             &["checkout", "-f", "--", "content/file.md"][..],
             &["switch"][..],
+            &["-C", "/tmp", "status"][..],
+            &["-C", "/tmp", "checkout", "--", "file.md"][..],
+            &["-c", "user.name=x", "checkout", "main", "--", "file.md"][..],
         ] {
             assert!(!is_head_moving(&v(allowed)), "{allowed:?} must pass through");
         }
