@@ -243,6 +243,19 @@ mod tests {
     }
 
     #[test]
+    fn template_drops_the_legacy_helper_and_schema_registry() {
+        let paths = template_paths();
+        for gone in [
+            "scripts/orso-content.mjs",
+            "scripts/orso-content.test.mjs",
+            "src/content-schemas.mjs",
+        ] {
+            assert!(!paths.iter().any(|p| p == gone), "still embeds {gone}");
+        }
+        assert!(orso_astro_paths().iter().any(|p| p == "src/index.js"));
+    }
+
+    #[test]
     fn orso_astro_contains_package_sources_only() {
         let paths = orso_astro_paths();
         for want in [

@@ -6,7 +6,7 @@
 //! filename are never trusted), written to a staging directory inside the project
 //! (`.git/orso-staging/`, same filesystem, ignored by git and the watcher), and given a
 //! deterministic unique name under `src/assets/<collection>/<slug>/`. Tokens become paths
-//! relative to the entry file before the helper validates the candidate. Only after
+//! relative to the entry file before the integration endpoint validates the candidate. Only after
 //! validation and the final branch/hash checks are the staged files hard-linked into place
 //! (never overwriting), under the caller's undo journal. Staging is removed when the save
 //! ends; staging or temporary files left by a crashed process are removed by the next

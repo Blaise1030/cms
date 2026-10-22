@@ -1,8 +1,8 @@
 /**
- * Test fixture mirroring `templates/astro-marketing/src/content-schemas.mjs`.
+ * Test fixture mirroring the schemas in `templates/astro-marketing/src/content.config.ts`.
  *
- * It is intentionally a copy rather than an import: the template is replaced in
- * Task 5, and the package must describe the same schemas the template uses.
+ * It is intentionally a copy rather than an import: `content.config.ts` imports
+ * `astro:content`, and the package must describe the same schemas the template uses.
  */
 export const collectionRegistry = {
   blog: { loader: { base: "./src/content/blog/en", pattern: "*.md" }, kind: "markdown" },

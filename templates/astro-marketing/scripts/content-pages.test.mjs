@@ -22,16 +22,6 @@ function build(dir, base = "/preview/example/") {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 }
 
-// Missing registry entries or drifted loader roots would hide editable collections.
-test("list reports the collection loaders and content kinds", () => {
-  const result = spawnSync(process.execPath, ["scripts/orso-content.mjs"], { cwd: root, input: '{"op":"list"}', encoding: "utf8" });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout).collections, [
-    { name: "blog", loader: { base: "./src/content/blog/en", pattern: "*.md" }, kind: "markdown" },
-    { name: "helpDocs", loader: { base: "./src/content/helpDocs/en", pattern: "*.md" }, kind: "markdown" },
-  ].map(collection => ({...collection, supportedForEditing: true})));
-});
-
 test("built sample Blog and Help articles render Markdown and navigation", () => {
   assert.match(html(root, "blog"), /Welcome to the blog/);
   assert.match(html(root, "blog/welcome"), /<h2[^>]*>.*Welcome/);
@@ -72,17 +62,3 @@ test("empty collections retain useful Blog and Help indexes", () => fixture((dir
   assert.match(html(dir, "blog"), /No blog posts yet/);
   assert.match(html(dir, "help"), /No help docs yet/);
 }));
-
-test("shared schemas validate article metadata and provide array defaults", async () => {
-  const { createCollectionSchemas } = await import("../src/content-schemas.mjs");
-  const { z } = await import("astro/zod");
-  const schemas = createCollectionSchemas({ z });
-  const post = { title: "Post", description: "Description", pubDate: "2026-10-11" };
-  assert.deepEqual(schemas.blog.parse(post), { ...post, tags: [], relatedPosts: [] });
-  for (const date of ["10/11/2026", "2026-02-30", "2026-13-01"]) assert.equal(schemas.blog.safeParse({ ...post, pubDate: date }).success, false);
-  assert.equal(schemas.blog.safeParse({ ...post, coverImage: "./cover.png" }).success, false);
-  assert.equal(schemas.blog.safeParse({ ...post, coverImage: "./cover.png", coverAlt: " " }).success, false);
-  assert.equal(schemas.blog.safeParse({ ...post, coverImage: "./cover.png", coverAlt: "A mountain" }).success, true);
-  assert.equal(schemas.helpDocs.safeParse({ title: "Guide", description: "Description", section: "Setup", order: 1 }).success, true);
-  assert.equal(schemas.helpDocs.safeParse({ title: "Guide", description: "Description", section: "Setup", order: "1" }).success, false);
-});
