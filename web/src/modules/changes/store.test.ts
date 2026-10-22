@@ -102,6 +102,22 @@ describe("changes store", () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  it("switchTo still reloads the preview when the content refresh fails", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    vi.spyOn(useContentStore(), "refreshForBranch").mockRejectedValue(new Error("preview not ready"));
+    vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await store.switchTo("site", "content/alpha");
+    expect(store.active?.branch).toBe("content/alpha");
+    expect(reload).toHaveBeenCalled();
+  });
+
   it("switchTo and create refresh Content for the new branch", async () => {
     const store = setup({
       switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
