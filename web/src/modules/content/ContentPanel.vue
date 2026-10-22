@@ -52,7 +52,7 @@ function showInUrl() {
 function removable(collection: string) {
   return !store.collections.find(x => x.name === collection)?.singleton;
 }
-const canRemove = computed(() => !!store.entry && !!store.descriptor && removable(store.entry.collection));
+const canRemove = computed(() => !!store.entry && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -258,7 +258,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <ResizableHandle with-handle class="bg-transparent" />
       <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
-      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && save()" @keydown.esc="history.selectedSha && history.select(null)">
+      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
         <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
@@ -291,6 +291,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </section>
         <p v-if="store.entry && store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
         <template v-if="store.entry && store.descriptor">
+          <p v-if="store.readOnlyReason" class="mb-3 text-sm text-muted-foreground" role="status" data-testid="content-read-only">{{ store.readOnlyReason }}</p>
           <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
           <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
             <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
@@ -351,7 +352,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
             <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
             <Button type="button" variant="ghost" size="sm" data-testid="content-discard" :disabled="store.saving" @click="store.discard()">Discard</Button>
-            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving">{{ store.saving ? "Saving…" : "Save" }}</Button>
+            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined">{{ store.saving ? "Saving…" : "Save" }}</Button>
           </div>
         </div>
       </Transition>

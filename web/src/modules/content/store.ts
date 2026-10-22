@@ -66,9 +66,16 @@ export const useContentStore = defineStore("content", () => {
   }
   /** Which mutation a Create Change resumes. */
   let resumeAction: "save" | "lifecycle" | "create" = "save";
+  const openCollection = computed(() => collections.value.find(x => x.name === entry.value?.collection));
+  /** The open entry's schema. A collection that is read only for now (preview not running) keeps it, so its draft stays a draft. */
   const descriptor = computed<FieldDescriptor | null>(() => {
-    const c = collections.value.find(x => x.name === entry.value?.collection);
-    return c?.editable && c.fields?.type === "object" ? c.fields : null;
+    const c = openCollection.value;
+    return c?.fields?.type === "object" ? c.fields : null;
+  });
+  /** Why the open entry cannot be saved right now, or null when it can. */
+  const readOnlyReason = computed(() => {
+    const c = openCollection.value;
+    return !c || c.editable ? null : c.reason ?? "This collection is read only";
   });
   /** Blog and Help docs Markdown bodies get the rich editor; every other body (section MDX included) stays raw. */
   const richBody = computed(() => !!entry.value && entry.value.kind === "markdown" && RICH_BODY_COLLECTIONS.includes(entry.value.collection));
@@ -399,5 +406,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
 });

@@ -81,6 +81,34 @@ it("still preserves a dirty draft and flags the on-disk change after a debounced
   expect(store.draftSource).toBe("Draft"); expect(store.changedOnDisk).toBe(true);
 });
 
+it.each([
+  ["field", { title: "Edited" }, "B", { fields: { title: "Edited" } }],
+  ["body", { title: "W" }, "Edited body", { fields: {}, body: "Edited body" }],
+])("keeps a dirty %s edit through refreshes while the preview is unavailable, then saves it", async (_edit, draftFields, draftBody, update) => {
+  const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
+  let editable = true;
+  const listContentCollections = vi.fn(async () => [{ name: "blog", kind: "markdown", fields, editable, reason: editable ? null : "Start the preview to edit content" }]);
+  const updateContentEntry = vi.fn(async () => ({ ...entry, fields: draftFields, body: draftBody, hash: "h2" }));
+  h.daemon = createFakeDaemon({ listContentCollections, listContentEntries: async () => [entry], contentEntry: async () => entry, updateContentEntry });
+  setActivePinia(createPinia());
+  const store = useContentStore(); await store.open("p"); await store.selectCollection("blog"); await store.selectEntry("welcome");
+  store.draftFields = { ...draftFields }; store.setBody(draftBody);
+  expect(store.dirty).toBe(true);
+  editable = false;
+  change("src/content/blog/en/other.md"); vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(store.collections[0]?.editable).toBe(false);
+  expect(store.draftFields).toEqual(draftFields); expect(store.draftBody).toBe(draftBody);
+  expect(store.dirty).toBe(true); expect(store.changedOnDisk).toBe(false);
+  expect(store.readOnlyReason).toBe("Start the preview to edit content");
+  editable = true;
+  h.daemon.emit({ type: "events.lagged" } as never); vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(store.draftFields).toEqual(draftFields); expect(store.draftBody).toBe(draftBody);
+  expect(store.dirty).toBe(true); expect(store.readOnlyReason).toBeNull();
+  await store.saveDraft();
+  expect(updateContentEntry).toHaveBeenCalledWith(expect.objectContaining({ ...update, hash: "h1" }));
+  expect(store.dirty).toBe(false);
+});
+
 it("loads reference picker entries once per collection and reloads them in place on refresh", async () => {
   const listEntries = vi.fn(async (_p: string, collection: string) => collection === "sections" ? [{ ...entry, collection, id: "hero" }, { ...entry, collection, id: "faq" }] : [entry]);
   h.daemon = createFakeDaemon({ listContentCollections: catalog, listContentEntries: listEntries, contentEntry: async () => entry });
