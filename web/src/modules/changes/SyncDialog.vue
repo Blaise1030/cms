@@ -72,7 +72,7 @@ async function advanced() {
   try {
     await store.openAdvanced(props.projectId);
   } catch {
-    advancedError.value = "Couldn't open the advanced view. Please try again.";
+    advancedError.value = "Couldn't open that view. Please try again.";
   }
 }
 
