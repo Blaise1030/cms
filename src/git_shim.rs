@@ -32,8 +32,9 @@ pub fn shim_dir(projects_dir: &Path) -> PathBuf {
 
 /// Whether a `git` invocation (args after the command, no leading `git`) moves HEAD.
 ///
-/// Blocks only HEAD-moving forms: `checkout <ref>`, `checkout -b/-B/--orphan/--detach`,
-/// and `switch` with any argument. Path-only restores (`checkout -- <path>`) and every
+/// Blocks only HEAD-moving forms: `checkout <branch>` (including the `-` alias for the
+/// previous branch), `checkout -b/-B/--orphan/--detach`, and `switch` with any argument.
+/// Path restores (`checkout -- <path>` and `checkout <tree-ish> -- <path>`) and every
 /// non-checkout command pass through.
 pub fn is_head_moving(args: &[String]) -> bool {
     match args.first().map(String::as_str) {
@@ -44,16 +45,20 @@ pub fn is_head_moving(args: &[String]) -> bool {
 }
 
 fn checkout_moves_head(args: &[String]) -> bool {
+    // Branch-creating/detaching forms always move HEAD.
     if args
         .iter()
         .any(|a| matches!(a.as_str(), "-b" | "-B" | "--orphan" | "--detach"))
     {
         return true;
     }
-    // `checkout <ref> -- <path>` still switches to `<ref>`; `checkout -- <path>` (and
-    // flag-only forms before `--`) only restore paths and leave HEAD alone.
-    let before_dashdash = args.split(|a| a == "--").next().unwrap_or(&[]);
-    before_dashdash.iter().any(|a| !a.starts_with('-'))
+    // `checkout <tree-ish> -- <pathspec>` only overwrites the index/worktree for those
+    // paths and leaves HEAD alone; any `--` makes this a path restore, not a switch.
+    if args.iter().any(|a| a == "--") {
+        return false;
+    }
+    // No `--`: a branch argument switches HEAD. `-` is an alias for the previous branch.
+    args.iter().any(|a| a == "-" || !a.starts_with('-'))
 }
 
 /// Ensure the `git` launcher exists in [`shim_dir`] and return that dir. `None` when there
@@ -195,12 +200,12 @@ mod tests {
     fn head_moving_matrix() {
         for blocked in [
             &["checkout", "content/other"][..],
+            &["checkout", "-"][..],
             &["checkout", "-b", "content/x"][..],
             &["checkout", "-B", "content/x"][..],
             &["checkout", "--orphan", "content/x"][..],
             &["checkout", "--detach"][..],
             &["checkout", "--detach", "main"][..],
-            &["checkout", "main", "--", "file.md"][..],
             &["switch", "content/x"][..],
             &["switch", "-c", "content/x"][..],
             &["switch", "-C", "content/x"][..],
@@ -223,6 +228,9 @@ mod tests {
             &["push"][..],
             &["checkout"][..],
             &["checkout", "--", "content/file.md"][..],
+            &["checkout", "main", "--", "file.md"][..],
+            &["checkout", "origin/main", "--", "file.md"][..],
+            &["checkout", "HEAD", "--", "file.md"][..],
             &["checkout", "-p", "--", "content/file.md"][..],
             &["checkout", "--ours", "--", "content/file.md"][..],
             &["checkout", "-f", "--", "content/file.md"][..],
