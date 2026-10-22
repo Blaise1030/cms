@@ -23,11 +23,12 @@ export interface ContentLifecycle {
 const RICH_BODY_COLLECTIONS = ["blog", "helpDocs"];
 /** File events within this window coalesce into one trailing refresh. */
 export const REFRESH_DELAY_MS = 250;
-const CONTENT_FILES = ["src/content-schemas.mjs", "src/content.config.ts", "scripts/orso-content.mjs"];
+const CONTENT_FILES = ["astro.config.mjs", "src/content.config.ts"];
+const CONTENT_DIRS = ["src/content", "src/assets", "packages/astro"];
 /** Whether a changed project path can change the catalog or an entry; "" is the watcher's overflow. */
 export function affectsContent(path: string): boolean {
   return path === "" || CONTENT_FILES.includes(path)
-    || ["src/content", "src/assets"].some(dir => path === dir || path.startsWith(`${dir}/`));
+    || CONTENT_DIRS.some(dir => path === dir || path.startsWith(`${dir}/`));
 }
 
 export const useContentStore = defineStore("content", () => {
