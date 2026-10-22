@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -209,6 +211,7 @@ fn link_node_modules(dir: &Path) {
 /// A project on a change branch, ready for the content endpoints; returns its ID too.
 async fn content_project(tmp: &Path) -> (axum::Router, std::path::PathBuf, String) {
     let (app, dir) = project(tmp).await;
+    common::write_content_manifest(&dir, "");
     link_node_modules(&dir);
     changes::create(&dir, "Edit content").await.unwrap();
     let id = dir.file_name().unwrap().to_string_lossy().to_string();

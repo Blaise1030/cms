@@ -1,5 +1,7 @@
 //! Task 5: safe structured content create/update over HTTP.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -66,6 +68,7 @@ async fn env(change: bool) -> Env {
     );
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
+    common::write_content_manifest(&dir, "");
     link_node_modules(&dir);
     if change {
         changes::create(&dir, "Edit content").await.unwrap();

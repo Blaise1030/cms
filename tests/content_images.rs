@@ -1,5 +1,7 @@
 //! Task 9: transactional image save through multipart create/update.
 
+mod common;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -69,6 +71,7 @@ async fn env() -> Env {
     );
     let info = state.projects.create("Site").await.unwrap();
     let dir = tmp.path().join(&info.id);
+    common::write_content_manifest(&dir, "");
     link_node_modules(&dir);
     changes::create(&dir, "Add images").await.unwrap();
     Env {
@@ -118,6 +121,7 @@ async fn env_under_subfolder_root() -> Env {
         std::fs::rename(dir.join(&name), site.join(&name)).unwrap();
     }
     std::fs::write(dir.join("orso.json"), r#"{"root":"site"}"#).unwrap();
+    common::write_content_manifest(&dir, "site/");
     let modules =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules");
     std::os::unix::fs::symlink(modules, site.join("node_modules")).unwrap();
