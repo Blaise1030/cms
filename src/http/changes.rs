@@ -1,7 +1,8 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
 //! `GET /api/changes/{branch}/status`, `GET /api/docs/branch-protection`, `POST /api/changes/update`,
-//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`.
+//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`,
+//! `POST /api/changes/{branch}/publish`.
 
 use std::collections::BTreeMap;
 
@@ -738,6 +739,51 @@ pub async fn ready(
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
     let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
+    Ok(Json(json!({ "pr": pr })))
+}
+
+/// `POST /api/changes/{branch}/publish` `{ project }` → `{ pr: { number, url, state } }`.
+/// Publishes the change: pushes it, shares it (opening a pull request if it has none), marks
+/// it ready, then merges it on GitHub. Anyone on the team may publish — approvals and
+/// CODEOWNERS are not checked. Local cleanup afterwards stays with the existing Clean up
+/// button ([`cleanup`]); publishing does not delete the change.
+pub async fn publish(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
+    let change = changes::get(&project.dir, &branch).await?;
+    let repo = project.repo.ok_or_else(|| {
+        ApiError::badreq("this project has no GitHub remote — open a repository first")
+    })?;
+    // Publish the change's latest commits, not an older shared copy.
+    let env = state.github.git_env().await?;
+    changes::push(&project.dir, &branch, &env).await?;
+    let shared = match state.github.find_pr(&repo, &branch).await? {
+        Some(existing) => existing,
+        None => {
+            let title = pr_title(&change.title);
+            let body = pr_body(&change.title);
+            state
+                .github
+                .create_draft_pr(&repo, &branch, &title, &body)
+                .await?
+        }
+    };
+    // A draft cannot be merged; this is the same step the ready route takes.
+    if shared.draft {
+        state.github.mark_ready_for_review(&repo, &branch).await?;
+    }
+    let pr = state.github.merge_pr(&repo, &branch).await?;
     Ok(Json(json!({ "pr": pr })))
 }
 
