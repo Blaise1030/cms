@@ -69,8 +69,9 @@ strings, and `singleton` must be a string or `null`.
 
 ### `orso()`
 
-The Astro integration. It writes the content manifest during dev-server setup and mounts
-the dev-only content endpoint.
+The Astro integration. `astro dev` and `astro sync` write the content manifest; the dev
+server also reloads it when the content config changes and mounts the dev-only content
+endpoint. `astro build` does nothing.
 
 ## Manifest
 
@@ -100,8 +101,8 @@ read-only, because its base and pattern cannot be recovered.
 ## Dev-only endpoint
 
 With `ORSO_CONTENT_TOKEN` set, the dev server mounts `POST /__orso`. The endpoint is
-loopback-only, takes a JSON body of at most 2 MiB, and answers the `list`, `describe`,
-`validate` and `patch` operations with a constant-time token comparison. Patches are
+loopback-only, takes a JSON body of at most 2 MiB, and answers the `validate` and `patch`
+operations with a constant-time token comparison. Patches are
 source-preserving: the bytes the editor did not change are kept as they were.
 
 ## Tests
