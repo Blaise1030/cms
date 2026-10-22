@@ -14,8 +14,11 @@ Scaffolded projects ship a copy of the package at `packages/astro/` and depend o
 path:
 
 ```json
-"orso-astro": "file:../../packages/astro"
+"orso-astro": "file:packages/astro"
 ```
+
+The template in this repository depends on `file:../../packages/astro`; scaffolding rewrites
+that path in `package.json` and `package-lock.json`.
 
 ## Usage
 
@@ -71,7 +74,8 @@ strings, and `singleton` must be a string or `null`.
 
 The Astro integration. `astro dev` and `astro sync` write the content manifest; the dev
 server also reloads it when the content config changes and mounts the dev-only content
-endpoint. `astro build` does nothing.
+endpoint. `astro sync` skips `astro:server:setup`, so for sync the integration adds a Vite
+plugin whose `configureServer` writes the manifest once. `astro build` does nothing.
 
 ## Manifest
 

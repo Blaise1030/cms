@@ -475,8 +475,9 @@ async fn project_endpoints_require_auth() {
     }
 }
 
-/// Full path with a real `npm install` and a real `astro build` of the scaffolded content
-/// model. Needs network; run with `cargo test -- --ignored`.
+/// Full path with a real `npm install`, a clean `npm ci` from the scaffolded lockfile and a
+/// real `astro build` of the scaffolded content model. Needs network; run with
+/// `cargo test -- --ignored`.
 #[tokio::test]
 #[ignore = "needs network + npm"]
 async fn real_npm_install_and_site_builds() {
@@ -496,16 +497,32 @@ async fn real_npm_install_and_site_builds() {
         "node_modules must be ignored"
     );
 
-    let out = Command::new("npm")
-        .args(["run", "build"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(dir.join("packages/astro/src/index.js").is_file());
+    let package_json = std::fs::read_to_string(dir.join("package.json")).unwrap();
+    let package: Value = serde_json::from_str(&package_json).unwrap();
+    assert_eq!(package["dependencies"]["orso-astro"], "file:packages/astro");
+    let lockfile = std::fs::read_to_string(dir.join("package-lock.json")).unwrap();
+    for text in [&package_json, &lockfile] {
+        assert!(!text.contains("file:../../packages/astro"));
+    }
+
+    // The lockfile's rewritten `file:packages/astro` entry must install as-is.
+    std::fs::remove_dir_all(dir.join("node_modules")).unwrap();
+    for args in [
+        &["ci", "--no-audit", "--no-fund", "--no-progress"][..],
+        &["run", "build"],
+    ] {
+        let out = Command::new("npm")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "npm {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
     assert!(dir.join("dist/index.html").is_file());
 }
 

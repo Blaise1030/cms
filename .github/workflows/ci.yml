@@ -1,7 +1,7 @@
 name: CI
 
-# Every push and pull request checks the daemon, the web app and the template,
-# then runs the Playwright smoke e2e against a real daemon.
+# Every push and pull request checks the daemon, the web app, the template and the
+# orso-astro package, then runs the Playwright smoke e2e against a real daemon.
 on:
   push:
     branches: [main]
@@ -51,7 +51,10 @@ jobs:
           pnpm -C web build
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-      # content_catalog reads templates/astro-marketing via its Node helper, which needs node_modules.
+      # Content tests run packages/astro's real `POST /__orso` endpoint in a fake dev server;
+      # template and scaffold tests copy templates/astro-marketing. Both need node_modules.
+      - name: Install content package deps
+        run: npm --prefix packages/astro ci
       - name: Install template deps
         run: npm --prefix templates/astro-marketing ci
       - name: Test
@@ -89,7 +92,24 @@ jobs:
           cache: npm
           cache-dependency-path: templates/astro-marketing/package-lock.json
       - run: npm ci
-      - run: npm run build
+      # Builds the site, then runs scripts/*.test.mjs.
+      - run: npm test
+
+  package:
+    name: orso-astro package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/astro
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/astro/package-lock.json
+      - run: npm ci
+      - run: npm test
 
   e2e:
     name: e2e
