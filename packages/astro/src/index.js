@@ -155,7 +155,8 @@ export function orso() {
         config = done;
       },
       "astro:server:setup": async ({ server, logger }) => {
-        if (command === "sync") return;
+        // `astro build --devOutput` and `astro sync` outside production also start a server.
+        if (command !== "dev") return;
         await setup({ config, server, logger, live: true });
       },
     },
