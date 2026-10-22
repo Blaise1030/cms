@@ -1,8 +1,54 @@
 #![allow(dead_code)]
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
+use orso::devserver::DevServerOptions;
+use orso::projects::DevserverStatus;
+use orso::state::AppState;
 use serde_json::{json, Value};
+use tokio::process::Command;
+
+const READY_POLL: Duration = Duration::from_millis(10);
+const READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Supervise `packages/astro/test/fixtures/fake-devserver.mjs`: the real `POST /__orso`
+/// endpoint with the fixture `blog`/`helpDocs` schemas. Needs `npm --prefix packages/astro ci`.
+pub fn fake_devserver() -> DevServerOptions {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("packages/astro/test/fixtures/fake-devserver.mjs");
+    DevServerOptions::custom(move |spec| {
+        let mut command = Command::new("node");
+        command.arg(&script).arg(spec.port.to_string());
+        command
+    })
+}
+
+/// Wait until the project's dev server reports ready; panics with the crash reason otherwise.
+pub async fn wait_ready(state: &AppState, id: &str) {
+    let start = Instant::now();
+    loop {
+        let status = state.projects.get(id).await.unwrap().devserver;
+        if status == DevserverStatus::Ready {
+            return;
+        }
+        assert!(
+            start.elapsed() < READY_TIMEOUT,
+            "dev server for {id} not ready ({status:?}): {:?}",
+            state.devservers.crash_message(id)
+        );
+        tokio::time::sleep(READY_POLL).await;
+    }
+}
+
+pub async fn start_fake(state: &AppState, id: &str) {
+    state.devservers.start(id).await.unwrap();
+    wait_ready(state, id).await;
+}
+
+pub async fn stop_fake(state: &AppState, id: &str) {
+    state.devservers.stop(id).await;
+}
 
 /// One collection entry of `.astro/orso-content.json`.
 pub fn manifest_collection(
