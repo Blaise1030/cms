@@ -122,7 +122,7 @@ async function loadEntries(name: string) {
     if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
   } catch { /* the collection keeps the list it last showed */ }
 }
-/** Collections the helper could not describe are left out of the tree and reported once in a toast. */
+/** Read-only collections are left out of the tree and reported once in a toast. */
 const validCollections = computed(() => store.collections.filter(c => !c.reason));
 let reportedInvalid = "";
 watch(() => store.collections, collections => {
