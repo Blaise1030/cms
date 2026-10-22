@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
+import ConfirmSwitchDialog from "./ConfirmSwitchDialog.vue";
 import { PR_STATE_LABEL } from "./prStatus";
 import { useChangesStore } from "./store";
 
@@ -157,4 +158,6 @@ function onNewChange() {
     via-agent
     description="The agent starts it from the latest version of the site."
   />
+
+  <ConfirmSwitchDialog />
 </template>

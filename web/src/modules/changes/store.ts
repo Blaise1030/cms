@@ -10,12 +10,21 @@ import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
+import { useChatStore } from "@/modules/chat/store";
 import { getLatest as syncAgain } from "./getLatest";
 
 const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
 const SYNC_START_FAILED = "Couldn't start combining. Please try again.";
 const SYNC_REQUEST_FAILED = "Something went wrong. Please try again.";
 const SYNC_DRAFT_MOVED = "Your draft changed while combining. Please sync again.";
+
+/** A switch held until the user confirms, because a chat turn is running. */
+interface PendingSwitch {
+  projectId: string;
+  branch: string;
+  fromTitle: string;
+  toTitle: string;
+}
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -38,6 +47,8 @@ export const useChangesStore = defineStore("changes", () => {
   const listing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /** A switch paused for confirmation because a chat turn is running. */
+  const pendingSwitch = ref<PendingSwitch | null>(null);
   /** Share failed with expired/missing auth — show a sign-in prompt. */
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
@@ -180,7 +191,22 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function switchTo(id: string, branch: string): Promise<Change> {
+  async function switchTo(id: string, branch: string): Promise<Change | null> {
+    // A chat turn is running for this project: hold the switch until the user confirms,
+    // so the agent is never left mid-thought on the wrong draft.
+    if (useChatStore().running[id]) {
+      pendingSwitch.value = {
+        projectId: id,
+        branch,
+        fromTitle: active.value?.title ?? "the live site",
+        toTitle: items.value.find((c) => c.branch === branch)?.title ?? branch,
+      };
+      return null;
+    }
+    return performSwitch(id, branch);
+  }
+
+  async function performSwitch(id: string, branch: string): Promise<Change> {
     // The old change's poll must not fire mid-switch.
     stopStatusPolling();
     switching.value = true;
@@ -201,6 +227,24 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       switching.value = false;
     }
+  }
+
+  /** Continue the held switch: stop the chat run first, then switch. A failed stop aborts. */
+  async function confirmSwitch(): Promise<Change> {
+    const pending = pendingSwitch.value;
+    if (!pending) throw new Error("Nothing to confirm");
+    pendingSwitch.value = null;
+    try {
+      await daemon.api.stopChat(pending.projectId);
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    }
+    return performSwitch(pending.projectId, pending.branch);
+  }
+
+  function cancelSwitch() {
+    pendingSwitch.value = null;
   }
 
   /** Refresh every view after a Get latest (ours, or one the daemon finished later). */
@@ -520,6 +564,7 @@ export const useChangesStore = defineStore("changes", () => {
     listing,
     loading,
     error,
+    pendingSwitch,
     needsSignIn,
     status,
     conflictSessions,
@@ -534,6 +579,8 @@ export const useChangesStore = defineStore("changes", () => {
     list,
     create,
     switchTo,
+    confirmSwitch,
+    cancelSwitch,
     getLatest,
     applyUpdate,
     followActive,
