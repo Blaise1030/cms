@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
@@ -20,6 +21,8 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
+import { useDesignStore } from "@/modules/design/store";
+import { useSettingsStore } from "@/modules/settings/store";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -236,6 +239,46 @@ describe("changes store", () => {
     h.daemon.emit({ type: "preview.deps_installing", projectId: "site" });
 
     expect(h.toastInfo).toHaveBeenCalledWith("Updating tools for this draft…");
+  });
+
+  it("refreshes content and preview once deps install finishes and the preview is ready", async () => {
+    const store = setup();
+    store.projectId = "site";
+    store.active = { branch: "content/new", title: "New" };
+    const content = useContentStore();
+    const refreshForBranch = vi.spyOn(content, "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
+    const preview = usePreviewStore();
+    const reload = vi.spyOn(preview, "reload");
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "site" });
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "starting" });
+    expect(refreshForBranch).not.toHaveBeenCalled();
+
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await vi.waitFor(() => expect(refreshForBranch).toHaveBeenCalledWith("content/new"));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+
+    // A later ready (a plain restart) does not refresh content again.
+    refreshForBranch.mockClear();
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await flushPromises();
+    expect(refreshForBranch).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh content on ready when no install ran for the open project", async () => {
+    const store = setup();
+    store.projectId = "site";
+    store.active = { branch: "content/new", title: "New" };
+    const content = useContentStore();
+    const refreshForBranch = vi.spyOn(content, "refreshForBranch").mockResolvedValue();
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "other" });
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await flushPromises();
+    expect(refreshForBranch).not.toHaveBeenCalled();
   });
 
   it("stays quiet when deps install for another project", async () => {

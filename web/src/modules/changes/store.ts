@@ -524,12 +524,24 @@ export const useChangesStore = defineStore("changes", () => {
     protectionHint.value = null;
   }
 
-  // Toast "Updating tools…" only when the installing project is the one the writer has open.
+  // Toast "Updating tools…" only when the installing project is the one the writer has open,
+  // and remember the install: the switch-time refresh ran before the preview could serve
+  // content, so content (like the preview) must refresh once the install is done.
+  let installPending = false;
   const offDepsInstalling = daemon.on("preview.deps_installing", (e) => {
     if (e.projectId !== projectId.value) return;
+    installPending = true;
     toast.info("Updating tools for this draft…");
   });
-  onScopeDispose(() => offDepsInstalling());
+  const offDevserverStatus = daemon.on("devserver.status", (e) => {
+    if (e.projectId !== projectId.value || e.state !== "ready" || !installPending) return;
+    installPending = false;
+    void refreshTreeAndPreview(active.value?.branch ?? "main");
+  });
+  onScopeDispose(() => {
+    offDepsInstalling();
+    offDevserverStatus();
+  });
 
   /**
    * Mark the change's draft PR ready for review and show the status it returns. No immediate
