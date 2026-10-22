@@ -1,6 +1,6 @@
 # Git collaboration for non-technical teammates (spec)
 
-Status: **draft for review, 2026-10-22**. Decisions below were settled in conversation
+Status: **approved, 2026-10-22**. Decisions below were settled in conversation
 with the product owner.
 
 Builds on:
