@@ -94,6 +94,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/ctl/preview-status", post(ctl::preview_status))
         .route("/api/ctl/restart-preview", post(ctl::restart_preview))
         .route("/api/ctl/change-status", post(ctl::change_status))
+        .route("/api/ctl/refresh-preview", post(ctl::refresh_preview))
+        .route("/api/ctl/refresh-content", post(ctl::refresh_content))
         .route(
             "/api/terminal/{project}",
             get(terminal::status).delete(terminal::stop),

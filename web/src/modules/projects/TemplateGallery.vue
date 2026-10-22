@@ -9,7 +9,7 @@ const emit = defineEmits<{ create: [] }>();
       <button
         type="button"
         data-testid="template-astro-marketing"
-        class="bg-card hover:bg-accent/50 flex flex-col overflow-hidden rounded-lg border text-left transition-colors"
+        class="bg-card hover:bg-accent/50 flex flex-col overflow-hidden rounded-lg border shadow-sm text-left transition-colors"
         @click="emit('create')"
       >
         <span class="bg-muted flex aspect-[16/10] flex-col gap-1.5 p-3" aria-hidden="true">

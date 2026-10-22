@@ -77,9 +77,9 @@ function onNewChange() {
   <DropdownMenu v-model:open="open">
     <DropdownMenuTrigger as-child>
       <Button
-        variant="secondary"
+        variant="outline"
         size="sm"
-        class="h-7 max-w-56 gap-1 px-2 text-xs"
+        class="bg-card h-7 max-w-56 gap-1 px-2 text-xs"
         data-testid="changes-menu"
       >
         <GitBranch class="size-4 shrink-0 opacity-70" />

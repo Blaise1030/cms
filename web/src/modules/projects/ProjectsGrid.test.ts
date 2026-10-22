@@ -65,9 +65,14 @@ afterEach(() => {
 });
 
 describe("ProjectsGrid", () => {
-  it("puts the account control in the page header", async () => {
+  it("puts the brand mark above Recent and the account control in the page header", async () => {
     const w = mountGrid({ user: { login: "ada", id: 1, name: "Ada", avatarUrl: "" } });
     await flushPromises();
+    const brand = w.get("[data-testid='home-brand']");
+    expect(brand.get("[data-testid='home-logo']").classes()).toContain("size-7");
+    expect(brand.get("h1").text()).toBe("orso");
+    expect(brand.get("p").text()).toBe("Build and edit your sites with an AI agent");
+    expect(brand.element.nextElementSibling?.querySelector("h2")?.textContent).toBe("Recent");
     const header = w.get("[data-testid='page-header']");
     expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
     expect(header.find("svg.paw-mark").exists()).toBe(false);

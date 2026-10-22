@@ -61,7 +61,13 @@ async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
 async fn every_ctl_route_refuses_without_a_live_terminal() {
     let (_t, st, id) = scaffolded(config()).await;
     let app = http::router(st);
-    for route in ["preview-status", "restart-preview", "change-status"] {
+    for route in [
+        "preview-status",
+        "restart-preview",
+        "change-status",
+        "refresh-preview",
+        "refresh-content",
+    ] {
         let (s, body) = call(
             &app,
             post(
@@ -156,4 +162,90 @@ async fn change_status_reports_active_change_and_unsaved_edits() {
     assert_eq!(v["active"]["title"], "Launch week", "{v}");
     assert_eq!(v["dirty"], true, "{v}");
     assert_eq!(v["changedPaths"], json!(["launch.md"]), "{v}");
+}
+
+/// Start a long-lived shell that prints its hook token, then return that token.
+async fn live_hook_token(st: &AppState, project: &str) -> String {
+    use orso::providers::LaunchSpec;
+    use orso::terminal::Output;
+    use tokio::sync::broadcast::error::RecvError;
+
+    let dir = st.projects.get(project).await.unwrap().dir;
+    st.terminals
+        .start(
+            project,
+            "fake",
+            &dir,
+            LaunchSpec {
+                argv: vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "echo \"TOKEN=$ORSO_HOOK_TOKEN\"; sleep 60".into(),
+                ],
+                env: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    let mut a = st.terminals.attach(project).unwrap();
+    let mut acc = String::from_utf8_lossy(&a.replay).into_owned();
+    loop {
+        if let Some(rest) = acc.split("TOKEN=").nth(1) {
+            let tok: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
+            if tok.len() == 32 {
+                return tok;
+            }
+        }
+        match a.rx.recv().await {
+            Ok(Output::Data(chunk)) => acc.push_str(&String::from_utf8_lossy(&chunk)),
+            Ok(Output::Exit(_)) | Err(RecvError::Closed) => {
+                panic!("terminal exited before printing TOKEN; got: {acc}")
+            }
+            Err(RecvError::Lagged(_)) => {}
+        }
+    }
+}
+
+async fn next_event_of(
+    rx: &mut tokio::sync::broadcast::Receiver<std::sync::Arc<str>>,
+    kind: &str,
+) -> Value {
+    loop {
+        let text = rx.recv().await.expect("event bus closed");
+        let v: Value = serde_json::from_str(&text).unwrap();
+        if v["type"] == kind {
+            return v;
+        }
+    }
+}
+
+#[tokio::test]
+async fn refresh_routes_emit_ui_events_when_authorized() {
+    let (_t, st, id) = scaffolded(config()).await;
+    let token = live_hook_token(&st, &id).await;
+    let mut rx = st.events.subscribe();
+    let app = http::router(st.clone());
+
+    for (route, kind) in [
+        ("refresh-preview", "preview.reload"),
+        ("refresh-content", "content.refresh"),
+    ] {
+        let (s, body) = call(
+            &app,
+            post(
+                &format!("/api/ctl/{route}"),
+                json!({ "project": id, "token": token }),
+            ),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{route}: {body}");
+        assert_eq!(body, json!({ "ok": true }), "{route}");
+        let ev = next_event_of(&mut rx, kind).await;
+        assert_eq!(ev["projectId"], id, "{ev}");
+    }
+
+    st.terminals.kill(&id).await;
 }

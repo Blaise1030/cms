@@ -224,11 +224,13 @@ For how their site gets updated, use these words: **change** (a set of edits mad
 Publishing, sharing a change, sending it for a greenlight, giving a greenlight, and merging are clicks the person makes in the app. Never publish, share, or greenlight for them, and never do the git equivalent (opening, approving, or merging a pull request, or pushing to main). When a change is done, tell them it is ready to look at in the preview.
 
 ## Check your work
-`orso ctl` shows app state you cannot see from files. Run it as `"$ORSO_HOOK_EXE" ctl <command>`; it prints JSON.
-- `"$ORSO_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. The preview reloads edits by itself; do not run a build.
+`orso ctl` shows app state you cannot see from files, and refreshes the app UI. Run it as `"$ORSO_HOOK_EXE" ctl <command>`; it prints JSON.
+- `"$ORSO_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. Ordinary file edits often hot-reload; do not run a build.
 - `"$ORSO_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause shown in `message`, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
+- `"$ORSO_HOOK_EXE" ctl refresh-content` after adding or renaming content (or when the Content sidebar looks stale): reloads **collections** and entry lists in the app.
+- `"$ORSO_HOOK_EXE" ctl refresh-preview` after that (or when the preview looks stale): remounts the preview page so the person sees the newest result.
 - `"$ORSO_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
-If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
+When a Chat or Terminal turn ends, the app also refreshes Content and the preview. Cursor has no turn-end hook — still call `refresh-content` then `refresh-preview` before saying you are done so the person sees the result right away. If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
 
 ## Edits after a greenlight
 If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
@@ -502,12 +504,19 @@ mod tests {
         assert!(g.starts_with(ORSO_GUIDE));
         assert!(g.ends_with(GIT_GUIDE));
         assert!(g.contains("orso ctl"));
-        for cmd in ["preview-status", "change-status", "restart-preview"] {
+        for cmd in [
+            "preview-status",
+            "change-status",
+            "restart-preview",
+            "refresh-preview",
+            "refresh-content",
+        ] {
             assert!(
                 g.contains(&format!("\"$ORSO_HOOK_EXE\" ctl {cmd}")),
                 "{cmd}"
             );
         }
+        assert!(g.contains("collections"));
         for word in [
             "change",
             "greenlight",

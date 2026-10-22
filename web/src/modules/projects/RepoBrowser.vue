@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { Search } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@orso/utils";
 import { useGithubStore } from "@/modules/github/store";
@@ -101,8 +102,17 @@ watch(
       </p>
     </div>
     <template v-else>
-      <Input v-model="filter" placeholder="Search repositories by name" aria-label="Search repositories" />
-      <div class="divide-y rounded-lg border" data-testid="repo-list">
+      <InputGroup>
+        <InputGroupAddon align="inline-start">
+          <Search class="size-4 opacity-50" aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          v-model="filter"
+          placeholder="Search repositories by name"
+          aria-label="Search repositories"
+        />
+      </InputGroup>
+      <div class="bg-card divide-y overflow-hidden rounded-lg border shadow-sm" data-testid="repo-list">
         <div
           v-if="!loaded || gh.reposLoading"
           class="text-muted-foreground flex items-center gap-2 px-4 py-2.5 text-sm"

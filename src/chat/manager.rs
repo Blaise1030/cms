@@ -28,10 +28,12 @@ use tokio::sync::{broadcast, watch};
 use super::chunk::{CheckpointData, UiChunk};
 use super::transcript;
 use super::translate::{self, Translator};
+use crate::auth::ct_eq;
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::events::EventBus;
 use crate::http::checkpoints::{finish_turn, TurnOutcome};
+use crate::http::ctl::{emit_content_refresh, emit_preview_reload};
 use crate::projects::STATE_DIR;
 use crate::providers::{headless_spec, AgentSession, Provider};
 use crate::state::AppState;
@@ -86,6 +88,8 @@ impl Stream {
 
 struct Turn {
     chat_id: String,
+    /// Hook token for `orso ctl` / turn-end (same shape as a terminal session).
+    token: String,
     /// The CLI's process group (`process_group(0)`: its pid), `None` if it never spawned.
     pgid: Option<libc::pid_t>,
     stopped: AtomicBool,
@@ -119,6 +123,12 @@ impl ChatManager {
     /// The chat id of the project's running turn.
     pub fn running(&self, project_id: &str) -> Option<String> {
         self.get(project_id).map(|t| t.chat_id.clone())
+    }
+
+    /// Whether `token` is the live chat turn's hook token (constant-time compare).
+    pub fn token_matches(&self, project_id: &str, token: &str) -> bool {
+        self.get(project_id)
+            .is_some_and(|t| ct_eq(&t.token, token))
     }
 
     /// Spawn the CLI for `req` and stream its turn. `conflict` while the project's terminal is
@@ -156,13 +166,21 @@ impl ChatManager {
             &req.session,
             req.model.as_deref(),
         );
+        let token = random_token()[..32].to_string();
         let mut cmd = login_command(&spec.argv, &req.dir);
-        cmd.envs(spec.env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .process_group(0);
+        cmd.env(
+            "ORSO_URL",
+            format!("http://127.0.0.1:{}", state.config.port),
+        )
+        .env("ORSO_PROJECT", &req.project_id)
+        .env("ORSO_HOOK_TOKEN", &token)
+        .env("ORSO_HOOK_EXE", state.config.hook_exe_path())
+        .envs(spec.env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .process_group(0);
         let child = match cmd.spawn() {
             Ok(child) => Some(child),
             // Reported in the stream like a missing CLI (exit 127).
@@ -193,6 +211,7 @@ impl ChatManager {
         let (done_tx, done) = watch::channel(false);
         let turn = Arc::new(Turn {
             chat_id: req.chat_id.clone(),
+            token,
             pgid,
             stopped: AtomicBool::new(false),
             stream: Mutex::new(stream),
@@ -336,6 +355,9 @@ impl TurnTask {
             }
         }
         emit_busy(&self.events, project, false);
+        // Same as terminal turn-end: refresh Content collections/entries and the preview.
+        emit_preview_reload(&self.state, project);
+        emit_content_refresh(&self.state, project);
         self.events.emit(
             "chat.turn",
             json!({ "projectId": project, "chatId": self.turn.chat_id }),
