@@ -1,4 +1,5 @@
-//! Project-scoped read-only content inventory. Editable paths come from the project helper.
+//! Project-scoped read-only content inventory. Collection metadata comes from the
+//! `.astro/orso-content.json` manifest the orso Astro integration writes.
 use crate::{error::ApiError, fs};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -6,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentCollection {
@@ -43,31 +45,36 @@ pub struct ContentEntry {
     pub branch: String,
     pub hash: String,
 }
-async fn helper(root: &Path, op: &str) -> Result<Vec<ContentCollection>, ApiError> {
-    let response = super::helper::run(root, &serde_json::json!({ "op": op }))
-        .await?
-        .map_err(|e| ApiError::io(format!("content helper: {e}")))?;
-    #[derive(Deserialize)]
-    struct Response {
-        collections: Vec<ContentCollection>,
+/// Written by the orso Astro integration during `astro dev` and `astro sync`.
+const MANIFEST: &str = ".astro/orso-content.json";
+#[derive(Deserialize)]
+struct Manifest {
+    version: u32,
+    collections: Vec<ContentCollection>,
+}
+/// Collections from the site's manifest; empty when it is missing, unreadable or invalid.
+async fn manifest(site: &Path, prefix: &str) -> Vec<ContentCollection> {
+    let Ok(Some(text)) = fs::read_file(site, MANIFEST).await.map(|f| f.content) else {
+        return vec![];
+    };
+    let Ok(manifest) = serde_json::from_str::<Manifest>(&text) else {
+        return vec![];
+    };
+    if manifest.version != 1 {
+        return vec![];
     }
-    let prefix = crate::settings::site_prefix(root);
-    serde_json::from_value::<Response>(response)
-        .map(|r| {
-            let mut collections = r.collections;
-            // Bases are relative to the Astro root; make them repo-relative
-            // so every caller keeps resolving against the project root.
-            for c in &mut collections {
-                if let Some(base) = c.loader.get("base").and_then(Value::as_str) {
-                    let base = format!("{prefix}{base}");
-                    if let Some(loader) = c.loader.as_object_mut() {
-                        loader.insert("base".into(), Value::String(base));
-                    }
-                }
+    let mut collections = manifest.collections;
+    // Bases are relative to the Astro root; make them repo-relative
+    // so every caller keeps resolving against the project root.
+    for c in &mut collections {
+        if let Some(base) = c.loader.get("base").and_then(Value::as_str) {
+            let base = format!("{prefix}{base}");
+            if let Some(loader) = c.loader.as_object_mut() {
+                loader.insert("base".into(), Value::String(base));
             }
-            collections
-        })
-        .map_err(|e| ApiError::io(format!("content helper invalid response: {e}")))
+        }
+    }
+    collections
 }
 pub(crate) fn supported(c: &ContentCollection) -> bool {
     let Some(base) = c.loader.get("base").and_then(Value::as_str) else {
@@ -89,27 +96,6 @@ pub(crate) fn supported(c: &ContentCollection) -> bool {
             _ => false,
         }
 }
-/// Known bundled paths are used only to expose raw, read-only files after helper failure.
-fn fallback(reason: String, prefix: &str) -> Vec<ContentCollection> {
-    let blog = format!("{prefix}src/content/blog/en");
-    let help = format!("{prefix}src/content/helpDocs/en");
-    [
-        ("blog", blog.as_str(), "*.md", "markdown", None),
-        ("helpDocs", help.as_str(), "*.md", "markdown", None),
-    ]
-    .into_iter()
-    .map(|(name, base, pattern, kind, singleton)| ContentCollection {
-        name: name.into(),
-        loader: serde_json::json!({"base":base,"pattern":pattern}),
-        kind: kind.into(),
-        singleton: singleton.map(str::to_string),
-        editable: false,
-        supported_for_editing: false,
-        reason: Some(reason.clone()),
-        fields: Value::Null,
-    })
-    .collect()
-}
 fn required_unsupported(field: &Value) -> bool {
     if field.get("required").and_then(Value::as_bool) == Some(false) {
         return false;
@@ -125,53 +111,42 @@ fn required_unsupported(field: &Value) -> bool {
             .and_then(Value::as_array)
             .is_some_and(|v| v.iter().any(required_unsupported))
 }
-/// Apply editability and the read-only reason from the helper's descriptions.
-fn finish(
-    mut collections: Vec<ContentCollection>,
-    describe_error: Option<&ApiError>,
-) -> Vec<ContentCollection> {
+/// Apply editability, keeping the manifest's read-only reason when it gives one.
+fn finish(mut collections: Vec<ContentCollection>) -> Vec<ContentCollection> {
     for c in &mut collections {
-        c.editable = matches!(c.name.as_str(), "blog" | "helpDocs")
-            && c.supported_for_editing
+        c.editable = c.supported_for_editing
             && supported(c)
             && !c.fields.is_null()
             && !required_unsupported(&c.fields);
         c.reason = if c.editable {
             None
         } else {
-            Some(match describe_error {
-                Some(error) => format!("Content helper describe unavailable: {error}"),
-                None => "Unsupported collection loader or schema; content is read-only".into(),
-            })
+            Some(c.reason.take().unwrap_or_else(|| {
+                "Unsupported collection loader or schema; content is read-only".into()
+            }))
         };
     }
     collections
 }
-/// Files whose modification times decide whether a cached catalog is still current.
-const CATALOG_INPUTS: [&str; 3] = [
-    "src/content-schemas.mjs",
-    "src/content.config.ts",
-    super::helper::SCRIPT,
-];
-type CatalogKey = (String, [Option<std::time::SystemTime>; 3]);
+/// Site prefix plus the manifest's mtime and length; the length catches rewrites within
+/// the filesystem's mtime granularity.
+type CatalogKey = (String, Option<(SystemTime, u64)>);
 type CatalogCache = HashMap<PathBuf, (CatalogKey, Vec<ContentCollection>)>;
 static CATALOG: LazyLock<Mutex<CatalogCache>> = LazyLock::new(Default::default);
-fn catalog_key(root: &Path) -> CatalogKey {
-    let prefix = crate::settings::site_prefix(root);
-    // symlink_metadata: replacing an input with a link also changes the key.
-    let mtimes = CATALOG_INPUTS.map(|path| {
-        std::fs::symlink_metadata(root.join(format!("{prefix}{path}")))
-            .and_then(|m| m.modified())
-            .ok()
-    });
-    (prefix, mtimes)
-}
-/// The catalog with field descriptors. One `describe` helper run serves both the
-/// collection list and the fields; complete results are cached per project until the site
-/// prefix or a schema input's mtime changes, so file events do not spawn Node for an
-/// unchanged catalog.
+/// The catalog with field descriptors, read from the site's integration manifest. Results
+/// are cached per project until the site prefix or the manifest's stamp changes.
 pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollection>, ApiError> {
-    let key = catalog_key(project_root);
+    let settings = crate::settings::load(project_root).ok();
+    let prefix = settings
+        .as_ref()
+        .map(|s| s.site_prefix())
+        .unwrap_or_default();
+    let site = settings.map_or_else(|| project_root.to_path_buf(), |s| s.site_dir(project_root));
+    // symlink_metadata: replacing the manifest with a link also changes the key.
+    let stamp = std::fs::symlink_metadata(site.join(MANIFEST))
+        .and_then(|m| Ok((m.modified()?, m.len())))
+        .ok();
+    let key = (prefix, stamp);
     let cached = CATALOG
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -181,27 +156,11 @@ pub async fn list_collections(project_root: &Path) -> Result<Vec<ContentCollecti
     if let Some(collections) = cached {
         return Ok(collections);
     }
-    let collections = match helper(project_root, "describe").await {
-        Ok(described) => {
-            let collections = finish(described, None);
-            CATALOG
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(project_root.to_path_buf(), (key, collections.clone()));
-            collections
-        }
-        // Not cached: a helper without `describe`, or a transient failure, lists read-only.
-        Err(describe_error) => match helper(project_root, "list").await {
-            Ok(mut listed) => {
-                listed.iter_mut().for_each(|c| c.fields = Value::Null);
-                finish(listed, Some(&describe_error))
-            }
-            Err(e) => fallback(
-                format!("Content helper unavailable: {e}"),
-                &crate::settings::site_prefix(project_root),
-            ),
-        },
-    };
+    let collections = finish(manifest(&site, &key.0).await);
+    CATALOG
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(project_root.to_path_buf(), (key, collections.clone()));
     Ok(collections)
 }
 pub(crate) async fn collection(root: &Path, name: &str) -> Result<ContentCollection, ApiError> {

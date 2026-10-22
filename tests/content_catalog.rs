@@ -1,12 +1,71 @@
+mod common;
+
 use orso::content::catalog::{list_collections, list_entries, read_entry};
+use serde_json::{json, Value};
 use std::path::Path;
 
-fn template() -> &'static Path {
-    Path::new("templates/astro-marketing")
+fn write(path: &Path, contents: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, contents).unwrap();
 }
+/// Writes `<site>/.astro/orso-content.json` with the given collections.
+fn manifest(site: &Path, collections: Vec<Value>) {
+    write(
+        &site.join(".astro/orso-content.json"),
+        &json!({ "version": 1, "collections": collections }).to_string(),
+    );
+}
+fn git_init(root: &Path) {
+    std::process::Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+}
+fn blog_fields() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title": { "type": "string", "required": true },
+            "pubDate": { "type": "date", "required": true },
+            "coverImage": { "type": "image", "required": false },
+        },
+    })
+}
+
 #[tokio::test]
-async fn template_catalog_and_raw_entries() {
-    let collections = list_collections(template()).await.unwrap();
+async fn manifest_catalog_and_raw_entries() {
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    manifest(
+        root,
+        vec![
+            common::manifest_collection(
+                "blog",
+                "src/content/blog/en",
+                "*.md",
+                "markdown",
+                blog_fields(),
+            ),
+            common::manifest_collection(
+                "helpDocs",
+                "src/content/helpDocs/en",
+                "*.md",
+                "markdown",
+                json!({ "type": "object", "properties": {} }),
+            ),
+        ],
+    );
+    let source = "---\r\ntitle: 'Quoted' # comment\r\ntags: [one, two]\r\n---\r\n\r\nBody\r\n";
+    write(&root.join("src/content/blog/en/post.md"), source);
+    write(
+        &root.join("src/content/helpDocs/en/getting-started.md"),
+        "---\ntitle: Start\n---\nBody\n",
+    );
+    git_init(root);
+
+    let collections = list_collections(root).await.unwrap();
     assert_eq!(
         collections
             .iter()
@@ -14,47 +73,37 @@ async fn template_catalog_and_raw_entries() {
             .collect::<Vec<_>>(),
         ["blog", "helpDocs"]
     );
-    assert!(collections.iter().all(|c| c.editable));
+    assert!(collections.iter().all(|c| c.editable && c.reason.is_none()));
+    assert_eq!(collections[0].loader["base"], "src/content/blog/en");
+    let json = serde_json::to_value(&collections).unwrap();
+    assert_eq!(json[0]["supportedForEditing"], true);
     assert_eq!(
-        serde_json::to_value(&collections).unwrap()[0]["fields"]["properties"]["pubDate"]["type"],
-        "date"
+        json[0]["fields"]["properties"]["pubDate"],
+        json!({ "type": "date", "required": true })
     );
-    for (collection, id, path) in [
-        ("blog", "welcome", "src/content/blog/en/welcome.md"),
-        (
-            "helpDocs",
-            "getting-started",
-            "src/content/helpDocs/en/getting-started.md",
-        ),
-    ] {
-        let entries = list_entries(template(), collection).await.unwrap();
-        assert!(entries.iter().any(|e| e.id == id && e.path == path));
-        let entry = read_entry(template(), collection, id).await.unwrap();
-        assert_eq!(
-            entry.source,
-            std::fs::read_to_string(template().join(path)).unwrap()
-        );
-        assert_eq!(entry.hash.len(), 64);
-        assert!(entry.fields.is_object());
-        assert!(!entry.id.starts_with("en/"));
-    }
-    assert!(read_entry(template(), "blog", "../site").await.is_err());
-}
-fn copy_template(src: &Path, dst: &Path) {
-    std::fs::create_dir_all(dst).unwrap();
-    for entry in std::fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name();
-        if matches!(name.to_str(), Some("node_modules" | "dist" | ".git")) {
-            continue;
-        }
-        let to = dst.join(&name);
-        if entry.file_type().unwrap().is_dir() {
-            copy_template(&entry.path(), &to);
-        } else {
-            std::fs::copy(entry.path(), &to).unwrap();
-        }
-    }
+    assert_eq!(
+        json[0]["fields"]["properties"]["coverImage"],
+        json!({ "type": "image", "required": false })
+    );
+
+    let entries = list_entries(root, "blog").await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "src/content/blog/en/post.md");
+    let entry = read_entry(root, "blog", "post").await.unwrap();
+    assert_eq!(entry.branch, "main");
+    assert_eq!(entry.fields["title"], "Quoted");
+    assert_eq!(entry.fields["tags"], json!(["one", "two"]));
+    assert_eq!(entry.body, "\r\nBody\r\n");
+    assert_eq!(entry.source, source);
+    assert_eq!(
+        entry.hash,
+        format!("{:x}", Sha256::digest(source.as_bytes()))
+    );
+    let help = read_entry(root, "helpDocs", "getting-started")
+        .await
+        .unwrap();
+    assert_eq!(help.path, "src/content/helpDocs/en/getting-started.md");
+    assert!(read_entry(root, "blog", "../site").await.is_err());
 }
 
 #[tokio::test]
@@ -62,111 +111,204 @@ async fn catalog_under_subfolder_root() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let site = root.join("site");
-    copy_template(template(), &site);
-    std::os::unix::fs::symlink(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/astro-marketing/node_modules"),
-        site.join("node_modules"),
-    )
-    .unwrap();
-    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
-    std::process::Command::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(root)
-        .output()
-        .unwrap();
+    write(&site.join("astro.config.mjs"), "export default {}");
+    write(&root.join("orso.json"), r#"{"root":"site"}"#);
+    common::write_content_manifest(root, "site/");
+    let source = "---\ntitle: Welcome\n---\nBody\n";
+    write(&site.join("src/content/blog/en/welcome.md"), source);
+    git_init(root);
 
     let collections = list_collections(root).await.unwrap();
     assert!(collections.iter().all(|c| c.editable), "{collections:?}");
-    let entries = list_entries(root, "blog").await.unwrap();
-    assert!(!entries.is_empty());
-    assert!(
-        entries
-            .iter()
-            .all(|e| e.path.starts_with("site/src/content/blog/en/")),
-        "{entries:?}"
+    assert_eq!(collections[0].loader["base"], "site/src/content/blog/en");
+    assert_eq!(
+        collections[1].loader["base"],
+        "site/src/content/helpDocs/en"
     );
+    let entries = list_entries(root, "blog").await.unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "site/src/content/blog/en/welcome.md");
     let entry = read_entry(root, "blog", "welcome").await.unwrap();
     assert_eq!(entry.path, "site/src/content/blog/en/welcome.md");
-    assert_eq!(
-        entry.source,
-        std::fs::read_to_string(site.join("src/content/blog/en/welcome.md")).unwrap()
-    );
+    assert_eq!(entry.source, source);
 }
 
 #[tokio::test]
-async fn helper_failure_is_read_only_and_isolated() {
+async fn missing_manifest_lists_nothing() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join("src/content/blog/en")).unwrap();
-    std::fs::write(
-        temp.path().join("src/content/blog/en/other.md"),
+    write(
+        &temp.path().join("src/content/blog/en/other.md"),
         "---\ntitle: Other\n---\nBody\n",
-    )
-    .unwrap();
-    let collections = list_collections(temp.path()).await.unwrap();
-    assert!(collections
-        .iter()
-        .all(|c| !c.editable && c.reason.as_deref().unwrap().contains("helper")));
-    assert_eq!(
-        list_entries(temp.path(), "blog").await.unwrap()[0].id,
-        "other"
     );
-    assert!(read_entry(temp.path(), "blog", "welcome").await.is_err());
+    assert!(list_collections(temp.path()).await.unwrap().is_empty());
+    assert!(list_entries(temp.path(), "blog").await.is_err());
+    assert!(read_entry(temp.path(), "blog", "other").await.is_err());
 }
+
 #[tokio::test]
-async fn unsupported_loader_is_visible_with_reason() {
+async fn invalid_manifests_list_nothing() {
+    let blog = common::manifest_collection(
+        "blog",
+        "src/content/blog/en",
+        "*.md",
+        "markdown",
+        blog_fields(),
+    );
+    for contents in [
+        "{not json".to_string(),
+        json!({ "version": 2, "collections": [blog] }).to_string(),
+        json!({ "collections": [blog] }).to_string(),
+        json!({ "version": 1 }).to_string(),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        write(&temp.path().join(".astro/orso-content.json"), &contents);
+        assert!(
+            list_collections(temp.path()).await.unwrap().is_empty(),
+            "{contents}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unsupported_loader_is_visible_with_its_reason() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
-    std::fs::write(temp.path().join("scripts/orso-content.mjs"), "console.log(JSON.stringify({collections:[{name:'remote',loader:{type:'remote'},kind:'json'}]}))").unwrap();
+    let mut remote = common::manifest_collection("remote", "", "", "json", Value::Null);
+    remote["loader"] = Value::Null;
+    remote["supportedForEditing"] = json!(false);
+    remote["reason"] = json!("Collection does not use orsoGlob");
+    manifest(temp.path(), vec![remote]);
+
     let collections = list_collections(temp.path()).await.unwrap();
+    assert_eq!(collections.len(), 1);
     assert_eq!(collections[0].name, "remote");
     assert!(!collections[0].editable);
-    assert!(collections[0]
-        .reason
-        .as_deref()
-        .unwrap()
-        .contains("Unsupported"));
+    assert!(!collections[0].supported_for_editing);
+    assert_eq!(
+        collections[0].reason.as_deref(),
+        Some("Collection does not use orsoGlob")
+    );
     assert!(list_entries(temp.path(), "remote")
         .await
         .unwrap()
         .is_empty());
 }
+
 #[tokio::test]
-async fn raw_read_keeps_crlf_body_and_hashes_exact_bytes() {
-    use sha2::{Digest, Sha256};
+async fn unsupported_pattern_without_reason_gets_the_default_reason() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join("src/content/blog/en")).unwrap();
-    let source = "---\r\ntitle: 'Quoted' # comment\r\ntags: [one, two]\r\n---\r\n\r\nBody\r\n";
-    std::fs::write(temp.path().join("src/content/blog/en/post.md"), source).unwrap();
-    std::process::Command::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(temp.path())
-        .output()
-        .unwrap();
-    let entry = read_entry(temp.path(), "blog", "post").await.unwrap();
-    assert_eq!(entry.branch, "main");
-    assert_eq!(entry.fields["title"], "Quoted");
-    assert_eq!(entry.fields["tags"], serde_json::json!(["one", "two"]));
-    assert_eq!(entry.body, "\r\nBody\r\n");
-    assert_eq!(entry.source, source);
+    write(
+        &temp.path().join("posts/custom.txt"),
+        "---\ntitle: Custom\n---\nBody",
+    );
+    manifest(
+        temp.path(),
+        vec![common::manifest_collection(
+            "custom",
+            "posts",
+            "*.txt",
+            "markdown",
+            json!({ "type": "object", "properties": {} }),
+        )],
+    );
+    let collections = list_collections(temp.path()).await.unwrap();
+    assert!(!collections[0].editable);
     assert_eq!(
-        entry.hash,
-        format!("{:x}", Sha256::digest(source.as_bytes()))
+        collections[0].reason.as_deref(),
+        Some("Unsupported collection loader or schema; content is read-only")
     );
 }
+
+#[tokio::test]
+async fn required_unsupported_schema_is_read_only() {
+    let temp = tempfile::tempdir().unwrap();
+    manifest(
+        temp.path(),
+        vec![common::manifest_collection(
+            "blog",
+            "posts",
+            "*.md",
+            "markdown",
+            json!({
+                "type": "object",
+                "properties": {
+                    "special": { "type": "unsupported", "required": true, "reason": "Unknown transform" },
+                },
+            }),
+        )],
+    );
+    let collections = list_collections(temp.path()).await.unwrap();
+    assert!(!collections[0].editable);
+    assert_eq!(
+        collections[0].fields["properties"]["special"],
+        json!({ "type": "unsupported", "required": true, "reason": "Unknown transform" })
+    );
+    assert!(collections[0].reason.as_deref().unwrap().contains("schema"));
+}
+
+#[tokio::test]
+async fn catalog_cache_follows_the_manifest_and_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let fields = json!({ "type": "object", "properties": {} });
+    let collection =
+        |name: &str| common::manifest_collection(name, "posts", "*.md", "markdown", fields.clone());
+    manifest(root, vec![collection("a")]);
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "a");
+    assert_eq!(list_collections(root).await.unwrap()[0].name, "a");
+
+    manifest(root, vec![collection("bb")]);
+    let collections = list_collections(root).await.unwrap();
+    assert_eq!(collections[0].name, "bb");
+    assert_eq!(collections[0].loader["base"], "posts");
+
+    let site = root.join("site");
+    write(&site.join("astro.config.mjs"), "export default {}");
+    manifest(&site, vec![collection("bb")]);
+    write(&root.join("orso.json"), r#"{"root":"site"}"#);
+    assert_eq!(
+        list_collections(root).await.unwrap()[0].loader["base"],
+        "site/posts"
+    );
+
+    std::fs::remove_file(site.join(".astro/orso-content.json")).unwrap();
+    assert!(list_collections(root).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn escaping_symlinks_are_not_readable() {
     let temp = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("secret.md"), "secret").unwrap();
+    common::write_content_manifest(temp.path(), "");
     std::fs::create_dir_all(temp.path().join("src/content/blog/en")).unwrap();
     std::os::unix::fs::symlink(
         outside.path().join("secret.md"),
         temp.path().join("src/content/blog/en/secret.md"),
     )
     .unwrap();
+    assert!(list_collections(temp.path())
+        .await
+        .unwrap()
+        .iter()
+        .any(|c| c.name == "blog"));
     assert!(list_entries(temp.path(), "blog").await.unwrap().is_empty());
     assert!(read_entry(temp.path(), "blog", "secret").await.is_err());
 }
+
+#[tokio::test]
+async fn escaping_manifest_symlink_is_ignored() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    common::write_content_manifest(outside.path(), "");
+    std::fs::create_dir_all(temp.path().join(".astro")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path().join(".astro/orso-content.json"),
+        temp.path().join(".astro/orso-content.json"),
+    )
+    .unwrap();
+    assert!(list_collections(temp.path()).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn content_routes_require_project_and_share_auth_boundary() {
     use axum::{body::Body, http::Request};
@@ -209,128 +351,4 @@ async fn content_routes_require_project_and_share_auth_boundary() {
         .await
         .unwrap();
     assert_eq!(response.status(), 401);
-}
-#[tokio::test]
-async fn unknown_helper_collection_is_read_only_even_with_a_supported_glob() {
-    let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
-    std::fs::create_dir_all(temp.path().join("posts")).unwrap();
-    std::fs::write(
-        temp.path().join("posts/custom.md"),
-        "---\ntitle: Custom\n---\nBody",
-    )
-    .unwrap();
-    std::fs::write(temp.path().join("scripts/orso-content.mjs"),"console.log(JSON.stringify({collections:[{name:'custom',loader:{base:'posts',pattern:'*.md'},kind:'markdown'}]}))").unwrap();
-    let collections = list_collections(temp.path()).await.unwrap();
-    assert!(!collections[0].editable);
-    assert!(collections[0]
-        .reason
-        .as_deref()
-        .unwrap()
-        .contains("Unsupported"));
-    assert_eq!(
-        read_entry(temp.path(), "custom", "custom")
-            .await
-            .unwrap()
-            .body,
-        "Body"
-    );
-}
-
-#[tokio::test]
-async fn required_unsupported_schema_is_read_only() {
-    let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
-    std::fs::write(temp.path().join("scripts/orso-content.mjs"), r#"console.log(JSON.stringify({collections:[{name:'blog',loader:{base:'posts',pattern:'*.md'},kind:'markdown',supportedForEditing:true,fields:{type:'object',properties:{special:{type:'unsupported',required:true,reason:'Unknown transform'}}}}]}))"#).unwrap();
-    let collections = list_collections(temp.path()).await.unwrap();
-    assert!(!collections[0].editable);
-    assert_eq!(
-        collections[0].fields["properties"]["special"]["type"],
-        "unsupported"
-    );
-    assert!(collections[0].reason.as_deref().unwrap().contains("schema"));
-}
-
-/// A fake helper that logs each run and reports one collection named `name`.
-fn counting_helper(root: &Path, name: &str) {
-    std::fs::create_dir_all(root.join("scripts")).unwrap();
-    std::fs::write(
-        root.join("scripts/orso-content.mjs"),
-        format!("import {{appendFileSync}} from 'node:fs'; appendFileSync('runs.log','run\\n'); console.log(JSON.stringify({{collections:[{{name:'{name}',loader:{{base:'posts',pattern:'*.md'}},kind:'markdown'}}]}}))"),
-    )
-    .unwrap();
-}
-fn runs(root: &Path) -> usize {
-    std::fs::read_to_string(root.join("runs.log"))
-        .map(|log| log.lines().count())
-        .unwrap_or(0)
-}
-fn set_mtime(path: &Path, time: std::time::SystemTime) {
-    std::fs::File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_modified(time)
-        .unwrap();
-}
-#[tokio::test]
-async fn collections_use_one_helper_run_and_are_cached_until_schema_inputs_change() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path();
-    let script = root.join("scripts/orso-content.mjs");
-    let schemas = root.join("src/content-schemas.mjs");
-    let config = root.join("src/content.config.ts");
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(&schemas, "export {}").unwrap();
-    counting_helper(root, "first");
-    let written = std::fs::metadata(&script).unwrap().modified().unwrap();
-
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "first");
-    assert_eq!(runs(root), 1, "list and describe share one helper run");
-    // Cache hit: same mtimes, so a rewritten helper is not consulted.
-    counting_helper(root, "second");
-    set_mtime(&script, written);
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "first");
-    assert_eq!(runs(root), 1);
-
-    // Each schema input invalidates the cache when its mtime changes.
-    let later = written + std::time::Duration::from_secs(5);
-    set_mtime(&schemas, later);
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "second");
-    assert_eq!(runs(root), 2);
-    std::fs::write(&config, "export const collections = {}").unwrap();
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "second");
-    assert_eq!(runs(root), 3, "a new content.config.ts invalidates");
-    counting_helper(root, "third");
-    set_mtime(&script, later + std::time::Duration::from_secs(5));
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
-    assert_eq!(runs(root), 4);
-    assert_eq!(list_collections(root).await.unwrap()[0].name, "third");
-    assert_eq!(runs(root), 4);
-}
-#[tokio::test]
-async fn changing_root_invalidates_the_cached_catalog() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("src/content-schemas.mjs"), "export {}").unwrap();
-    counting_helper(root, "blog");
-    assert_eq!(
-        list_collections(root).await.unwrap()[0].loader["base"],
-        "posts"
-    );
-
-    // A rename keeps every input's mtime, so only the prefix differs.
-    let site = root.join("site");
-    std::fs::create_dir_all(&site).unwrap();
-    std::fs::write(site.join("astro.config.mjs"), "export default {}").unwrap();
-    for dir in ["src", "scripts"] {
-        std::fs::rename(root.join(dir), site.join(dir)).unwrap();
-    }
-    std::fs::write(root.join("orso.json"), r#"{"root":"site"}"#).unwrap();
-    assert_eq!(
-        list_collections(root).await.unwrap()[0].loader["base"],
-        "site/posts"
-    );
-    assert_eq!(runs(&site), 1);
 }
