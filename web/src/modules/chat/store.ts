@@ -25,6 +25,11 @@ export const useChatStore = defineStore("chat", () => {
     writePref(activeKey(projectId), chatId);
   }
 
+  /** Record a turn starting or ending locally, without waiting for the next list refresh. */
+  function setRunning(projectId: string, chatId: string | null) {
+    running.value[projectId] = chatId;
+  }
+
   function newChat(projectId: string): string {
     const id = crypto.randomUUID();
     setActive(projectId, id);
@@ -61,5 +66,5 @@ export const useChatStore = defineStore("chat", () => {
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 
-  return { chats, running, activeChatId, setActive, newChat, load, remove };
+  return { chats, running, activeChatId, setActive, setRunning, newChat, load, remove };
 });
