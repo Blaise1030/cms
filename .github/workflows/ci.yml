@@ -60,6 +60,36 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  # The ignored real-npm tests: a scaffolded project's `npm ci` + `astro build`, and a save
+  # through a real Astro dev server's `orso()` integration. Other ignored tests stay out.
+  real-astro:
+    name: Real Astro (scaffold + content save)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The daemon embeds web/dist, so it must exist before Rust compiles.
+      - name: Build the web app
+        run: |
+          pnpm -C web install --frozen-lockfile
+          pnpm -C web build
+      - name: Install content package deps
+        run: npm --prefix packages/astro ci
+      - name: Scaffold, npm ci and astro build
+        run: cargo test --locked --test projects -- --ignored --exact real_npm_install_and_site_builds
+      - name: Save through a real Astro dev server
+        run: cargo test --locked --test content_e2e -- --ignored --exact real_astro_saves_content_through_the_integration
+
   web:
     name: Web
     runs-on: ubuntu-latest
