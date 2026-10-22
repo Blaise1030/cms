@@ -767,8 +767,15 @@ pub async fn publish(
     })?;
     // Publish the change's latest commits, not an older shared copy.
     let env = state.github.git_env().await?;
-    changes::push(&project.dir, &branch, &env).await?;
-    let shared = match state.github.find_pr(&repo, &branch).await? {
+    changes::push(&project.dir, &branch, &env)
+        .await
+        .map_err(|e| publish_step_error(e, true))?;
+    let shared = match state
+        .github
+        .find_pr(&repo, &branch)
+        .await
+        .map_err(|e| publish_step_error(e, false))?
+    {
         Some(existing) => existing,
         None => {
             let title = pr_title(&change.title);
@@ -776,19 +783,66 @@ pub async fn publish(
             state
                 .github
                 .create_draft_pr(&repo, &branch, &title, &body)
-                .await?
+                .await
+                .map_err(|e| publish_step_error(e, false))?
         }
     };
     // A draft cannot be merged; this is the same step the ready route takes.
     if shared.draft {
-        state.github.mark_ready_for_review(&repo, &branch).await?;
+        state
+            .github
+            .mark_ready_for_review(&repo, &branch)
+            .await
+            .map_err(|e| publish_step_error(e, false))?;
     }
-    let pr = state.github.merge_pr(&repo, &branch).await?;
+    let pr = state
+        .github
+        .merge_pr(&repo, &branch)
+        .await
+        .map_err(|e| publish_step_error(e, false))?;
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// Writer-plain copy for a failed publish step: git/GitHub details never reach the
+/// Publish button. Already-plain publish messages pass through unchanged.
+fn publish_step_error(e: ApiError, push_failed: bool) -> ApiError {
+    if e.message.starts_with("Couldn't publish") || e.message.starts_with("Ask an owner") {
+        return e;
+    }
+    if push_failed {
+        ApiError::conflict("Couldn't publish. Get latest, then try again.")
+    } else {
+        ApiError::github("Couldn't publish. Try again in a moment.")
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn publish_step_errors_hide_git_and_github_details() {
+        let push = publish_step_error(ApiError::git("git push failed: rejected"), true);
+        assert_eq!(push.message, "Couldn't publish. Get latest, then try again.");
+        let ready = publish_step_error(
+            ApiError::github("GitHub could not mark the pull request ready for review"),
+            false,
+        );
+        assert_eq!(ready.message, "Couldn't publish. Try again in a moment.");
+        assert!(!ready.message.contains("pull request"));
+    }
+
+    #[test]
+    fn publish_step_errors_keep_plain_publish_copy() {
+        let owner = publish_step_error(
+            ApiError::sandbox("Ask an owner to add you to this site, then try again."),
+            false,
+        );
+        assert_eq!(owner.message, "Ask an owner to add you to this site, then try again.");
+        let already = publish_step_error(ApiError::conflict("Couldn't publish. Get latest, then try again."), true);
+        assert_eq!(already.message, "Couldn't publish. Get latest, then try again.");
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
