@@ -4,6 +4,7 @@ import { defineComponent, h as render } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import type { DevserverState } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { REFRESH_DELAY_MS, affectsContent, useContentStore } from "./store";
@@ -53,6 +54,20 @@ it("stops refreshing while the Content panel is unmounted and refreshes once on 
   vi.advanceTimersByTime(REFRESH_DELAY_MS * 4); await flushPromises();
   expect(catalog).toHaveBeenCalledTimes(1);
   second.unmount();
+});
+
+it("refreshes the catalog once when this project's dev server becomes ready", async () => {
+  const status = (projectId: string, state: DevserverState) => h.daemon.emit({ type: "devserver.status", projectId, state });
+  const store = useContentStore(); await store.open("p"); catalog.mockClear();
+  status("other", "ready"); status("p", "starting");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).not.toHaveBeenCalled();
+  status("p", "ready");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(1);
+  status("p", "crashed");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(1);
 });
 
 it("still preserves a dirty draft and flags the on-disk change after a debounced refresh", async () => {

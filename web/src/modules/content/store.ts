@@ -394,6 +394,7 @@ export const useContentStore = defineStore("content", () => {
   }
   const offs = [
     daemon.on("fs.change", (e) => { if (e.projectId === projectId.value && affectsContent(e.path)) scheduleRefresh(); }),
+    daemon.on("devserver.status", (e) => { if (e.projectId === projectId.value && e.state === "ready") scheduleRefresh(); }),
     daemon.on("events.lagged", scheduleRefresh),
     daemon.onReconnected(scheduleRefresh),
   ];
