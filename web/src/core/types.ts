@@ -297,6 +297,12 @@ export interface PreviewReloadEvent {
   projectId: string;
 }
 
+/** The dev server is about to reinstall the draft's packages (its deps changed). */
+export interface PreviewDepsInstallingEvent {
+  type: "preview.deps_installing";
+  projectId: string;
+}
+
 /** Reload Content collections, entry lists, and the open entry (agent ctl or turn-end). */
 export interface ContentRefreshEvent {
   type: "content.refresh";
@@ -338,6 +344,7 @@ export type DaemonEvent =
   | ChangesAutoResolveEvent
   | TerminalTurnEvent
   | PreviewReloadEvent
+  | PreviewDepsInstallingEvent
   | ContentRefreshEvent
   | TerminalBusyEvent
   | ChatTurnEvent

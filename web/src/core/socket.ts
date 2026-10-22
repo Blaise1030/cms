@@ -27,6 +27,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "changes.auto_resolve": { projectId: "string", sessionId: "string", state: "string" },
   "terminal.turn": { projectId: "string" },
   "preview.reload": { projectId: "string" },
+  "preview.deps_installing": { projectId: "string" },
   "content.refresh": { projectId: "string" },
   "terminal.busy": { projectId: "string" },
   "chat.turn": { projectId: "string", chatId: "string" },
