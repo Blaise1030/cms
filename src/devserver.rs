@@ -205,6 +205,8 @@ struct Running {
 pub struct DevServerManager {
     shared: Arc<Shared>,
     running: Mutex<HashMap<String, Running>>,
+    /// `ORSO_CONTENT_TOKEN` of each supervised project, fresh per `start`.
+    content_tokens: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl DevServerManager {
@@ -217,7 +219,19 @@ impl DevServerManager {
                 crash_messages: Default::default(),
             }),
             running: Mutex::new(HashMap::new()),
+            content_tokens: Default::default(),
         }
+    }
+
+    /// The token the project's current dev server was started with.
+    pub fn content_token(&self, id: &str) -> Option<String> {
+        self.tokens().get(id).cloned()
+    }
+
+    fn tokens(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+        self.content_tokens
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Why the project's dev server stopped, while it is `crashed`.
@@ -245,6 +259,7 @@ impl DevServerManager {
         if let Some(old) = running.remove(id) {
             old.stop().await;
         }
+        self.tokens().remove(id);
         let port = match self.shared.projects.ensure_free_port(id).await {
             Ok(p) => p,
             Err(e) => {
@@ -264,15 +279,27 @@ impl DevServerManager {
         self.shared
             .set_state(id, DevserverStatus::Starting, port, None)
             .await;
+        let token = crate::config::random_token();
+        self.tokens().insert(id.to_string(), token.clone());
         let (stop, stop_rx) = oneshot::channel();
-        let task = tokio::spawn(supervise(self.shared.clone(), id.to_string(), stop_rx));
+        let task = tokio::spawn(supervise(
+            self.shared.clone(),
+            id.to_string(),
+            stop_rx,
+            token,
+        ));
         running.insert(id.to_string(), Running { stop, task });
         Ok(())
     }
 
     /// Stop the project's dev server and wait until the process group is gone.
     pub async fn stop(&self, id: &str) {
-        let old = self.running.lock().await.remove(id);
+        let old = {
+            let mut running = self.running.lock().await;
+            // Under the lock, so a concurrent `start` cannot store its token first.
+            self.tokens().remove(id);
+            running.remove(id)
+        };
         if let Some(old) = old {
             old.stop().await;
         }
@@ -289,7 +316,11 @@ impl DevServerManager {
 
     /// Stop every dev server (daemon shutdown).
     pub async fn shutdown(&self) {
-        let all: Vec<Running> = self.running.lock().await.drain().map(|(_, r)| r).collect();
+        let all: Vec<Running> = {
+            let mut running = self.running.lock().await;
+            self.tokens().clear();
+            running.drain().map(|(_, r)| r).collect()
+        };
         let mut stopping = Vec::new();
         for r in all {
             let _ = r.stop.send(());
@@ -350,7 +381,12 @@ enum Outcome {
     Died { message: String, stable: bool },
 }
 
-async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<()>) {
+async fn supervise(
+    shared: Arc<Shared>,
+    id: String,
+    mut stop: oneshot::Receiver<()>,
+    token: String,
+) {
     let mut crashes = 0u32;
     let mut port = 0u16;
     loop {
@@ -403,6 +439,7 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                                 port,
                                 &mut stop,
                                 settings.as_ref(),
+                                &token,
                             )
                             .await
                         }
@@ -419,6 +456,7 @@ async fn supervise(shared: Arc<Shared>, id: String, mut stop: oneshot::Receiver<
                             port,
                             &mut stop,
                             settings.as_ref(),
+                            &token,
                         )
                         .await
                     }
@@ -541,6 +579,7 @@ async fn run_once(
     port: u16,
     stop: &mut oneshot::Receiver<()>,
     settings: Option<&crate::settings::ProjectSettings>,
+    token: &str,
 ) -> Outcome {
     let spec = LaunchSpec {
         project_id: id.to_string(),
@@ -572,6 +611,7 @@ async fn run_once(
         cmd.current_dir(&dir);
     }
     cmd.env("PUBLIC_BASE", &spec.public_base)
+        .env("ORSO_CONTENT_TOKEN", token)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
