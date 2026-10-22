@@ -62,6 +62,8 @@ pub async fn create(
     let dir = project_dir(&state, &req.project).await?;
     save_edits(&state, &req.project, &dir, true).await?;
     let change = changes::create(&dir, &req.title).await?;
+    // Same as switch: a new change checks out a different tree; restart so preview matches.
+    let _ = state.devservers.start(&req.project).await;
     Ok((StatusCode::CREATED, Json(change_json(&change))))
 }
 
@@ -168,6 +170,11 @@ pub async fn switch(
     let dir = project_dir(&state, &req.project).await?;
     save_edits(&state, &req.project, &dir, false).await?;
     let change = changes::switch(&dir, &branch).await?;
+    // Checkout replaces files under a still-running Vite/Astro process; remounting the
+    // iframe alone can keep serving the previous draft. Restart (no reinstall unless
+    // deps are already stale). Switch already succeeded — a preview failure must not
+    // report the draft switch as failed.
+    let _ = state.devservers.start(&req.project).await;
     Ok(Json(change_json(&change)))
 }
 
@@ -687,6 +694,8 @@ pub async fn cleanup(
         None => (PrMerge::NotMerged, Vec::new()),
     };
     let done = changes::cleanup(&project.dir, &branch, pr, &env).await?;
+    // Cleanup checks out main; same Vite-stale problem as switch.
+    let _ = state.devservers.start(&req.project).await;
     Ok(Json(
         json!({ "branch": "main", "mainUpdated": done.main_updated }),
     ))
