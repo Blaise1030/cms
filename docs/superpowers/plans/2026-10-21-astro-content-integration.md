@@ -494,9 +494,9 @@ Add `"orso-astro": "file:../../packages/astro"` to `package.json`. Add `.npmrc` 
 - [ ] **Step 2: Implement `orso()` and the template configuration**
 
   Implement the integration as described above. In `astro:server:setup`, use
-  `server.middlewares.use(...)` for the endpoint. Do not add a Vite plugin with
-  `apply: "serve"`; `astro:server:setup` also runs for the temporary Vite server created by
-  `astro sync`.
+  `server.middlewares.use(...)` for the endpoint. `astro sync` skips `astro:server:setup`, so
+  when `astro:config:setup` reports `command === "sync"`, add a Vite plugin whose
+  `configureServer` runs the same setup without the endpoint or watcher.
 
   Important: `server.environments.astro` exists in Astro 7.3.5. If it is missing in a future
   version, fall back to `server.environments.ssr`; throw a clear error if neither exists.
@@ -1407,8 +1407,9 @@ cargo test --test content_e2e -- --ignored --nocapture
 
 ### Verified assumptions
 
-- Astro 7.3.5's `astro sync` creates a temporary Vite server and runs `astro:server:setup`;
-  `server.environments.astro.runner` is available there.
+- Astro 7.3.5's `astro sync` creates a temporary Vite server but runs it as production, so it
+  skips `astro:server:setup`. `orso()` therefore adds a sync-only Vite plugin whose
+  `configureServer` writes the manifest; `server.environments.astro.runner` is available there.
 - Vite's runner exposes `runner.evaluatedModules.getModulesByFile(file)` and
   `invalidateModule(module)`; the integration uses those before re-importing the content config.
   If a future Astro/Vite upgrade removes them, use a cache-busting query on `runner.import` while
