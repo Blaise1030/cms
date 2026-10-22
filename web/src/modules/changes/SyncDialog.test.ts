@@ -186,7 +186,7 @@ describe("SyncDialog", () => {
     const store = await mountWith({ state: "failed" });
     await click("sync-advanced");
     expect(find("sync-failed").exists()).toBe(true);
-    expect(find("sync-failed").text()).toContain("Couldn't open the advanced view. Please try again.");
+    expect(find("sync-failed").text()).toContain("Couldn't open that view. Please try again.");
     expect(store.syncSessionId).toBe("s1");
   });
 
