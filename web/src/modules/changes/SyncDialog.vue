@@ -172,7 +172,7 @@ async function submitAnswers() {
         <p v-if="store.syncStatus?.error" class="text-destructive text-sm" role="alert">{{ store.syncStatus.error }}</p>
         <p v-if="advancedError" class="text-destructive text-sm" role="alert" data-testid="sync-advanced-error">{{ advancedError }}</p>
         <DialogFooter class="sm:justify-between">
-          <Button variant="link" class="px-0" data-testid="sync-advanced" @click="advanced">Advanced</Button>
+          <Button variant="link" class="px-0" data-testid="sync-advanced" @click="advanced">I'll choose myself</Button>
           <div class="flex gap-2">
             <Button variant="outline" data-testid="sync-close" @click="store.closeSync()">Close</Button>
             <Button data-testid="sync-retry" @click="store.retrySync(projectId)">Try again</Button>
