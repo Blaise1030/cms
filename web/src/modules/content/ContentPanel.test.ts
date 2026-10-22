@@ -122,6 +122,16 @@ it("keeps showing a draft's form with Save disabled while the preview is unavail
  expect(w.get('[data-testid="content-save"]').attributes("disabled")).toBeUndefined();
  w.unmount();
 });
+it("explains an empty catalog: the site needs the orso-astro integration", async () => {
+ const w = await setup({ listContentCollections: async () => [] }); await flushPromises();
+ const empty = w.get('[data-testid="content-empty-catalog"]').text();
+ for (const part of ["orso-astro", "orso()", "astro.config", "orsoGlob", "src/content.config.ts", "preview starts"]) expect(empty).toContain(part);
+ expect(w.text()).not.toContain("Select a collection and entry");
+ w.unmount();
+ const listed = await setup(); await flushPromises();
+ expect(listed.find('[data-testid="content-empty-catalog"]').exists()).toBe(false);
+ listed.unmount();
+});
 it("clears the previous project's catalog while the next project loads", async () => {
  const w = await setup(); await flushPromises(); const store = useContentStore();
  const opening = store.open("other");

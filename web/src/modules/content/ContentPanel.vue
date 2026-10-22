@@ -340,6 +340,11 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </div>
         <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
       </template>
+      <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
+        <FileText class="size-8 opacity-50" aria-hidden="true" />
+        <p class="font-medium text-foreground">No content collections</p>
+        <p class="max-w-md">Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.</p>
+      </div>
       <div v-else-if="!store.loading" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground">
         <FileText class="size-8 opacity-50" aria-hidden="true" />
         <p>Select a collection and entry to read its content.</p>
