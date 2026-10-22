@@ -56,10 +56,10 @@ it("stops refreshing while the Content panel is unmounted and refreshes once on 
   second.unmount();
 });
 
-it("refreshes the catalog once when this project's dev server becomes ready", async () => {
+it("refreshes the catalog once per change in this project's dev server state", async () => {
   const status = (projectId: string, state: DevserverState) => h.daemon.emit({ type: "devserver.status", projectId, state });
   const store = useContentStore(); await store.open("p"); catalog.mockClear();
-  status("other", "ready"); status("p", "starting");
+  status("other", "ready"); status("other", "crashed");
   vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
   expect(catalog).not.toHaveBeenCalled();
   status("p", "ready");
@@ -67,7 +67,11 @@ it("refreshes the catalog once when this project's dev server becomes ready", as
   expect(catalog).toHaveBeenCalledTimes(1);
   status("p", "crashed");
   vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
-  expect(catalog).toHaveBeenCalledTimes(1);
+  expect(catalog).toHaveBeenCalledTimes(2);
+  // A restart (or a stop then start) leaves ready through starting.
+  status("p", "starting");
+  vi.advanceTimersByTime(REFRESH_DELAY_MS); await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(3);
 });
 
 it("still preserves a dirty draft and flags the on-disk change after a debounced refresh", async () => {

@@ -401,7 +401,8 @@ export const useContentStore = defineStore("content", () => {
   }
   const offs = [
     daemon.on("fs.change", (e) => { if (e.projectId === projectId.value && affectsContent(e.path)) scheduleRefresh(); }),
-    daemon.on("devserver.status", (e) => { if (e.projectId === projectId.value && e.state === "ready") scheduleRefresh(); }),
+    // Saving needs a ready preview, so any change in its state can change what is editable.
+    daemon.on("devserver.status", (e) => { if (e.projectId === projectId.value) scheduleRefresh(); }),
     daemon.on("events.lagged", scheduleRefresh),
     daemon.onReconnected(scheduleRefresh),
   ];
