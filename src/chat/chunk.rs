@@ -1,101 +1,67 @@
-//! AI SDK `UIMessageChunk`s and their SSE framing.
+//! Tabsh-shaped chat chunks and their SSE framing.
+//!
+//! One flat object per transcript line / SSE `data:` payload, discriminated
+//! by `type` (snake_case). CMS adds `checkpoint`; `blocked` is the reason a
+//! commit did not happen, not a boolean.
 
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
-/// One AI SDK UI message stream chunk. Tool parts are always `dynamic`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
+/// One line of the chat transcript / one SSE `data:` payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiChunk {
-    Start {
-        message_id: String,
+    /// Streaming agent text (`agent_message_chunk`).
+    TextDelta { session_id: String, text: String },
+    /// Streaming agent reasoning text (`agent_thought_chunk`).
+    ThoughtDelta { session_id: String, text: String },
+    /// Echo of a user message chunk.
+    UserText { session_id: String, text: String },
+    /// A tool call; `tool_call` is the raw ACP update minus its
+    /// `sessionUpdate` discriminator.
+    ToolCall {
+        session_id: String,
+        tool_call: serde_json::Value,
     },
-    StartStep,
-    FinishStep,
-    TextStart {
-        id: String,
+    ToolCallUpdate {
+        session_id: String,
+        tool_call: serde_json::Value,
     },
-    TextDelta {
-        id: String,
-        delta: String,
+    /// The agent's plan; `entries` is the raw ACP plan entries array.
+    Plan {
+        session_id: String,
+        entries: serde_json::Value,
     },
-    TextEnd {
-        id: String,
+    /// A permission request. `request_id` is the JSON-RPC id (stringified).
+    Permission {
+        session_id: String,
+        request_id: String,
+        tool_call: serde_json::Value,
+        options: serde_json::Value,
     },
-    ReasoningStart {
-        id: String,
+    /// A prompt turn finished; `stop_reason` is the ACP `stopReason`
+    /// (e.g. `end_turn`, `cancelled`).
+    TurnEnd {
+        session_id: String,
+        stop_reason: String,
     },
-    ReasoningDelta {
-        id: String,
-        delta: String,
+    /// Anything else, kept raw so no agent output is silently dropped.
+    Unknown {
+        session_id: String,
+        update: serde_json::Value,
     },
-    ReasoningEnd {
-        id: String,
+    /// A spawn, auth, or protocol failure.
+    Error { message: String },
+    /// CMS checkpoint after a turn. `blocked` is why the commit did not happen.
+    Checkpoint {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+        #[serde(default)]
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blocked: Option<String>,
     },
-    ToolInputAvailable {
-        tool_call_id: String,
-        tool_name: String,
-        input: Value,
-        dynamic: bool,
-    },
-    ToolOutputAvailable {
-        tool_call_id: String,
-        output: Value,
-        dynamic: bool,
-    },
-    ToolOutputError {
-        tool_call_id: String,
-        error_text: String,
-        dynamic: bool,
-    },
-    #[serde(rename = "data-checkpoint")]
-    DataCheckpoint {
-        data: CheckpointData,
-    },
-    #[serde(rename = "data-agent-error")]
-    DataAgentError {
-        data: AgentError,
-    },
-    MessageMetadata {
-        message_metadata: Value,
-    },
-    Error {
-        error_text: String,
-    },
-    Abort,
-    Finish,
-}
-
-/// What the turn's checkpoint did: committed (`sha`/`summary`/`files`) or `blocked`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckpointData {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sha: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    pub files: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocked: Option<String>,
-}
-
-/// A CLI failure shown to the user as a data part.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct AgentError {
-    pub code: AgentErrorCode,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentErrorCode {
-    Login,
-    NotInstalled,
-    Failed,
 }
 
 /// `data: {json}\n\n`.
@@ -104,78 +70,57 @@ pub fn sse_frame(chunk: &UiChunk) -> String {
     format!("data: {json}\n\n")
 }
 
-/// Terminates an AI SDK UI message stream.
-pub const SSE_DONE: &str = "data: [DONE]\n\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn to_json(chunk: &UiChunk) -> String {
-        serde_json::to_string(chunk).unwrap()
-    }
-
     #[test]
-    fn tool_input_available_json() {
-        let chunk = UiChunk::ToolInputAvailable {
-            tool_call_id: "c1".into(),
-            tool_name: "edit".into(),
-            input: json!({"path": "a.md"}),
-            dynamic: true,
+    fn checkpoint_chunk_round_trips() {
+        let chunk = UiChunk::Checkpoint {
+            sha: Some("abc".into()),
+            summary: Some("saved".into()),
+            files: vec!["a.md".into()],
+            blocked: Some("protected branch".into()),
         };
+        let value = serde_json::to_value(&chunk).unwrap();
         assert_eq!(
-            to_json(&chunk),
-            r#"{"type":"tool-input-available","toolCallId":"c1","toolName":"edit","input":{"path":"a.md"},"dynamic":true}"#
+            value,
+            json!({
+                "type": "checkpoint",
+                "sha": "abc",
+                "summary": "saved",
+                "files": ["a.md"],
+                "blocked": "protected branch"
+            })
         );
-    }
+        let back: UiChunk = serde_json::from_value(value).unwrap();
+        assert_eq!(back, chunk);
 
-    #[test]
-    fn checkpoint_skips_missing_fields() {
-        let chunk = UiChunk::DataCheckpoint {
-            data: CheckpointData {
-                files: vec!["a.md".into()],
-                ..Default::default()
-            },
+        let empty = UiChunk::Checkpoint {
+            sha: None,
+            summary: None,
+            files: vec![],
+            blocked: None,
         };
-        assert_eq!(
-            to_json(&chunk),
-            r#"{"type":"data-checkpoint","data":{"files":["a.md"]}}"#
-        );
+        let json = serde_json::to_string(&empty).unwrap();
+        assert_eq!(json, r#"{"type":"checkpoint","files":[]}"#);
+        assert_eq!(serde_json::from_str::<UiChunk>(&json).unwrap(), empty);
+
+        // `blocked` is a reason string. A boolean is not this field.
+        assert!(serde_json::from_value::<UiChunk>(json!({
+            "type": "checkpoint",
+            "files": [],
+            "blocked": true
+        }))
+        .is_err());
     }
 
     #[test]
-    fn agent_error_json() {
-        let chunk = UiChunk::DataAgentError {
-            data: AgentError {
-                code: AgentErrorCode::NotInstalled,
-                message: "…".into(),
-            },
-        };
-        assert_eq!(
-            to_json(&chunk),
-            r#"{"type":"data-agent-error","data":{"code":"not_installed","message":"…"}}"#
-        );
-    }
-
-    #[test]
-    fn start_json() {
-        let chunk = UiChunk::Start {
-            message_id: "m1".into(),
-        };
-        assert_eq!(to_json(&chunk), r#"{"type":"start","messageId":"m1"}"#);
-    }
-
-    #[test]
-    fn unit_variants_are_kebab_case() {
-        assert_eq!(to_json(&UiChunk::StartStep), r#"{"type":"start-step"}"#);
-        assert_eq!(to_json(&UiChunk::Finish), r#"{"type":"finish"}"#);
-    }
-
-    #[test]
-    fn sse_frame_wraps_json() {
-        let frame = sse_frame(&UiChunk::Abort);
-        assert_eq!(frame, "data: {\"type\":\"abort\"}\n\n");
-        assert!(frame.ends_with("\n\n"));
+    fn sse_frame_is_a_data_event() {
+        let frame = sse_frame(&UiChunk::Error {
+            message: "nope".into(),
+        });
+        assert_eq!(frame, "data: {\"type\":\"error\",\"message\":\"nope\"}\n\n");
     }
 }

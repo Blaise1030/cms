@@ -15,7 +15,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::{changes, checkpoints, ctl};
 use crate::auth;
-use crate::chat::{models, transcript};
+use crate::chat::models;
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::projects::STATE_DIR;
@@ -165,7 +165,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
         &req.project,
         &session,
     );
-    if state.chats.running(&req.project).is_some() {
+    if state.chats.any_live(&req.project) {
         return Err(ApiError::conflict("The agent is busy in Chat"));
     }
     state
@@ -467,9 +467,6 @@ fn record_turn(state: &AppState, req: &TurnEndRequest) {
     let Some(id) = state.terminals.history_id(&req.project) else {
         return;
     };
-    if let Err(e) = transcript::mark_terminal(&state_dir(state), &req.project, &id) {
-        eprintln!("orso: cannot mark the chat transcript: {e}");
-    }
     let title = req
         .summary
         .as_deref()

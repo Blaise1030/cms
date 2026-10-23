@@ -165,7 +165,7 @@ pub async fn remove(
     // serves from) a directory being removed.
     state.devservers.stop(&id).await;
     state.terminals.kill(&id).await;
-    state.chats.stop(&id).await;
+    state.chats.stop_project(&id).await;
     state.watchers.stop(&id);
     if let Err(e) = state.projects.delete(&id).await {
         // Delete failed and the project lives on: bring its preview back.
