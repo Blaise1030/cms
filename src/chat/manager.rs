@@ -6,12 +6,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use serde_json::json;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, watch, Notify};
 
 use super::acp::{AcpClient, AcpEvent};
 use super::chunk::UiChunk;
@@ -124,6 +124,9 @@ impl LiveChat {
 struct Starting {
     done: watch::Sender<bool>,
     cancel: Arc<AtomicBool>,
+    /// `forget` dropped this reservation. The handshake must not publish, and
+    /// a start waiting on it must not spawn a replacement.
+    abandoned: AtomicBool,
 }
 
 enum Entry {
@@ -275,6 +278,7 @@ impl ChatManager {
                         let s = Arc::new(Starting {
                             done: watch::channel(false).0,
                             cancel: Arc::new(AtomicBool::new(false)),
+                            abandoned: AtomicBool::new(false),
                         });
                         slots.chats.insert(key.clone(), Entry::Starting(s.clone()));
                         Action::Reserve(s)
@@ -286,6 +290,9 @@ impl ChatManager {
                 Action::Wait(s) => {
                     let mut rx = s.done.subscribe();
                     let _ = rx.wait_for(|done| *done).await;
+                    if s.abandoned.load(Ordering::SeqCst) {
+                        return Err(ChatError::Failed("chat start was cancelled".into()));
+                    }
                 }
                 Action::Reserve(s) => break s,
             }
@@ -640,7 +647,16 @@ impl ChatManager {
         chat_id: &str,
         model_id: &str,
     ) -> ChatResult<()> {
+        wait_model_gate(project_id, chat_id).await;
         let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
+        // Already selected: a second cold start can observe the first message's
+        // open turn. Refusing here drops that message. A different model still waits.
+        {
+            let models = live.models.lock().unwrap_or_else(|e| e.into_inner());
+            if models.as_ref().is_some_and(|cfg| cfg.current == model_id) {
+                return Ok(());
+            }
+        }
         {
             let history = live.history.lock().unwrap_or_else(|e| e.into_inner());
             if transcript_turn_open(&history) {
@@ -675,17 +691,22 @@ impl ChatManager {
         Ok(())
     }
 
-    /// Drops the live chat, if any. The agent process dies with its last
-    /// client reference (`kill_on_drop`). A start still handshaking is left
-    /// to publish or clear its own reservation.
+    /// Drops a live chat or a handshake still in `Starting`. The live agent
+    /// dies with its last client reference (`kill_on_drop`). A handshake
+    /// whose reservation was removed does not publish, including when
+    /// `forget` wins the race against the publish lock.
     pub fn forget(&self, project_id: &str, chat_id: &str) {
-        let mut slots = self.slots();
-        let key = Key {
-            project_id: project_id.to_string(),
-            chat_id: chat_id.to_string(),
+        let removed = {
+            let mut slots = self.slots();
+            slots.chats.remove(&Key {
+                project_id: project_id.to_string(),
+                chat_id: chat_id.to_string(),
+            })
         };
-        if matches!(slots.chats.get(&key), Some(Entry::Live(_))) {
-            slots.chats.remove(&key);
+        if let Some(Entry::Starting(starting)) = removed {
+            starting.abandoned.store(true, Ordering::SeqCst);
+            starting.cancel.store(true, Ordering::SeqCst);
+            let _ = starting.done.send(true);
         }
     }
 
@@ -814,6 +835,85 @@ impl ChatManager {
                 Entry::Starting(_) => None,
             })
     }
+}
+
+/// Test seam for two cold `POST …/message` calls. Both block inside
+/// `set_model` until [`ModelGate::release_first`] / [`ModelGate::release_rest`].
+struct ArmedModelGate {
+    project_id: String,
+    chat_id: String,
+    entered: Arc<AtomicUsize>,
+    first: Arc<Notify>,
+    rest: Arc<Notify>,
+}
+
+static MODEL_GATE: Mutex<Option<ArmedModelGate>> = Mutex::new(None);
+
+pub struct ModelGate {
+    entered: Arc<AtomicUsize>,
+    first: Arc<Notify>,
+    rest: Arc<Notify>,
+}
+
+impl ModelGate {
+    pub fn entered(&self) -> usize {
+        self.entered.load(Ordering::SeqCst)
+    }
+
+    pub fn release_first(&self) {
+        self.first.notify_one();
+    }
+
+    pub fn release_rest(&self) {
+        self.rest.notify_waiters();
+    }
+}
+
+impl Drop for ModelGate {
+    fn drop(&mut self) {
+        *MODEL_GATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.first.notify_waiters();
+        self.rest.notify_waiters();
+    }
+}
+
+/// Arms the gate for one chat. A later arm replaces it. Dropping the handle
+/// releases anyone still waiting.
+pub fn arm_model_gate(project_id: impl Into<String>, chat_id: impl Into<String>) -> ModelGate {
+    let entered = Arc::new(AtomicUsize::new(0));
+    let first = Arc::new(Notify::new());
+    let rest = Arc::new(Notify::new());
+    *MODEL_GATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(ArmedModelGate {
+        project_id: project_id.into(),
+        chat_id: chat_id.into(),
+        entered: entered.clone(),
+        first: first.clone(),
+        rest: rest.clone(),
+    });
+    ModelGate {
+        entered,
+        first,
+        rest,
+    }
+}
+
+async fn wait_model_gate(project_id: &str, chat_id: &str) {
+    let wait = {
+        let guard = MODEL_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(gate) = guard.as_ref() else {
+            return;
+        };
+        if gate.project_id != project_id || gate.chat_id != chat_id {
+            return;
+        }
+        let n = gate.entered.fetch_add(1, Ordering::SeqCst);
+        if n == 0 {
+            gate.first.clone()
+        } else {
+            gate.rest.clone()
+        }
+    };
+    wait.notified().await;
 }
 
 fn transcript_turn_open(chunks: &[UiChunk]) -> bool {
@@ -1052,6 +1152,49 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    /// Delete/forget while `session/new` is still in flight must drop the
+    /// reservation. The handshake must not publish afterwards, or terminal
+    /// start stays blocked (`any_live`) with no record left to stop.
+    #[tokio::test]
+    async fn forget_during_handshake_does_not_publish() {
+        let (chats, dir) = manager();
+        let gate = dir.path().join("hold");
+        let (cmd, args) = crate::chat::acp::fake_agent_hold(&gate);
+        let mut argv = vec![cmd];
+        argv.extend(args);
+        let cwd = std::env::temp_dir();
+        let started = {
+            let chats = chats.clone();
+            tokio::spawn(async move { chats.start("proj", "chat-1", &cwd, &argv, &[]).await })
+        };
+        let ready = format!("{}.ready", gate.display());
+        let go = format!("{}.go", gate.display());
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while !std::path::Path::new(&ready).exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fake agent never reached the hold"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            chats.any_live("proj"),
+            "handshake should count as live for terminal"
+        );
+        assert!(!chats.is_live("proj", "chat-1"));
+        chats.forget("proj", "chat-1");
+        assert!(
+            !chats.any_live("proj"),
+            "forget left the handshake reservation in place"
+        );
+        std::fs::write(&go, b"").unwrap();
+        let err = started.await.unwrap().unwrap_err();
+        assert!(
+            !chats.is_live("proj", "chat-1") && !chats.any_live("proj"),
+            "published after forget: {err}"
+        );
     }
 
     /// `stop_project` used to snapshot keys and then await `cancel`. A start

@@ -401,3 +401,156 @@ async fn chat_id_traversal_rejected() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_ne!(body["error"]["message"], "route not found");
 }
+
+async fn wait_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn delete_during_handshake_does_not_keep_terminal_blocked() {
+    let env = env().await;
+    let gate = env.root.join("hold");
+    let (cmd, args) = orso::chat::acp::fake_agent_hold(&gate);
+    let mut argv = vec![cmd];
+    argv.extend(args);
+    orso::providers::set_test_acp_argv("hold", argv);
+
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}", env.project),
+        Some(json!({ "provider": "hold" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+
+    let state = env.state.clone();
+    let project = env.project.clone();
+    let start_id = id.clone();
+    let started = tokio::spawn(async move {
+        let res = http::router(state)
+            .oneshot(req(
+                "POST",
+                &format!("/api/chat/{project}/{start_id}/start"),
+                None,
+            ))
+            .await
+            .unwrap();
+        res.status()
+    });
+    wait_path(&std::path::PathBuf::from(format!(
+        "{}.ready",
+        gate.display()
+    )))
+    .await;
+    assert!(
+        env.state.chats.any_live(&env.project),
+        "terminal start would not be blocked yet"
+    );
+
+    let (status, body) = call(
+        &env,
+        "DELETE",
+        &format!("/api/chat/{}/{id}", env.project),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !env.state.chats.any_live(&env.project),
+        "delete left the handshake up; terminal start stays 409"
+    );
+
+    std::fs::write(format!("{}.go", gate.display()), b"").unwrap();
+    let start_status = started.await.unwrap();
+    assert_ne!(
+        start_status,
+        StatusCode::ACCEPTED,
+        "start published after delete"
+    );
+    assert_ne!(start_status, StatusCode::NO_CONTENT);
+    assert!(!env.state.chats.any_live(&env.project));
+    assert!(!env.state.chats.is_live(&env.project, &id));
+
+    for (method, path) in [
+        ("GET", format!("/api/chat/{}/{id}", env.project)),
+        ("DELETE", format!("/api/chat/{}/{id}", env.project)),
+        ("POST", format!("/api/chat/{}/{id}/stop", env.project)),
+    ] {
+        let (status, body) = call(&env, method, &path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {body}");
+    }
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn overlapping_cold_messages_with_stored_model_both_send() {
+    let env = env().await;
+    let id = create_chat(&env, Some("smart")).await;
+    let gate = orso::chat::manager::arm_model_gate(&env.project, &id);
+    let path = format!("/api/chat/{}/{id}/message", env.project);
+
+    // "slow" holds the first turn open so the other set_model runs mid-turn.
+    let alpha = call(
+        &env,
+        "POST",
+        &path,
+        Some(json!({ "text": "slow alpha-msg" })),
+    );
+    let beta = call(
+        &env,
+        "POST",
+        &path,
+        Some(json!({ "text": "slow beta-msg" })),
+    );
+    let ((), (status_a, body_a), (status_b, body_b)) = tokio::join!(
+        async {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while gate.entered() < 2 {
+                assert!(
+                    Instant::now() < deadline,
+                    "both messages did not reach set_model (entered {})",
+                    gate.entered()
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            gate.release_first();
+            let _ = wait_detail(
+                &env,
+                &id,
+                |body| {
+                    let text = chunk_text(body);
+                    text.contains("alpha-msg") || text.contains("beta-msg")
+                },
+                "first cold message recorded",
+            )
+            .await;
+            gate.release_rest();
+        },
+        alpha,
+        beta,
+    );
+    assert_eq!(status_a, StatusCode::ACCEPTED, "{body_a}");
+    assert_eq!(status_b, StatusCode::ACCEPTED, "{body_b}");
+    let detail = wait_detail(
+        &env,
+        &id,
+        |body| {
+            let text = chunk_text(body);
+            text.contains("alpha-msg") && text.contains("beta-msg")
+        },
+        "both messages recorded",
+    )
+    .await;
+    assert_eq!(detail["model"], "smart");
+    env.state.chats.shutdown().await;
+}
