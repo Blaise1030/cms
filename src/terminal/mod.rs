@@ -24,7 +24,6 @@
 //! an explicit kill). They never `kill` the pid: after `wait` it may already belong to
 //! another process.
 
-pub mod history;
 mod modes;
 
 use std::collections::{HashMap, VecDeque};
@@ -122,7 +121,7 @@ struct Activity {
 struct Session {
     provider: String,
     token: String,
-    /// The [`history`] record this session belongs to.
+    /// The [`crate::chat::history`] record this session belongs to.
     history_id: Mutex<Option<String>>,
     /// Process-group id captured at spawn, while the leader was still alive.
     pgid: Option<libc::pid_t>,
@@ -284,14 +283,14 @@ impl TerminalManager {
             .map_err(|e| ApiError::io(format!("failed to resize terminal: {e}")))
     }
 
-    /// Tie the live session to its [`history`] record. No-op if no terminal is live.
+    /// Tie the live session to its [`crate::chat::history`] record. No-op if no terminal is live.
     pub fn set_history_id(&self, project_id: &str, id: &str) {
         if let Some(s) = self.get(project_id) {
             *s.history_id.lock().unwrap() = Some(id.to_string());
         }
     }
 
-    /// The live session's [`history`] record id.
+    /// The live session's [`crate::chat::history`] record id.
     pub fn history_id(&self, project_id: &str) -> Option<String> {
         self.get(project_id)
             .and_then(|s| s.history_id.lock().unwrap().clone())

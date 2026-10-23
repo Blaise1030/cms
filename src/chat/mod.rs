@@ -2,6 +2,7 @@
 
 pub mod acp;
 pub mod chunk;
+pub mod history;
 pub mod manager;
 pub mod models;
 pub mod normalize;

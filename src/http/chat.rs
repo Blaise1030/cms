@@ -1,0 +1,428 @@
+//! `/api/chat/*`: one ACP agent per chat, tabsh-shaped `UiChunk` SSE.
+//!
+//! Chat ids are `^[A-Za-z0-9_-]{1,64}$`. `turn` is an ordinary id. The stream
+//! replays recorded chunks and stays open; it does not send an AI SDK `[DONE]`
+//! trailer. ACP argv comes from [`crate::providers::acp_argv`] (test override
+//! or `ORSO_ACP_ARGV`) until Task 6 stores it on the provider.
+
+use std::collections::VecDeque;
+use std::convert::Infallible;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::Json;
+use futures_util::stream::Stream;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use tokio::sync::broadcast;
+
+use crate::chat::chunk::{sse_frame, UiChunk};
+use crate::chat::history::{self, SessionRecord};
+use crate::chat::manager::ChatError;
+use crate::chat::transcript;
+use crate::config::random_token;
+use crate::error::ApiError;
+use crate::projects::STATE_DIR;
+use crate::providers;
+use crate::state::AppState;
+
+const TITLE_MAX: usize = 72;
+
+fn state_dir(state: &AppState) -> PathBuf {
+    state.config.projects_dir.join(STATE_DIR)
+}
+
+fn chat_error(err: ChatError) -> ApiError {
+    match err {
+        ChatError::Invalid(message) => ApiError::badreq(message),
+        ChatError::NotLive => ApiError::conflict("no live chat for this session"),
+        ChatError::Failed(message) => ApiError::agent(message),
+    }
+}
+
+fn require_chat_id(id: &str) -> Result<(), ApiError> {
+    if transcript::valid_chat_id(id) {
+        Ok(())
+    } else {
+        Err(ApiError::badreq(format!("invalid chat id: {id}")))
+    }
+}
+
+fn require_record(state: &AppState, project: &str, chat: &str) -> Result<SessionRecord, ApiError> {
+    history::get(&state_dir(state), project, chat)
+        .ok_or_else(|| ApiError::enoent(format!("no such chat: {chat}")))
+}
+
+fn summary(state: &AppState, project: &str, record: &SessionRecord) -> Value {
+    json!({
+        "id": record.id,
+        "provider": record.provider,
+        "model": record.model,
+        "title": record.title,
+        "updatedAt": record.updated_at,
+        "live": state.chats.is_live(project, &record.id),
+    })
+}
+
+fn chunk_event(chunk: &UiChunk) -> Event {
+    let framed = sse_frame(chunk);
+    let data = framed
+        .strip_prefix("data: ")
+        .unwrap_or(&framed)
+        .trim_end_matches('\n');
+    Event::default().data(data)
+}
+
+fn truncate_title(text: &str) -> String {
+    let line = text.trim().lines().next().unwrap_or("").trim();
+    if line.chars().count() <= TITLE_MAX {
+        return line.to_string();
+    }
+    let mut out: String = line.chars().take(TITLE_MAX - 1).collect();
+    out.push('…');
+    out
+}
+
+fn parse_json<T: for<'de> Deserialize<'de>>(body: &Bytes, what: &str) -> Result<T, ApiError> {
+    serde_json::from_slice(body).map_err(|e| ApiError::badreq(format!("expected {what}: {e}")))
+}
+
+async fn project_cwd(state: &AppState, project: &str) -> Result<PathBuf, ApiError> {
+    super::project_dir(state, project).await
+}
+
+fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
+    if providers::acp_argv(id).is_some() {
+        return Ok(true);
+    }
+    Ok(providers::load(state.config.agents_config.as_deref())?
+        .iter()
+        .any(|p| p.id == id))
+}
+
+/// Spawn the chat's ACP process with `session/new` (not a terminal `AgentSession`).
+async fn ensure_agent(
+    state: &AppState,
+    project: &str,
+    chat: &str,
+    cwd: &std::path::Path,
+    record: &SessionRecord,
+) -> Result<(), ApiError> {
+    let argv = providers::acp_argv(&record.provider).ok_or_else(|| {
+        ApiError::badreq(format!("provider {} has no ACP command", record.provider))
+    })?;
+    state
+        .chats
+        .start(project, chat, cwd, &argv, &[])
+        .await
+        .map_err(chat_error)?;
+    if let Some(model) = record.model.clone() {
+        state
+            .chats
+            .set_model(project, chat, &model)
+            .await
+            .map_err(chat_error)?;
+    }
+    Ok(())
+}
+
+fn touch(state: &AppState, project: &str, chat: &str, title_from: Option<&str>) {
+    let _ = history::update(&state_dir(state), project, chat, |record| {
+        if record.title.is_none() {
+            if let Some(text) = title_from.map(truncate_title).filter(|t| !t.is_empty()) {
+                record.title = Some(text);
+            }
+        }
+        record.updated_at = history::now_ms();
+    });
+}
+
+#[derive(Deserialize)]
+struct CreateBody {
+    provider: String,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+/// `GET /api/chat/{project}` → `{ chats: [{ id, provider, model, title, updatedAt, live }] }`.
+pub async fn list_chats(
+    State(state): State<AppState>,
+    Path(project): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    project_cwd(&state, &project).await?;
+    let chats: Vec<Value> = history::list(&state_dir(&state), &project)
+        .into_iter()
+        .map(|record| summary(&state, &project, &record))
+        .collect();
+    Ok(Json(json!({ "chats": chats })))
+}
+
+/// `POST /api/chat/{project}` `{ provider, model? }` → the new chat record.
+pub async fn create_chat(
+    State(state): State<AppState>,
+    Path(project): Path<String>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    project_cwd(&state, &project).await?;
+    let req: CreateBody = parse_json(&body, "JSON body {provider, model?}")?;
+    let provider = req.provider.trim();
+    if !transcript::valid_chat_id(provider) {
+        return Err(ApiError::badreq(format!("invalid provider: {provider}")));
+    }
+    if !known_provider(&state, provider)? {
+        return Err(ApiError::badreq(format!("unknown provider: {provider}")));
+    }
+    let model = req
+        .model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    let now = history::now_ms();
+    let record = SessionRecord {
+        id: random_token()[..16].to_string(),
+        provider: provider.to_string(),
+        model,
+        agent_session_id: None,
+        title: None,
+        created_at: now,
+        updated_at: now,
+    };
+    history::insert(&state_dir(&state), &project, record.clone())?;
+    Ok((
+        StatusCode::CREATED,
+        Json(summary(&state, &project, &record)),
+    ))
+}
+
+/// `GET /api/chat/{project}/{chat}` → `{ chunks, provider, model, running }`.
+pub async fn get_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    let record = require_record(&state, &project, &chat)?;
+    Ok(Json(json!({
+        "chunks": state.chats.history(&project, &chat),
+        "provider": record.provider,
+        "model": record.model,
+        "running": state.chats.is_live(&project, &chat),
+    })))
+}
+
+/// `DELETE /api/chat/{project}/{chat}` drops the record, the transcript, and the agent.
+pub async fn delete_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    if !history::remove(&state_dir(&state), &project, &chat)? {
+        return Err(ApiError::enoent(format!("no such chat: {chat}")));
+    }
+    state.chats.forget(&project, &chat);
+    if let Some(path) = transcript::path(&state_dir(&state), &project, &chat) {
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                eprintln!("orso: cannot remove transcript {}: {e}", path.display());
+            }
+        }
+    }
+    Ok(Json(json!({ "deleted": chat })))
+}
+
+/// `POST /api/chat/{project}/{chat}/start` — 202 after a new handshake, 204 if already live.
+pub async fn start_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let cwd = project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    let record = require_record(&state, &project, &chat)?;
+    if state.chats.is_live(&project, &chat) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    ensure_agent(&state, &project, &chat, &cwd, &record).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Deserialize)]
+struct MessageBody {
+    text: String,
+}
+
+/// `POST /api/chat/{project}/{chat}/message` `{ text }` — starts the agent when it is down.
+pub async fn post_message(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    let cwd = project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    let req: MessageBody = parse_json(&body, "JSON body {text}")?;
+    if req.text.trim().is_empty() {
+        return Err(ApiError::badreq("text is required"));
+    }
+    let record = require_record(&state, &project, &chat)?;
+    if !state.chats.is_live(&project, &chat) {
+        ensure_agent(&state, &project, &chat, &cwd, &record).await?;
+    }
+    state
+        .chats
+        .send_message(&project, &chat, &req.text)
+        .await
+        .map_err(chat_error)?;
+    touch(&state, &project, &chat, Some(&req.text));
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// `POST /api/chat/{project}/{chat}/stop` cancels the current turn.
+pub async fn stop_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    require_record(&state, &project, &chat)?;
+    state
+        .chats
+        .cancel(&project, &chat)
+        .await
+        .map_err(chat_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct ApproveBody {
+    #[serde(rename = "requestId")]
+    request_id: String,
+    allow: bool,
+}
+
+/// `POST /api/chat/{project}/{chat}/approve` `{ requestId, allow }`.
+pub async fn approve_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    require_record(&state, &project, &chat)?;
+    let req: ApproveBody = parse_json(&body, "JSON body {requestId, allow}")?;
+    state
+        .chats
+        .answer(&project, &chat, &req.request_id, req.allow)
+        .await
+        .map_err(chat_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn models_body(state: &AppState, project: &str, chat: &str) -> Value {
+    match state.chats.models(project, chat) {
+        Some(cfg) => json!({ "current": cfg.current, "options": cfg.options }),
+        None => json!({ "current": null, "options": [] }),
+    }
+}
+
+/// `GET /api/chat/{project}/{chat}/models` — empty when the agent is not live.
+pub async fn list_models(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    require_record(&state, &project, &chat)?;
+    Ok(Json(models_body(&state, &project, &chat)))
+}
+
+#[derive(Deserialize)]
+struct ModelBody {
+    #[serde(rename = "modelId")]
+    model_id: String,
+}
+
+/// `POST /api/chat/{project}/{chat}/model` `{ modelId }`.
+pub async fn set_model(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    require_record(&state, &project, &chat)?;
+    let req: ModelBody = parse_json(&body, "JSON body {modelId}")?;
+    state
+        .chats
+        .set_model(&project, &chat, &req.model_id)
+        .await
+        .map_err(chat_error)?;
+    let _ = history::update(&state_dir(&state), &project, &chat, |record| {
+        record.model = Some(req.model_id.clone());
+        record.updated_at = history::now_ms();
+    });
+    Ok(Json(models_body(&state, &project, &chat)))
+}
+
+struct StreamState {
+    st: AppState,
+    project: String,
+    chat: String,
+    replay: VecDeque<UiChunk>,
+    rx: Option<broadcast::Receiver<UiChunk>>,
+    seen: usize,
+}
+
+/// `GET /api/chat/{project}/{chat}/stream` — replay, then live chunks, until the client leaves.
+pub async fn stream_chat(
+    State(state): State<AppState>,
+    Path((project, chat)): Path<(String, String)>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    project_cwd(&state, &project).await?;
+    require_chat_id(&chat)?;
+    require_record(&state, &project, &chat)?;
+    let (replay, rx) = match state.chats.subscribe(&project, &chat) {
+        Some(sub) => (sub.replay, Some(sub.rx)),
+        None => (state.chats.history(&project, &chat), None),
+    };
+    let stream_state = StreamState {
+        st: state,
+        project,
+        chat,
+        replay: replay.into(),
+        rx,
+        seen: 0,
+    };
+    let stream = futures_util::stream::unfold(stream_state, |mut state| async move {
+        loop {
+            if let Some(chunk) = state.replay.pop_front() {
+                state.seen += 1;
+                return Some((Ok(chunk_event(&chunk)), state));
+            }
+            match &mut state.rx {
+                Some(rx) => match rx.recv().await {
+                    Ok(chunk) => {
+                        state.seen += 1;
+                        return Some((Ok(chunk_event(&chunk)), state));
+                    }
+                    // R9: a lagged subscriber has missed chunks. End the
+                    // stream; the client reconnects and replays history.
+                    Err(broadcast::error::RecvError::Lagged(_))
+                    | Err(broadcast::error::RecvError::Closed) => return None,
+                },
+                None => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if let Some(sub) = state.st.chats.subscribe(&state.project, &state.chat) {
+                        state.replay = sub.replay.into_iter().skip(state.seen).collect();
+                        state.rx = Some(sub.rx);
+                    }
+                }
+            }
+        }
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}

@@ -50,11 +50,42 @@
 //!   file; `-s <session>` resumed the conversation, and an `instructions` file listed in that
 //!   dir's `opencode.json` was obeyed.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde::Serialize;
 
 use crate::error::ApiError;
+
+/// Temporary ACP argv by provider id. Task 6 moves this onto [`Provider`].
+static ACP_ARGV_OVERRIDE: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+/// Install the argv `POST /api/chat/…/start` and `/message` pass to
+/// [`crate::chat::manager::ChatManager::start`]. Tests point `fake` at
+/// [`crate::chat::acp::fake_agent`]. A real provider has no argv until Task 6.
+pub fn set_test_acp_argv(provider_id: impl Into<String>, argv: Vec<String>) {
+    let mut map = ACP_ARGV_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner());
+    map.get_or_insert_with(HashMap::new)
+        .insert(provider_id.into(), argv);
+}
+
+/// ACP command for `provider_id`: the test override, else `ORSO_ACP_ARGV`
+/// (a JSON string array, any provider). `None` when neither is set.
+pub fn acp_argv(provider_id: &str) -> Option<Vec<String>> {
+    if let Some(argv) = ACP_ARGV_OVERRIDE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|map| map.get(provider_id).cloned())
+    {
+        return Some(argv);
+    }
+    std::env::var("ORSO_ACP_ARGV")
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .filter(|argv| !argv.is_empty())
+}
 
 /// `{ id, command }` as exposed by `GET /api/terminal/providers`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

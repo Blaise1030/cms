@@ -15,13 +15,13 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::{changes, checkpoints, ctl};
 use crate::auth;
+use crate::chat::history::{self, SessionRecord};
 use crate::chat::models;
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::projects::STATE_DIR;
 use crate::providers::{self, AgentSession, Provider};
 use crate::state::AppState;
-use crate::terminal::history::{self, SessionRecord};
 use crate::terminal::{login_command, Output};
 
 const SUMMARY_MAX: usize = 72;
@@ -88,7 +88,7 @@ pub async fn list_models(
 struct StartRequest {
     project: String,
     provider: String,
-    /// A [`history`] record to resume; its provider wins over `provider`.
+    /// A [`crate::chat::history`] record to resume; its provider wins over `provider`.
     #[serde(default)]
     resume: Option<String>,
 }
@@ -135,6 +135,7 @@ pub async fn start(State(state): State<AppState>, body: Bytes) -> Result<Json<Va
             let record = SessionRecord {
                 id: random_token()[..16].to_string(),
                 provider: provider.id.clone(),
+                model: None,
                 agent_session_id: match &session {
                     AgentSession::Assign(id) => Some(id.clone()),
                     _ => None,
