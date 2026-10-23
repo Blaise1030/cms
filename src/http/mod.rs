@@ -1,6 +1,7 @@
 //! HTTP layer: router, middleware wiring.
 
 pub mod changes;
+pub mod chat;
 pub mod checkpoints;
 pub mod content;
 pub mod ctl;
@@ -83,6 +84,27 @@ pub fn router(state: AppState) -> Router {
         .route("/@fs/{*rest}", any(preview::handle_vite_root))
         .route("/node_modules/{*rest}", any(preview::handle_vite_root))
         .route("/src/{*rest}", any(preview::handle_vite_root))
+        .route(
+            "/api/chat/{project}",
+            get(chat::list_chats).post(chat::create_chat),
+        )
+        .route(
+            "/api/chat/{project}/{chat}",
+            get(chat::get_chat).delete(chat::delete_chat),
+        )
+        .route("/api/chat/{project}/{chat}/start", post(chat::start_chat))
+        .route("/api/chat/{project}/{chat}/stream", get(chat::stream_chat))
+        .route(
+            "/api/chat/{project}/{chat}/message",
+            post(chat::post_message),
+        )
+        .route("/api/chat/{project}/{chat}/stop", post(chat::stop_chat))
+        .route(
+            "/api/chat/{project}/{chat}/approve",
+            post(chat::approve_chat),
+        )
+        .route("/api/chat/{project}/{chat}/models", get(chat::list_models))
+        .route("/api/chat/{project}/{chat}/model", post(chat::set_model))
         .route("/api/terminal/providers", get(terminal::list_providers))
         .route(
             "/api/terminal/providers/{provider}/models",
