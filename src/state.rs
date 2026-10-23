@@ -27,7 +27,7 @@ pub struct AppState {
     pub events: EventBus,
     /// PTY terminal sessions (one per project).
     pub terminals: Arc<TerminalManager>,
-    /// Headless chat turns (one per project, never alongside its terminal).
+    /// ACP chat agents, one process per `(project, chat)`.
     pub chats: Arc<ChatManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
@@ -118,7 +118,8 @@ impl AppState {
         let projects = Arc::new(projects);
         let events = EventBus::new();
         let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
-        let chats = Arc::new(ChatManager::new(events.clone()));
+        let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
+        let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),

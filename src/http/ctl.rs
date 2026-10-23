@@ -25,9 +25,7 @@ struct CtlRequest {
 fn authorize(state: &AppState, body: &Bytes) -> Result<String, ApiError> {
     let req: CtlRequest = serde_json::from_slice(body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{project, token}}: {e}")))?;
-    if !state.terminals.token_matches(&req.project, &req.token)
-        && !state.chats.token_matches(&req.project, &req.token)
-    {
+    if !state.terminals.token_matches(&req.project, &req.token) {
         return Err(ApiError::unauth("invalid hook token").with_status(403));
     }
     Ok(req.project)
