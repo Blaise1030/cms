@@ -4,7 +4,7 @@
 //! the terminal module still asks [`ChatManager::any_live`] so a project
 //! delete / terminal start can see chat agents until the terminal goes away.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -84,19 +84,17 @@ struct LiveChat {
     cancel: Arc<AtomicBool>,
     /// Process death is one error chunk, then the live entry is dropped.
     exited: AtomicBool,
-    /// In-flight `session/prompt`. Aborted when this chat is dropped so the
-    /// task releases its `AcpClient` and `kill_on_drop` can reap the process.
-    prompt: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Every `session/prompt` task spawned for this chat, including ones a
+    /// later send already aborted. Dropping a `JoinHandle` does not abort, so
+    /// the handles stay here until drop, which aborts all of them. Otherwise
+    /// an older task keeps an `AcpClient` and the child survives `forget`.
+    prompts: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl Drop for LiveChat {
     fn drop(&mut self) {
-        if let Some(task) = self
-            .prompt
-            .get_mut()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
+        let prompts = self.prompts.get_mut().unwrap_or_else(|e| e.into_inner());
+        for task in prompts.drain(..) {
             task.abort();
         }
     }
@@ -133,14 +131,32 @@ enum Entry {
     Starting(Arc<Starting>),
 }
 
+struct Slots {
+    chats: HashMap<Key, Entry>,
+    /// Projects inside [`ChatManager::stop_project`]. Cleared under this same
+    /// mutex only once that project has no entries, so a `start` cannot
+    /// publish in the gap after the last cancel await.
+    stopping: HashSet<String>,
+}
+
+/// Test seam: `stop_project` notifies `entered` after it has marked the
+/// project and taken the current entries, then waits on `release`.
+#[cfg(test)]
+struct StopGate {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
 struct Inner {
-    chats: Mutex<HashMap<Key, Entry>>,
+    slots: Mutex<Slots>,
     state_dir: PathBuf,
     events: EventBus,
     on_turn_end: Mutex<Option<TurnEndHook>>,
     /// Set by [`ChatManager::shutdown`]. A handshake that finishes after
     /// this does not publish a live chat.
     shutdown: AtomicBool,
+    #[cfg(test)]
+    stop_gate: Mutex<Option<StopGate>>,
 }
 
 /// Every live chat. Clones share the same map.
@@ -157,14 +173,23 @@ fn split_argv(argv: &[String]) -> ChatResult<(&str, &[String])> {
 }
 
 impl ChatManager {
+    fn slots(&self) -> std::sync::MutexGuard<'_, Slots> {
+        self.inner.slots.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn new(events: EventBus, state_dir: PathBuf) -> Self {
         Self {
             inner: Arc::new(Inner {
-                chats: Mutex::new(HashMap::new()),
+                slots: Mutex::new(Slots {
+                    chats: HashMap::new(),
+                    stopping: HashSet::new(),
+                }),
                 state_dir,
                 events,
                 on_turn_end: Mutex::new(None),
                 shutdown: AtomicBool::new(false),
+                #[cfg(test)]
+                stop_gate: Mutex::new(None),
             }),
         }
     }
@@ -236,8 +261,14 @@ impl ChatManager {
         }
         let starting = loop {
             let action = {
-                let mut chats = self.inner.chats.lock().unwrap_or_else(|e| e.into_inner());
-                match chats.get(&key) {
+                let mut slots = self.slots();
+                // Re-checked under the map lock: `stop_project` sets `stopping`
+                // before it awaits, and clears it only while the map is empty.
+                if self.inner.shutdown.load(Ordering::SeqCst) || slots.stopping.contains(project_id)
+                {
+                    return Err(ChatError::Failed("chat start was cancelled".into()));
+                }
+                match slots.chats.get(&key) {
                     Some(Entry::Live(live)) => Action::Existing(live.clone()),
                     Some(Entry::Starting(s)) => Action::Wait(s.clone()),
                     None => {
@@ -245,7 +276,7 @@ impl ChatManager {
                             done: watch::channel(false).0,
                             cancel: Arc::new(AtomicBool::new(false)),
                         });
-                        chats.insert(key.clone(), Entry::Starting(s.clone()));
+                        slots.chats.insert(key.clone(), Entry::Starting(s.clone()));
                         Action::Reserve(s)
                     }
                 }
@@ -306,20 +337,22 @@ impl ChatManager {
             cwd: cwd.to_path_buf(),
             cancel: starting.cancel.clone(),
             exited: AtomicBool::new(false),
-            prompt: Mutex::new(None),
+            prompts: Mutex::new(Vec::new()),
         });
 
         let publish = {
-            let mut chats = self.inner.chats.lock().unwrap_or_else(|e| e.into_inner());
-            let still_ours =
-                matches!(chats.get(&key), Some(Entry::Starting(s)) if Arc::ptr_eq(s, &starting));
-            if self.inner.shutdown.load(Ordering::SeqCst) || !still_ours {
+            let mut slots = self.slots();
+            let still_ours = matches!(slots.chats.get(&key), Some(Entry::Starting(s)) if Arc::ptr_eq(s, &starting));
+            if self.inner.shutdown.load(Ordering::SeqCst)
+                || slots.stopping.contains(project_id)
+                || !still_ours
+            {
                 false
             } else {
                 if live.cancel.load(Ordering::SeqCst) {
                     live.client.mark_cancelled();
                 }
-                chats.insert(key.clone(), Entry::Live(live.clone()));
+                slots.chats.insert(key.clone(), Entry::Live(live.clone()));
                 true
             }
         };
@@ -384,11 +417,11 @@ impl ChatManager {
     }
 
     fn clear_reservation(&self, key: &Key, starting: &Arc<Starting>) {
-        let mut chats = self.inner.chats.lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(chats.get(key), Some(Entry::Starting(s)) if Arc::ptr_eq(s, starting)) {
-            chats.remove(key);
+        let mut slots = self.slots();
+        if matches!(slots.chats.get(key), Some(Entry::Starting(s)) if Arc::ptr_eq(s, starting)) {
+            slots.chats.remove(key);
         }
-        drop(chats);
+        drop(slots);
         let _ = starting.done.send(true);
     }
 
@@ -419,29 +452,35 @@ impl ChatManager {
             live.record(chunk);
         }
         if let Some((session_id, stop_reason)) = turn_end {
-            let ended = TurnEnded {
-                project_id: live.project_id.clone(),
-                chat_id: live.chat_id.clone(),
-                session_id,
-                stop_reason,
-                cwd: live.cwd.clone(),
-            };
-            let hook = self
-                .inner
-                .on_turn_end
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            self.inner.events.emit(
-                "chat.turn",
-                json!({
-                    "projectId": ended.project_id,
-                    "chatId": ended.chat_id,
-                }),
-            );
-            if let Some(hook) = hook {
-                hook(ended);
-            }
+            self.note_turn_end(&live, &session_id, &stop_reason);
+        }
+    }
+
+    /// `chat.turn` plus the Task 6 hook. Shared by ACP `PromptEnded` and the
+    /// cancel latch, which records `TurnEnd` without a prompt response.
+    fn note_turn_end(&self, live: &LiveChat, session_id: &str, stop_reason: &str) {
+        let ended = TurnEnded {
+            project_id: live.project_id.clone(),
+            chat_id: live.chat_id.clone(),
+            session_id: session_id.to_string(),
+            stop_reason: stop_reason.to_string(),
+            cwd: live.cwd.clone(),
+        };
+        let hook = self
+            .inner
+            .on_turn_end
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        self.inner.events.emit(
+            "chat.turn",
+            json!({
+                "projectId": ended.project_id,
+                "chatId": ended.chat_id,
+            }),
+        );
+        if let Some(hook) = hook {
+            hook(ended);
         }
     }
 
@@ -453,18 +492,37 @@ impl ChatManager {
             text: text.to_string(),
         });
         if live.cancel.load(Ordering::SeqCst) {
+            let session_id = live.acp_session_id.clone();
             live.record(UiChunk::TurnEnd {
-                session_id: live.acp_session_id.clone(),
+                session_id: session_id.clone(),
                 stop_reason: "cancelled".into(),
             });
+            self.note_turn_end(live, &session_id, "cancelled");
             return;
         }
+        // Abort earlier prompt tasks but keep their handles until drop so a
+        // task that is still inside a poll is aborted again when the chat goes.
+        let replaced = {
+            let mut prompts = live.prompts.lock().unwrap_or_else(|e| e.into_inner());
+            let replaced = prompts.iter().any(|task| !task.is_finished());
+            for task in prompts.iter() {
+                task.abort();
+            }
+            prompts.retain(|task| !task.is_finished());
+            replaced
+        };
         let client = live.client.clone();
         let acp_session_id = live.acp_session_id.clone();
         let text = text.to_string();
         let weak = Arc::downgrade(live);
         let mgr = self.clone();
         let task = tokio::spawn(async move {
+            if replaced {
+                // The previous prompt may still be sitting in the agent
+                // (`stuck` / `slow`). Cancel it before writing another.
+                let _ = client.cancel(&acp_session_id).await;
+                client.clear_cancelled();
+            }
             let first = client.prompt(&acp_session_id, &text).await;
             let result = match first {
                 Err(e) if prompt_busy(&e.to_string()) => {
@@ -490,7 +548,10 @@ impl ChatManager {
                 }
             }
         });
-        *live.prompt.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
+        live.prompts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(task);
     }
 
     fn note_agent_exit(&self, key: &Key) {
@@ -524,8 +585,8 @@ impl ChatManager {
     /// in-flight prompts end `cancelled`. With no chat yet this is a no-op.
     pub async fn cancel(&self, project_id: &str, chat_id: &str) -> ChatResult<()> {
         let client = {
-            let chats = self.inner.chats.lock().unwrap_or_else(|e| e.into_inner());
-            match chats.get(&Key {
+            let slots = self.slots();
+            match slots.chats.get(&Key {
                 project_id: project_id.to_string(),
                 chat_id: chat_id.to_string(),
             }) {
@@ -618,13 +679,13 @@ impl ChatManager {
     /// client reference (`kill_on_drop`). A start still handshaking is left
     /// to publish or clear its own reservation.
     pub fn forget(&self, project_id: &str, chat_id: &str) {
-        let mut chats = self.inner.chats.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slots = self.slots();
         let key = Key {
             project_id: project_id.to_string(),
             chat_id: chat_id.to_string(),
         };
-        if matches!(chats.get(&key), Some(Entry::Live(_))) {
-            chats.remove(&key);
+        if matches!(slots.chats.get(&key), Some(Entry::Live(_))) {
+            slots.chats.remove(&key);
         }
     }
 
@@ -655,66 +716,95 @@ impl ChatManager {
 
     /// Any chat for `project_id` is live or still handshaking.
     pub fn any_live(&self, project_id: &str) -> bool {
-        self.inner
+        self.slots()
             .chats
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .keys()
             .any(|key| key.project_id == project_id)
     }
 
     /// Cancels and drops every chat agent for one project (project delete).
+    ///
+    /// The project is marked stopping before the first await. `start` fails
+    /// until that mark is cleared, which happens under the map lock only when
+    /// the project has no entries left. A start that arrives during `cancel`
+    /// is either rejected or taken by the next pass.
     pub async fn stop_project(&self, project_id: &str) {
-        let keys: Vec<Key> = self
-            .inner
-            .chats
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .filter(|key| key.project_id == project_id)
-            .cloned()
-            .collect();
-        for key in keys {
-            let _ = self.cancel(&key.project_id, &key.chat_id).await;
-            self.inner
-                .chats
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&key);
+        self.slots().stopping.insert(project_id.to_string());
+        loop {
+            let batch: Vec<Entry> = {
+                let mut slots = self.slots();
+                let keys: Vec<Key> = slots
+                    .chats
+                    .keys()
+                    .filter(|key| key.project_id == project_id)
+                    .cloned()
+                    .collect();
+                if keys.is_empty() {
+                    slots.stopping.remove(project_id);
+                    return;
+                }
+                keys.into_iter()
+                    .filter_map(|key| slots.chats.remove(&key))
+                    .collect()
+            };
+            self.pause_stop_for_test().await;
+            for entry in batch {
+                self.teardown_entry(entry).await;
+            }
         }
     }
 
     /// Cancels and drops every chat. In-flight handshakes do not publish.
     pub async fn shutdown(&self) {
         self.inner.shutdown.store(true, Ordering::SeqCst);
-        let entries: Vec<(Key, Entry)> = self
-            .inner
-            .chats
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain()
-            .collect();
+        let entries: Vec<(Key, Entry)> = {
+            let mut slots = self.slots();
+            slots.chats.drain().collect()
+        };
         for (key, entry) in entries {
-            match entry {
-                Entry::Live(live) => {
-                    live.cancel.store(true, Ordering::SeqCst);
-                    let _ = live.client.cancel(&live.acp_session_id).await;
-                    drop(live);
-                }
-                Entry::Starting(starting) => {
-                    starting.cancel.store(true, Ordering::SeqCst);
-                    let _ = starting.done.send(true);
-                }
-            }
+            self.teardown_entry(entry).await;
             let _ = key;
         }
     }
 
+    async fn teardown_entry(&self, entry: Entry) {
+        match entry {
+            Entry::Live(live) => {
+                live.cancel.store(true, Ordering::SeqCst);
+                let _ = live.client.cancel(&live.acp_session_id).await;
+                drop(live);
+            }
+            Entry::Starting(starting) => {
+                starting.cancel.store(true, Ordering::SeqCst);
+                let _ = starting.done.send(true);
+            }
+        }
+    }
+
+    /// Pauses once inside `stop_project` when a test has armed the gate.
+    async fn pause_stop_for_test(&self) {
+        #[cfg(test)]
+        {
+            let gate = self
+                .inner
+                .stop_gate
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            if let Some(gate) = gate {
+                gate.entered.notify_one();
+                gate.release.notified().await;
+            }
+        }
+        #[cfg(not(test))]
+        {
+            let _ = self;
+        }
+    }
+
     fn live(&self, project_id: &str, chat_id: &str) -> Option<Arc<LiveChat>> {
-        self.inner
+        self.slots()
             .chats
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .get(&Key {
                 project_id: project_id.to_string(),
                 chat_id: chat_id.to_string(),
@@ -911,5 +1001,143 @@ mod tests {
             matches!(history.last(), Some(UiChunk::Error { message }) if message.contains("nonexistent-orso-acp-bin")),
             "{err}; {history:?}"
         );
+    }
+
+    fn pid_alive(pid: &str) -> bool {
+        let Ok(pid) = pid.parse::<i32>() else {
+            return false;
+        };
+        let rc = unsafe { libc::kill(pid, 0) };
+        if rc == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+
+    /// A second send used to detach the first prompt task. `forget` then
+    /// aborted only the latest handle, and the detached task kept the
+    /// `AcpClient` — and the child — alive.
+    #[tokio::test]
+    async fn forget_reaps_child_when_a_previous_prompt_is_still_running() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        chats
+            .send_message("proj", "chat-1", "show-pid")
+            .await
+            .unwrap();
+        let hist = wait_until(&chats, "proj", "chat-1", |h| pid_of(h).is_some()).await;
+        let pid = pid_of(&hist).unwrap();
+        chats.send_message("proj", "chat-1", "stuck").await.unwrap();
+        wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(
+                |c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("stuck started")),
+            )
+        })
+        .await;
+        chats
+            .send_message("proj", "chat-1", "second")
+            .await
+            .unwrap();
+        chats.forget("proj", "chat-1");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while pid_alive(&pid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "pid {pid} still alive after forget"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// `stop_project` used to snapshot keys and then await `cancel`. A start
+    /// in that window was not in the snapshot and stayed live.
+    #[tokio::test]
+    async fn stop_project_rejects_a_start_that_arrives_while_stopping() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-a", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        *chats.inner.stop_gate.lock().unwrap() = Some(StopGate {
+            entered: entered.clone(),
+            release: release.clone(),
+        });
+        let stopping = {
+            let chats = chats.clone();
+            tokio::spawn(async move { chats.stop_project("proj").await })
+        };
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .expect("stop_project did not reach its cancel window");
+        let err = chats
+            .start("proj", "sneak", &cwd, &argv, &[])
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ChatError::Failed(_)),
+            "start during stop_project should fail, got {err}"
+        );
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), stopping)
+            .await
+            .expect("stop_project hung")
+            .unwrap();
+        assert!(!chats.any_live("proj"));
+        assert!(!chats.is_live("proj", "sneak"));
+        chats
+            .start("proj", "after", &cwd, &argv, &[])
+            .await
+            .expect("start after stop_project should work");
+        assert!(chats.is_live("proj", "after"));
+        chats.shutdown().await;
+    }
+
+    /// The cancel latch records `TurnEnd` without an ACP response. That path
+    /// has to emit the same hook and `chat.turn` as `PromptEnded`.
+    #[tokio::test]
+    async fn cancel_latch_emits_turn_end_hook_and_event() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        let reasons = Arc::new(Mutex::new(Vec::new()));
+        let reasons_hook = reasons.clone();
+        chats.set_on_turn_end(move |ended| {
+            reasons_hook
+                .lock()
+                .unwrap()
+                .push((ended.chat_id, ended.stop_reason));
+        });
+        let mut events = chats.inner.events.subscribe();
+        let live = chats.live("proj", "chat-1").unwrap();
+        live.cancel.store(true, Ordering::SeqCst);
+        chats.dispatch(&live, "nope");
+        assert_eq!(
+            reasons.lock().unwrap().as_slice(),
+            [("chat-1".to_string(), "cancelled".to_string())]
+        );
+        assert!(chats.history("proj", "chat-1").iter().any(|c| {
+            matches!(c, UiChunk::TurnEnd { stop_reason, .. } if stop_reason == "cancelled")
+        }));
+        let mut saw = false;
+        while let Ok(frame) = events.try_recv() {
+            if frame.contains("\"type\":\"chat.turn\"") && frame.contains("chat-1") {
+                saw = true;
+            }
+        }
+        assert!(saw, "cancel latch did not emit chat.turn");
+        chats.shutdown().await;
     }
 }
