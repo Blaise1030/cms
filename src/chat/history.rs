@@ -1,9 +1,9 @@
 //! Per-project chat session records, `{state_dir}/{project}/sessions.json`.
 //!
 //! One record per chat. ACP chats do not store an [`crate::providers::AgentSession`]:
-//! the live process calls `session/new` itself. `agent_session_id` remains for the
-//! terminal HTTP routes, which still read this file until the terminal is removed.
-//! `model` is the optional model id chosen when the chat was created or last set.
+//! the live process calls `session/new` itself. `agent_session_id` is kept so records
+//! written by the old terminal stay readable. `model` is the optional model id chosen
+//! when the chat was created or last set.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

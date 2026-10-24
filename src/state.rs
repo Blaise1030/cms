@@ -155,7 +155,13 @@ impl AppState {
             tokio::spawn(async move {
                 crate::http::ctl::emit_preview_reload(&state, &ended.project_id);
                 crate::http::ctl::emit_content_refresh(&state, &ended.project_id);
-                match crate::http::checkpoints::finish_turn(&state, &ended.project_id, ended.summary.as_deref()).await {
+                match crate::http::checkpoints::finish_turn(
+                    &state,
+                    &ended.project_id,
+                    ended.summary.as_deref(),
+                )
+                .await
+                {
                     Ok(outcome) => {
                         if let Some(chunk) = crate::http::chat::checkpoint_chunk(&outcome) {
                             state.chats.record(&ended.project_id, &ended.chat_id, chunk);

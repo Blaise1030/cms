@@ -89,7 +89,7 @@ pub enum TurnOutcome {
     Unchanged,
 }
 
-/// Checkpoint the agent's edits at the end of a turn (terminal hook or chat).
+/// Checkpoint the agent's edits at the end of a chat turn.
 ///
 /// Serialised per project. Emits `checkpoint.blocked` / `checkpoint.created`, then lets a
 /// pending change update move the checkout now that the agent is idle.

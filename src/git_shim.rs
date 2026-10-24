@@ -1,6 +1,6 @@
 //! Hard-block agent `git checkout`/`switch`: only the app may switch drafts.
 //!
-//! Agents (chat and terminal) run with a daemon-generated `git` launcher first on their
+//! Chat agents run with a daemon-generated `git` launcher first on their
 //! `PATH`; the launcher execs this binary's `git-shim` subcommand, which refuses any
 //! HEAD-moving checkout/switch unless the app set [`ALLOW_ENV`]. Allowed commands are
 //! `exec`'d into the real git ([`REAL_GIT_ENV`], else the next `git` on `PATH`) so exit
