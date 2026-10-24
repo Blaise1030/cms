@@ -30,7 +30,7 @@ test("syncing a colliding draft asks the writer one question and combines it", a
   git(projectDir, ["push", "origin", "main"]);
   fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
 
-  await page.addInitScript(() => localStorage.setItem("orso.terminal.provider", "fake-resolver"));
+  await page.addInitScript(() => localStorage.setItem("orso.chat.provider", "fake-resolver"));
   await page.goto(`${origin}/?t=${token}`);
   await startChange(orso, "New page: Home");
   await page.goto(`${origin}/p/${projectId}`);

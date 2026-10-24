@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
@@ -29,7 +29,7 @@ test("starts a change, checkpoints on the branch, suffixes collisions", async ({
   );
 
   // Fake CLI turn-end hook → git::checkpoint, not a raw git commit.
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 
   const changeTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   const mainTip = git(projectDir, ["rev-parse", "main"]);
