@@ -165,7 +165,8 @@ async fn chat_message_against_fake_acp_appends_transcript() {
     let detail = wait_text(&env, &id, "fake reply: hello").await;
     assert_eq!(detail["provider"], "fake");
     assert_eq!(detail["model"], "fast");
-    assert_eq!(detail["running"], true);
+    // The agent stays up after the turn; only a prompt in flight is "running".
+    assert_eq!(detail["running"], false);
     assert!(chunk_text(&detail).contains("hello"));
 
     let (status, list) = call(&env, "GET", &format!("/api/chat/{}", env.project), None).await;
@@ -537,6 +538,7 @@ async fn turn_end_appends_checkpoint_chunk() {
         "{checkpoint}"
     );
     assert!(checkpoint.get("blocked").is_none(), "{checkpoint}");
+    assert_eq!(checkpoint["summary"], "fake reply: edit something (done)", "{checkpoint}");
 
     let path = env
         .root

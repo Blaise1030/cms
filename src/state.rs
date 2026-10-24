@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use serde_json::json;
+
 use crate::changes::auto_resolve::{AutoResolveJobs, Timeouts};
 use crate::changes::conflict_sessions::ConflictSessions;
 use crate::chat::manager::ChatManager;
@@ -153,10 +155,18 @@ impl AppState {
             tokio::spawn(async move {
                 crate::http::ctl::emit_preview_reload(&state, &ended.project_id);
                 crate::http::ctl::emit_content_refresh(&state, &ended.project_id);
-                match crate::http::checkpoints::finish_turn(&state, &ended.project_id, None).await {
+                match crate::http::checkpoints::finish_turn(&state, &ended.project_id, ended.summary.as_deref()).await {
                     Ok(outcome) => {
                         if let Some(chunk) = crate::http::chat::checkpoint_chunk(&outcome) {
                             state.chats.record(&ended.project_id, &ended.chat_id, chunk);
+                            // The turn-end event raced this async checkpoint; reload once more.
+                            state.events.emit(
+                                "chat.turn",
+                                json!({
+                                    "projectId": ended.project_id,
+                                    "chatId": ended.chat_id,
+                                }),
+                            );
                         }
                     }
                     Err(e) => eprintln!("orso: checkpoint after chat turn failed: {e}"),

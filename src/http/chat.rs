@@ -67,6 +67,7 @@ fn summary(state: &AppState, project: &str, record: &SessionRecord) -> Value {
         "title": record.title,
         "updatedAt": record.updated_at,
         "live": state.chats.is_live(project, &record.id),
+        "running": state.chats.is_running(project, &record.id),
     })
 }
 
@@ -201,11 +202,16 @@ pub async fn list_chats(
     Path(project): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     project_cwd(&state, &project).await?;
-    let chats: Vec<Value> = history::list(&state_dir(&state), &project)
-        .into_iter()
-        .map(|record| summary(&state, &project, &record))
+    let records = history::list(&state_dir(&state), &project);
+    let running = records
+        .iter()
+        .find(|record| state.chats.is_running(&project, &record.id))
+        .map(|record| record.id.clone());
+    let chats: Vec<Value> = records
+        .iter()
+        .map(|record| summary(&state, &project, record))
         .collect();
-    Ok(Json(json!({ "chats": chats })))
+    Ok(Json(json!({ "chats": chats, "running": running })))
 }
 
 /// `POST /api/chat/{project}` `{ provider, model? }` → the new chat record.
@@ -256,7 +262,7 @@ pub async fn get_chat(
         "chunks": state.chats.history(&project, &chat),
         "provider": record.provider,
         "model": record.model,
-        "running": state.chats.is_live(&project, &chat),
+        "running": state.chats.is_running(&project, &chat),
     })))
 }
 
