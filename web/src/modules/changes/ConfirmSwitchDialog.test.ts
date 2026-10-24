@@ -94,7 +94,7 @@ describe("ConfirmSwitchDialog", () => {
     await flushPromises();
     await click("confirm-switch-continue");
 
-    expect(stopChat).toHaveBeenCalledWith("site");
+    expect(stopChat).toHaveBeenCalledWith("site", "c1");
     expect(switchChange).toHaveBeenCalledWith("site", "content/new");
     expect(store.active).toEqual({ branch: "content/new", title: "New" });
     expect(store.pendingSwitch).toBeNull();

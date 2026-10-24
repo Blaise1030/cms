@@ -61,8 +61,6 @@ export const useChatStore = defineStore("chat", () => {
     daemon.on("chat.turn", (e) => {
       if (e.projectId in chats.value) void load(e.projectId);
     }),
-    // The terminal and chat tabs share one conversation: follow the terminal's session.
-    daemon.on("terminal.session", (e) => setActive(e.projectId, e.sessionId)),
   ];
   onScopeDispose(() => offs.forEach((off) => off()));
 

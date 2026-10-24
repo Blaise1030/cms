@@ -192,7 +192,7 @@ describe("changes store", () => {
     await store.switchTo("site", "content/new");
     const change = await store.confirmSwitch();
 
-    expect(stopChat).toHaveBeenCalledWith("site");
+    expect(stopChat).toHaveBeenCalledWith("site", "c1");
     expect(switchChange).toHaveBeenCalledWith("site", "content/new");
     expect(change).toEqual({ branch: "content/new", title: "New" });
     expect(store.active).toEqual({ branch: "content/new", title: "New" });

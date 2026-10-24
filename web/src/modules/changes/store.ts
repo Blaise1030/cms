@@ -240,7 +240,8 @@ export const useChangesStore = defineStore("changes", () => {
     if (!pending) throw new Error("Nothing to confirm");
     pendingSwitch.value = null;
     try {
-      await daemon.api.stopChat(pending.projectId);
+      const runningId = useChatStore().running[pending.projectId];
+      if (runningId) await daemon.api.stopChat(pending.projectId, runningId);
     } catch (e) {
       error.value = errorMessage(e);
       throw e;

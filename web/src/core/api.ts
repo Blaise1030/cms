@@ -1,7 +1,7 @@
-import type { UIMessage } from "ai";
 import type { DaemonConfig } from "./config";
 import {
   ERROR_CODES,
+  type ChatHistory,
   type ChatSummary,
   type ContentCollection,
   type ContentEntrySummary,
@@ -249,11 +249,11 @@ export function createApi(
     restartDevserver: (id: string) =>
       json<unknown>("POST", `/api/projects/${enc(id)}/devserver/restart`),
 
-    terminalProviders: async (): Promise<{ id: string; command: string[] }[]> =>
+    chatProviders: async (): Promise<{ id: string; command: string[]; acp: string[] }[]> =>
       (
-        await json<{ providers: { id: string; command: string[] }[] }>(
+        await json<{ providers: { id: string; command: string[]; acp: string[] }[] }>(
           "GET",
-          "/api/terminal/providers",
+          "/api/chat/providers",
         )
       ).providers,
     /** The models an agent CLI offers; `id` is what its model flag takes. */
@@ -261,38 +261,31 @@ export function createApi(
       (
         await json<{ models: { id: string; name: string }[] }>(
           "GET",
-          `/api/terminal/providers/${enc(provider)}/models`,
+          `/api/chat/providers/${enc(provider)}/models`,
         )
       ).models,
-    stopTerminal: (project: string) =>
-      json<{ stopped: true }>("DELETE", `/api/terminal/${enc(project)}`),
-    terminalStatus: (project: string) =>
-      json<{ running: boolean; provider?: string; sessionId?: string | null; busy?: boolean }>(
-        "GET",
-        `/api/terminal/${enc(project)}`,
-      ),
-    /** Save an image for the agent; resolves to an absolute path on the daemon's machine. */
-    attachTerminalImage: async (project: string, image: Blob): Promise<string> =>
-      (await json<{ path: string }>("POST", `/api/terminal/${enc(project)}/attachments`, { blob: image })).path,
+    /** Save a file for the agent; resolves to an absolute path on the daemon's machine. */
+    attachChatFile: async (project: string, file: Blob): Promise<string> =>
+      (await json<{ path: string }>("POST", `/api/chat/${enc(project)}/attachments`, { blob: file })).path,
     /** A saved attachment by file name, for `<img>` (authenticated by the session cookie). */
     attachmentUrl: (project: string, name: string) =>
-      `${cfg().origin}/api/terminal/${enc(project)}/attachments/${enc(name)}`,
+      `${cfg().origin}/api/chat/${enc(project)}/attachments/${enc(name)}`,
     listChats: (project: string) =>
       json<{ chats: ChatSummary[]; running: string | null }>("GET", `/api/chat/${enc(project)}`),
+    createChat: (project: string, provider: string, model?: string | null) =>
+      json<ChatSummary>("POST", `/api/chat/${enc(project)}`, {
+        body: { provider, ...(model && { model }) },
+      }),
     chatHistory: (project: string, chatId: string) =>
-      json<{ messages: UIMessage[]; provider: string; running: boolean }>(
-        "GET",
-        `/api/chat/${enc(project)}/${enc(chatId)}`,
-      ),
+      json<ChatHistory>("GET", `/api/chat/${enc(project)}/${enc(chatId)}`),
+    sendChatMessage: (project: string, chatId: string, text: string) =>
+      json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/message`, { body: { text } }),
+    stopChat: (project: string, chatId: string) =>
+      json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/stop`),
+    setChatModel: (project: string, chatId: string, model: string) =>
+      json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/model`, { body: { modelId: model } }),
     deleteChat: (project: string, chatId: string) =>
       json<{ deleted: true }>("DELETE", `/api/chat/${enc(project)}/${enc(chatId)}`),
-    /** Stop the project's running chat turn, if any. */
-    stopChat: (project: string) =>
-      json<{ stopped: boolean }>("DELETE", `/api/chat/${enc(project)}/turn`),
-    /** The chat stream endpoint; the AI SDK transport fetches it (and `/{chatId}/stream`) itself. */
-    chatUrl: (project: string) => `${cfg().origin}/api/chat/${enc(project)}`,
-    /** Headers for requests made outside this client (the chat transport). */
-    authHeaders,
     createChange: (project: string, title: string) =>
       json<Change>("POST", "/api/changes", { body: { project, title } }),
     listChanges: async (project: string): Promise<Change[]> =>
