@@ -92,12 +92,4 @@ describe("chat store", () => {
     await expect(store.remove("site", "c1")).rejects.toThrow("working in this chat");
     expect(store.chats.site?.map((c) => c.id)).toEqual(["c1"]);
   });
-
-  it("follows the terminal's session as the active chat", () => {
-    const store = setup();
-    store.newChat("site");
-    h.daemon.emit({ type: "terminal.session", projectId: "site", sessionId: "sess-1" });
-    expect(store.activeChatId("site")).toBe("sess-1");
-    expect(window.localStorage.getItem("orso.chat.active.site")).toBe("sess-1");
-  });
 });

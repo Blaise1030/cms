@@ -3,8 +3,9 @@ import { ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { readPref, writePref } from "@orso/utils";
 
-/** Named for the old Terminal tab; kept so users keep their pick. */
-const PROVIDER_KEY = "orso.terminal.provider";
+const PROVIDER_KEY = "orso.chat.provider";
+/** The pick lived here when agents ran in Terminal; read it once so nobody loses their choice. */
+const LEGACY_PROVIDER_KEY = "orso.terminal.provider";
 const modelKey = (provider: string) => `orso.chat.model.${provider}`;
 
 export interface AgentProvider {
@@ -22,7 +23,7 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
   const daemon = useDaemon();
 
   const providers = ref<AgentProvider[]>([]);
-  const provider = ref<string | null>(readPref(PROVIDER_KEY));
+  const provider = ref<string | null>(readPref(PROVIDER_KEY) ?? readPref(LEGACY_PROVIDER_KEY));
   /** Per provider; absent until asked, empty when the daemon couldn't list them. */
   const models = ref<Record<string, AgentModel[]>>({});
   /** Model picks made this session, by provider; `null` is Default. */
@@ -37,7 +38,7 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
 
   async function loadProviders() {
     try {
-      providers.value = await daemon.api.terminalProviders();
+      providers.value = await daemon.api.chatProviders();
     } catch {
       // An older daemon, or a transient failure: keep the current pick.
       return;

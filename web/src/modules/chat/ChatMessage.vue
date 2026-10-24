@@ -19,7 +19,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Message, MessageContent } from "@/components/ui/message";
 import {
   Trace,
@@ -184,11 +183,6 @@ const agentError = (data: unknown) => data as AgentErrorData;
           :project-id="projectId"
           :checkpoint="checkpoint(group.part.data)"
         />
-
-        <Marker v-else-if="group.part.type === 'data-terminal'" variant="separator">
-          <MarkerIcon><SquareTerminal /></MarkerIcon>
-          <MarkerContent>Continued in Terminal</MarkerContent>
-        </Marker>
 
         <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">
           <CircleAlert />

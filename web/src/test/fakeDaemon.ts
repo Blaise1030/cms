@@ -10,7 +10,7 @@ export function createFakeDaemon(api: Record<string, unknown> = {}) {
     api: {
       previewUrl: (id: string) => `http://127.0.0.1:7800/preview/${id}/`,
       attachmentUrl: (project: string, name: string) =>
-        `http://127.0.0.1:7800/api/terminal/${project}/attachments/${name}`,
+        `http://127.0.0.1:7800/api/chat/${project}/attachments/${name}`,
       ...api,
     },
     config: ref({ origin: "http://127.0.0.1:7800" }),

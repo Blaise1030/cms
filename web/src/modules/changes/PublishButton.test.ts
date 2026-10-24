@@ -23,8 +23,9 @@ function mountWith(opts: { status?: PrStatus | null; repo?: string | null } = {}
   const store = useChangesStore();
   if (opts.status !== null) store.status = opts.status ?? open;
   store.active = { branch: "content/lw", title: "LW" };
+  const repo = opts.repo === undefined ? "acme/site" : opts.repo;
   const wrapper = mount(PublishButton, {
-    props: { projectId: "site", repo: "repo" in opts ? opts.repo : "acme/site" },
+    props: { projectId: "site", repo },
   });
   return { store, wrapper };
 }

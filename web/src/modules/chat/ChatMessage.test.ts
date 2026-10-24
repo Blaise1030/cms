@@ -62,7 +62,7 @@ describe("ChatMessage", () => {
       "user",
     );
     const img = w.find<HTMLImageElement>("[data-testid='message-attachment'] img");
-    expect(img.attributes("src")).toBe("http://127.0.0.1:7800/api/terminal/p/attachments/5d83a351365d7d18.png");
+    expect(img.attributes("src")).toBe("http://127.0.0.1:7800/api/chat/p/attachments/5d83a351365d7d18.png");
     const files = w.findAll("[data-testid='message-attachment']");
     expect(files).toHaveLength(2);
     expect(files[1]!.text()).toContain("PDF file");
@@ -244,12 +244,6 @@ describe("ChatMessage", () => {
     const w = await render([{ type: "data-checkpoint", data: { files: [], blocked: "merge in progress" } }]);
     expect(w.text()).toContain("Not saved: merge in progress");
     expect(byText("Restore")).toBeUndefined();
-    w.unmount();
-  });
-
-  it("marks a turn continued in the terminal", async () => {
-    const w = await render([{ type: "data-terminal", data: {} }]);
-    expect(w.text()).toContain("Continued in Terminal");
     w.unmount();
   });
 

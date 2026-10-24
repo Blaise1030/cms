@@ -232,7 +232,7 @@ async function pickElement(el: Element) {
   store.setPicking(false);
   try {
     const shot = await captureElement(el);
-    if (shot) element.screenshot = await daemon.api.attachTerminalImage(projectId, shot);
+    if (shot) element.screenshot = await daemon.api.attachChatFile(projectId, shot);
   } catch (e) {
     // The mention is still useful without the picture.
     console.warn("element screenshot failed", e);

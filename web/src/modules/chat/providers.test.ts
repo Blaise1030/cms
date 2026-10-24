@@ -8,11 +8,12 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import { useAgentProvidersStore } from "./providers";
 
-const KEY = "orso.terminal.provider";
+const KEY = "orso.chat.provider";
+const LEGACY_KEY = "orso.terminal.provider";
 const api = {
-  terminalProviders: vi.fn(async () => [
-    { id: "claude", command: ["claude"] },
-    { id: "codex", command: ["codex"] },
+  chatProviders: vi.fn(async () => [
+    { id: "claude", command: ["claude"], acp: ["claude"] },
+    { id: "codex", command: ["codex"], acp: ["codex"] },
   ]),
   agentModels: vi.fn(async (provider: string) => [{ id: `${provider}-m1`, name: "Model 1" }]),
 };
@@ -33,6 +34,13 @@ describe("useAgentProvidersStore", () => {
     expect(store.provider).toBe("codex");
   });
 
+  it("keeps the pick saved by the old Terminal tab", async () => {
+    localStorage.setItem(LEGACY_KEY, "codex");
+    const store = useAgentProvidersStore();
+    await store.loadProviders();
+    expect(store.provider).toBe("codex");
+  });
+
   it("falls back to the first provider when the saved one is gone", async () => {
     localStorage.setItem(KEY, "cursor");
     const store = useAgentProvidersStore();
@@ -50,7 +58,7 @@ describe("useAgentProvidersStore", () => {
   });
 
   it("keeps the current pick when the daemon can't list providers", async () => {
-    api.terminalProviders.mockRejectedValueOnce(new Error("offline"));
+    api.chatProviders.mockRejectedValueOnce(new Error("offline"));
     const store = useAgentProvidersStore();
     store.setProvider("codex");
     await store.loadProviders();
