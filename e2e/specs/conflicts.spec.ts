@@ -30,7 +30,7 @@ async function openAdvanced(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("orso.terminal.provider", "fake-garbage"));
+  await page.addInitScript(() => localStorage.setItem("orso.chat.provider", "fake-garbage"));
 });
 
 test("writer resolves a conflicting page with a visible file choice", async ({ page, orso }) => {

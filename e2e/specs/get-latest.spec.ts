@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getLatest, startChange, terminalCheckpoint, type orsoEnv } from "../fixtures/daemon";
+import { getLatest, startChange, chatCheckpoint, type orsoEnv } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
@@ -62,29 +62,22 @@ test("get latest merges new main into every open change without force-pushing", 
 
   // First change: edit + share (pushes the branch to the remote).
   await newChange(page, orso, "New post: First change", "First change");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
   const sharedTip = git(bareRemote, ["rev-parse", "refs/heads/content/first-change"]);
 
   // Second change (active from here on).
   await newChange(page, orso, "New post: Second change", "Second change");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 
   const preview = page.frameLocator('[data-testid="preview-frame"]');
   await expect(preview.locator("body")).toContainText("Not found", { timeout: 30_000 });
 
   const remoteMain = pushToRemoteMain(orso);
 
-  // Get latest leaves the checked-out change for later while this project's terminal is live.
-  const stop = await fetch(`${origin}/api/terminal/${encodeURIComponent(projectId)}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!stop.ok) {
-    throw new Error(`stop terminal before get latest failed: ${stop.status} ${await stop.text()}`);
-  }
-
+  // Get latest may touch the checked-out change now that no turn is running,
+  // even though the chat's agent process is still up.
   const result = await getLatest(orso);
   expect(result.mainUpdated).toBe(true);
   expect(result.updated.map((c) => c.branch).sort()).toEqual([
