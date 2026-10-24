@@ -68,21 +68,21 @@
   - `pub enum AcpEvent` — same variants as tabsh
   - `pub fn fake_agent() -> (String, Vec<String>)` and `fake_agent_hold(gate: &Path) -> (String, Vec<String>)`
 
-- [ ] **Step 1: Write the failing test** `initialize_and_session_new_against_fake_agent` — spawn `fake_agent()`, `initialize` ok, `session_new` returns non-empty session id.
+- [x] **Step 1: Write the failing test** `initialize_and_session_new_against_fake_agent` — spawn `fake_agent()`, `initialize` ok, `session_new` returns non-empty session id.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -q initialize_and_session_new_against_fake_agent`
 Expected: FAIL (module missing)
 
-- [ ] **Step 3: Port `acp.rs` from tabsh** (adapt `Result`/`BoxError` only as needed for CMS; do not pull board/PTY code)
+- [x] **Step 3: Port `acp.rs` from tabsh** (adapt `Result`/`BoxError` only as needed for CMS; do not pull board/PTY code)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -q acp::`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chat/acp.rs src/chat/mod.rs
@@ -109,18 +109,18 @@ EOF
 - Produces: `pub fn sse_frame(chunk: &UiChunk) -> String` → `data: {json}\n\n`
 - Produces: `pub fn to_chunks(ev: &AcpEvent) -> Vec<UiChunk>`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `agent_message_chunk_serializes_with_type_tag` — `TextDelta` → `{"type":"text_delta",...}`
   - `prompt_ended_becomes_turn_end`
   - `checkpoint_chunk_round_trips`
 
-- [ ] **Step 2: Run** `cargo test -q agent_message_chunk_serializes_with_type_tag prompt_ended_becomes_turn_end checkpoint_chunk_round_trips` — Expected: FAIL
+- [x] **Step 2: Run** `cargo test -q agent_message_chunk_serializes_with_type_tag prompt_ended_becomes_turn_end checkpoint_chunk_round_trips` — Expected: FAIL
 
-- [ ] **Step 3: Implement `chunk.rs` + `normalize.rs`** (port tabsh normalize; add `Checkpoint`)
+- [x] **Step 3: Implement `chunk.rs` + `normalize.rs`** (port tabsh normalize; add `Checkpoint`)
 
-- [ ] **Step 4: Run** same tests — Expected: PASS
+- [x] **Step 4: Run** same tests — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chat/chunk.rs src/chat/normalize.rs src/chat/mod.rs
@@ -146,15 +146,15 @@ EOF
   - `pub fn load(...) -> Vec<UiChunk>` — skips invalid lines; empty if missing/invalid id
   - Seal open turn with synthetic `turn_end` / `error` on load if last turn incomplete (match tabsh `seal_open_turn` behavior)
 
-- [ ] **Step 1: Write failing tests** `append_and_load_round_trip`, `reject_traversal_chat_id`, `seal_open_turn_on_load`
+- [x] **Step 1: Write failing tests** `append_and_load_round_trip`, `reject_traversal_chat_id`, `seal_open_turn_on_load`
 
-- [ ] **Step 2: Run** `cargo test -q transcript::` — Expected: FAIL
+- [x] **Step 2: Run** `cargo test -q transcript::` — Expected: FAIL
 
-- [ ] **Step 3: Implement jsonl transcript**
+- [x] **Step 3: Implement jsonl transcript**
 
-- [ ] **Step 4: Run** `cargo test -q transcript::` — Expected: PASS
+- [x] **Step 4: Run** `cargo test -q transcript::` — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chat/transcript.rs
@@ -191,19 +191,19 @@ EOF
 - Map key: `(project_id, chat_id)` — two keys in one project are two processes.
 - On `AcpEvent::PromptEnded` / turn end: append `turn_end` chunk; invoke checkpoint hook in Task 6 (manager may expose `on_turn_end` callback or call into `finish_turn` once HTTP state is available — prefer injecting `AppState` handle like today’s manager).
 
-- [ ] **Step 1: Write failing tests** (tokio + fake agent):
+- [x] **Step 1: Write failing tests** (tokio + fake agent):
   - `two_chats_same_project_are_both_live`
   - `send_message_streams_text_delta_then_turn_end`
   - `cancel_ends_turn`
   - `missing_binary_notes_error_chunk`
 
-- [ ] **Step 2: Run** `cargo test -q chat::manager` — Expected: FAIL
+- [x] **Step 2: Run** `cargo test -q chat::manager` — Expected: FAIL
 
-- [ ] **Step 3: Implement manager + models** (port tabsh lifecycle **without** `Surfaces`/PTY; key by project+chat; cwd = project dir)
+- [x] **Step 3: Implement manager + models** (port tabsh lifecycle **without** `Surfaces`/PTY; key by project+chat; cwd = project dir)
 
-- [ ] **Step 4: Run** same tests — Expected: PASS
+- [x] **Step 4: Run** same tests — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/chat/manager.rs src/chat/models.rs src/state.rs
@@ -242,20 +242,20 @@ EOF
 - Stream: SSE of `sse_frame(UiChunk)`; keep-alive ok; **no** `[DONE]` AI SDK trailer unless you also document it — prefer tabsh behavior (stream stays open for the chat’s life / ends on disconnect).
 - List/history JSON: return `{ chunks: UiChunk[] }` or equivalent — pick one shape and use it in tests.
 
-- [ ] **Step 1: Write failing HTTP tests** (follow existing `tests/` or `http/chat` test style):
+- [x] **Step 1: Write failing HTTP tests** (follow existing `tests/` or `http/chat` test style):
   - `chat_message_against_fake_acp_appends_transcript`
   - `chat_stream_replays_then_live`
   - `chat_stop_cancels_turn`
   - `chat_approve_permission`
   - `chat_id_traversal_rejected`
 
-- [ ] **Step 2: Run** those tests — Expected: FAIL
+- [x] **Step 2: Run** those tests — Expected: FAIL
 
-- [ ] **Step 3: Implement handlers wiring `ChatManager` + provider ACP argv**
+- [x] **Step 3: Implement handlers wiring `ChatManager` + provider ACP argv**
 
-- [ ] **Step 4: Run** — Expected: PASS
+- [x] **Step 4: Run** — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/http/chat.rs src/http/mod.rs
@@ -275,17 +275,17 @@ EOF
 - Modify: `src/chat/manager.rs` / `src/http/chat.rs` — on `turn_end` with `stop_reason == "end_turn"`, call existing `checkpoints::finish_turn` (and the same content/preview refresh side effects today’s headless manager used), append `UiChunk::Checkpoint { ... }`
 - Remove chat call sites of `headless_spec` (delete headless helpers when unused after Task 7)
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `default_providers_include_acp_argv_for_four_ids`
   - `turn_end_appends_checkpoint_chunk` (temp project dir + fake finish or stub)
 
-- [ ] **Step 2: Run** — Expected: FAIL
+- [x] **Step 2: Run** — Expected: FAIL
 
-- [ ] **Step 3: Implement ACP defaults + checkpoint emission**
+- [x] **Step 3: Implement ACP defaults + checkpoint emission**
 
-- [ ] **Step 4: Run** — Expected: PASS
+- [x] **Step 4: Run** — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/providers.rs src/chat/manager.rs src/http/chat.rs
@@ -306,15 +306,15 @@ EOF
 - Modify: events that referenced `terminal.busy` / `terminal.turn` — either delete emitters or rename to `chat.*` consistently; update web listeners in Task 8
 - Move attachment handlers from terminal into `src/http/chat.rs` (paths under `/api/chat/{project}/attachments`)
 
-- [ ] **Step 1: Write failing test** `terminal_routes_are_gone` — `GET /api/terminal/providers` → 404 (or whatever CMS uses for unknown routes)
+- [x] **Step 1: Write failing test** `terminal_routes_are_gone` — `GET /api/terminal/providers` → 404 (or whatever CMS uses for unknown routes)
 
-- [ ] **Step 2: Run** — Expected: FAIL (still 200)
+- [x] **Step 2: Run** — Expected: FAIL (still 200)
 
-- [ ] **Step 3: Delete PTY stack + translators; fix compile; register attachment routes on chat**
+- [x] **Step 3: Delete PTY stack + translators; fix compile; register attachment routes on chat**
 
-- [ ] **Step 4: Run** `cargo test -q` — Expected: PASS (fix or delete obsolete terminal tests)
+- [x] **Step 4: Run** `cargo test -q` — Expected: PASS (fix or delete obsolete terminal tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A src/http src/terminal src/chat src/lib.rs src/state.rs tests
@@ -336,15 +336,15 @@ EOF
 - Modify: `web/src/core/types.ts`, `socket.ts`, `fakeDaemon.ts`, `ChatMessage` attachment URLs
 - Modify: any `terminal.turn` / `terminal.busy` listeners (e.g. `ProjectPage.vue`) → `chat.turn` if still emitted
 
-- [ ] **Step 1: Write failing tests** updating `providers.test.ts` / `api` expectations for new paths; ChatPanel test that it no longer calls `/api/terminal/*`
+- [x] **Step 1: Write failing tests** updating `providers.test.ts` / `api` expectations for new paths; ChatPanel test that it no longer calls `/api/terminal/*`
 
-- [ ] **Step 2: Run** `pnpm -C web test` — Expected: FAIL
+- [x] **Step 2: Run** `pnpm -C web test` — Expected: FAIL
 
-- [ ] **Step 3: Implement API moves + ChatPanel stub**
+- [x] **Step 3: Implement API moves + ChatPanel stub**
 
-- [ ] **Step 4: Run** `pnpm -C web test && pnpm -C web build` — Expected: PASS
+- [x] **Step 4: Run** `pnpm -C web test && pnpm -C web build` — Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/src
@@ -359,13 +359,13 @@ EOF
 
 ### Task 9: Full verification
 
-- [ ] **Step 1: Run** `cargo test`
+- [x] **Step 1: Run** `cargo test`
 
-- [ ] **Step 2: Run** `pnpm -C web test && pnpm -C web build`
+- [x] **Step 2: Run** `pnpm -C web test && pnpm -C web build`
 
-- [ ] **Step 3: Manual smoke (optional, not CI):** one real provider ACP if available on the machine
+- [x] **Step 3: Manual smoke (optional, not CI):** one real provider ACP if available on the machine
 
-- [ ] **Step 4: Commit any fixes**
+- [x] **Step 4: Commit any fixes**
 
 ```bash
 git commit -m "$(cat <<'EOF'
