@@ -77,7 +77,7 @@ async fn save_edits(
     dir: &std::path::Path,
     carry_main: bool,
 ) -> Result<(), ApiError> {
-    if state.chats.any_live(project_id) || !changes::is_dirty(dir).await? {
+    if state.chats.any_running(project_id) || !changes::is_dirty(dir).await? {
         return Ok(());
     }
     let on_change = changes::active(dir).await?.is_some();
@@ -266,13 +266,13 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-/// While that project's agent is live the checkout is left alone (`skipped`) — git must not
-/// rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
+/// While that project's agent is running a turn the checkout is left alone (`skipped`) — git must
+/// not rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
 pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
-    let leave_checkout = state.chats.any_live(&req.project);
+    let leave_checkout = state.chats.any_running(&req.project);
     Ok(Json(
         run_update(&state, &req.project, leave_checkout).await?,
     ))

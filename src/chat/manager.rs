@@ -1,7 +1,8 @@
 //! One long-lived ACP agent per `(project_id, chat_id)`.
 //!
 //! Two chats in the same project are two processes. There is no PTY claim:
-//! project delete and Get latest use [`ChatManager::any_live`] to see chats.
+//! project delete uses [`ChatManager::any_live`]; Get latest only waits for
+//! [`ChatManager::any_running`] prompts, since an idle agent edits nothing.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -52,6 +53,8 @@ pub struct TurnEnded {
     pub chat_id: String,
     pub session_id: String,
     pub stop_reason: String,
+    /// The turn's last agent text, used as the checkpoint's commit subject.
+    pub summary: Option<String>,
     pub cwd: PathBuf,
 }
 
@@ -74,6 +77,8 @@ struct LiveChat {
     acp_session_id: String,
     /// Token the agent was given in `ORSO_HOOK_TOKEN`; `orso ctl` presents it.
     hook_token: String,
+    /// A prompt is in flight (a turn is running).
+    running: AtomicBool,
     tx: broadcast::Sender<UiChunk>,
     history: Mutex<Vec<UiChunk>>,
     models: Mutex<Option<ModelConfig>>,
@@ -119,6 +124,24 @@ impl LiveChat {
         history.push(chunk.clone());
         let _ = self.tx.send(chunk);
     }
+}
+
+/// The agent text of the turn that just ended, for the checkpoint subject.
+fn last_turn_text(live: &LiveChat) -> Option<String> {
+    let history = live.history.lock().unwrap_or_else(|e| e.into_inner());
+    let start = history
+        .iter()
+        .rposition(|chunk| matches!(chunk, UiChunk::UserText { .. }))
+        .map_or(0, |at| at + 1);
+    let text: String = history[start..]
+        .iter()
+        .filter_map(|chunk| match chunk {
+            UiChunk::TextDelta { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 /// A start in flight. Its handshake runs outside the map lock; waiters park
@@ -353,6 +376,7 @@ impl ChatManager {
             client,
             acp_session_id: created.session_id,
             hook_token,
+            running: AtomicBool::new(false),
             tx: broadcast::channel(BROADCAST_CAPACITY).0,
             history: Mutex::new(transcript::load(&self.inner.state_dir, project_id, chat_id)),
             models: Mutex::new(created.models),
@@ -484,11 +508,13 @@ impl ChatManager {
     /// `chat.turn` plus the Task 6 hook. Shared by ACP `PromptEnded` and the
     /// cancel latch, which records `TurnEnd` without a prompt response.
     fn note_turn_end(&self, live: &LiveChat, session_id: &str, stop_reason: &str) {
+        live.running.store(false, Ordering::SeqCst);
         let ended = TurnEnded {
             project_id: live.project_id.clone(),
             chat_id: live.chat_id.clone(),
             session_id: session_id.to_string(),
             stop_reason: stop_reason.to_string(),
+            summary: last_turn_text(live),
             cwd: live.cwd.clone(),
         };
         let hook = self
@@ -512,6 +538,7 @@ impl ChatManager {
     /// Records `text` as the user's chunk and runs it as an ACP prompt.
     /// The turn's chunks arrive through the event pump.
     fn dispatch(&self, live: &Arc<LiveChat>, text: &str) {
+        live.running.store(true, Ordering::SeqCst);
         live.record(UiChunk::UserText {
             session_id: live.acp_session_id.clone(),
             text: text.to_string(),
@@ -778,6 +805,24 @@ impl ChatManager {
     pub fn hook_token(&self, project_id: &str, chat_id: &str) -> Option<String> {
         self.live(project_id, chat_id)
             .map(|live| live.hook_token.clone())
+    }
+
+    /// A prompt is in flight in this chat.
+    pub fn is_running(&self, project_id: &str, chat_id: &str) -> bool {
+        self.live(project_id, chat_id)
+            .is_some_and(|live| live.running.load(Ordering::SeqCst))
+    }
+
+    /// A prompt is in flight in any chat of this project. Unlike [`Self::any_live`],
+    /// an idle agent process (kept up between turns) does not count: it writes nothing,
+    /// so git may touch the checkout.
+    pub fn any_running(&self, project_id: &str) -> bool {
+        self.slots().chats.values().any(|entry| match entry {
+            Entry::Live(live) => {
+                live.project_id == project_id && live.running.load(Ordering::SeqCst)
+            }
+            Entry::Starting(_) => false,
+        })
     }
 
     /// True when `token` is a live chat agent's hook token in `project_id`.
@@ -1089,6 +1134,9 @@ mod tests {
             |c| matches!(c, UiChunk::TurnEnd { stop_reason, .. } if stop_reason == "end_turn"),
         );
         assert!(delta_at.unwrap() < end_at.unwrap(), "{history:?}");
+        // The process stays up, but nothing is running until the next prompt.
+        assert!(chats.any_live("proj"));
+        assert!(!chats.any_running("proj"));
         chats.shutdown().await;
     }
 
