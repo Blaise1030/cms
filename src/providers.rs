@@ -13,6 +13,9 @@
 //! hook injection (keyed on the id). Unknown ids get no injection; they call
 //! `$ORSO_HOOK_EXE hook turn-end` themselves.
 //!
+//! Chat providers also carry an ACP argv (`{ "claude": { "command": ["npx","claude"],
+//! "acp": ["npx","--yes","@agentclientprotocol/claude-agent-acp"] } }`).
+//!
 //! # Hook mechanics (verified 2026-10-10 against claude 2.1.296, codex-cli 0.162.1,
 //! opencode v2.0.25)
 //!
@@ -62,8 +65,8 @@ use crate::error::ApiError;
 static ACP_ARGV_OVERRIDE: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
 
 /// Install the argv `POST /api/chat/…/start` and `/message` pass to
-/// [`crate::chat::manager::ChatManager::start`]. Tests point `fake` at
-/// [`crate::chat::acp::fake_agent`]. A real provider has no argv until Task 6.
+/// [`crate::chat::manager::ChatManager::start`] in tests. Tests point `fake` at
+/// [`crate::chat::acp::fake_agent`]. Real providers use [`Provider::acp`].
 pub fn set_test_acp_argv(provider_id: impl Into<String>, argv: Vec<String>) {
     let mut map = ACP_ARGV_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner());
     map.get_or_insert_with(HashMap::new)
@@ -87,12 +90,28 @@ pub fn acp_argv(provider_id: &str) -> Option<Vec<String>> {
         .filter(|argv| !argv.is_empty())
 }
 
-/// `{ id, command }` as exposed by `GET /api/terminal/providers`.
+/// ACP command for each built-in provider. Every chat provider must be able to
+/// hold one long-lived ACP session, so none of these is empty.
+fn default_acp(id: &str) -> Vec<String> {
+    let argv: &[&str] = match id {
+        "cursor" => &["cursor-agent", "acp"],
+        "claude" => &["npx", "--yes", "@agentclientprotocol/claude-agent-acp"],
+        "codex" => &["npx", "--yes", "@agentclientprotocol/codex-acp"],
+        "opencode" => &["opencode", "acp"],
+        _ => return Vec::new(),
+    };
+    argv.iter().map(|s| s.to_string()).collect()
+}
+
+/// `{ id, command, acp }` as exposed by the provider list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Provider {
     pub id: String,
     /// argv: program followed by its arguments.
     pub command: Vec<String>,
+    /// argv for the Agent Client Protocol (`<command> acp`, or an `npx` bridge).
+    /// Empty when no ACP command is known for this id.
+    pub acp: Vec<String>,
 }
 
 /// Which agent conversation a launch belongs to.
@@ -130,6 +149,7 @@ pub fn default_providers() -> Vec<Provider> {
     .map(|(id, program)| Provider {
         id: id.into(),
         command: vec![program.into()],
+        acp: default_acp(id),
     })
     .collect()
 }
@@ -162,34 +182,59 @@ pub fn load(path: Option<&Path>) -> Result<Vec<Provider>, ApiError> {
     }
 }
 
-/// Parse the JSON registry (see module docs).
+/// Parse the JSON registry (see module docs). Each value is either the command
+/// array (legacy shape) or `{ "command"?: [...], "acp"?: [...] }`; omitted
+/// `acp` falls back to the built-in ACP command for a known id.
 pub fn parse(text: &str) -> Result<Vec<Provider>, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let obj = value
         .as_object()
         .ok_or("expected a JSON object mapping provider id to command array")?;
     let mut providers = Vec::new();
-    for (id, cmd) in obj {
+    for (id, entry) in obj {
         if id.is_empty() || id.chars().any(char::is_control) {
             return Err(format!("invalid provider id {id:?}"));
         }
-        let argv = cmd
-            .as_array()
-            .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
-        let command: Vec<String> = argv
-            .iter()
-            .map(|a| a.as_str().map(str::to_string))
-            .collect::<Option<_>>()
-            .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
+        let (command, acp) = match entry {
+            serde_json::Value::Array(_) => (Some(argv(id, entry)?), None),
+            serde_json::Value::Object(fields) => {
+                let command = fields.get("command").map(|v| argv(id, v)).transpose()?;
+                let acp = fields.get("acp").map(|v| argv(id, v)).transpose()?;
+                (command, acp)
+            }
+            _ => {
+                return Err(format!(
+                    "provider {id:?}: command must be an array of strings or an object"
+                ))
+            }
+        };
+        let command = command.unwrap_or_else(|| {
+            default_providers()
+                .into_iter()
+                .find(|p| p.id == *id)
+                .map(|p| p.command)
+                .unwrap_or_default()
+        });
         if command.first().is_none_or(|p| p.is_empty()) {
             return Err(format!("provider {id:?}: command must not be empty"));
         }
         providers.push(Provider {
             id: id.clone(),
             command,
+            acp: acp.unwrap_or_else(|| default_acp(id)),
         });
     }
     Ok(providers)
+}
+
+fn argv(id: &str, value: &serde_json::Value) -> Result<Vec<String>, String> {
+    let list = value
+        .as_array()
+        .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
+    list.iter()
+        .map(|a| a.as_str().map(str::to_string))
+        .collect::<Option<_>>()
+        .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))
 }
 
 /// POSIX single-quote `s` so a shell reads it back as one word.
@@ -589,10 +634,43 @@ mod tests {
     }
 
     #[test]
+    fn default_providers_include_acp_argv_for_four_ids() {
+        let c = default_providers();
+        for (id, acp) in [
+            ("cursor", vec!["cursor-agent", "acp"]),
+            ("claude", vec!["npx", "--yes", "@agentclientprotocol/claude-agent-acp"]),
+            ("codex", vec!["npx", "--yes", "@agentclientprotocol/codex-acp"]),
+            ("opencode", vec!["opencode", "acp"]),
+        ] {
+            let provider = c.iter().find(|p| p.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(provider.acp, acp, "{id}");
+            assert!(!provider.acp.is_empty(), "{id}");
+        }
+    }
+
+    #[test]
     fn parses_custom_registry() {
         let c = parse(r#"{"mine": ["/bin/agent", "--custom"]}"#).unwrap();
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].command, ["/bin/agent", "--custom"]);
+        assert!(c[0].acp.is_empty());
+    }
+
+    #[test]
+    fn overrides_acp_argv_only_when_present() {
+        let c = parse(
+            r#"{
+                "claude": { "command": ["npx", "claude"], "acp": ["my-claude", "acp"] },
+                "opencode": { "command": ["opencode"] }
+            }"#,
+        )
+        .unwrap();
+        let claude = c.iter().find(|p| p.id == "claude").unwrap();
+        assert_eq!(claude.command, ["npx", "claude"]);
+        assert_eq!(claude.acp, ["my-claude", "acp"]);
+        let opencode = c.iter().find(|p| p.id == "opencode").unwrap();
+        assert_eq!(opencode.command, ["opencode"]);
+        assert_eq!(opencode.acp, ["opencode", "acp"]);
     }
 
     #[test]
@@ -625,6 +703,7 @@ mod tests {
         Provider {
             id: id.into(),
             command: vec![id.into()],
+            acp: default_acp(id),
         }
     }
     fn spec(id: &str, exe: &str, auto: bool, dir: &Path) -> LaunchSpec {
@@ -845,6 +924,7 @@ mod tests {
             &Provider {
                 id: "mine".into(),
                 command: vec!["/bin/a".into(), "-v".into()],
+                acp: vec![],
             },
             Path::new("/x"),
             true,
@@ -1108,6 +1188,7 @@ mod tests {
             &Provider {
                 id: "fake".into(),
                 command: vec!["sh".into(), "fake.sh".into(), "resolved".into()],
+                acp: vec![],
             },
             PROMPT,
             Path::new("/nope"),

@@ -126,7 +126,7 @@ impl AppState {
             devserver,
         ));
         let watchers = Arc::new(WatchManager::new(events.clone()));
-        Self {
+        let state = Self {
             config,
             projects,
             events,
@@ -141,6 +141,34 @@ impl AppState {
             auto_resolve: Arc::new(AutoResolveJobs::new(Timeouts::default())),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
-        }
+        };
+        state.wire_chat_turn_end();
+        state
+    }
+
+    /// After an ACP turn ends: refresh the preview and Content panel, checkpoint
+    /// the edits, and record the resulting `checkpoint` chunk in the transcript.
+    fn wire_chat_turn_end(&self) {
+        let state = self.clone();
+        self.chats.set_on_turn_end(move |ended| {
+            if ended.stop_reason != "end_turn" {
+                return;
+            }
+            let state = state.clone();
+            tokio::spawn(async move {
+                crate::http::ctl::emit_preview_reload(&state, &ended.project_id);
+                crate::http::ctl::emit_content_refresh(&state, &ended.project_id);
+                match crate::http::checkpoints::finish_turn(&state, &ended.project_id, None).await {
+                    Ok(outcome) => {
+                        if let Some(chunk) = crate::http::chat::checkpoint_chunk(&outcome) {
+                            state
+                                .chats
+                                .record(&ended.project_id, &ended.chat_id, chunk);
+                        }
+                    }
+                    Err(e) => eprintln!("orso: checkpoint after chat turn failed: {e}"),
+                }
+            });
+        });
     }
 }

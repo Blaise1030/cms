@@ -493,6 +493,58 @@ async fn delete_during_handshake_does_not_keep_terminal_blocked() {
 }
 
 #[tokio::test]
+async fn turn_end_appends_checkpoint_chunk() {
+    let env = env().await;
+    let id = create_chat(&env, None).await;
+    let project = env.state.projects.get(&env.project).await.unwrap();
+    std::fs::write(project.dir.join("note.md"), "edited by the agent\n").unwrap();
+
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "edit something" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let detail = wait_detail(
+        &env,
+        &id,
+        |body| {
+            body["chunks"]
+                .as_array()
+                .is_some_and(|chunks| chunks.iter().any(|c| c["type"] == "checkpoint"))
+        },
+        "checkpoint chunk",
+    )
+    .await;
+    let checkpoint = detail["chunks"]
+        .as_array()
+        .and_then(|chunks| chunks.iter().find(|c| c["type"] == "checkpoint"))
+        .unwrap()
+        .clone();
+    assert!(checkpoint["sha"].as_str().is_some_and(|sha| !sha.is_empty()), "{checkpoint}");
+    assert!(
+        checkpoint["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|f| f == "note.md")),
+        "{checkpoint}"
+    );
+    assert!(checkpoint.get("blocked").is_none(), "{checkpoint}");
+
+    let path = env
+        .root
+        .join(".orso")
+        .join(&env.project)
+        .join("chats")
+        .join(format!("{id}.jsonl"));
+    let transcript = std::fs::read_to_string(&path).unwrap();
+    assert!(transcript.contains("\"type\":\"checkpoint\""), "{transcript}");
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
 async fn overlapping_cold_messages_with_stored_model_both_send() {
     let env = env().await;
     let id = create_chat(&env, Some("smart")).await;

@@ -45,7 +45,8 @@ impl std::error::Error for ChatError {}
 
 pub type ChatResult<T> = Result<T, ChatError>;
 
-/// Fired after a `turn_end` chunk is recorded. Task 6 attaches the checkpoint hook.
+/// Fired after a `turn_end` chunk is recorded. [`crate::state::AppState`] hooks
+/// checkpointing and the preview/content refresh onto it.
 #[derive(Debug, Clone)]
 pub struct TurnEnded {
     pub project_id: String,
@@ -197,8 +198,9 @@ impl ChatManager {
         }
     }
 
-    /// Checkpoint / content refresh (Task 6) runs after each `turn_end` chunk.
-    /// The hook is synchronous and should not block the event pump for long.
+    /// Checkpoint / content refresh runs after each `turn_end` chunk; wired by
+    /// [`crate::state::AppState`]. The hook is synchronous and should not block
+    /// the event pump for long.
     pub fn set_on_turn_end(&self, hook: impl Fn(TurnEnded) + Send + Sync + 'static) {
         *self
             .inner
@@ -717,6 +719,18 @@ impl ChatManager {
             return history.clone();
         }
         transcript::load(&self.inner.state_dir, project_id, chat_id)
+    }
+
+    /// Appends a daemon-authored chunk (a checkpoint) to a chat: the live
+    /// history when one exists, otherwise the transcript file.
+    pub fn record(&self, project_id: &str, chat_id: &str, chunk: UiChunk) {
+        if let Some(live) = self.live(project_id, chat_id) {
+            live.record(chunk);
+        } else if let Err(e) =
+            transcript::append(&self.inner.state_dir, project_id, chat_id, &chunk)
+        {
+            eprintln!("orso: failed to write chat chunk for {project_id}/{chat_id}: {e}");
+        }
     }
 
     /// Replay plus the live stream. `None` when this chat has no process
