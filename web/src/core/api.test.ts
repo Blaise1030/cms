@@ -134,6 +134,16 @@ describe("createApi", () => {
       "http://127.0.0.1:7800/api/chat/my%20proj/attachments/a.png",
     );
   });
+
+  it("accepts the empty 202 body from sending a chat message", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => new Response(null, { status: 202 }));
+    await expect(api(fetchMock).sendChatMessage("p", "c1", "hello")).resolves.toBeUndefined();
+  });
+
+  it("accepts the empty 204 body from stopping a chat", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => new Response(null, { status: 204 }));
+    await expect(api(fetchMock).stopChat("p", "c1")).resolves.toBeUndefined();
+  });
 });
 
 describe("updateContentEntry", () => {

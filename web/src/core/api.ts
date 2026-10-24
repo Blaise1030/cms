@@ -181,6 +181,11 @@ export function createApi(
     }
   }
 
+  /** Commands that answer 202/204 with no body. */
+  async function empty(method: string, path: string, opts?: SendOpts) {
+    await send(method, path, opts);
+  }
+
   const enc = encodeURIComponent;
 
   return {
@@ -279,9 +284,9 @@ export function createApi(
     chatHistory: (project: string, chatId: string) =>
       json<ChatHistory>("GET", `/api/chat/${enc(project)}/${enc(chatId)}`),
     sendChatMessage: (project: string, chatId: string, text: string) =>
-      json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/message`, { body: { text } }),
+      empty("POST", `/api/chat/${enc(project)}/${enc(chatId)}/message`, { body: { text } }),
     stopChat: (project: string, chatId: string) =>
-      json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/stop`),
+      empty("POST", `/api/chat/${enc(project)}/${enc(chatId)}/stop`),
     setChatModel: (project: string, chatId: string, model: string) =>
       json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/model`, { body: { modelId: model } }),
     deleteChat: (project: string, chatId: string) =>
