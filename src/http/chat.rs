@@ -2,8 +2,8 @@
 //!
 //! Chat ids are `^[A-Za-z0-9_-]{1,64}$`. `turn` is an ordinary id. The stream
 //! replays recorded chunks and stays open; it does not send an AI SDK `[DONE]`
-//! trailer. ACP argv comes from [`crate::providers::acp_argv`] (test override
-//! or `ORSO_ACP_ARGV`) until Task 6 stores it on the provider.
+//! trailer. ACP argv comes from the provider registry (`agents.json` or the
+//! built-in defaults), with the test/env override first.
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -96,12 +96,21 @@ async fn project_cwd(state: &AppState, project: &str) -> Result<PathBuf, ApiErro
 }
 
 fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
-    if providers::acp_argv(id).is_some() {
-        return Ok(true);
+    Ok(acp_argv_for(state, id)?.is_some())
+}
+
+/// ACP argv for `provider_id`: the test/env override first, then the provider
+/// registry (`agents.json` or the built-in defaults). `None` when the provider
+/// has no ACP command.
+fn acp_argv_for(state: &AppState, provider_id: &str) -> Result<Option<Vec<String>>, ApiError> {
+    if let Some(argv) = providers::acp_argv(provider_id) {
+        return Ok(Some(argv));
     }
     Ok(providers::load(state.config.agents_config.as_deref())?
-        .iter()
-        .any(|p| p.id == id))
+        .into_iter()
+        .find(|p| p.id == provider_id)
+        .map(|p| p.acp)
+        .filter(|argv| !argv.is_empty()))
 }
 
 /// Spawn the chat's ACP process with `session/new` (not a terminal `AgentSession`).
@@ -112,7 +121,7 @@ async fn ensure_agent(
     cwd: &std::path::Path,
     record: &SessionRecord,
 ) -> Result<(), ApiError> {
-    let argv = providers::acp_argv(&record.provider).ok_or_else(|| {
+    let argv = acp_argv_for(state, &record.provider)?.ok_or_else(|| {
         ApiError::badreq(format!("provider {} has no ACP command", record.provider))
     })?;
     state
@@ -322,8 +331,28 @@ pub async fn approve_chat(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn models_body(state: &AppState, project: &str, chat: &str) -> Value {
-    match state.chats.models(project, chat) {
+/// The transcript chunk for a turn-end checkpoint, or `None` when the turn
+/// changed nothing (no commit, no block).
+pub fn checkpoint_chunk(outcome: &super::checkpoints::TurnOutcome) -> Option<UiChunk> {
+    use super::checkpoints::TurnOutcome;
+    match outcome {
+        TurnOutcome::Committed { checkpoint, files } => Some(UiChunk::Checkpoint {
+            sha: Some(checkpoint.sha.clone()),
+            summary: Some(checkpoint.summary.clone()),
+            files: files.clone(),
+            blocked: None,
+        }),
+        TurnOutcome::Blocked(reason) => Some(UiChunk::Checkpoint {
+            sha: None,
+            summary: None,
+            files: Vec::new(),
+            blocked: Some(reason.clone()),
+        }),
+        TurnOutcome::Unchanged => None,
+    }
+}
+
+fn models_body(state: &AppState, project: &str, chat: &str) -> Value {    match state.chats.models(project, chat) {
         Some(cfg) => json!({ "current": cfg.current, "options": cfg.options }),
         None => json!({ "current": null, "options": [] }),
     }
