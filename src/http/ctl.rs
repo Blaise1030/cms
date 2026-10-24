@@ -1,7 +1,7 @@
-//! `POST /api/ctl/*` — app state and UI refresh for the agent running in a project's
-//! terminal (`orso ctl`). Authenticated like turn-end: the live session's hook token
-//! in the JSON body, no daemon token. Read-only except `restart-preview` and the
-//! refresh commands (which only emit UI events).
+//! `POST /api/ctl/*` — app state and UI refresh for the agent in a project's
+//! chat (`orso ctl`). Authenticated like the old turn-end hook: the live chat's
+//! `ORSO_HOOK_TOKEN` in the JSON body, no daemon token. Read-only except
+//! `restart-preview` and the refresh commands (which only emit UI events).
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -25,7 +25,7 @@ struct CtlRequest {
 fn authorize(state: &AppState, body: &Bytes) -> Result<String, ApiError> {
     let req: CtlRequest = serde_json::from_slice(body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{project, token}}: {e}")))?;
-    if !state.terminals.token_matches(&req.project, &req.token) {
+    if !state.chats.token_matches(&req.project, &req.token) {
         return Err(ApiError::unauth("invalid hook token").with_status(403));
     }
     Ok(req.project)

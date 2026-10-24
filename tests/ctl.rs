@@ -58,7 +58,7 @@ async fn call(app: &axum::Router, r: Request<Body>) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
-async fn every_ctl_route_refuses_without_a_live_terminal() {
+async fn every_ctl_route_refuses_without_a_live_chat() {
     let (_t, st, id) = scaffolded(config()).await;
     let app = http::router(st);
     for route in [
@@ -164,49 +164,18 @@ async fn change_status_reports_active_change_and_unsaved_edits() {
     assert_eq!(v["changedPaths"], json!(["launch.md"]), "{v}");
 }
 
-/// Start a long-lived shell that prints its hook token, then return that token.
+/// Start a fake ACP chat, then return the hook token its agent was given.
 async fn live_hook_token(st: &AppState, project: &str) -> String {
-    use orso::providers::LaunchSpec;
-    use orso::terminal::Output;
-    use tokio::sync::broadcast::error::RecvError;
-
     let dir = st.projects.get(project).await.unwrap().dir;
-    st.terminals
-        .start(
-            project,
-            "fake",
-            &dir,
-            LaunchSpec {
-                argv: vec![
-                    "sh".into(),
-                    "-c".into(),
-                    "echo \"TOKEN=$ORSO_HOOK_TOKEN\"; sleep 60".into(),
-                ],
-                env: vec![],
-            },
-        )
+    let (cmd, args) = orso::chat::acp::fake_agent();
+    let mut argv = vec![cmd];
+    argv.extend(args);
+    orso::providers::set_test_acp_argv("fake", argv.clone());
+    st.chats
+        .start(project, "ctl-chat", &dir, &argv, &[])
         .await
         .unwrap();
-    let mut a = st.terminals.attach(project).unwrap();
-    let mut acc = String::from_utf8_lossy(&a.replay).into_owned();
-    loop {
-        if let Some(rest) = acc.split("TOKEN=").nth(1) {
-            let tok: String = rest
-                .chars()
-                .take_while(|c| c.is_ascii_hexdigit())
-                .collect();
-            if tok.len() == 32 {
-                return tok;
-            }
-        }
-        match a.rx.recv().await {
-            Ok(Output::Data(chunk)) => acc.push_str(&String::from_utf8_lossy(&chunk)),
-            Ok(Output::Exit(_)) | Err(RecvError::Closed) => {
-                panic!("terminal exited before printing TOKEN; got: {acc}")
-            }
-            Err(RecvError::Lagged(_)) => {}
-        }
-    }
+    st.chats.hook_token(project, "ctl-chat").unwrap()
 }
 
 async fn next_event_of(
@@ -247,5 +216,5 @@ async fn refresh_routes_emit_ui_events_when_authorized() {
         assert_eq!(ev["projectId"], id, "{ev}");
     }
 
-    st.terminals.kill(&id).await;
+    st.chats.shutdown().await;
 }

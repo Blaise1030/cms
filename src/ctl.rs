@@ -1,4 +1,4 @@
-//! `orso ctl`: app state for the agent in a orso terminal. Posts the session's
+//! `orso ctl`: app state for the agent in a orso chat. Posts the session's
 //! hook token to `/api/ctl/*` and prints the daemon's JSON answer.
 
 use std::process::ExitCode;

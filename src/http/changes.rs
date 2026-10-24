@@ -69,15 +69,15 @@ pub async fn create(
 
 /// Checkpoint leftover edits onto the change they were made on, so moving to another change
 /// doesn't stop on them. Edits on `main` are left alone when `carry_main` (a new change takes
-/// them) and on GitHub projects (never committed to `main`). Not while a terminal is live: the
-/// agent may be mid-edit.
+/// them) and on GitHub projects (never committed to `main`). Not while an agent is live: it
+/// may be mid-edit.
 async fn save_edits(
     state: &AppState,
     project_id: &str,
     dir: &std::path::Path,
     carry_main: bool,
 ) -> Result<(), ApiError> {
-    if state.terminals.status(project_id).is_some() || !changes::is_dirty(dir).await? {
+    if state.chats.any_live(project_id) || !changes::is_dirty(dir).await? {
         return Ok(());
     }
     let on_change = changes::active(dir).await?.is_some();
@@ -266,20 +266,20 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-/// While that project's terminal is live the checkout is left alone (`skipped`) — git must not
+/// While that project's agent is live the checkout is left alone (`skipped`) — git must not
 /// rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
 pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
-    let leave_checkout = state.terminals.status(&req.project).is_some();
+    let leave_checkout = state.chats.any_live(&req.project);
     Ok(Json(
         run_update(&state, &req.project, leave_checkout).await?,
     ))
 }
 
 /// Finish a Get latest that skipped the checked-out change, now that nothing is editing it
-/// (turn end, terminal stopped). Emits `changes.updated` with the result or the error.
+/// (turn end). Emits `changes.updated` with the result or the error.
 pub async fn finish_pending_update(state: AppState, project_id: String) {
     let pending = state.pending_latest.lock().unwrap().remove(&project_id);
     if !pending {

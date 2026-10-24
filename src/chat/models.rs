@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::providers::Provider;
-use crate::terminal::login_command;
+use crate::shell::login_command;
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(20);
 

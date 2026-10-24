@@ -16,7 +16,6 @@ use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::{DevserverStatus, ProjectRegistry};
-use crate::terminal::TerminalManager;
 use crate::watch::WatchManager;
 
 #[derive(Clone)]
@@ -25,8 +24,6 @@ pub struct AppState {
     pub projects: Arc<ProjectRegistry>,
     /// Broadcaster behind `WS /ws/events`.
     pub events: EventBus,
-    /// PTY terminal sessions (one per project).
-    pub terminals: Arc<TerminalManager>,
     /// ACP chat agents, one process per `(project, chat)`.
     pub chats: Arc<ChatManager>,
     /// Supervised `npm run dev` per project.
@@ -44,7 +41,7 @@ pub struct AppState {
     pub auto_resolve: Arc<AutoResolveJobs>,
     /// Serializes Get latest through session creation as one operation.
     pub conflict_updates: Arc<Mutex<()>>,
-    /// Projects whose Get latest skipped the checked-out change while a terminal was live.
+    /// Projects whose Get latest skipped the checked-out change while an agent was live.
     pub pending_latest: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
@@ -117,7 +114,6 @@ impl AppState {
         let config = Arc::new(config);
         let projects = Arc::new(projects);
         let events = EventBus::new();
-        let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
         let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
         let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
         let devservers = Arc::new(DevServerManager::new(
@@ -130,7 +126,6 @@ impl AppState {
             config,
             projects,
             events,
-            terminals,
             chats,
             devservers,
             watchers,
@@ -161,9 +156,7 @@ impl AppState {
                 match crate::http::checkpoints::finish_turn(&state, &ended.project_id, None).await {
                     Ok(outcome) => {
                         if let Some(chunk) = crate::http::chat::checkpoint_chunk(&outcome) {
-                            state
-                                .chats
-                                .record(&ended.project_id, &ended.chat_id, chunk);
+                            state.chats.record(&ended.project_id, &ended.chat_id, chunk);
                         }
                     }
                     Err(e) => eprintln!("orso: checkpoint after chat turn failed: {e}"),

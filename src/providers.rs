@@ -289,7 +289,7 @@ A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its huma
 - The app also commits your work automatically at the end of each turn; that is expected."#;
 
 /// The orso layer of [`agent_guide`]: who the user is, the words to use with them,
-/// what only they may do, and how to check work with `orso ctl`. Agent terminals have
+/// what only they may do, and how to check work with `orso ctl`. Chat agents have
 /// the binary at `$ORSO_HOOK_EXE`, not on `PATH`.
 pub const ORSO_GUIDE: &str = r#"# Working in orso
 
@@ -308,7 +308,7 @@ Publishing, sharing a change, sending it for a greenlight, giving a greenlight, 
 - `"$ORSO_HOOK_EXE" ctl refresh-content` after adding or renaming content (or when the Content sidebar looks stale): reloads **collections** and entry lists in the app.
 - `"$ORSO_HOOK_EXE" ctl refresh-preview` after that (or when the preview looks stale): remounts the preview page so the person sees the newest result.
 - `"$ORSO_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
-When a Chat or Terminal turn ends, the app also refreshes Content and the preview. Cursor has no turn-end hook — still call `refresh-content` then `refresh-preview` before saying you are done so the person sees the result right away. If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
+When a chat turn ends, the app also refreshes Content and the preview. Cursor has no turn-end hook — still call `refresh-content` then `refresh-preview` before saying you are done so the person sees the result right away. If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
 
 ## Edits after a greenlight
 If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
@@ -638,11 +638,20 @@ mod tests {
         let c = default_providers();
         for (id, acp) in [
             ("cursor", vec!["cursor-agent", "acp"]),
-            ("claude", vec!["npx", "--yes", "@agentclientprotocol/claude-agent-acp"]),
-            ("codex", vec!["npx", "--yes", "@agentclientprotocol/codex-acp"]),
+            (
+                "claude",
+                vec!["npx", "--yes", "@agentclientprotocol/claude-agent-acp"],
+            ),
+            (
+                "codex",
+                vec!["npx", "--yes", "@agentclientprotocol/codex-acp"],
+            ),
             ("opencode", vec!["opencode", "acp"]),
         ] {
-            let provider = c.iter().find(|p| p.id == id).unwrap_or_else(|| panic!("{id}"));
+            let provider = c
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("{id}"));
             assert_eq!(provider.acp, acp, "{id}");
             assert!(!provider.acp.is_empty(), "{id}");
         }

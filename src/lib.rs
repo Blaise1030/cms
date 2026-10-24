@@ -15,14 +15,13 @@ pub mod fs;
 pub mod git;
 pub mod git_shim;
 pub mod github;
-pub mod hook;
 pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod providers;
 pub mod settings;
+pub mod shell;
 pub mod state;
-pub mod terminal;
 pub mod watch;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
 #[path = "static.rs"]
@@ -49,7 +48,6 @@ pub async fn serve_until(
     state: AppState,
     signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    let terminals = state.terminals.clone();
     let chats = state.chats.clone();
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
@@ -84,7 +82,6 @@ pub async fn serve_until(
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(signal)
         .await;
-    terminals.shutdown().await;
     chats.shutdown().await;
     devservers.shutdown().await;
     watchers.shutdown();

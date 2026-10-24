@@ -1,9 +1,8 @@
 //! `GET /api/checkpoints`, `GET /api/checkpoints/{sha}/diff`, `POST /api/checkpoints/{sha}/restore`.
 //!
-//! Also hosts the "start a change first" guard used by mutating edit paths (terminal
-//! start and turn-end checkpoints), and the shared turn-end commit (`finish_turn`) for
-//! terminal hooks and chat. Restore on `main` is intentionally not gated (Slice 3 out of
-//! scope).
+//! Also hosts the "start a change first" guard used by mutating edit paths, and the
+//! shared turn-end commit (`finish_turn`) for chat. Restore on `main` is intentionally
+//! not gated (Slice 3 out of scope).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -17,11 +16,50 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{project_dir, query_or_badreq, terminal};
+use super::{project_dir, query_or_badreq};
 use crate::changes;
 use crate::error::ApiError;
 use crate::git;
 use crate::state::AppState;
+
+const SUMMARY_MAX: usize = 72;
+
+/// One-line commit subject for turn-end checkpoints.
+pub fn commit_message(summary: Option<&str>, changed: &[String]) -> String {
+    let first = summary
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.lines().next().map(str::trim))
+        .filter(|s| !s.is_empty());
+    match first {
+        Some(line) => truncate_summary(line),
+        None => {
+            let n = changed.len();
+            let paths = changed
+                .iter()
+                .take(3)
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Update {n} files: {paths}")
+        }
+    }
+}
+
+fn truncate_summary(line: &str) -> String {
+    if line.chars().count() <= SUMMARY_MAX {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    for (i, ch) in line.chars().enumerate() {
+        if i >= SUMMARY_MAX - 1 {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
 
 #[derive(Deserialize)]
 pub struct ProjectQuery {
@@ -78,7 +116,7 @@ pub async fn finish_turn(
         return Ok(TurnOutcome::Blocked(e.message));
     }
     let mut files = git::changed_paths(&dir).await?;
-    let message = terminal::commit_message(summary, &files);
+    let message = commit_message(summary, &files);
     files.sort();
     let outcome = match git::checkpoint(&dir, &message).await? {
         Some(cp) => {
@@ -108,7 +146,7 @@ pub async fn finish_turn(
 
 /// Reject edits on `main` for GitHub-remote projects. Local-only projects may edit `main`.
 ///
-/// Used by terminal start and hook turn-end checkpoints. Restore stays ungated.
+/// Used by chat turn-end checkpoints. Restore stays ungated.
 pub(crate) async fn require_change(state: &AppState, project_id: &str) -> Result<(), ApiError> {
     let project = state
         .projects

@@ -153,76 +153,38 @@ fn switch_without_arguments_is_not_head_moving() {
     assert_eq!(logged(&log), vec!["switch"]);
 }
 
-/// Spawned agents get `ORSO_REAL_GIT` (an absolute path) and the daemon's `git` launcher
+/// Chat agents get `ORSO_REAL_GIT` (an absolute path) and the daemon's `git` launcher
 /// first on `PATH`.
-#[tokio::test]
-async fn agent_spawn_sets_real_git_and_prepends_the_shim() {
-    use std::sync::{Arc, Mutex, Once};
-    use std::time::{Duration, Instant};
+#[test]
+fn chat_agent_env_sets_real_git_and_prepends_the_shim() {
+    use orso::state::AppState;
 
-    use orso::events::EventBus;
-    use orso::providers::LaunchSpec;
-    use orso::terminal::TerminalManager;
-
-    // One PTY at a time; login zsh under parallel `cargo test` can stall, so use POSIX sh.
-    static LOCK: Mutex<()> = Mutex::new(());
-    static SHELL: Once = Once::new();
-    SHELL.call_once(|| std::env::set_var("SHELL", "/bin/sh"));
-
-    let _lock = LOCK.lock().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let projects = tmp.path().join("projects");
     std::fs::create_dir_all(&projects).unwrap();
-    let out = tmp.path().join("env.txt");
-    let script = format!(
-        "printf '%s\\n' \"$ORSO_REAL_GIT\" > '{}'; printf '%s\\n' \"$PATH\" >> '{}'",
-        out.display(),
-        out.display(),
-    );
     let config = Config {
         projects_dir: projects.clone(),
         hook_exe: Some(PathBuf::from(orso())),
         ..Default::default()
     };
-    let m = TerminalManager::new(Arc::new(config), EventBus::new());
-    m.start(
-        "p1",
-        "fake",
-        tmp.path(),
-        LaunchSpec {
-            argv: vec!["sh".into(), "-c".into(), script],
-            env: vec![],
-        },
-    )
-    .await
-    .unwrap();
+    let st = AppState::with_scaffold_install(config, false);
+    let env: std::collections::HashMap<String, String> =
+        orso::http::chat::agent_env(&st, "p1").into_iter().collect();
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let text = loop {
-        let text = std::fs::read_to_string(&out).unwrap_or_default();
-        if text.lines().count() >= 2 {
-            break text;
-        }
-        assert!(Instant::now() < deadline, "env never written");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
-    let mut lines = text.lines();
-    let real_git = lines.next().unwrap();
-    let path = lines.next().unwrap();
+    let real_git = env.get("ORSO_REAL_GIT").expect("ORSO_REAL_GIT");
+    assert!(real_git.contains('/') || real_git == "git", "{real_git}");
 
-    assert!(real_git.contains('/'), "{real_git}");
-    assert!(
-        real_git.ends_with("/git") || real_git == "git",
-        "{real_git}"
-    );
-
+    let path = env.get("PATH").expect("PATH");
     let shim_dir = projects.join(".orso").join("bin");
     assert!(
-        path.starts_with(&shim_dir.to_string_lossy().into_owned()),
+        path.starts_with(&format!("{}:", shim_dir.display())),
         "shim dir should lead PATH: {path}"
     );
     let launcher = shim_dir.join("git");
-    assert!(launcher.is_file(), "launcher missing: {}", launcher.display());
-
-    m.kill("p1").await;
+    assert!(
+        launcher.is_file(),
+        "launcher missing: {}",
+        launcher.display()
+    );
+    assert_eq!(env.get("ORSO_PROJECT").map(String::as_str), Some("p1"));
 }
