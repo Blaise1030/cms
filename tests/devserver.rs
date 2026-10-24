@@ -434,6 +434,53 @@ async fn manual_restart_replaces_the_running_process() {
     env.state.devservers.shutdown().await;
 }
 
+/// After `git checkout` the supervised Vite/Astro process keeps the previous branch's
+/// modules; remounting the iframe alone is not enough. Switch must restart it.
+#[tokio::test]
+async fn switching_a_change_restarts_the_dev_server() {
+    let env = env_with(script(READY));
+    let mut events = env.events();
+    env.create("Site").await;
+    events.status("site", "ready").await;
+    let first = read_pid(&env.file("site", "spawns.log"));
+
+    let (s, a) = env
+        .call(
+            "POST",
+            "/api/changes",
+            Some(json!({ "project": "site", "title": "Alpha" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{a}");
+    let (s, b) = env
+        .call(
+            "POST",
+            "/api/changes",
+            Some(json!({ "project": "site", "title": "Beta" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+    let before_switch = lines(&env.file("site", "spawns.log")).len();
+
+    let (s, v) = env
+        .call(
+            "POST",
+            "/api/changes/content%2Falpha/switch",
+            Some(json!({ "project": "site" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["branch"], "content/alpha");
+    events.status("site", "ready").await;
+    let all = lines(&env.file("site", "spawns.log"));
+    assert!(
+        all.len() > before_switch,
+        "switch must respawn the preview process; spawns={all:?}"
+    );
+    assert!(!alive(first), "original preview process must be gone");
+    env.state.devservers.shutdown().await;
+}
+
 #[tokio::test]
 async fn restart_unknown_project_is_404() {
     let env = env_with(script(READY));

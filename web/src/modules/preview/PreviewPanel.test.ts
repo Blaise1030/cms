@@ -140,6 +140,7 @@ describe("PreviewPanel", () => {
     const w = mountPanel("starting");
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("starting");
     expect(w.find("iframe").exists()).toBe(false);
+    expect(w.find("[data-testid='preview-starting'] [aria-label='Loading']").exists()).toBe(true);
     hDaemon.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "ready", port: 4000 });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
@@ -167,6 +168,19 @@ describe("PreviewPanel", () => {
     hDaemon.daemon.emit({ type: "events.lagged", missed: 4 });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");
+    expect(w.find("iframe").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("remounts the iframe on preview.reload for this project", async () => {
+    const w = mountPanel("ready");
+    const before = usePreviewStore().reloadNonce;
+    hDaemon.daemon.emit({ type: "preview.reload", projectId: "other" });
+    await flushPromises();
+    expect(usePreviewStore().reloadNonce).toBe(before);
+    hDaemon.daemon.emit({ type: "preview.reload", projectId: "site-1" });
+    await flushPromises();
+    expect(usePreviewStore().reloadNonce).toBe(before + 1);
     expect(w.find("iframe").exists()).toBe(true);
     w.unmount();
   });

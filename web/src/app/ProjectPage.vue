@@ -74,7 +74,7 @@ const offAutoResolve = daemon.on("changes.auto_resolve", (e) => {
   if (e.projectId !== props.id) return;
   void changes.onAutoResolve(props.id, e).catch(() => undefined);
 });
-const offTurn = daemon.on("terminal.turn", (e) => {
+const offTurn = daemon.on("chat.turn", (e) => {
   if (e.projectId !== props.id) return;
   void changes.followActive(props.id).catch(() => undefined);
 });
@@ -112,7 +112,11 @@ watch(
       <EditorMenubar v-if="project" :project-id="project.id" />
     </template>
     <template #actions>
-      <SharePreviewButton v-if="project" :project-id="project.id" />
+      <SharePreviewButton
+        v-if="project"
+        :project-id="project.id"
+        :repo="project.repo"
+      />
     </template>
     <template #workspace>
       <Workspace v-if="project" :project="project" />

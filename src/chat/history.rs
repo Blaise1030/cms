@@ -1,9 +1,9 @@
-//! Per-project agent session history, `{state_dir}/{project}/sessions.json`.
+//! Per-project chat session records, `{state_dir}/{project}/sessions.json`.
 //!
-//! One record per terminal session started from the orso. `agent_session_id` is the
-//! coding CLI's own conversation id, which is what makes a record resumable: assigned at launch
-//! (Claude `--session-id`, Cursor `create-chat`) or reported later by the turn-end hook
-//! (Codex `thread-id`, OpenCode `session_id`).
+//! One record per chat. ACP chats do not store an [`crate::providers::AgentSession`]:
+//! the live process calls `session/new` itself. `agent_session_id` is kept so records
+//! written by the old terminal stay readable. `model` is the optional model id chosen
+//! when the chat was created or last set.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -22,6 +22,9 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 pub struct SessionRecord {
     pub id: String,
     pub provider: String,
+    /// Model id from create or `POST …/model`. Absent on older terminal records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,6 +132,7 @@ mod tests {
         SessionRecord {
             id: id.into(),
             provider: "claude".into(),
+            model: None,
             agent_session_id: None,
             title: None,
             created_at: updated_at,

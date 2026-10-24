@@ -19,6 +19,30 @@ export ORSO_VITE_PORT="$vite_port" ORSO_DAEMON_PORT="$daemon_port"
 export ORSO_DEV_UI="http://localhost:$vite_port"
 export ORSO_DEV_DAEMON="${ORSO_DEV_DAEMON:-$repo_root/target/debug/orso}"
 
+# A daemon left behind by an earlier run keeps its port, so the shell's own daemon would exit
+# on start and the shell would report "the orso service exited during startup". Stop a leftover
+# orso daemon; anything else holding the port is not ours to kill.
+if nc -z localhost "$daemon_port" 2>/dev/null; then
+  while read -r pid; do
+    cmdline="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    if [[ "$cmdline" == *orso*serve* ]]; then
+      echo "Stopping the leftover orso daemon on :$daemon_port (pid $pid)." >&2
+      kill "$pid" 2>/dev/null || true
+    else
+      echo "Port $daemon_port is held by pid $pid ($cmdline); stop it or pass another daemon port." >&2
+      exit 1
+    fi
+  done < <(lsof -nP -tiTCP:"$daemon_port" -sTCP:LISTEN || true)
+  for _ in {1..50}; do
+    nc -z localhost "$daemon_port" 2>/dev/null || break
+    sleep 0.2
+  done
+  if nc -z localhost "$daemon_port" 2>/dev/null; then
+    echo "Port $daemon_port is still busy after stopping its daemon." >&2
+    exit 1
+  fi
+fi
+
 trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT
 pnpm -C web dev &
 vite=$!

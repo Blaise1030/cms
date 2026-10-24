@@ -4,6 +4,9 @@ use std::fmt;
 
 use serde::Serialize;
 
+/// Error box for subsystems that are not the HTTP `{ "error": ... }` envelope.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 /// Error codes from the spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

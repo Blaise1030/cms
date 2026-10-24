@@ -1,18 +1,28 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
-import type { AutoResolveState, AutoResolveStatus } from "@/core/types";
+import type { AutoResolveState, AutoResolveStatus, PrStatus } from "@/core/types";
 
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+const h = vi.hoisted(() => ({
+  daemon: null as unknown as FakeDaemon,
+  toastInfo: vi.fn(),
+}));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("vue-sonner", () => ({
+  toast: { info: h.toastInfo, success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+}));
 
 import { STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
+import { useChatStore } from "@/modules/chat/store";
+import { useDesignStore } from "@/modules/design/store";
+import { useSettingsStore } from "@/modules/settings/store";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -27,6 +37,7 @@ const HINT = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("changes store", () => {
@@ -91,6 +102,22 @@ describe("changes store", () => {
     expect(reload).toHaveBeenCalled();
   });
 
+  it("switchTo still reloads the preview when the content refresh fails", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    vi.spyOn(useContentStore(), "refreshForBranch").mockRejectedValue(new Error("preview not ready"));
+    vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await store.switchTo("site", "content/alpha");
+    expect(store.active?.branch).toBe("content/alpha");
+    expect(reload).toHaveBeenCalled();
+  });
+
   it("switchTo and create refresh Content for the new branch", async () => {
     const store = setup({
       switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
@@ -114,6 +141,187 @@ describe("changes store", () => {
     });
     await expect(store.switchTo("site", "content/alpha")).rejects.toBeInstanceOf(ApiError);
     expect(store.error).toMatch(/checkpoint/i);
+  });
+
+  it("switchTo with a chat running defers to a confirm and cancel leaves active unchanged", async () => {
+    const switchChange = vi.fn(async () => ({ branch: "content/new", title: "New" }));
+    const stopChat = vi.fn(async () => ({ stopped: true }));
+    const store = setup({
+      switchChange,
+      stopChat,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    const result = await store.switchTo("site", "content/new");
+
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+    expect(store.pendingSwitch).toEqual({
+      projectId: "site",
+      branch: "content/new",
+      fromTitle: "Old",
+      toTitle: "New",
+    });
+
+    store.cancelSwitch();
+    expect(store.pendingSwitch).toBeNull();
+    expect(store.active).toEqual({ branch: "content/old", title: "Old" });
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(stopChat).not.toHaveBeenCalled();
+  });
+
+  it("confirming the switch stops the chat then switches", async () => {
+    const switchChange = vi.fn(async () => ({ branch: "content/new", title: "New" }));
+    const stopChat = vi.fn(async () => ({ stopped: true }));
+    const store = setup({
+      switchChange,
+      stopChat,
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+    vi.spyOn(usePreviewStore(), "reload");
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    const change = await store.confirmSwitch();
+
+    expect(stopChat).toHaveBeenCalledWith("site", "c1");
+    expect(switchChange).toHaveBeenCalledWith("site", "content/new");
+    expect(change).toEqual({ branch: "content/new", title: "New" });
+    expect(store.active).toEqual({ branch: "content/new", title: "New" });
+    expect(store.pendingSwitch).toBeNull();
+  });
+
+  it("switchTo toasts 'Opening this draft…' when it actually switches", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+
+    await store.switchTo("site", "content/alpha");
+
+    expect(h.toastInfo).toHaveBeenCalledWith("Opening this draft…");
+  });
+
+  it("a canceled switch shows no toast", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/new", title: "New" })),
+      stopChat: vi.fn(async () => ({ stopped: true })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    store.cancelSwitch();
+
+    expect(h.toastInfo).not.toHaveBeenCalled();
+  });
+
+  it("confirming a held switch toasts once the switch runs", async () => {
+    const store = setup({
+      switchChange: vi.fn(async () => ({ branch: "content/new", title: "New" })),
+      stopChat: vi.fn(async () => ({ stopped: true })),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    expect(h.toastInfo).not.toHaveBeenCalled();
+    await store.confirmSwitch();
+    expect(h.toastInfo).toHaveBeenCalledWith("Opening this draft…");
+  });
+
+  it("toasts 'Updating tools for this draft…' when deps install for the open project", async () => {
+    const store = setup();
+    store.projectId = "site";
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "site" });
+
+    expect(h.toastInfo).toHaveBeenCalledWith("Updating tools for this draft…");
+  });
+
+  it("refreshes content and preview once deps install finishes and the preview is ready", async () => {
+    const store = setup();
+    store.projectId = "site";
+    store.active = { branch: "content/new", title: "New" };
+    const content = useContentStore();
+    const refreshForBranch = vi.spyOn(content, "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
+    vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
+    const preview = usePreviewStore();
+    const reload = vi.spyOn(preview, "reload");
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "site" });
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "starting" });
+    expect(refreshForBranch).not.toHaveBeenCalled();
+
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await vi.waitFor(() => expect(refreshForBranch).toHaveBeenCalledWith("content/new"));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
+
+    // A later ready (a plain restart) does not refresh content again.
+    refreshForBranch.mockClear();
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await flushPromises();
+    expect(refreshForBranch).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh content on ready when no install ran for the open project", async () => {
+    const store = setup();
+    store.projectId = "site";
+    store.active = { branch: "content/new", title: "New" };
+    const content = useContentStore();
+    const refreshForBranch = vi.spyOn(content, "refreshForBranch").mockResolvedValue();
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "other" });
+    h.daemon.emit({ type: "devserver.status", projectId: "site", state: "ready", port: 4321 });
+    await flushPromises();
+    expect(refreshForBranch).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when deps install for another project", async () => {
+    const store = setup();
+    store.projectId = "site";
+
+    h.daemon.emit({ type: "preview.deps_installing", projectId: "other" });
+
+    expect(h.toastInfo).not.toHaveBeenCalled();
+  });
+
+  it("a failed stop aborts the switch and stays on the old draft", async () => {
+    const switchChange = vi.fn();
+    const stopChat = vi.fn(async () => {
+      throw new ApiError("IO", "could not stop the agent", 500);
+    });
+    const store = setup({ switchChange, stopChat });
+    useChatStore().running.site = "c1";
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    await store.switchTo("site", "content/new");
+    await expect(store.confirmSwitch()).rejects.toBeInstanceOf(ApiError);
+
+    expect(store.error).toMatch(/could not stop the agent/i);
+    expect(switchChange).not.toHaveBeenCalled();
+    expect(store.active).toEqual({ branch: "content/old", title: "Old" });
   });
 
   it("load sets active from GET /api/changes/active", async () => {
@@ -614,6 +822,93 @@ describe("changes store cleanup", () => {
     });
     vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
     await expect(store.cleanup("site", "content/lw")).resolves.toEqual({ mainUpdated: false });
+  });
+});
+
+describe("changes store publish", () => {
+  const pr: PrStatus = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged",
+    checks: "none",
+    previewUrl: null,
+  };
+
+  function publishStore(api: Record<string, unknown> = {}) {
+    return setup({
+      publishChange: vi.fn(async () => pr),
+      listChanges: vi.fn(async () => []),
+      tree: vi.fn(async () => ({ entries: [] })),
+      ...api,
+    });
+  }
+
+  it("publishes the active change and shows the returned status", async () => {
+    const publishChange = vi.fn(async () => pr);
+    const store = publishStore({ publishChange });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      expect(publishChange).toHaveBeenCalledWith("site", "content/lw");
+      expect(store.status).toEqual(pr);
+      expect(store.prUrl).toBe(pr.url);
+      expect(store.publishing).toBe(false);
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("refreshes the change list after publishing", async () => {
+    const listChanges = vi.fn(async () => []);
+    const store = publishStore({ listChanges });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      expect(listChanges).toHaveBeenCalledWith("site");
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("is in flight while the publish request is pending", async () => {
+    let release!: (pr: PrStatus) => void;
+    const publishChange = vi.fn(
+      () => new Promise<PrStatus>((resolve) => (release = resolve)),
+    );
+    const store = publishStore({ publishChange });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      const pending = store.publish("site", "content/lw");
+      expect(store.publishing).toBe(true);
+      release(pr);
+      await expect(pending).resolves.toBeUndefined();
+      expect(store.publishing).toBe(false);
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("surfaces publish failures and keeps the change", async () => {
+    const store = publishStore({
+      publishChange: vi.fn(async () => {
+        throw new ApiError("SANDBOX", "Ask an owner to add you to this site.", 403);
+      }),
+    });
+    store.active = { branch: "content/lw", title: "LW" };
+    await expect(store.publish("site", "content/lw")).rejects.toBeInstanceOf(ApiError);
+    expect(store.active).toEqual({ branch: "content/lw", title: "LW" });
+    expect(store.publishing).toBe(false);
+  });
+
+  it("a publish blocked by a stale session asks for sign-in", async () => {
+    const store = publishStore({
+      publishChange: vi.fn(async () => {
+        throw new ApiError("UNAUTH", "your GitHub session expired — sign in again", 401);
+      }),
+    });
+    store.active = { branch: "content/lw", title: "LW" };
+    await expect(store.publish("site", "content/lw")).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsSignIn).toBe(true);
   });
 });
 

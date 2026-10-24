@@ -39,20 +39,8 @@ function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
-function fakeCliPath(root = repoRoot()): string {
-  return path.join(root, "tests/fixtures/fake_cli.sh");
-}
-
-/** `http(s)://host` → `ws(s)://host/api/terminal/{project}/ws[?t=token]`. */
-function buildTerminalUrl(
-  origin: string,
-  token: string,
-  projectId: string,
-): string {
-  const url = new URL(`/api/terminal/${encodeURIComponent(projectId)}/ws`, origin);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  if (token) url.searchParams.set("t", token);
-  return url.toString();
+function fakeAcpPath(root = repoRoot()): string {
+  return path.join(root, "e2e/fixtures/fake_acp.py");
 }
 
 export async function api(
@@ -83,8 +71,8 @@ export async function createChange(
 
 /**
  * Start a change the way the app's Content and Design "Create change" prompts do. The Changes
- * menu and command palette hand "New change" to the coding agent instead, which the fake CLI
- * cannot act on, so specs start changes here and reload the page to pick them up.
+ * menu and command palette hand "New change" to the coding agent instead, which the fake ACP
+ * agent cannot act on, so specs start changes here and reload the page to pick them up.
  */
 export async function startChange(
   env: Pick<orsoEnv, "origin" | "token" | "projectId">,
@@ -120,105 +108,42 @@ export async function getLatest(
 }
 
 /**
- * Drive a fake CLI turn over the terminal WebSocket: start session, send `edit …`, wait for checkpoint.
+ * Drive a fake ACP chat turn: create a chat with the `fake` agent, send `edit …`, wait for the
+ * checkpoint the daemon saves when the turn ends.
  */
-export async function terminalCheckpoint(
+export async function chatCheckpoint(
   env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   text = "edit the notes",
 ): Promise<void> {
-  const beforeRes = await api(
-    env.origin,
-    env.token,
-    "GET",
-    `/api/checkpoints?project=${encodeURIComponent(env.projectId)}`,
-  );
-  if (!beforeRes.ok) throw new Error(`checkpoints list failed: ${await beforeRes.text()}`);
-  const before = (await beforeRes.json()) as { checkpoints: unknown[] };
-  const beforeCount = before.checkpoints.length;
-
-  const start = await api(env.origin, env.token, "POST", "/api/terminal", {
-    project: env.projectId,
-    provider: "fake",
-  });
-  if (!start.ok && start.status !== 409) {
-    throw new Error(`terminal start failed: ${await start.text()}`);
-  }
-
-  const wsUrl = buildTerminalUrl(env.origin, env.token, env.projectId);
-  const ws = new WebSocket(wsUrl);
-  ws.binaryType = "arraybuffer";
-
-  let pty = "";
-
-  await new Promise<void>((resolve, reject) => {
-    const deadline = Date.now() + 30_000;
-    let sent = false;
-    let done = false;
-
-    const fail = (err: Error) => {
-      if (done) return;
-      done = true;
-      clearInterval(timer);
-      ws.close();
-      reject(err);
-    };
-
-    const timer = setInterval(() => {
-      if (Date.now() > deadline) {
-        clearInterval(timer);
-        fail(
-          new Error(
-            sent
-              ? `timed out waiting for TURN-END on terminal websocket; pty=${JSON.stringify(pty)}`
-              : "timed out waiting for FAKE-CLI READY on terminal websocket",
-          ),
-        );
-      }
-    }, 250);
-
-    ws.onopen = () => {
-      // wait for replay/data
-    };
-    ws.onmessage = (ev) => {
-      if (typeof ev.data === "string") return;
-      pty += Buffer.from(ev.data as ArrayBuffer).toString("utf8");
-      if (!sent && pty.includes("FAKE-CLI READY")) {
-        sent = true;
-        ws.send(new TextEncoder().encode(`${text}\r`));
-        return;
-      }
-      if (sent && pty.includes("TURN-END")) {
-        done = true;
-        clearInterval(timer);
-        resolve();
-      }
-    };
-    ws.onerror = () => fail(new Error("terminal websocket error"));
-    ws.onclose = () => {
-      if (!done && !pty.includes("TURN-END")) {
-        fail(new Error(`terminal websocket closed early; pty=${JSON.stringify(pty)}`));
-      }
-    };
-  });
-
-  const pollDeadline = Date.now() + 30_000;
-  while (Date.now() < pollDeadline) {
-    const list = await api(
+  const checkpoints = async () => {
+    const res = await api(
       env.origin,
       env.token,
       "GET",
       `/api/checkpoints?project=${encodeURIComponent(env.projectId)}`,
     );
-    if (!list.ok) throw new Error(`checkpoints list failed: ${await list.text()}`);
-    const body = (await list.json()) as { checkpoints: unknown[] };
-    if (body.checkpoints.length > beforeCount) {
-      ws.close();
-      return;
-    }
+    if (!res.ok) throw new Error(`checkpoints list failed: ${await res.text()}`);
+    return (await res.json()) as { checkpoints: unknown[] };
+  };
+  const before = await checkpoints();
+
+  const project = encodeURIComponent(env.projectId);
+  const created = await api(env.origin, env.token, "POST", `/api/chat/${project}`, {
+    provider: "fake",
+  });
+  if (!created.ok) throw new Error(`chat create failed: ${await created.text()}`);
+  const { id } = (await created.json()) as { id: string };
+
+  const sent = await api(env.origin, env.token, "POST", `/api/chat/${project}/${id}/message`, { text });
+  if (!sent.ok) throw new Error(`chat message failed: ${await sent.text()}`);
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const body = await checkpoints();
+    if (body.checkpoints.length > before.checkpoints.length) return;
     await new Promise((r) => setTimeout(r, 100));
   }
-  ws.close();
-  throw new Error("timed out waiting for checkpoint after terminal turn");
+  throw new Error("timed out waiting for a checkpoint after the chat turn");
 }
 
 async function signInAndClone(origin: string, token: string): Promise<string> {
@@ -267,14 +192,20 @@ export async function startorso(): Promise<orsoEnv> {
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
   const resolver = path.join(root, "tests/fixtures/fake_resolver.sh");
-  const headless = path.join(root, "tests/fixtures/fake_headless.sh");
+  const acp = fakeAcpPath(root);
   fs.writeFileSync(
     agents,
     JSON.stringify({
-      fake: [fakeCliPath(root)],
+      fake: {
+        command: ["python3", acp, "edit"],
+        acp: ["python3", acp, "edit"],
+      },
       "fake-resolver": ["sh", resolver, "needs-input"],
       "fake-garbage": ["sh", resolver, "garbage"],
-      cursor: ["sh", headless, path.join(root, CURSOR_TURN_FIXTURE), "edit"],
+      cursor: {
+        command: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
+        acp: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
+      },
     }) + "\n",
   );
 

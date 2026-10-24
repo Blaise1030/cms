@@ -1,7 +1,8 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
 //! `GET /api/changes/{branch}/status`, `GET /api/docs/branch-protection`, `POST /api/changes/update`,
-//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`.
+//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`,
+//! `POST /api/changes/{branch}/publish`.
 
 use std::collections::BTreeMap;
 
@@ -61,20 +62,22 @@ pub async fn create(
     let dir = project_dir(&state, &req.project).await?;
     save_edits(&state, &req.project, &dir, true).await?;
     let change = changes::create(&dir, &req.title).await?;
+    // Same as switch: a new change checks out a different tree; restart so preview matches.
+    let _ = state.devservers.start(&req.project).await;
     Ok((StatusCode::CREATED, Json(change_json(&change))))
 }
 
 /// Checkpoint leftover edits onto the change they were made on, so moving to another change
 /// doesn't stop on them. Edits on `main` are left alone when `carry_main` (a new change takes
-/// them) and on GitHub projects (never committed to `main`). Not while a terminal is live: the
-/// agent may be mid-edit.
+/// them) and on GitHub projects (never committed to `main`). Not while an agent is live: it
+/// may be mid-edit.
 async fn save_edits(
     state: &AppState,
     project_id: &str,
     dir: &std::path::Path,
     carry_main: bool,
 ) -> Result<(), ApiError> {
-    if state.terminals.status(project_id).is_some() || !changes::is_dirty(dir).await? {
+    if state.chats.any_running(project_id) || !changes::is_dirty(dir).await? {
         return Ok(());
     }
     let on_change = changes::active(dir).await?.is_some();
@@ -167,6 +170,11 @@ pub async fn switch(
     let dir = project_dir(&state, &req.project).await?;
     save_edits(&state, &req.project, &dir, false).await?;
     let change = changes::switch(&dir, &branch).await?;
+    // Checkout replaces files under a still-running Vite/Astro process; remounting the
+    // iframe alone can keep serving the previous draft. Restart (no reinstall unless
+    // deps are already stale). Switch already succeeded — a preview failure must not
+    // report the draft switch as failed.
+    let _ = state.devservers.start(&req.project).await;
     Ok(Json(change_json(&change)))
 }
 
@@ -258,20 +266,20 @@ struct UpdateRequest {
 /// `POST /api/changes/update` `{ project }` →
 /// `{ mainUpdated, mainDiverged, updated: [{ branch, title }], conflicts: [{ branch, title }] }`.
 /// Get latest: pull `main`, merge it into every open change; conflicting changes are left as-is.
-/// While that project's terminal is live the checkout is left alone (`skipped`) — git must not
-/// rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
+/// While that project's agent is running a turn the checkout is left alone (`skipped`) — git must
+/// not rewrite files under the CLI — and caught up by [`finish_pending_update`] once it is idle.
 pub async fn update(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: UpdateRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;
-    let leave_checkout = state.terminals.status(&req.project).is_some();
+    let leave_checkout = state.chats.any_running(&req.project);
     Ok(Json(
         run_update(&state, &req.project, leave_checkout).await?,
     ))
 }
 
 /// Finish a Get latest that skipped the checked-out change, now that nothing is editing it
-/// (turn end, terminal stopped). Emits `changes.updated` with the result or the error.
+/// (turn end). Emits `changes.updated` with the result or the error.
 pub async fn finish_pending_update(state: AppState, project_id: String) {
     let pending = state.pending_latest.lock().unwrap().remove(&project_id);
     if !pending {
@@ -686,6 +694,8 @@ pub async fn cleanup(
         None => (PrMerge::NotMerged, Vec::new()),
     };
     let done = changes::cleanup(&project.dir, &branch, pr, &env).await?;
+    // Cleanup checks out main; same Vite-stale problem as switch.
+    let _ = state.devservers.start(&req.project).await;
     Ok(Json(
         json!({ "branch": "main", "mainUpdated": done.main_updated }),
     ))
@@ -741,8 +751,107 @@ pub async fn ready(
     Ok(Json(json!({ "pr": pr })))
 }
 
+/// `POST /api/changes/{branch}/publish` `{ project }` → `{ pr: { number, url, state } }`.
+/// Publishes the change: pushes it, shares it (opening a pull request if it has none), marks
+/// it ready, then merges it on GitHub. Anyone on the team may publish — approvals and
+/// CODEOWNERS are not checked. Local cleanup afterwards stays with the existing Clean up
+/// button ([`cleanup`]); publishing does not delete the change.
+pub async fn publish(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: ShareRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
+    })?;
+    let project = state
+        .projects
+        .get(&req.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
+    // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
+    let change = changes::get(&project.dir, &branch).await?;
+    let repo = project.repo.ok_or_else(|| {
+        ApiError::badreq("this project has no GitHub remote — open a repository first")
+    })?;
+    // Publish the change's latest commits, not an older shared copy.
+    let env = state.github.git_env().await?;
+    changes::push(&project.dir, &branch, &env)
+        .await
+        .map_err(|e| publish_step_error(e, true))?;
+    let shared = match state
+        .github
+        .find_pr(&repo, &branch)
+        .await
+        .map_err(|e| publish_step_error(e, false))?
+    {
+        Some(existing) => existing,
+        None => {
+            let title = pr_title(&change.title);
+            let body = pr_body(&change.title);
+            state
+                .github
+                .create_draft_pr(&repo, &branch, &title, &body)
+                .await
+                .map_err(|e| publish_step_error(e, false))?
+        }
+    };
+    // A draft cannot be merged; this is the same step the ready route takes.
+    if shared.draft {
+        state
+            .github
+            .mark_ready_for_review(&repo, &branch)
+            .await
+            .map_err(|e| publish_step_error(e, false))?;
+    }
+    let pr = state
+        .github
+        .merge_pr(&repo, &branch)
+        .await
+        .map_err(|e| publish_step_error(e, false))?;
+    Ok(Json(json!({ "pr": pr })))
+}
+
+/// Writer-plain copy for a failed publish step: git/GitHub details never reach the
+/// Publish button. Already-plain publish messages pass through unchanged.
+fn publish_step_error(e: ApiError, push_failed: bool) -> ApiError {
+    if e.message.starts_with("Couldn't publish") || e.message.starts_with("Ask an owner") {
+        return e;
+    }
+    if push_failed {
+        ApiError::conflict("Couldn't publish. Get latest, then try again.")
+    } else {
+        ApiError::github("Couldn't publish. Try again in a moment.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn publish_step_errors_hide_git_and_github_details() {
+        let push = publish_step_error(ApiError::git("git push failed: rejected"), true);
+        assert_eq!(push.message, "Couldn't publish. Get latest, then try again.");
+        let ready = publish_step_error(
+            ApiError::github("GitHub could not mark the pull request ready for review"),
+            false,
+        );
+        assert_eq!(ready.message, "Couldn't publish. Try again in a moment.");
+        assert!(!ready.message.contains("pull request"));
+    }
+
+    #[test]
+    fn publish_step_errors_keep_plain_publish_copy() {
+        let owner = publish_step_error(
+            ApiError::sandbox("Ask an owner to add you to this site, then try again."),
+            false,
+        );
+        assert_eq!(owner.message, "Ask an owner to add you to this site, then try again.");
+        let already = publish_step_error(ApiError::conflict("Couldn't publish. Get latest, then try again."), true);
+        assert_eq!(already.message, "Couldn't publish. Get latest, then try again.");
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;

@@ -52,7 +52,7 @@ pub async fn sign_out(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "signedOut": true }))
 }
 
-/// `GET /api/github/repos` → `{ repos: [{ fullName, private, defaultBranch, canPush }] }`.
+/// `GET /api/github/repos` → `{ repos: [{ fullName, private, defaultBranch, canPush, pushedAt }] }`.
 pub async fn repos(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let (result, cleared) = state.github.repos_checked().await;
     if cleared {

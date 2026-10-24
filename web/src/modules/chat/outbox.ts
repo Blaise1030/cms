@@ -17,7 +17,7 @@ export function agentPrompt(message: AgentMessage): string {
   return message.kind === "element" ? elementPrompt(message.element) : message.text;
 }
 
-/** Messages waiting for the agent terminal, held until its session can take input. */
+/** Messages waiting for the agent, held until its session can take input. */
 export const useAgentOutboxStore = defineStore("agentOutbox", () => {
   const messages = ref<AgentMessage[]>([]);
   /** Bumped on every send, so the page can bring the agent into view even after a quick drain. */

@@ -16,7 +16,7 @@
 #   variables: CLOUDFLARE_WORKER_NAME (optional; defaults to `name` in wrangler.toml)
 # No other repo settings: the job requests the token permissions it needs (contents: read,
 # deployments: write, pull-requests: write). PRs from forks get no secrets and are skipped.
-name: Deploy to Cloudflare Workers
+name: Deploy Cloudflare Workers
 
 on:
   push:

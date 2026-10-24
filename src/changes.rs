@@ -183,7 +183,7 @@ async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// GitHub-remote projects cannot be edited (terminal / checkpoint) on `main`.
+/// GitHub-remote projects cannot be edited (agent / checkpoint) on `main`.
 /// Local-only projects (`github_repo == None`) may edit `main`.
 pub async fn require_change(dir: &Path, github_repo: Option<&str>) -> Result<(), ApiError> {
     if github_repo.is_none() {
@@ -320,7 +320,13 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
         return Err(ApiError::enoent(format!("no such change: {branch}")));
     }
     ensure_clean(dir, "switching changes").await?;
-    run(dir, &["checkout", branch]).await?;
+    // Only the app's checkout is allowed: mark this one invocation (never process-wide).
+    run_env(
+        dir,
+        &["checkout", branch],
+        &[(crate::git_shim::ALLOW_ENV.to_string(), "1".to_string())],
+    )
+    .await?;
     let title = branch_title(dir, branch).await;
     Ok(Change {
         branch: branch.to_string(),
@@ -343,7 +349,7 @@ pub struct Update {
     pub updated: Vec<Change>,
     /// Change branches whose merge with `main` conflicts; left exactly as they were.
     pub conflicts: Vec<Change>,
-    /// The checked-out branch needed the latest but was left as it is because a terminal is
+    /// The checked-out branch needed the latest but was left as it is because an agent is
     /// working in the checkout ([`get_latest_leaving_checkout`]).
     pub skipped: Option<Change>,
 }
@@ -385,7 +391,7 @@ pub async fn get_latest(dir: &Path, env: &[(String, String)]) -> Result<Update, 
 
 /// [`get_latest`] without touching the working tree: the checked-out branch is left as it is
 /// (reported in [`Update::skipped`] when it needed the latest), everything else moves by ref.
-/// For while a terminal is editing the checkout.
+/// For while an agent is running a turn in the checkout.
 pub async fn get_latest_leaving_checkout(
     dir: &Path,
     env: &[(String, String)],

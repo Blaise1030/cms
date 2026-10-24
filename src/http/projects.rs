@@ -161,11 +161,10 @@ pub async fn remove(
             "deleting a project removes its files; pass ?confirm=true to proceed",
         ));
     }
-    // Stop the project's dev server, terminal and chat turn first so nothing writes into (or
+    // Stop the project's dev server and chat turn first so nothing writes into (or
     // serves from) a directory being removed.
     state.devservers.stop(&id).await;
-    state.terminals.kill(&id).await;
-    state.chats.stop(&id).await;
+    state.chats.stop_project(&id).await;
     state.watchers.stop(&id);
     if let Err(e) = state.projects.delete(&id).await {
         // Delete failed and the project lives on: bring its preview back.

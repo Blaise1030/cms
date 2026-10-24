@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, FolderGit2, Plus, Trash2 } from "@lucide/vue";
+import { EllipsisVertical, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -12,7 +12,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,23 +19,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
+import PawMark from "@/app/PawMark.vue";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
-import { useGithubStore } from "@/modules/github/store";
+import InviteDialog from "./InviteDialog.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
-import OpenRepoDialog from "./OpenRepoDialog.vue";
+import RepoBrowser from "./RepoBrowser.vue";
+import TemplateGallery from "./TemplateGallery.vue";
 import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
 import { projectPath } from "@/router";
@@ -44,8 +36,11 @@ import { projectPath } from "@/router";
 const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
 const store = useProjectsStore();
-const gh = useGithubStore();
 const macDesktop = isMacDesktop();
+
+/** Newest first, capped: the daemon and the store append new projects to the end. */
+const RECENT_LIMIT = 5;
+const recent = computed(() => [...store.projects].reverse().slice(0, RECENT_LIMIT));
 
 const STATUS_DOT: Record<Project["devserver"], string> = {
   starting: "bg-amber-500 animate-pulse",
@@ -54,7 +49,7 @@ const STATUS_DOT: Record<Project["devserver"], string> = {
 };
 
 const showNew = ref(false);
-const showOpen = ref(false);
+const inviteProject = ref<Project | null>(null);
 const pendingDelete = ref<Project | null>(null);
 const deleting = ref(false);
 
@@ -85,96 +80,105 @@ function open(project: Project) {
 
 <template>
   <div class="flex h-full flex-col">
-    <div v-if="macDesktop" class="h-11 shrink-0 fullscreen:hidden" data-tauri-drag-region data-testid="window-drag-strip" />
+    <!-- One title-bar row. On macOS it is the drag region and clears the traffic lights. -->
+    <div
+      class="flex h-11 shrink-0 items-start justify-end pt-1"
+      :class="macDesktop ? 'pr-3 fullscreen:hidden' : 'px-3'"
+      :data-tauri-drag-region="macDesktop ? '' : undefined"
+      data-testid="page-header"
+    >
+      <div data-testid="account-slot"><GithubAccount /></div>
+    </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
-      <div class="absolute top-3 right-3">
-        <GithubAccount />
-      </div>
-      <!-- A welcome page in the spirit of VS Code's: title, start actions, then recent projects. -->
-      <div class="flex min-h-full flex-col items-center gap-10 px-10 pt-[15vh] pb-10">
-        <header class="text-center">
-          <img :src="'/icons/orso-logo.svg?v=chrome-rounded-exact'" alt="" width="64" height="48" class="mx-auto mb-1 h-12 w-16" />
-          <h1 class="text-3xl font-bold tracking-tight">orso</h1>
-          <p class="text-muted-foreground mt-1">Build and edit your sites with an AI agent</p>
-        </header>
+      <div class="mx-auto flex w-full max-w-2xl flex-col gap-8 px-10 pt-16 pb-16">
+        <div class="flex flex-col gap-8">
+          <header class="mb-2 flex items-center gap-4" data-testid="home-brand">
+            <PawMark class="text-muted-foreground size-7 shrink-0" data-testid="home-logo" />
+            <div class="min-w-0 leading-tight">
+              <h1 class="text-lg font-semibold tracking-tight">orso</h1>
+              <p class="text-muted-foreground text-sm">Build and edit your sites with an AI agent</p>
+            </div>
+          </header>
+          <section class="flex flex-col gap-3">
+            <h2 class="text-lg font-medium">Recent</h2>
 
-        <div class="flex gap-2">
-          <Button @click="showNew = true"><Plus /> New project</Button>
-          <Button v-if="gh.configured" variant="outline" @click="showOpen = true">
-            <FolderGit2 /> Open from GitHub
-          </Button>
-        </div>
+            <p v-if="store.error" class="text-destructive text-sm" role="alert">
+              {{ store.error }}
+              <Button variant="link" size="sm" @click="store.load()">Retry</Button>
+            </p>
 
-        <section class="flex w-full max-w-xl flex-col gap-3">
-          <h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
+            <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
+              <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
+            </div>
 
-          <p v-if="store.error" class="text-destructive text-sm" role="alert">
-            {{ store.error }}
-            <Button variant="link" size="sm" @click="store.load()">Retry</Button>
-          </p>
-
-          <div v-if="store.loading && !store.loaded" class="flex flex-col gap-2">
-            <Skeleton v-for="n in 3" :key="n" class="h-14 w-full" />
-          </div>
-
-          <p
-            v-else-if="store.loaded && store.projects.length === 0"
-            class="text-muted-foreground text-sm"
-          >
-            No projects yet.
-          </p>
-
-          <ItemGroup v-else class="gap-2" data-testid="project-grid">
-            <!-- The whole row links to the project; the menu stops its clicks from following it. -->
-            <Item
-              v-for="project in store.projects"
-              :key="project.id"
-              as-child
-              variant="outline"
-              size="sm"
+            <p
+              v-else-if="store.loaded && store.projects.length === 0"
+              class="text-muted-foreground text-sm"
             >
-              <RouterLink :to="projectPath(project.id)" :data-testid="`project-${project.id}`">
-              <ItemMedia>
+              No projects yet.
+            </p>
+
+            <div v-else class="bg-card divide-y overflow-hidden rounded-lg border shadow-sm" data-testid="project-grid">
+              <div
+                v-for="project in recent"
+                :key="project.id"
+                :data-testid="`project-${project.id}`"
+                class="flex items-center gap-3 px-4 py-2.5"
+              >
                 <span :title="STATUS_LABEL[project.devserver]" data-testid="project-status">
                   <span class="block size-2 rounded-full" :class="STATUS_DOT[project.devserver]" />
                   <span class="sr-only">{{ STATUS_LABEL[project.devserver] }}</span>
                 </span>
-              </ItemMedia>
-              <ItemContent class="min-w-0">
-                <ItemTitle>{{ project.name }}</ItemTitle>
-                <ItemDescription v-if="project.repo">{{ project.repo }}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Badge variant="outline">localhost:{{ project.port }}</Badge>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm">{{ project.name }}</span>
+                  <span v-if="project.repo" class="text-muted-foreground block truncate text-xs">
+                    {{ project.repo }}
+                  </span>
+                </span>
+                <Button variant="outline" size="sm" as-child>
+                  <RouterLink :to="projectPath(project.id)" :aria-label="`Open ${project.name}`">
+                    Open
+                  </RouterLink>
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       :aria-label="`Actions for ${project.name}`"
-                      @click.stop.prevent
                       @keydown.enter.stop
                     >
                       <EllipsisVertical />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem @select="inviteProject = project">
+                      <UserPlus /> Invite
+                    </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" @select="pendingDelete = project">
                       <Trash2 /> Delete
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </ItemActions>
-              </RouterLink>
-            </Item>
-          </ItemGroup>
-        </section>
+              </div>
+            </div>
+          </section>
+        </div>
+        <RepoBrowser />
+        <TemplateGallery @create="showNew = true" />
       </div>
     </div>
   </div>
 
   <NewProjectDialog v-model:open="showNew" @created="open" />
-  <OpenRepoDialog v-model:open="showOpen" @created="open" />
+
+  <InviteDialog
+    v-if="inviteProject"
+    :open="inviteProject !== null"
+    :name="inviteProject.name"
+    :repo="inviteProject.repo"
+    @update:open="(o) => !o && (inviteProject = null)"
+  />
 
   <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
     <AlertDialogContent>

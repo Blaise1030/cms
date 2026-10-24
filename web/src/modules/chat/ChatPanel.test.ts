@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import type { UIMessage } from "ai";
 import { createApi } from "@/core/api";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
@@ -16,47 +15,54 @@ import { useChatStore } from "./store";
 enableAutoUnmount(afterEach);
 
 const ORIGIN = "http://127.0.0.1:7800";
-const encoder = new TextEncoder();
 
 type Call = { method: string; url: string; init: RequestInit };
+type Chunk = Record<string, unknown>;
+type WireChat = {
+  id: string;
+  provider: string;
+  model: string | null;
+  title: string | null;
+  updatedAt: number;
+  live: boolean;
+  running: boolean;
+};
+type History = { chunks: Chunk[]; provider: string; model: string | null; running: boolean };
+
 let calls: Call[];
-let terminalRunning: boolean;
-let histories: Record<string, { messages: UIMessage[]; provider: string; running: boolean }>;
-let chatResponse: (init: RequestInit) => Response;
+let chats: WireChat[];
+let histories: Record<string, History>;
+let seq: number;
 /** When set, chat history responses wait for it. */
 let historyGate: Promise<void> | null;
-
-function sse(chunks: unknown[], keepOpen = false, signal?: AbortSignal | null) {
-  const body = new ReadableStream<Uint8Array>({
-    start(c) {
-      for (const chunk of chunks) c.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-      if (keepOpen) signal?.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
-      else c.close();
-    },
-  });
-  return new Response(body, { headers: { "content-type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" } });
-}
-
-const reply = [
-  { type: "start", messageId: "a1" },
-  { type: "text-start", id: "t1" },
-  { type: "text-delta", id: "t1", delta: "Hello " },
-  { type: "text-delta", id: "t1", delta: "there" },
-  { type: "text-end", id: "t1" },
-  { type: "finish" },
-];
+/** When set, the next message POST fails with it. */
+let messageFailure: Response | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+function finish(id: string, chunks: Chunk[]) {
+  histories[id]!.chunks.push(...chunks);
+  histories[id]!.running = false;
+  const chat = chats.find((c) => c.id === id);
+  if (chat) chat.running = false;
+  h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: id });
+}
 
 async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const url = String(input);
   const method = (init.method ?? "GET").toUpperCase();
   calls.push({ method, url, init });
   const path = url.replace(ORIGIN, "");
-  if (path === "/api/terminal/providers")
-    return json({ providers: ["cursor", "claude", "codex", "opencode", "shell"].map((id) => ({ id, command: [id] })) });
-  const models = path.match(/^\/api\/terminal\/providers\/([^/]+)\/models$/);
+  if (path === "/api/chat/providers")
+    return json({
+      providers: ["cursor", "claude", "codex", "opencode", "shell"].map((id) => ({
+        id,
+        command: [id],
+        acp: [id],
+      })),
+    });
+  const models = path.match(/^\/api\/chat\/providers\/([^/]+)\/models$/);
   if (models)
     return json({
       models: [
@@ -64,35 +70,86 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
         { id: `${models[1]}-smart`, name: "Smart" },
       ],
     });
-  if (path === "/api/terminal/p1" && method === "DELETE") {
-    terminalRunning = false;
+  if (path === "/api/chat/p1/attachments" && method === "POST")
+    return json({ path: "/state/p1/attachments/abc123.png" });
+  if (path === "/api/chat/p1" && method === "GET")
+    return json({ chats, running: chats.find((c) => c.running)?.id ?? null });
+  if (path === "/api/chat/p1" && method === "POST") {
+    const body = JSON.parse(String(init.body));
+    const created: WireChat = {
+      id: `c${++seq}`,
+      provider: body.provider,
+      model: body.model ?? null,
+      title: null,
+      updatedAt: Date.now(),
+      live: true,
+      running: false,
+    };
+    chats.unshift(created);
+    histories[created.id] = {
+      chunks: [],
+      provider: created.provider,
+      model: created.model,
+      running: false,
+    };
+    return json(created, 201);
+  }
+  const stop = path.match(/^\/api\/chat\/p1\/([^/]+)\/stop$/);
+  if (stop && method === "POST") {
+    const id = stop[1]!;
+    const chat = chats.find((c) => c.id === id);
+    if (chat) chat.running = false;
+    if (histories[id]) histories[id]!.running = false;
     return json({ stopped: true });
   }
-  if (path === "/api/terminal/p1") return json({ running: terminalRunning });
-  if (path === "/api/terminal/p1/attachments" && method === "POST") return json({ path: "/state/p1/attachments/abc123.png" });
-  if (path === "/api/chat/p1" && method === "GET")
-    return json({ chats: [{ id: "c-old", provider: "claude", title: "Old chat", updatedAt: 1 }], running: null });
-  if (path === "/api/chat/p1" && method === "POST") return chatResponse(init);
-  if (path === "/api/chat/p1/turn" && method === "DELETE") return json({ stopped: true });
-  if (path === "/api/chat/p1/c-old" && method === "DELETE") return json({ deleted: true });
+  const model = path.match(/^\/api\/chat\/p1\/([^/]+)\/model$/);
+  if (model && method === "POST") {
+    const id = model[1]!;
+    const body = JSON.parse(String(init.body));
+    const chat = chats.find((c) => c.id === id);
+    if (chat) chat.model = body.modelId;
+    if (histories[id]) histories[id]!.model = body.modelId;
+    return json({ model: body.modelId });
+  }
+  const message = path.match(/^\/api\/chat\/p1\/([^/]+)\/message$/);
+  if (message && method === "POST") {
+    if (messageFailure) return messageFailure;
+    const id = message[1]!;
+    const body = JSON.parse(String(init.body));
+    histories[id]!.chunks.push({ type: "user_text", session_id: "s", text: body.text });
+    histories[id]!.running = true;
+    const chat = chats.find((c) => c.id === id);
+    if (chat) chat.running = true;
+    return json({ accepted: true }, 202);
+  }
   const history = path.match(/^\/api\/chat\/p1\/([^/]+)$/);
   if (history && method === "GET") {
     if (historyGate) await historyGate;
     const found = histories[decodeURIComponent(history[1]!)];
     return found ? json(found) : json({ error: { code: "NOT_FOUND", message: "no such chat" } }, 404);
   }
+  if (history && method === "DELETE") {
+    const id = decodeURIComponent(history[1]!);
+    chats = chats.filter((c) => c.id !== id);
+    delete histories[id];
+    return json({ deleted: true });
+  }
   return json({ error: { code: "UNKNOWN", message: `unrouted ${method} ${path}` } }, 500);
 }
 
-const posts = () => calls.filter((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1`);
+const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));
+const createPosts = () =>
+  calls.filter((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1`);
+const textOf = (call: Call) => JSON.parse(String(call.init.body)).text as string;
 
 beforeEach(() => {
   localStorage.clear();
   calls = [];
-  terminalRunning = false;
+  chats = [];
   histories = {};
-  chatResponse = () => sse(reply);
+  seq = 0;
   historyGate = null;
+  messageFailure = null;
   vi.stubGlobal("fetch", vi.fn(fetchMock));
   const api = createApi({ origin: ORIGIN, token: "tok" }, (i, init) => fetchMock(i, init));
   h.daemon = createFakeDaemon(api);
@@ -112,7 +169,7 @@ async function mountPanel() {
 async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
   await w.find("[data-testid='chat-input']").setValue(text);
   await w.find("[data-testid='chat-send']").trigger("click");
-  await vi.waitFor(() => expect(posts().length).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(messagePosts().length).toBeGreaterThan(0));
   await flushPromises();
 }
 
@@ -123,7 +180,6 @@ function agentPicker(w: Awaited<ReturnType<typeof mountPanel>>) {
   return {
     label: () => trigger().text(),
     provider: () => trigger().attributes("data-provider"),
-    disabled: () => trigger().attributes("disabled") !== undefined,
     groups: () =>
       [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-agent-group']")].map((g) => g.dataset.provider),
     open: async () => {
@@ -147,54 +203,58 @@ function agentPicker(w: Awaited<ReturnType<typeof mountPanel>>) {
 }
 
 describe("ChatPanel", () => {
-  it("posts the message with the provider and auth, then renders the streamed reply", async () => {
+  it("creates a chat, posts only the new message with auth, then renders the saved reply", async () => {
     const w = await mountPanel();
     await send(w, "hi");
-    const post = posts()[0]!;
-    const body = JSON.parse(String(post.init.body));
-    expect(body.provider).toBe("cursor");
-    expect(body.messages.at(-1).parts[0].text).toBe("hi");
-    expect(new Headers(post.init.headers).get("Authorization")).toBe("Bearer tok");
-    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+    const create = createPosts()[0]!;
+    expect(JSON.parse(String(create.init.body))).toEqual({ provider: "cursor" });
+    const message = messagePosts()[0]!;
+    expect(textOf(message)).toBe("hi");
+    expect(new Headers(message.init.headers).get("Authorization")).toBe("Bearer tok");
     expect(w.text()).toContain("hi");
+
+    const id = useChatStore().activeChatId("p1")!;
+    finish(id, [
+      { type: "thought_delta", session_id: "s", text: "Looking at about.md" },
+      {
+        type: "tool_call",
+        session_id: "s",
+        tool_call: {
+          toolCallId: "t1",
+          kind: "edit",
+          title: "Edit about.md",
+          status: "pending",
+          locations: [{ path: "about.md" }],
+        },
+      },
+      { type: "tool_call_update", session_id: "s", tool_call: { toolCallId: "t1", status: "completed" } },
+      { type: "text_delta", session_id: "s", text: "Hello " },
+      { type: "text_delta", session_id: "s", text: "there" },
+      { type: "checkpoint", sha: "abcdef1234", summary: "Hello there", files: ["about.md"] },
+      { type: "turn_end", session_id: "s", stop_reason: "end_turn" },
+    ]);
+    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+    expect(w.text()).toContain("Worked through 2 steps");
+    expect(w.text()).toContain("Saved 1 file");
+    expect(w.text()).not.toContain("Agent is working");
   });
 
   it("uploads a picked image and sends its saved path with the message", async () => {
     const w = await mountPanel();
     const input = w.find<HTMLInputElement>("[data-testid='chat-attach-input']");
-    expect(input.exists()).toBe(true);
     const file = new File([new Uint8Array([0x89])], "cat.png", { type: "image/png" });
     Object.defineProperty(input.element, "files", { value: [file], configurable: true });
     await input.trigger("change");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-attachment']").text()).toContain("cat.png"));
-    expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/terminal/p1/attachments`)).toBe(true);
+    expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1/attachments`)).toBe(true);
     await w.find("[data-testid='chat-input']").setValue("use this image");
     await w.find("[data-testid='chat-send']").trigger("click");
-    await vi.waitFor(() => expect(posts()).toHaveLength(1));
-    const body = JSON.parse(String(posts()[0]!.init.body));
-    expect(body.messages.at(-1).parts[0].text).toContain("/state/p1/attachments/abc123.png");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(textOf(messagePosts()[0]!)).toContain("/state/p1/attachments/abc123.png");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-attachment']").exists()).toBe(false));
   });
 
-  it("posts only the new message, not the whole conversation", async () => {
-    const w = await mountPanel();
-    const id = useChatStore().activeChatId("p1");
-    await send(w, "hi");
-    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
-    chatResponse = () => sse([{ type: "start", messageId: "a2" }, ...reply.slice(1)]);
-    await w.find("[data-testid='chat-input']").setValue("again");
-    await w.find("[data-testid='chat-send']").trigger("click");
-    await vi.waitFor(() => expect(posts()).toHaveLength(2));
-    const body = JSON.parse(String(posts()[1]!.init.body));
-    expect(body.id).toBe(id);
-    expect(body.provider).toBe("cursor");
-    expect(body.messages).toHaveLength(1);
-    expect(body.messages[0].role).toBe("user");
-    expect(body.messages[0].parts[0].text).toBe("again");
-    expect(new Headers(posts()[1]!.init.headers).get("Authorization")).toBe("Bearer tok");
-  });
-
-  it("groups chat-capable agents and keeps only the chat's agent once it has messages", async () => {
+  it("groups chat-capable agents and locks the chat's agent after it is created", async () => {
     const w = await mountPanel();
     const picker = agentPicker(w);
     expect(picker.provider()).toBe("cursor");
@@ -203,10 +263,9 @@ describe("ChatPanel", () => {
     await picker.choose("claude:default");
     expect(picker.provider()).toBe("claude");
     await send(w, "hi");
-    expect(JSON.parse(String(posts()[0]!.init.body)).provider).toBe("claude");
+    expect(JSON.parse(String(createPosts()[0]!.init.body)).provider).toBe("claude");
     await picker.open();
     expect(picker.groups()).toEqual(["claude"]);
-    expect(picker.disabled()).toBe(false);
   });
 
   it("offers each agent's models after its Default, and sends no model for Default", async () => {
@@ -224,7 +283,7 @@ describe("ChatPanel", () => {
     await picker.choose("opencode:default");
     expect(picker.label()).toBe("OpenCode");
     await send(w, "hi");
-    const body = JSON.parse(String(posts()[0]!.init.body));
+    const body = JSON.parse(String(createPosts()[0]!.init.body));
     expect(body.provider).toBe("opencode");
     expect(body).not.toHaveProperty("model");
   });
@@ -235,44 +294,63 @@ describe("ChatPanel", () => {
     await picker.open();
     await vi.waitFor(() => expect(picker.items()).toContain("codex:codex-smart"));
     await picker.search("sma");
-    expect(picker.items()).toEqual(["cursor:cursor-smart", "claude:claude-smart", "codex:codex-smart", "opencode:opencode-smart"]);
+    expect(picker.items()).toEqual([
+      "cursor:cursor-smart",
+      "claude:claude-smart",
+      "codex:codex-smart",
+      "opencode:opencode-smart",
+    ]);
     await picker.choose("codex:codex-smart");
     expect(picker.provider()).toBe("codex");
     expect(picker.label()).toBe("Smart");
   });
 
-  it("sends the picked model and lets it change between turns", async () => {
+  it("sends the model picked for a new chat and updates an existing chat's model", async () => {
     const w = await mountPanel();
     const picker = agentPicker(w);
     await picker.open();
     await vi.waitFor(() => expect(picker.items()).toContain("cursor:cursor-smart"));
     await picker.choose("cursor:cursor-smart");
     await send(w, "hi");
-    expect(JSON.parse(String(posts()[0]!.init.body)).model).toBe("cursor-smart");
+    expect(JSON.parse(String(createPosts()[0]!.init.body))).toEqual({ provider: "cursor", model: "cursor-smart" });
+
+    const id = useChatStore().activeChatId("p1")!;
+    finish(id, [{ type: "text_delta", session_id: "s", text: "Hello there" }]);
     await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
 
-    chatResponse = () => sse([{ type: "start", messageId: "a2" }, ...reply.slice(1)]);
     await picker.open();
     await picker.choose("cursor:cursor-fast");
-    await w.find("[data-testid='chat-input']").setValue("again");
-    await w.find("[data-testid='chat-send']").trigger("click");
-    await vi.waitFor(() => expect(posts()).toHaveLength(2));
-    expect(JSON.parse(String(posts()[1]!.init.body)).model).toBe("cursor-fast");
+    await send(w, "again");
+    const model = calls.find((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1/${id}/model`);
+    expect(JSON.parse(String(model!.init.body))).toEqual({ modelId: "cursor-fast" });
+    expect(calls.indexOf(model!)).toBeLessThan(calls.indexOf(messagePosts()[1]!));
   });
 
-  it("stops a running turn on the client and the daemon", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+  it("marks the chat running in the store until chat.turn ends it", async () => {
+    const w = await mountPanel();
+    const store = useChatStore();
+    expect(store.running.p1 ?? null).toBeNull();
+    await send(w, "hello");
+    const id = store.activeChatId("p1")!;
+    expect(store.running.p1).toBe(id);
+    finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);
+    await vi.waitFor(() => expect(store.running.p1).toBeNull());
+  });
+
+  it("stops the running turn on the daemon and clears the spinner when it ends", async () => {
     const w = await mountPanel();
     await send(w, "hi");
+    const id = useChatStore().activeChatId("p1")!;
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
     await w.find("[data-testid='chat-stop']").trigger("click");
-    await flushPromises();
-    expect(calls.some((c) => c.method === "DELETE" && c.url === `${ORIGIN}/api/chat/p1/turn`)).toBe(true);
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1/${id}/stop`)).toBe(true),
+    );
+    finish(id, [{ type: "text_delta", session_id: "s", text: "Stopped" }]);
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(false));
   });
 
-  it("doesn't send on Enter while a turn streams, and keeps the typed text", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+  it("doesn't send on Enter while a turn runs, and keeps the typed text", async () => {
     const w = await mountPanel();
     await send(w, "hi");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
@@ -280,77 +358,23 @@ describe("ChatPanel", () => {
     await input.setValue("next");
     await input.trigger("keydown", { key: "Enter" });
     await flushPromises();
-    expect(posts()).toHaveLength(1);
+    expect(messagePosts()).toHaveLength(1);
     expect(input.element.value).toBe("next");
   });
 
-  it("is busy until the terminal check completes, and while a turn runs", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+  it("is busy until the draft's history check finishes, and while a turn runs", async () => {
+    let release!: () => void;
+    historyGate = new Promise((r) => (release = r));
     const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
     const vm = w.vm as unknown as { busy: boolean; send(t: string): Promise<void> };
     expect(vm.busy).toBe(true);
+    release();
     await flushPromises();
     expect(vm.busy).toBe(false);
     void vm.send("hi");
     expect(vm.busy).toBe(true);
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
     expect(vm.busy).toBe(true);
-  });
-
-  it("reloads the history when the stopped turn ends, showing its checkpoint", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
-    const w = await mountPanel();
-    const id = useChatStore().activeChatId("p1")!;
-    await send(w, "hi");
-    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
-    await w.find("[data-testid='chat-stop']").trigger("click");
-    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(false));
-    histories[id] = {
-      provider: "cursor",
-      running: false,
-      messages: [
-        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
-        {
-          id: "a1",
-          role: "assistant",
-          parts: [
-            { type: "text", text: "Hello " },
-            { type: "data-checkpoint", data: { sha: "abcdef1234", files: ["a.md"] } },
-          ],
-        },
-      ],
-    };
-    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: id });
-    await vi.waitFor(() => expect(w.find("[data-testid='checkpoint']").exists()).toBe(true));
-    expect(w.find("[data-testid='checkpoint']").text()).toContain("Saved 1 file");
-    expect(w.findAll("[data-testid='chat-stop']")).toHaveLength(0);
-  });
-
-  it("reloads the history when a terminal turn ends in the active chat", async () => {
-    histories["c-old"] = {
-      provider: "claude",
-      running: false,
-      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Earlier question" }] }],
-    };
-    useChatStore().setActive("p1", "c-old");
-    const w = await mountPanel();
-    expect(w.text()).not.toContain("Continued in Terminal");
-    histories["c-old"].messages.push({ id: "m1", role: "assistant", parts: [{ type: "data-terminal", data: {} }] });
-    h.daemon.emit({ type: "terminal.session", projectId: "p1", sessionId: "c-old" });
-    await vi.waitFor(() => expect(w.text()).toContain("Continued in Terminal"));
-  });
-
-  it("doesn't reload the history over a streaming turn", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
-    const w = await mountPanel();
-    const id = useChatStore().activeChatId("p1")!;
-    await send(w, "hi");
-    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
-    const before = calls.length;
-    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: id });
-    await flushPromises();
-    expect(calls.slice(before).some((c) => c.url === `${ORIGIN}/api/chat/p1/${id}`)).toBe(false);
-    expect(w.text()).toContain("Hello");
   });
 
   it("offers three suggestions on an empty chat that fill the input", async () => {
@@ -365,44 +389,28 @@ describe("ChatPanel", () => {
     expect(w.find<HTMLTextAreaElement>("[data-testid='chat-input']").element.value).toBe(
       "Make the homepage headline punchier",
     );
-    expect(posts()).toHaveLength(0);
-  });
-
-  it("disables Send while the terminal is running", async () => {
-    terminalRunning = true;
-    const w = await mountPanel();
-    await w.find("[data-testid='chat-input']").setValue("hi");
-    expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(true);
-    expect(w.find("[data-testid='chat-send']").attributes("aria-label")).toBe("The agent is busy in Terminal");
-  });
-
-  it("offers to stop the terminal session that blocks the chat", async () => {
-    terminalRunning = true;
-    const w = await mountPanel();
-    await w.find("[data-testid='chat-input']").setValue("hi");
-    const stopTerminal = w.find("[data-testid='chat-stop-terminal']");
-    expect(stopTerminal.text()).toBe("Stop terminal session");
-    await stopTerminal.trigger("click");
-    await flushPromises();
-    expect(calls.some((c) => c.method === "DELETE" && c.url === `${ORIGIN}/api/terminal/p1`)).toBe(true);
-    expect(w.find("[data-testid='chat-stop-terminal']").exists()).toBe(false);
-    expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(false);
+    expect(createPosts()).toHaveLength(0);
   });
 
   it("shows a refused turn's message in an alert", async () => {
-    chatResponse = () => json({ error: { code: "CONFLICT", message: "A chat turn is already running" } }, 409);
+    messageFailure = json({ error: { code: "CONFLICT", message: "A chat turn is already running" } }, 409);
     const w = await mountPanel();
     await send(w, "hi");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-error']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-error']").text()).toBe("A chat turn is already running");
+    expect(useChatStore().running.p1 ?? null).toBeNull();
   });
 
   it("starts an empty chat with a new active id", async () => {
     histories["c-old"] = {
+      chunks: [{ type: "user_text", session_id: "s", text: "Earlier question" }],
       provider: "claude",
+      model: null,
       running: false,
-      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Earlier question" }] }],
     };
+    chats = [
+      { id: "c-old", provider: "claude", model: null, title: "Old chat", updatedAt: 1, live: false, running: false },
+    ];
     useChatStore().setActive("p1", "c-old");
     const w = await mountPanel();
     expect(w.text()).toContain("Earlier question");
@@ -417,13 +425,17 @@ describe("ChatPanel", () => {
 
   it("loads a chat picked from the history", async () => {
     histories["c-old"] = {
-      provider: "claude",
-      running: false,
-      messages: [
-        { id: "u1", role: "user", parts: [{ type: "text", text: "Earlier question" }] },
-        { id: "a1", role: "assistant", parts: [{ type: "text", text: "Earlier answer" }] },
+      chunks: [
+        { type: "user_text", session_id: "s", text: "Earlier question" },
+        { type: "text_delta", session_id: "s", text: "Earlier answer" },
       ],
+      provider: "claude",
+      model: null,
+      running: false,
     };
+    chats = [
+      { id: "c-old", provider: "claude", model: null, title: "Old chat", updatedAt: 1, live: false, running: false },
+    ];
     const w = await mountPanel();
     await w.find("[data-testid='chat-history-toggle']").trigger("click");
     await flushPromises();
@@ -440,6 +452,10 @@ describe("ChatPanel", () => {
   });
 
   it("deletes a chat from the history after confirming", async () => {
+    chats = [
+      { id: "c-old", provider: "claude", model: null, title: "Old chat", updatedAt: 1, live: false, running: false },
+    ];
+    histories["c-old"] = { chunks: [], provider: "claude", model: null, running: false };
     const w = await mountPanel();
     await w.find("[data-testid='chat-history-toggle']").trigger("click");
     await flushPromises();
@@ -457,42 +473,21 @@ describe("ChatPanel", () => {
 
   it("resumes a turn still running when the chat loads", async () => {
     histories["c-live"] = {
+      chunks: [{ type: "user_text", session_id: "s", text: "Go" }],
       provider: "cursor",
+      model: null,
       running: true,
-      messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Go" }] }],
     };
+    chats = [
+      { id: "c-live", provider: "cursor", model: null, title: null, updatedAt: 1, live: true, running: true },
+    ];
     useChatStore().setActive("p1", "c-live");
-    (fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
-      String(input) === `${ORIGIN}/api/chat/p1/c-live/stream` ? sse(reply) : fetchMock(input, init),
-    );
     const w = await mountPanel();
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
+    expect(useChatStore().running.p1).toBe("c-live");
+    finish("c-live", [{ type: "text_delta", session_id: "s", text: "Hello there" }]);
     await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
-  });
-
-  it("reloads a chat started here when it is reopened", async () => {
-    histories["c-old"] = {
-      provider: "claude",
-      running: false,
-      messages: [{ id: "u0", role: "user", parts: [{ type: "text", text: "Earlier question" }] }],
-    };
-    const w = await mountPanel();
-    const id = useChatStore().activeChatId("p1")!;
-    await send(w, "hi");
-    await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
-    histories[id] = {
-      provider: "cursor",
-      running: false,
-      messages: [
-        { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
-        { id: "a1", role: "assistant", parts: [{ type: "text", text: "Saved reply" }] },
-      ],
-    };
-    useChatStore().setActive("p1", "c-old");
-    await vi.waitFor(() => expect(w.text()).toContain("Earlier question"));
-    const before = calls.length;
-    useChatStore().setActive("p1", id);
-    await vi.waitFor(() => expect(w.text()).toContain("Saved reply"));
-    expect(calls.slice(before).some((c) => c.method === "GET" && c.url === `${ORIGIN}/api/chat/p1/${id}`)).toBe(true);
+    expect(w.find("[data-testid='chat-stop']").exists()).toBe(false);
   });
 
   it("shows a loading indicator while the conversation loads", async () => {
@@ -515,10 +510,9 @@ describe("ChatPanel", () => {
     const sendButton = w.find<HTMLButtonElement>("[data-testid='chat-send']");
     expect(sendButton.element.disabled).toBe(true);
     await sendButton.trigger("click");
-    await w.find("[data-testid='chat-input']").trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(w.find<HTMLTextAreaElement>("[data-testid='chat-input']").element.value).toBe("hi");
-    expect(posts()).toHaveLength(0);
+    expect(createPosts()).toHaveLength(0);
     release();
     await flushPromises();
     expect(w.find<HTMLButtonElement>("[data-testid='chat-send']").element.disabled).toBe(false);
@@ -530,12 +524,12 @@ describe("ChatPanel", () => {
     const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
     const sent = (w.vm as unknown as { send(t: string): Promise<void> }).send("hi");
     await flushPromises();
-    expect(posts()).toHaveLength(0);
+    expect(messagePosts()).toHaveLength(0);
     release();
     await sent;
     await flushPromises();
-    expect(posts()).toHaveLength(1);
-    expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe("hi");
+    expect(messagePosts()).toHaveLength(1);
+    expect(textOf(messagePosts()[0]!)).toBe("hi");
   });
 
   it("exposes insert and send for the outbox", async () => {
@@ -545,19 +539,49 @@ describe("ChatPanel", () => {
     await flushPromises();
     expect(w.find<HTMLTextAreaElement>("[data-testid='chat-input']").element.value).toBe("Fix the footer");
     await vm.send("Ship it");
-    await vi.waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe("Ship it");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(textOf(messagePosts()[0]!)).toBe("Ship it");
   });
 
-  it("shows a working indicator above the input while a turn runs", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
+  it("shows a working indicator and leaves room under the last message while a turn runs", async () => {
     const w = await mountPanel();
     expect(w.find("[data-testid='chat-working']").exists()).toBe(false);
     await send(w, "hi");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-working']").text()).toBe("Agent is working…");
-    await w.find("[data-testid='chat-stop']").trigger("click");
+    expect(w.find("[data-testid='chat-messages']").classes()).toContain("pb-10");
+    const id = useChatStore().activeChatId("p1")!;
+    finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
+    expect(w.find("[data-testid='chat-messages']").classes()).not.toContain("pb-10");
+  });
+
+  it("reloads only the active chat when chat.turn fires", async () => {
+    histories["c-old"] = {
+      chunks: [{ type: "user_text", session_id: "s", text: "Earlier question" }],
+      provider: "claude",
+      model: null,
+      running: false,
+    };
+    histories["c-other"] = {
+      chunks: [{ type: "user_text", session_id: "s", text: "Other" }],
+      provider: "claude",
+      model: null,
+      running: false,
+    };
+    chats = [
+      { id: "c-old", provider: "claude", model: null, title: "Old chat", updatedAt: 1, live: false, running: false },
+    ];
+    useChatStore().setActive("p1", "c-old");
+    const w = await mountPanel();
+    expect(w.text()).toContain("Earlier question");
+    const before = calls.length;
+    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: "c-other" });
+    await flushPromises();
+    expect(calls.slice(before).some((c) => c.url === `${ORIGIN}/api/chat/p1/c-other`)).toBe(false);
+    histories["c-old"]!.chunks.push({ type: "text_delta", session_id: "s", text: "Earlier answer" });
+    h.daemon.emit({ type: "chat.turn", projectId: "p1", chatId: "c-old" });
+    await vi.waitFor(() => expect(w.text()).toContain("Earlier answer"));
   });
 
   it("fades the message list at its edges under a borderless header", async () => {
@@ -566,16 +590,6 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-viewport']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-viewport']").classes()).toContain("scroll-fade-y");
     expect(w.find("[data-testid='chat-header']").classes()).not.toContain("border-b");
-  });
-
-  it("leaves room under the last message for the working indicator while a turn runs", async () => {
-    chatResponse = (init) => sse(reply.slice(0, 3), true, init.signal);
-    const w = await mountPanel();
-    await send(w, "hi");
-    const list = () => w.find("[data-testid='chat-messages']");
-    await vi.waitFor(() => expect(list().classes()).toContain("pb-10"));
-    await w.find("[data-testid='chat-stop']").trigger("click");
-    await vi.waitFor(() => expect(list().classes()).not.toContain("pb-10"));
   });
 
   describe("element references", () => {
@@ -599,8 +613,7 @@ describe("ChatPanel", () => {
       (w.vm as unknown as Vm).insertReference(ref1);
       await flushPromises();
       await send(w, `${input(w).element.value} make it shorter`);
-      const sent = JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text;
-      expect(sent).toBe(`${ref1.trim()} make it shorter`);
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} make it shorter`);
     });
 
     it("drops a reference whose tag was deleted, and numbers afresh after sending", async () => {
@@ -610,8 +623,7 @@ describe("ChatPanel", () => {
       vm.insertReference(ref2);
       await flushPromises();
       await send(w, "[Element #2] only");
-      expect(JSON.parse(String(posts()[0]!.init.body)).messages.at(-1).parts[0].text).toBe(`${ref2} only`);
-      await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref2} only`);
       vm.insertReference(ref2);
       await flushPromises();
       expect(input(w).element.value).toBe("[Element #1]");

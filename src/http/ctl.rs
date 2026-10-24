@@ -1,6 +1,7 @@
-//! `POST /api/ctl/*` — app state for the agent running in a project's terminal
-//! (`orso ctl`). Authenticated like turn-end: the live session's hook token in the
-//! JSON body, no daemon token. Read-only except `restart-preview`.
+//! `POST /api/ctl/*` — app state and UI refresh for the agent in a project's
+//! chat (`orso ctl`). Authenticated like the old turn-end hook: the live chat's
+//! `ORSO_HOOK_TOKEN` in the JSON body, no daemon token. Read-only except
+//! `restart-preview` and the refresh commands (which only emit UI events).
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -24,7 +25,7 @@ struct CtlRequest {
 fn authorize(state: &AppState, body: &Bytes) -> Result<String, ApiError> {
     let req: CtlRequest = serde_json::from_slice(body)
         .map_err(|e| ApiError::badreq(format!("expected JSON body {{project, token}}: {e}")))?;
-    if !state.terminals.token_matches(&req.project, &req.token) {
+    if !state.chats.token_matches(&req.project, &req.token) {
         return Err(ApiError::unauth("invalid hook token").with_status(403));
     }
     Ok(req.project)
@@ -89,4 +90,36 @@ pub async fn change_status(
 ) -> Result<Json<Value>, ApiError> {
     let project = authorize(&state, &body)?;
     Ok(Json(change_status_value(&state, &project).await?))
+}
+
+/// Tell the UI to remount the preview iframe for this project.
+pub fn emit_preview_reload(state: &AppState, project: &str) {
+    state
+        .events
+        .emit("preview.reload", json!({ "projectId": project }));
+}
+
+/// Tell the UI to reload Content collections, entry lists, and the open entry.
+pub fn emit_content_refresh(state: &AppState, project: &str) {
+    state
+        .events
+        .emit("content.refresh", json!({ "projectId": project }));
+}
+
+pub async fn refresh_preview(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let project = authorize(&state, &body)?;
+    emit_preview_reload(&state, &project);
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn refresh_content(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let project = authorize(&state, &body)?;
+    emit_content_refresh(&state, &project);
+    Ok(Json(json!({ "ok": true })))
 }

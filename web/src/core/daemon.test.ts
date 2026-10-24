@@ -38,18 +38,18 @@ describe("createDaemon", () => {
   it("dispatches events by type to subscribers and supports unsubscribe", () => {
     const { daemon, sockets } = setup(async () => ({}));
     const seen: string[] = [];
-    const off = daemon.on("terminal.exited", (e) => seen.push(`exit:${e.code}`));
+    const off = daemon.on("chat.turn", (e) => seen.push(`turn:${e.chatId}`));
     daemon.on("fs.change", (e) => seen.push(`fs:${e.path}`));
     daemon.start();
     expect(sockets[0]!.url).toBe("ws://127.0.0.1:7800/ws/events?t=tok");
     sockets[0]!.onopen?.({});
     expect(daemon.status.value).toBe("open");
     const send = (o: unknown) => sockets[0]!.onmessage?.({ data: JSON.stringify(o) });
-    send({ type: "terminal.exited", projectId: "p", code: 0 });
+    send({ type: "chat.turn", projectId: "p", chatId: "c1" });
     send({ type: "fs.change", projectId: "p", path: "x.md", kind: "modify" });
     off();
-    send({ type: "terminal.exited", projectId: "p", code: 1 });
-    expect(seen).toEqual(["exit:0", "fs:x.md"]);
+    send({ type: "chat.turn", projectId: "p", chatId: "c2" });
+    expect(seen).toEqual(["turn:c1", "fs:x.md"]);
   });
 
   it("reports reason=network when nothing answers", async () => {

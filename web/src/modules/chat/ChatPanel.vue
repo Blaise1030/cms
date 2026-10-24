@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import { Chat } from "@ai-sdk/vue";
-import { DefaultChatTransport, type UIMessage } from "ai";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import type { UIMessage } from "ai";
 import { CircleAlert, MessageSquare, Plus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { errorMessage } from "@orso/utils";
 import { mapErrorResponse } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
+import type { ChatHistory as ChatHistoryData } from "@/core/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
@@ -24,12 +24,13 @@ import ChatComposer, { type ChatAttachment } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { attachmentMessage } from "./attachments";
+import { chunksToMessages } from "./chunks";
 import { expandReferences, referenceTag } from "./references";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
 
-/** Terminal providers the daemon can also drive headlessly. */
+/** Agent CLIs this UI can drive over ACP. */
 const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
 const SUGGESTIONS = [
   "Write a new blog post about our latest update",
@@ -41,21 +42,28 @@ const daemon = useDaemon();
 const store = useChatStore();
 const agentProviders = useAgentProvidersStore();
 
-const chat = shallowRef<Chat<UIMessage> | null>(null);
+const messages = ref<UIMessage[]>([]);
 const input = ref("");
 const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
 const historyOpen = ref(false);
-const terminalRunning = ref(false);
-/** Until the first terminal status arrives, `terminalRunning` may be stale. */
-const terminalChecked = ref(false);
-/** A `send` is waiting for the history or for its turn to end. */
+/** A turn is running on the daemon (its transcript lands when `chat.turn` says so). */
+const running = ref(false);
+/** A `send` is waiting for the chat to exist or for its turn to start. */
 const sending = ref(false);
 /** The saved transcript is being fetched; the message list is empty until it lands. */
 const loadingChat = ref(false);
-/** The chat's own provider, or the user's pick; null falls back to the saved pick. */
+/** The latest API failure, shown above the composer. */
+const errorText = ref<string | null>(null);
+/** The provider saved on the open chat; null for a draft with no messages yet. */
+const chatProvider = ref<string | null>(null);
+/** The model saved on the open chat; null is the agent's default. */
+const chatModel = ref<string | null>(null);
+/** The user's pick for a chat that does not exist yet. */
 const chosen = ref<string | null>(null);
 /** The latest `open()`; sends wait for it so none land while the history loads. */
-let opened: Promise<void> = Promise.resolve();
+let opening = 0;
+let openId: string | null = null;
+let openPromise: Promise<void> = Promise.resolve();
 /** What each `[Element #n]` in the input stands for, until the input is sent. */
 const references = new Map<string, string>();
 /** Files uploaded for the next message; the agent reads them from their saved paths. */
@@ -67,7 +75,7 @@ async function attach(files: File[]) {
   attaching.value = true;
   try {
     for (const file of files) {
-      const path = await daemon.api.attachTerminalImage(props.projectId, file);
+      const path = await daemon.api.attachChatFile(props.projectId, file);
       attachments.value.push({ name: file.name, path });
     }
   } catch (e) {
@@ -80,6 +88,7 @@ async function attach(files: File[]) {
 const providers = computed(() => agentProviders.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
 const provider = computed({
   get: () =>
+    chatProvider.value ??
     chosen.value ??
     (agentProviders.provider && providers.value.includes(agentProviders.provider)
       ? agentProviders.provider
@@ -99,62 +108,64 @@ const model = computed({
   },
 });
 watch(providers, (ids) => ids.forEach((id) => void agentProviders.loadModels(id)), { immediate: true });
-const messages = computed(() => chat.value?.messages ?? []);
-const streaming = computed(() => chat.value?.status === "submitted" || chat.value?.status === "streaming");
+
+const streaming = computed(() => running.value || sending.value);
 /** A new turn would be refused (or race the current one): outbox requests wait. */
-const busy = computed(() => !terminalChecked.value || terminalRunning.value || sending.value || streaming.value);
-/** The daemon refuses a turn with its JSON error envelope as the body. */
-const errorText = computed(() => {
-  const e = chat.value?.error;
-  return e ? mapErrorResponse(0, e.message, e.message).message : null;
-});
+const busy = computed(() => !store.activeChatId(props.projectId) || loadingChat.value || streaming.value);
 const chats = computed(() => store.chats[props.projectId] ?? []);
 const activeId = computed(() => store.activeChatId(props.projectId));
+const isSaved = (id: string) => chats.value.some((c) => c.id === id);
 
-function createChat(id: string, initial: UIMessage[]) {
-  return new Chat<UIMessage>({
-    id,
-    messages: initial,
-    transport: new DefaultChatTransport({
-      api: daemon.api.chatUrl(props.projectId),
-      headers: () => daemon.api.authHeaders(),
-      // The daemon keeps the transcript and only reads the new user message; the whole
-      // conversation would eventually exceed its request body limit.
-      prepareSendMessagesRequest: ({ id, messages }) => ({
-        body: { id, messages: messages.slice(-1), provider: provider.value, ...(model.value && { model: model.value }) },
-      }),
-    }),
-  });
-}
-
-let opening = 0;
-async function open(id: string) {
+/** Fetch one chat's transcript. Draft ids (not saved yet) come back empty. */
+async function loadChat(id: string): Promise<void> {
   const seq = ++opening;
-  void chat.value?.stop();
-  chat.value = null;
-  chosen.value = null;
   loadingChat.value = true;
-  let history: Awaited<ReturnType<typeof daemon.api.chatHistory>> | null = null;
+  messages.value = [];
+  running.value = false;
+  errorText.value = null;
+  chatProvider.value = null;
+  chatModel.value = null;
+  let history: ChatHistoryData | null = null;
   try {
     history = await daemon.api.chatHistory(props.projectId, id);
   } catch {
-    // Not saved yet (a chat with no turns), or a transient failure: start empty.
+    // Not saved yet (a draft), or a transient failure: start empty.
   }
   if (seq !== opening) return;
   loadingChat.value = false;
-  if (history?.provider) chosen.value = history.provider;
-  chat.value = createChat(id, history?.messages ?? []);
-  if (history?.running) void chat.value.resumeStream();
+  if (!history) return;
+  chatProvider.value = history.provider;
+  chatModel.value = history.model;
+  // The chat's model becomes this agent's pick, so the picker shows what is running.
+  agentProviders.setModel(history.provider, history.model);
+  messages.value = chunksToMessages(history.chunks);
+  running.value = history.running;
+  store.setRunning(props.projectId, history.running ? id : null);
 }
 
-/** Catch up with the saved transcript (a Stop's checkpoint, a terminal turn's marker) unless a turn is streaming here. */
+/** Open a chat once; concurrent callers share the fetch. */
+function open(id: string): Promise<void> {
+  if (id === openId) return openPromise;
+  openId = id;
+  openPromise = loadChat(id);
+  return openPromise;
+}
+
+function startNew() {
+  historyOpen.value = false;
+  chosen.value = null;
+  store.newChat(props.projectId);
+}
+
+/** Catch up with the saved transcript after a turn. */
 async function reload(id: string) {
-  const current = chat.value;
-  const idle = () => chat.value === current && !streaming.value;
-  if (id !== activeId.value || !current || !idle()) return;
+  if (id !== activeId.value) return;
   try {
     const history = await daemon.api.chatHistory(props.projectId, id);
-    if (idle()) current.messages = history.messages;
+    if (id !== activeId.value) return;
+    messages.value = chunksToMessages(history.chunks);
+    running.value = history.running;
+    store.setRunning(props.projectId, history.running ? id : null);
   } catch {
     // Keep what we have; the next turn or reopen catches up.
   }
@@ -163,16 +174,11 @@ async function reload(id: string) {
 watch(
   activeId,
   (id) => {
-    if (id) opened = open(id);
+    if (id) void open(id);
     else startNew();
   },
   { immediate: true },
 );
-
-function startNew() {
-  historyOpen.value = false;
-  store.newChat(props.projectId);
-}
 
 async function removeChat(id: string) {
   try {
@@ -182,21 +188,10 @@ async function removeChat(id: string) {
   }
 }
 
-async function refreshTerminal() {
-  try {
-    terminalRunning.value = (await daemon.api.terminalStatus(props.projectId)).running;
-  } catch {
-    // Keep the last known state.
-  } finally {
-    terminalChecked.value = true;
-  }
-}
-
 watch(
   () => props.active,
   (active) => {
     if (!active) return;
-    void refreshTerminal();
     void store.load(props.projectId);
     if (!agentProviders.providers.length) void agentProviders.loadProviders();
   },
@@ -204,34 +199,47 @@ watch(
 );
 
 const offs = [
-  daemon.on("terminal.exited", (e) => {
-    if (e.projectId === props.projectId) terminalRunning.value = false;
-  }),
-  daemon.on("terminal.session", (e) => {
-    if (e.projectId !== props.projectId) return;
-    void refreshTerminal();
-    void reload(e.sessionId);
-  }),
   daemon.on("chat.turn", (e) => {
     if (e.projectId === props.projectId) void reload(e.chatId);
   }),
 ];
-onBeforeUnmount(() => {
-  offs.forEach((off) => off());
-  void chat.value?.stop();
-});
+onBeforeUnmount(() => offs.forEach((off) => off()));
 
 async function send(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return;
   sending.value = true;
+  errorText.value = null;
   try {
-    let pending: Promise<void>;
-    do {
-      pending = opened;
-      await pending;
-    } while (pending !== opened);
-    await chat.value?.sendMessage({ text: trimmed });
+    let id = activeId.value;
+    if (!id) id = store.newChat(props.projectId);
+    // Wait for the active chat (or draft) to finish opening: a saved chat must not
+    // be mistaken for a draft just because the list is still loading.
+    await open(id);
+    if (!provider.value) await agentProviders.loadProviders();
+    const providerId = provider.value;
+    if (!providerId) throw new Error("No agent is available");
+    if (!isSaved(id) && chatProvider.value === null) {
+      const created = await daemon.api.createChat(props.projectId, providerId, model.value);
+      id = created.id;
+      store.setActive(props.projectId, id);
+      await open(id);
+    } else if (model.value && model.value !== chatModel.value) {
+      await daemon.api.setChatModel(props.projectId, id, model.value);
+      chatModel.value = model.value;
+    }
+    messages.value = [
+      ...messages.value,
+      { id: `u-${Date.now()}`, role: "user", parts: [{ type: "text", text: trimmed }] },
+    ];
+    running.value = true;
+    store.setRunning(props.projectId, id);
+    await daemon.api.sendChatMessage(props.projectId, id, trimmed);
+  } catch (e) {
+    running.value = false;
+    store.setRunning(props.projectId, null);
+    const message = errorMessage(e);
+    errorText.value = mapErrorResponse(0, message, message).message;
   } finally {
     sending.value = false;
   }
@@ -247,21 +255,13 @@ function submit(text: string) {
 }
 
 async function stop() {
-  void chat.value?.stop();
+  const id = activeId.value;
+  if (!id) return;
   try {
-    await daemon.api.stopChat(props.projectId);
+    await daemon.api.stopChat(props.projectId, id);
   } catch (e) {
     toast.error(`Couldn't stop the agent: ${errorMessage(e)}`);
   }
-}
-
-async function stopTerminal() {
-  try {
-    await daemon.api.stopTerminal(props.projectId);
-  } catch (e) {
-    toast.error(`Couldn't stop the terminal session: ${errorMessage(e)}`);
-  }
-  await refreshTerminal();
 }
 
 function insert(text: string) {
@@ -370,12 +370,6 @@ defineExpose({ insert, insertReference, send, busy });
         <CircleAlert />
         <AlertDescription data-testid="chat-error">{{ errorText }}</AlertDescription>
       </Alert>
-      <div v-if="terminalRunning" class="text-muted-foreground flex items-center justify-between gap-2 text-sm">
-        <span>The agent is busy in Terminal</span>
-        <Button variant="outline" size="sm" data-testid="chat-stop-terminal" @click="stopTerminal">
-          Stop terminal session
-        </Button>
-      </div>
       <ChatComposer
         ref="composer"
         v-model="input"
@@ -383,9 +377,9 @@ defineExpose({ insert, insertReference, send, busy });
         v-model:model="model"
         :providers="providers"
         :models="agentProviders.models"
-        :provider-locked="messages.length > 0"
+        :provider-locked="chatProvider !== null"
         :streaming="streaming"
-        :blocked="terminalRunning ? 'The agent is busy in Terminal' : chat ? null : 'Loading chat'"
+        :blocked="loadingChat ? 'Loading chat' : provider ? null : 'No agent is available'"
         :attachments="attachments"
         :attaching="attaching"
         @submit="submit"

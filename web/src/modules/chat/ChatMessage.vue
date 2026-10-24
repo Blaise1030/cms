@@ -19,7 +19,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Message, MessageContent } from "@/components/ui/message";
 import {
   Trace,
@@ -80,9 +79,10 @@ const agentError = (data: unknown) => data as AgentErrorData;
 </script>
 
 <template>
-  <Message v-if="message.role === 'user'" align="end">
+  <!-- Padding keeps btn-raised-soft's shadow inside the scroller item (content-visibility clips paint). -->
+  <Message v-if="message.role === 'user'" align="end" class="p-1">
     <MessageContent>
-      <Bubble variant="secondary" align="end">
+      <Bubble variant="tinted" align="end">
         <template v-for="(sent, i) in userTexts" :key="i">
           <div v-if="sent.files.length" class="flex flex-wrap justify-end gap-1.5">
             <template v-for="f in sent.files" :key="f.name">
@@ -183,11 +183,6 @@ const agentError = (data: unknown) => data as AgentErrorData;
           :project-id="projectId"
           :checkpoint="checkpoint(group.part.data)"
         />
-
-        <Marker v-else-if="group.part.type === 'data-terminal'" variant="separator">
-          <MarkerIcon><SquareTerminal /></MarkerIcon>
-          <MarkerContent>Continued in Terminal</MarkerContent>
-        </Marker>
 
         <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">
           <CircleAlert />

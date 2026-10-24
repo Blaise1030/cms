@@ -1,7 +1,9 @@
-//! Headless chat: coding CLIs run per turn, their JSON lines streamed as AI SDK UI message chunks.
+//! ACP chat: one long-lived agent process per chat id, streaming tabsh-shaped chunks.
 
+pub mod acp;
 pub mod chunk;
+pub mod history;
 pub mod manager;
 pub mod models;
+pub mod normalize;
 pub mod transcript;
-pub mod translate;

@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
+import ConfirmSwitchDialog from "./ConfirmSwitchDialog.vue";
 import { PR_STATE_LABEL } from "./prStatus";
 import { useChangesStore } from "./store";
 
@@ -77,9 +78,9 @@ function onNewChange() {
   <DropdownMenu v-model:open="open">
     <DropdownMenuTrigger as-child>
       <Button
-        variant="secondary"
+        variant="outline"
         size="sm"
-        class="h-7 max-w-56 gap-1 px-2 text-xs"
+        class="bg-card h-7 max-w-56 gap-1 px-2 text-xs"
         data-testid="changes-menu"
       >
         <GitBranch class="size-4 shrink-0 opacity-70" />
@@ -157,4 +158,6 @@ function onNewChange() {
     via-agent
     description="The agent starts it from the latest version of the site."
   />
+
+  <ConfirmSwitchDialog />
 </template>

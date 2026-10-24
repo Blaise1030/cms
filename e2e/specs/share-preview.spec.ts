@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, openPrMenu, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
@@ -21,7 +21,7 @@ async function startChangeAndCheckpoint(
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 }
 
 test("shares a preview: push, draft PR, link; re-share advances remote without second PR", async ({
@@ -57,7 +57,7 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
 
   const remoteBefore = git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"]);
   // Second append to `notes.md` (fake CLI `edit`); distinct from the first turn's text.
-  await terminalCheckpoint(orso, "edit late");
+  await chatCheckpoint(orso, "edit late");
   const localTip = git(projectDir, ["rev-parse", "content/launch-week"]);
   expect(localTip).not.toBe(remoteBefore);
 

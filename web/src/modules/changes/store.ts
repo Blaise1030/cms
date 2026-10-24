@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { onScopeDispose, ref } from "vue";
+import { toast } from "vue-sonner";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
@@ -10,12 +11,21 @@ import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
+import { useChatStore } from "@/modules/chat/store";
 import { getLatest as syncAgain } from "./getLatest";
 
 const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
 const SYNC_START_FAILED = "Couldn't start combining. Please try again.";
 const SYNC_REQUEST_FAILED = "Something went wrong. Please try again.";
 const SYNC_DRAFT_MOVED = "Your draft changed while combining. Please sync again.";
+
+/** A switch held until the user confirms, because a chat turn is running. */
+interface PendingSwitch {
+  projectId: string;
+  branch: string;
+  fromTitle: string;
+  toTitle: string;
+}
 
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
@@ -32,12 +42,15 @@ export const useChangesStore = defineStore("changes", () => {
   const creating = ref(false);
   const sharing = ref(false);
   const markingReady = ref(false);
+  const publishing = ref(false);
   const switching = ref(false);
   const updating = ref(false);
   const cleaningUp = ref(false);
   const listing = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /** A switch paused for confirmation because a chat turn is running. */
+  const pendingSwitch = ref<PendingSwitch | null>(null);
   /** Share failed with expired/missing auth — show a sign-in prompt. */
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
@@ -90,7 +103,9 @@ export const useChangesStore = defineStore("changes", () => {
 
   /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
   async function refreshTreeAndPreview(branch?: string) {
-    await Promise.all([
+    // One failing refresh (content cannot be served until the preview is up) must not
+    // block the others or the preview reload: each store surfaces its own error.
+    await Promise.allSettled([
       useFilesStore().refresh(),
       branch ? useContentStore().refreshForBranch(branch) : undefined,
       branch ? useDesignStore().refreshForBranch(branch) : undefined,
@@ -180,7 +195,23 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function switchTo(id: string, branch: string): Promise<Change> {
+  async function switchTo(id: string, branch: string): Promise<Change | null> {
+    // A chat turn is running for this project: hold the switch until the user confirms,
+    // so the agent is never left mid-thought on the wrong draft.
+    if (useChatStore().running[id]) {
+      pendingSwitch.value = {
+        projectId: id,
+        branch,
+        fromTitle: active.value?.title ?? "the live site",
+        toTitle: items.value.find((c) => c.branch === branch)?.title ?? branch,
+      };
+      return null;
+    }
+    return performSwitch(id, branch);
+  }
+
+  async function performSwitch(id: string, branch: string): Promise<Change> {
+    toast.info("Opening this draft…");
     // The old change's poll must not fire mid-switch.
     stopStatusPolling();
     switching.value = true;
@@ -201,6 +232,25 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       switching.value = false;
     }
+  }
+
+  /** Continue the held switch: stop the chat run first, then switch. A failed stop aborts. */
+  async function confirmSwitch(): Promise<Change> {
+    const pending = pendingSwitch.value;
+    if (!pending) throw new Error("Nothing to confirm");
+    pendingSwitch.value = null;
+    try {
+      const runningId = useChatStore().running[pending.projectId];
+      if (runningId) await daemon.api.stopChat(pending.projectId, runningId);
+    } catch (e) {
+      error.value = errorMessage(e);
+      throw e;
+    }
+    return performSwitch(pending.projectId, pending.branch);
+  }
+
+  function cancelSwitch() {
+    pendingSwitch.value = null;
   }
 
   /** Refresh every view after a Get latest (ours, or one the daemon finished later). */
@@ -477,6 +527,25 @@ export const useChangesStore = defineStore("changes", () => {
     protectionHint.value = null;
   }
 
+  // Toast "Updating tools…" only when the installing project is the one the writer has open,
+  // and remember the install: the switch-time refresh ran before the preview could serve
+  // content, so content (like the preview) must refresh once the install is done.
+  let installPending = false;
+  const offDepsInstalling = daemon.on("preview.deps_installing", (e) => {
+    if (e.projectId !== projectId.value) return;
+    installPending = true;
+    toast.info("Updating tools for this draft…");
+  });
+  const offDevserverStatus = daemon.on("devserver.status", (e) => {
+    if (e.projectId !== projectId.value || e.state !== "ready" || !installPending) return;
+    installPending = false;
+    void refreshTreeAndPreview(active.value?.branch ?? "main");
+  });
+  onScopeDispose(() => {
+    offDepsInstalling();
+    offDevserverStatus();
+  });
+
   /**
    * Mark the change's draft PR ready for review and show the status it returns. No immediate
    * re-read: GitHub's REST view can lag the GraphQL write and still say draft. Polling resumes
@@ -505,6 +574,38 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
+  /**
+   * Publish the change: push it, share it (opening a pull request if it has none), mark it
+   * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
+   * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
+   * after the usual interval.
+   */
+  async function publish(id: string, branch: string): Promise<void> {
+    publishing.value = true;
+    needsSignIn.value = false;
+    try {
+      const pr = await daemon.api.publishChange(id, branch);
+      projectId.value = id;
+      if (active.value?.branch === branch) {
+        stopStatusPolling();
+        status.value = pr;
+        if (pr) {
+          prUrl.value = pr.url;
+          pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+        }
+      }
+      // The drafts menu drops the published change; the change itself stays until Clean up.
+      await list(id).catch(() => undefined);
+    } catch (e) {
+      if (e instanceof ApiError && e.needsGithubSignIn) {
+        needsSignIn.value = true;
+      }
+      throw e;
+    } finally {
+      publishing.value = false;
+    }
+  }
+
   return {
     projectId,
     active,
@@ -514,12 +615,14 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     markingReady,
+    publishing,
     switching,
     updating,
     cleaningUp,
     listing,
     loading,
     error,
+    pendingSwitch,
     needsSignIn,
     status,
     conflictSessions,
@@ -534,6 +637,8 @@ export const useChangesStore = defineStore("changes", () => {
     list,
     create,
     switchTo,
+    confirmSwitch,
+    cancelSwitch,
     getLatest,
     applyUpdate,
     followActive,
@@ -552,6 +657,7 @@ export const useChangesStore = defineStore("changes", () => {
     share,
     cleanup,
     markReady,
+    publish,
     refreshStatus,
     stopStatusPolling,
     dismissProtectionHint,

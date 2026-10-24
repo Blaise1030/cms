@@ -53,25 +53,16 @@ enum Command {
         #[arg(long, env = "ORSO_UI_URL")]
         ui_url: Option<String>,
     },
-    /// Called by coding-CLI hooks (internal).
-    #[command(hide = true)]
-    Hook {
-        #[command(subcommand)]
-        event: HookEvent,
-    },
-    /// App state for the agent in a orso terminal (prints JSON).
+    /// App state for the agent in a orso chat (prints JSON).
     Ctl {
         #[command(subcommand)]
         command: orso::ctl::CtlCommand,
     },
-}
-
-#[derive(Subcommand)]
-enum HookEvent {
-    /// A coding-CLI turn ended.
-    TurnEnd {
-        /// Hook payload JSON (default: read from stdin).
-        payload: Option<String>,
+    /// Agent-only git launcher (internal): `orso git-shim -- <git argv>`.
+    #[command(hide = true)]
+    GitShim {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
@@ -99,10 +90,8 @@ async fn main() -> ExitCode {
     } = command
     else {
         return match command {
-            Command::Hook {
-                event: HookEvent::TurnEnd { payload },
-            } => orso::hook::turn_end(payload).await,
             Command::Ctl { command } => orso::ctl::run(command).await,
+            Command::GitShim { args } => orso::git_shim::run(args),
             Command::Serve { .. } => unreachable!(),
         };
     };

@@ -13,6 +13,9 @@
 //! hook injection (keyed on the id). Unknown ids get no injection; they call
 //! `$ORSO_HOOK_EXE hook turn-end` themselves.
 //!
+//! Chat providers also carry an ACP argv (`{ "claude": { "command": ["npx","claude"],
+//! "acp": ["npx","--yes","@agentclientprotocol/claude-agent-acp"] } }`).
+//!
 //! # Hook mechanics (verified 2026-10-10 against claude 2.1.296, codex-cli 0.162.1,
 //! opencode v2.0.25)
 //!
@@ -50,18 +53,65 @@
 //!   file; `-s <session>` resumed the conversation, and an `instructions` file listed in that
 //!   dir's `opencode.json` was obeyed.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde::Serialize;
 
 use crate::error::ApiError;
 
-/// `{ id, command }` as exposed by `GET /api/terminal/providers`.
+/// Temporary ACP argv by provider id. Task 6 moves this onto [`Provider`].
+static ACP_ARGV_OVERRIDE: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+/// Install the argv `POST /api/chat/…/start` and `/message` pass to
+/// [`crate::chat::manager::ChatManager::start`] in tests. Tests point `fake` at
+/// [`crate::chat::acp::fake_agent`]. Real providers use [`Provider::acp`].
+pub fn set_test_acp_argv(provider_id: impl Into<String>, argv: Vec<String>) {
+    let mut map = ACP_ARGV_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner());
+    map.get_or_insert_with(HashMap::new)
+        .insert(provider_id.into(), argv);
+}
+
+/// ACP command for `provider_id`: the test override, else `ORSO_ACP_ARGV`
+/// (a JSON string array, any provider). `None` when neither is set.
+pub fn acp_argv(provider_id: &str) -> Option<Vec<String>> {
+    if let Some(argv) = ACP_ARGV_OVERRIDE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|map| map.get(provider_id).cloned())
+    {
+        return Some(argv);
+    }
+    std::env::var("ORSO_ACP_ARGV")
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .filter(|argv| !argv.is_empty())
+}
+
+/// ACP command for each built-in provider. Every chat provider must be able to
+/// hold one long-lived ACP session, so none of these is empty.
+fn default_acp(id: &str) -> Vec<String> {
+    let argv: &[&str] = match id {
+        "cursor" => &["cursor-agent", "acp"],
+        "claude" => &["npx", "--yes", "@agentclientprotocol/claude-agent-acp"],
+        "codex" => &["npx", "--yes", "@agentclientprotocol/codex-acp"],
+        "opencode" => &["opencode", "acp"],
+        _ => return Vec::new(),
+    };
+    argv.iter().map(|s| s.to_string()).collect()
+}
+
+/// `{ id, command, acp }` as exposed by the provider list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Provider {
     pub id: String,
     /// argv: program followed by its arguments.
     pub command: Vec<String>,
+    /// argv for the Agent Client Protocol (`<command> acp`, or an `npx` bridge).
+    /// Empty when no ACP command is known for this id.
+    pub acp: Vec<String>,
 }
 
 /// Which agent conversation a launch belongs to.
@@ -99,6 +149,7 @@ pub fn default_providers() -> Vec<Provider> {
     .map(|(id, program)| Provider {
         id: id.into(),
         command: vec![program.into()],
+        acp: default_acp(id),
     })
     .collect()
 }
@@ -131,34 +182,59 @@ pub fn load(path: Option<&Path>) -> Result<Vec<Provider>, ApiError> {
     }
 }
 
-/// Parse the JSON registry (see module docs).
+/// Parse the JSON registry (see module docs). Each value is either the command
+/// array (legacy shape) or `{ "command"?: [...], "acp"?: [...] }`; omitted
+/// `acp` falls back to the built-in ACP command for a known id.
 pub fn parse(text: &str) -> Result<Vec<Provider>, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let obj = value
         .as_object()
         .ok_or("expected a JSON object mapping provider id to command array")?;
     let mut providers = Vec::new();
-    for (id, cmd) in obj {
+    for (id, entry) in obj {
         if id.is_empty() || id.chars().any(char::is_control) {
             return Err(format!("invalid provider id {id:?}"));
         }
-        let argv = cmd
-            .as_array()
-            .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
-        let command: Vec<String> = argv
-            .iter()
-            .map(|a| a.as_str().map(str::to_string))
-            .collect::<Option<_>>()
-            .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
+        let (command, acp) = match entry {
+            serde_json::Value::Array(_) => (Some(argv(id, entry)?), None),
+            serde_json::Value::Object(fields) => {
+                let command = fields.get("command").map(|v| argv(id, v)).transpose()?;
+                let acp = fields.get("acp").map(|v| argv(id, v)).transpose()?;
+                (command, acp)
+            }
+            _ => {
+                return Err(format!(
+                    "provider {id:?}: command must be an array of strings or an object"
+                ))
+            }
+        };
+        let command = command.unwrap_or_else(|| {
+            default_providers()
+                .into_iter()
+                .find(|p| p.id == *id)
+                .map(|p| p.command)
+                .unwrap_or_default()
+        });
         if command.first().is_none_or(|p| p.is_empty()) {
             return Err(format!("provider {id:?}: command must not be empty"));
         }
         providers.push(Provider {
             id: id.clone(),
             command,
+            acp: acp.unwrap_or_else(|| default_acp(id)),
         });
     }
     Ok(providers)
+}
+
+fn argv(id: &str, value: &serde_json::Value) -> Result<Vec<String>, String> {
+    let list = value
+        .as_array()
+        .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))?;
+    list.iter()
+        .map(|a| a.as_str().map(str::to_string))
+        .collect::<Option<_>>()
+        .ok_or_else(|| format!("provider {id:?}: command must be an array of strings"))
 }
 
 /// POSIX single-quote `s` so a shell reads it back as one word.
@@ -199,19 +275,21 @@ export default {{
 /// itself, in the shape the app lists them (`content/*` + branch description as the title).
 pub const GIT_GUIDE: &str = r#"# Changes and syncing (this project is edited through a no-code app)
 
-The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I started a new draft called Pricing page", "I brought in the latest version of the site") — never ask them to run git.
+The person you are helping is usually not technical. Do the git work for them and describe it in plain words ("I brought in the latest version of the site") — never ask them to run git.
 
 A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its human title is stored with `git config branch.<branch>.description "<Title>"`. The app lists these as the user's changes.
 
-- Never edit or commit on `main`. Before editing while on `main`, start a change.
-- Start a change: commit any pending work on the current change first (`git add -A && git commit -m "<summary>"`), then branch from the latest main — `git fetch origin main && git checkout -b content/<slug> origin/main` when an `origin` remote exists, otherwise `git checkout -b content/<slug> main` — and set its description. Pick a short title from what the user asked for; if the slug exists, add `-2`, `-3`, ….
+- Only the person switches changes, in the app's change picker. Never switch to a different change yourself — do not run `git checkout <branch>` or `git switch` to move to another change (the app blocks this). Stay on the current change.
+- If the work needs a new change, do not create or switch to one yourself. Propose it in plain words ("I'd start a new draft called …") and ask the person to create it in the app, then continue.
 - Do a new, unrelated request in a new change; keep follow-ups on the current one.
+- Never edit or commit on `main`. If the current change is the live site (`main`), ask the person to create a change first.
+- Save your work as you go: `git add -A && git commit -m "<summary>"` before anything risky, so nothing is lost.
 - Get the latest / sync with main: commit pending work, then `git fetch origin main && git merge origin/main` (just `git merge main` without a remote). If it conflicts, resolve it keeping the intent of both sides, run nothing destructive, and ask the user in plain words when the right result is unclear.
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
 - The app also commits your work automatically at the end of each turn; that is expected."#;
 
 /// The orso layer of [`agent_guide`]: who the user is, the words to use with them,
-/// what only they may do, and how to check work with `orso ctl`. Agent terminals have
+/// what only they may do, and how to check work with `orso ctl`. Chat agents have
 /// the binary at `$ORSO_HOOK_EXE`, not on `PATH`.
 pub const ORSO_GUIDE: &str = r#"# Working in orso
 
@@ -224,11 +302,13 @@ For how their site gets updated, use these words: **change** (a set of edits mad
 Publishing, sharing a change, sending it for a greenlight, giving a greenlight, and merging are clicks the person makes in the app. Never publish, share, or greenlight for them, and never do the git equivalent (opening, approving, or merging a pull request, or pushing to main). When a change is done, tell them it is ready to look at in the preview.
 
 ## Check your work
-`orso ctl` shows app state you cannot see from files. Run it as `"$ORSO_HOOK_EXE" ctl <command>`; it prints JSON.
-- `"$ORSO_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. The preview reloads edits by itself; do not run a build.
+`orso ctl` shows app state you cannot see from files, and refreshes the app UI. Run it as `"$ORSO_HOOK_EXE" ctl <command>`; it prints JSON.
+- `"$ORSO_HOOK_EXE" ctl preview-status` after editing: `devserver` is `starting`, `ready`, or `crashed`; when `crashed`, `message` holds the end of the dev server's output. Ordinary file edits often hot-reload; do not run a build.
 - `"$ORSO_HOOK_EXE" ctl restart-preview` when the preview `crashed`: fix the cause shown in `message`, restart once, and check again. If it still crashes, tell the person in plain words what is wrong.
+- `"$ORSO_HOOK_EXE" ctl refresh-content` after adding or renaming content (or when the Content sidebar looks stale): reloads **collections** and entry lists in the app.
+- `"$ORSO_HOOK_EXE" ctl refresh-preview` after that (or when the preview looks stale): remounts the preview page so the person sees the newest result.
 - `"$ORSO_HOOK_EXE" ctl change-status` before saying you are done: confirm which change you are on (`active`). `changedPaths` lists files edited since the last save; the app saves them when your turn ends, so there is nothing to do unless a path is unexpected.
-If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
+When a chat turn ends, the app also refreshes Content and the preview. Cursor has no turn-end hook — still call `refresh-content` then `refresh-preview` before saying you are done so the person sees the result right away. If `$ORSO_HOOK_EXE` is not set, or the command says to run it inside a orso agent session, skip these checks.
 
 ## Edits after a greenlight
 If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
@@ -502,12 +582,19 @@ mod tests {
         assert!(g.starts_with(ORSO_GUIDE));
         assert!(g.ends_with(GIT_GUIDE));
         assert!(g.contains("orso ctl"));
-        for cmd in ["preview-status", "change-status", "restart-preview"] {
+        for cmd in [
+            "preview-status",
+            "change-status",
+            "restart-preview",
+            "refresh-preview",
+            "refresh-content",
+        ] {
             assert!(
                 g.contains(&format!("\"$ORSO_HOOK_EXE\" ctl {cmd}")),
                 "{cmd}"
             );
         }
+        assert!(g.contains("collections"));
         for word in [
             "change",
             "greenlight",
@@ -525,6 +612,14 @@ mod tests {
         assert!(!g.contains("not saved yet"));
     }
 
+    #[test]
+    fn git_guide_no_longer_starts_or_switches_changes() {
+        assert!(!agent_guide().contains("git checkout -b"));
+        assert!(!GIT_GUIDE.contains("git checkout -b"));
+        assert!(GIT_GUIDE.contains("Only the person switches changes"));
+        assert!(GIT_GUIDE.contains("Propose it in plain words"));
+    }
+
     use super::*;
 
     #[test]
@@ -539,10 +634,52 @@ mod tests {
     }
 
     #[test]
+    fn default_providers_include_acp_argv_for_four_ids() {
+        let c = default_providers();
+        for (id, acp) in [
+            ("cursor", vec!["cursor-agent", "acp"]),
+            (
+                "claude",
+                vec!["npx", "--yes", "@agentclientprotocol/claude-agent-acp"],
+            ),
+            (
+                "codex",
+                vec!["npx", "--yes", "@agentclientprotocol/codex-acp"],
+            ),
+            ("opencode", vec!["opencode", "acp"]),
+        ] {
+            let provider = c
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(provider.acp, acp, "{id}");
+            assert!(!provider.acp.is_empty(), "{id}");
+        }
+    }
+
+    #[test]
     fn parses_custom_registry() {
         let c = parse(r#"{"mine": ["/bin/agent", "--custom"]}"#).unwrap();
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].command, ["/bin/agent", "--custom"]);
+        assert!(c[0].acp.is_empty());
+    }
+
+    #[test]
+    fn overrides_acp_argv_only_when_present() {
+        let c = parse(
+            r#"{
+                "claude": { "command": ["npx", "claude"], "acp": ["my-claude", "acp"] },
+                "opencode": { "command": ["opencode"] }
+            }"#,
+        )
+        .unwrap();
+        let claude = c.iter().find(|p| p.id == "claude").unwrap();
+        assert_eq!(claude.command, ["npx", "claude"]);
+        assert_eq!(claude.acp, ["my-claude", "acp"]);
+        let opencode = c.iter().find(|p| p.id == "opencode").unwrap();
+        assert_eq!(opencode.command, ["opencode"]);
+        assert_eq!(opencode.acp, ["opencode", "acp"]);
     }
 
     #[test]
@@ -575,6 +712,7 @@ mod tests {
         Provider {
             id: id.into(),
             command: vec![id.into()],
+            acp: default_acp(id),
         }
     }
     fn spec(id: &str, exe: &str, auto: bool, dir: &Path) -> LaunchSpec {
@@ -795,6 +933,7 @@ mod tests {
             &Provider {
                 id: "mine".into(),
                 command: vec!["/bin/a".into(), "-v".into()],
+                acp: vec![],
             },
             Path::new("/x"),
             true,
@@ -1058,6 +1197,7 @@ mod tests {
             &Provider {
                 id: "fake".into(),
                 command: vec!["sh".into(), "fake.sh".into(), "resolved".into()],
+                acp: vec![],
             },
             PROMPT,
             Path::new("/nope"),

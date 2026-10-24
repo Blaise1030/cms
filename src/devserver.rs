@@ -430,24 +430,30 @@ async fn supervise(
                     .await;
                 let configured = matches!(shared.opts.launcher, Launcher::Configured);
                 match configured && deps_stale(&project.dir) {
-                    true => match crate::projects::install(&project.dir).await {
-                        Ok(()) => {
-                            run_once(
-                                &shared,
-                                &id,
-                                project.dir,
-                                port,
-                                &mut stop,
-                                settings.as_ref(),
-                                &token,
-                            )
-                            .await
+                    true => {
+                        // The draft's packages changed: an install is about to run (slow path).
+                        shared
+                            .events
+                            .emit("preview.deps_installing", json!({ "projectId": id }));
+                        match crate::projects::install(&project.dir).await {
+                            Ok(()) => {
+                                run_once(
+                                    &shared,
+                                    &id,
+                                    project.dir,
+                                    port,
+                                    &mut stop,
+                                    settings.as_ref(),
+                                    &token,
+                                )
+                                .await
+                            }
+                            Err(e) => Outcome::Died {
+                                message: e.message,
+                                stable: false,
+                            },
                         }
-                        Err(e) => Outcome::Died {
-                            message: e.message,
-                            stable: false,
-                        },
-                    },
+                    }
                     false => {
                         run_once(
                             &shared,

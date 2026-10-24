@@ -113,6 +113,38 @@ it.each([
   expect(store.dirty).toBe(false);
 });
 
+it("reloads collections and entries immediately on content.refresh", async () => {
+  const store = useContentStore();
+  await store.open("p");
+  await store.selectCollection("blog");
+  catalog.mockClear();
+  h.daemon.emit({ type: "content.refresh", projectId: "other" });
+  await flushPromises();
+  expect(catalog).not.toHaveBeenCalled();
+  h.daemon.emit({ type: "content.refresh", projectId: "p" });
+  await flushPromises();
+  expect(catalog).toHaveBeenCalledTimes(1);
+});
+
+it("offers the rich body editor for every Markdown collection", async () => {
+  const category = { ...entry, collection: "blogCategories", id: "news", path: "src/content/blogCategories/en/news.md", body: "" };
+  const mdx = { ...entry, collection: "sections", id: "hero", path: "src/content/sections/hero.mdx", kind: "mdx" as const, body: "export const x = 1" };
+  h.daemon = createFakeDaemon({
+    listContentCollections: async () => [
+      { name: "blog", kind: "markdown", editable: true, reason: null },
+      { name: "blogCategories", kind: "markdown", editable: true, reason: null },
+      { name: "sections", kind: "mdx", editable: true, reason: null },
+    ],
+    listContentEntries: async (_p: string, collection: string) => collection === "blogCategories" ? [category] : collection === "sections" ? [mdx] : [entry],
+    contentEntry: async (_p: string, collection: string) => collection === "blogCategories" ? category : collection === "sections" ? mdx : entry,
+  });
+  setActivePinia(createPinia());
+  const store = useContentStore(); await store.open("p");
+  await store.selectCollection("blog"); await store.selectEntry("welcome"); expect(store.richBody).toBe(true);
+  await store.selectCollection("blogCategories"); await store.selectEntry("news"); expect(store.richBody).toBe(true);
+  await store.selectCollection("sections"); await store.selectEntry("hero"); expect(store.richBody).toBe(false);
+});
+
 it("loads reference picker entries once per collection and reloads them in place on refresh", async () => {
   const listEntries = vi.fn(async (_p: string, collection: string) => collection === "sections" ? [{ ...entry, collection, id: "hero" }, { ...entry, collection, id: "faq" }] : [entry]);
   h.daemon = createFakeDaemon({ listContentCollections: catalog, listContentEntries: listEntries, contentEntry: async () => entry });

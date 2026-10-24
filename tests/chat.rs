@@ -1,975 +1,716 @@
-//! `ChatManager`: headless turns against `tests/fixtures/fake_headless.sh`.
+//! `/api/chat/*` against the fake ACP agent. The process argv is installed
+//! with `providers::set_test_acp_argv` until Task 6 stores it on the provider.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use orso::chat::chunk::{AgentErrorCode, UiChunk};
-use orso::chat::manager::{Subscription, TurnRequest};
-use orso::chat::transcript;
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
 use orso::config::Config;
-use orso::providers::{self, AgentSession, Provider};
+use orso::http;
 use orso::state::AppState;
-use orso::terminal::history::{self, SessionRecord};
 use serde_json::{json, Value};
-use tokio::sync::broadcast;
+use tower::ServiceExt;
 
-const CHAT: &str = "chat1";
-const FIXTURE_SESSION: &str = "34f63cf5-7e32-4205-9b34-72582ec9f80e";
-const WAIT: Duration = Duration::from_secs(10);
-
-fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+fn argv() -> Vec<String> {
+    let (cmd, args) = orso::chat::acp::fake_agent();
+    let mut all = vec![cmd];
+    all.extend(args);
+    all
 }
 
 struct Env {
     _tmp: tempfile::TempDir,
+    root: PathBuf,
     state: AppState,
     project: String,
-    dir: PathBuf,
-    state_dir: PathBuf,
 }
 
-fn fake_cli() -> String {
-    fixtures().join("fake_cli.sh").display().to_string()
-}
-
-/// A project whose `cursor` provider runs `argv` (and whose terminal-only `fake` provider runs
-/// `fake_cli.sh`), with a `sessions.json` record for [`CHAT`].
-async fn env(argv: Vec<String>) -> Env {
+async fn env() -> Env {
     let tmp = tempfile::tempdir().unwrap();
-    let agents = tmp.path().join("agents.json");
-    std::fs::write(
-        &agents,
-        json!({ "cursor": argv, "fake": [fake_cli()] }).to_string(),
-    )
-    .unwrap();
+    let root = tmp.path().to_path_buf();
     let config = Config {
-        port: 0,
-        projects_dir: tmp.path().to_path_buf(),
+        projects_dir: root.clone(),
         no_auth: true,
-        agents_config: Some(agents),
         ..Default::default()
     };
     let state = AppState::with_scaffold_install(config, false);
     let info = state.projects.create("Site").await.unwrap();
-    let dir = tmp.path().join(&info.id);
-    let state_dir = tmp.path().join(".orso");
-    let now = history::now_ms();
-    history::insert(
-        &state_dir,
-        &info.id,
-        SessionRecord {
-            id: CHAT.into(),
-            provider: "cursor".into(),
-            agent_session_id: Some("chat-fake-1".into()),
-            title: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
+    orso::providers::set_test_acp_argv("fake", argv());
     Env {
         _tmp: tmp,
+        root,
         state,
         project: info.id,
-        dir,
-        state_dir,
     }
 }
 
-/// `sh fake_headless.sh cursor/turn.jsonl <mode>`, with `FAKE_PIDFILE` set when given.
-fn fake(mode: &str, pidfile: Option<&Path>) -> Vec<String> {
-    let mut argv = Vec::new();
-    if let Some(pidfile) = pidfile {
-        argv.push("env".to_string());
-        argv.push(format!("FAKE_PIDFILE={}", pidfile.display()));
-    }
-    argv.push("sh".into());
-    argv.push(fixtures().join("fake_headless.sh").display().to_string());
-    argv.push(
-        fixtures()
-            .join("chat/cursor/turn.jsonl")
-            .display()
-            .to_string(),
-    );
-    argv.push(mode.into());
-    argv
+fn app(env: &Env) -> axum::Router {
+    http::router(env.state.clone())
 }
 
-fn cursor(env: &Env) -> Provider {
-    providers::load(env.state.config.agents_config.as_deref())
-        .unwrap()
-        .into_iter()
-        .find(|p| p.id == "cursor")
-        .unwrap()
-}
-
-fn request(env: &Env, prompt: &str) -> TurnRequest {
-    TurnRequest {
-        project_id: env.project.clone(),
-        chat_id: CHAT.into(),
-        provider: cursor(env),
-        dir: env.dir.clone(),
-        prompt: prompt.into(),
-        session: AgentSession::Assign("chat-fake-1".into()),
-        model: None,
-    }
-}
-
-/// Replay plus live chunks until the turn is over.
-async fn collect(sub: Subscription) -> Vec<UiChunk> {
-    let Subscription { mut replay, mut rx } = sub;
-    loop {
-        match tokio::time::timeout(WAIT, rx.recv()).await {
-            Ok(Ok(Some(chunk))) => replay.push(chunk),
-            Ok(Ok(None)) => return replay,
-            other => panic!("stream did not end cleanly: {other:?}; got {replay:?}"),
+fn req(method: &str, path: &str, body: Option<Value>) -> Request<Body> {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::HOST, "localhost");
+    let body = match body {
+        Some(v) => {
+            b = b.header(header::CONTENT_TYPE, "application/json");
+            Body::from(v.to_string())
         }
+        None => Body::empty(),
+    };
+    b.body(body).unwrap()
+}
+
+async fn call(env: &Env, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+    let res = app(env).oneshot(req(method, path, body)).await.unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+async fn create_chat(env: &Env, model: Option<&str>) -> String {
+    let mut body = json!({ "provider": "fake" });
+    if let Some(model) = model {
+        body["model"] = json!(model);
     }
+    let (status, body) = call(
+        env,
+        "POST",
+        &format!("/api/chat/{}", env.project),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["provider"], "fake");
+    assert_eq!(body["live"], false);
+    body["id"].as_str().unwrap().to_string()
 }
 
-/// The project's events up to and including the first of type `until`.
-async fn events_until(
-    rx: &mut broadcast::Receiver<std::sync::Arc<str>>,
-    project: &str,
-    until: &str,
-) -> Vec<Value> {
-    let mut seen = Vec::new();
+fn chunk_text(body: &Value) -> String {
+    body["chunks"]
+        .as_array()
+        .map(|chunks| {
+            chunks
+                .iter()
+                .filter_map(|c| c["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+async fn wait_detail(env: &Env, chat: &str, pred: impl Fn(&Value) -> bool, what: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let path = format!("/api/chat/{}/{}", env.project, chat);
     loop {
-        let text = tokio::time::timeout(WAIT, rx.recv())
-            .await
-            .unwrap_or_else(|_| panic!("no {until} event; saw {seen:?}"))
-            .unwrap();
-        let v: Value = serde_json::from_str(&text).unwrap();
-        if v["projectId"] != project {
-            continue;
-        }
-        let done = v["type"] == until;
-        seen.push(v);
-        if done {
-            return seen;
-        }
-    }
-}
-
-fn has_text(chunks: &[UiChunk], needle: &str) -> bool {
-    chunks
-        .iter()
-        .any(|c| matches!(c, UiChunk::TextDelta { delta, .. } if delta.contains(needle)))
-}
-
-/// The pid of the `slow` fake's SIGTERM-ignoring child, once it is running.
-async fn child_pid(pidfile: &Path) -> String {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        let text = std::fs::read_to_string(pidfile).unwrap_or_default();
-        if !text.trim().is_empty() {
-            let pid = text.trim().to_string();
-            assert!(alive(&pid));
-            return pid;
+        let (status, body) = call(env, "GET", &path, None).await;
+        if status == StatusCode::OK && pred(&body) {
+            return body;
         }
         assert!(
             Instant::now() < deadline,
-            "the fake never started its child"
+            "timed out waiting for {what}; last {status} {body}"
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
     }
 }
 
-fn alive(pid: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", pid])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap()
-        .success()
+async fn wait_text(env: &Env, chat: &str, needle: &str) -> Value {
+    let label = format!("text {needle:?}");
+    let needle = needle.to_string();
+    wait_detail(
+        env,
+        chat,
+        move |body| chunk_text(body).contains(&needle),
+        &label,
+    )
+    .await
+}
+
+async fn read_until(body: &mut Body, buf: &mut String, needle: &str) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !buf.contains(needle) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let frame = tokio::time::timeout(left, body.frame())
+            .await
+            .unwrap_or_else(|_| panic!("timed out; sse so far: {buf}"))
+            .unwrap_or_else(|| panic!("stream ended; sse so far: {buf}"))
+            .expect("sse frame");
+        if let Ok(data) = frame.into_data() {
+            buf.push_str(&String::from_utf8_lossy(&data));
+        }
+    }
 }
 
 #[tokio::test]
-async fn turn_streams_and_checkpoints() {
-    let env = env(fake("edit", None)).await;
-    orso::changes::create(&env.dir, "New post").await.unwrap();
-    let mut events = env.state.events.subscribe();
+async fn chat_message_against_fake_acp_appends_transcript() {
+    let env = env().await;
+    let id = create_chat(&env, Some("fast")).await;
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "hello" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
 
-    let sub = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "Add a note\nsecond line"))
-        .unwrap();
-    assert_eq!(env.state.chats.running(&env.project).as_deref(), Some(CHAT));
-    let chunks = collect(sub).await;
+    let detail = wait_text(&env, &id, "fake reply: hello").await;
+    assert_eq!(detail["provider"], "fake");
+    assert_eq!(detail["model"], "fast");
+    // The agent stays up after the turn; only a prompt in flight is "running".
+    assert_eq!(detail["running"], false);
+    assert!(chunk_text(&detail).contains("hello"));
 
+    let (status, list) = call(&env, "GET", &format!("/api/chat/{}", env.project), None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let chat = list["chats"]
+        .as_array()
+        .and_then(|chats| chats.iter().find(|c| c["id"] == id))
+        .unwrap_or_else(|| panic!("missing chat in {list}"));
+    assert_eq!(chat["provider"], "fake");
+    assert_eq!(chat["model"], "fast");
+    assert_eq!(chat["live"], true);
+    assert!(chat["updatedAt"].as_u64().is_some(), "{chat}");
+
+    let path = env
+        .root
+        .join(".orso")
+        .join(&env.project)
+        .join("chats")
+        .join(format!("{id}.jsonl"));
+    let transcript = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{e} at {path:?}"));
     assert!(
-        matches!(&chunks[0], UiChunk::Start { message_id } if message_id.starts_with("msg-")),
-        "{chunks:?}"
+        transcript.contains("fake reply: hello"),
+        "transcript: {transcript}"
     );
-    assert_eq!(chunks[1], UiChunk::StartStep);
-    assert!(has_text(&chunks, "I added the line to `about.md`"));
-    let n = chunks.len();
-    match &chunks[n - 3] {
-        UiChunk::DataCheckpoint { data } => {
-            assert_eq!(data.files, ["notes.md"]);
-            assert!(data.sha.is_some() && data.blocked.is_none(), "{data:?}");
-        }
-        other => panic!("expected a checkpoint, got {other:?}"),
-    }
-    assert_eq!(chunks[n - 2..], [UiChunk::FinishStep, UiChunk::Finish]);
-
-    let messages = transcript::read(&env.state_dir, &env.project, CHAT);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert_eq!(messages[0]["role"], "user");
-    assert_eq!(messages[0]["parts"][0]["text"], "Add a note\nsecond line");
-    assert_eq!(messages[1]["role"], "assistant");
-
-    let record = history::get(&env.state_dir, &env.project, CHAT).unwrap();
-    assert_eq!(record.agent_session_id.as_deref(), Some(FIXTURE_SESSION));
-    assert_eq!(record.title.as_deref(), Some("Add a note"));
-
-    let seen = events_until(&mut events, &env.project, "chat.turn").await;
-    let busy: Vec<&Value> = seen
-        .iter()
-        .filter(|v| v["type"] == "terminal.busy")
-        .map(|v| &v["busy"])
-        .collect();
-    assert_eq!(busy, [&json!(true), &json!(false)], "{seen:?}");
-    assert_eq!(seen.last().unwrap()["chatId"], CHAT);
-    assert_eq!(env.state.chats.running(&env.project), None);
-    assert!(env.state.chats.subscribe(&env.project, CHAT).is_none());
-}
-
-#[tokio::test]
-async fn second_start_conflicts() {
-    let tmp = tempfile::tempdir().unwrap();
-    let pidfile = tmp.path().join("child.pid");
-    let env = env(fake("slow", Some(&pidfile))).await;
-    let _sub = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "one"))
-        .unwrap();
-    let err = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "two"))
-        .err()
-        .expect("second start conflicts");
-    assert_eq!(err.http_status(), 409);
-    assert_eq!(err.message, "The agent is busy in Chat");
-    let replay = env
-        .state
-        .chats
-        .subscribe(&env.project, CHAT)
-        .unwrap()
-        .replay;
-    assert!(matches!(replay[0], UiChunk::Start { .. }));
-    env.state.chats.stop(&env.project).await;
-    assert_eq!(env.state.chats.running(&env.project), None);
-}
-
-#[tokio::test]
-async fn stop_kills_group_and_checkpoints() {
-    let tmp = tempfile::tempdir().unwrap();
-    let pidfile = tmp.path().join("child.pid");
-    let env = env(fake("slow", Some(&pidfile))).await;
-    let sub = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "slow one"))
-        .unwrap();
-
-    let pid = child_pid(&pidfile).await;
-    std::fs::write(env.dir.join("notes.md"), "partial\n").unwrap();
-
-    let stopped = Instant::now();
-    let (chats, project) = (env.state.chats.clone(), env.project.clone());
-    let stop = tokio::spawn(async move { chats.stop(&project).await });
-    loop {
-        // Read before the liveness check: an idle manager means the group is already dead.
-        let running = env.state.chats.running(&env.project);
-        if !alive(&pid) {
-            break;
-        }
-        assert!(running.is_some(), "turn ended while child {pid} still ran");
-        assert!(
-            stopped.elapsed() < Duration::from_secs(3),
-            "child {pid} survived stop"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    tokio::time::timeout(WAIT, stop).await.unwrap().unwrap();
-
-    let chunks = collect(sub).await;
-    let n = chunks.len();
-    match &chunks[n - 2] {
-        UiChunk::DataCheckpoint { data } => assert_eq!(data.files, ["notes.md"]),
-        other => panic!("expected a checkpoint, got {other:?}"),
-    }
-    assert_eq!(chunks[n - 1], UiChunk::Abort);
-    assert!(!chunks.contains(&UiChunk::Finish));
-    assert_eq!(env.state.chats.running(&env.project), None);
-    assert_eq!(
-        transcript::read(&env.state_dir, &env.project, CHAT).len(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn shutdown_kills_running_turns() {
-    let tmp = tempfile::tempdir().unwrap();
-    let pidfile = tmp.path().join("child.pid");
-    let env = env(fake("slow", Some(&pidfile))).await;
-    let sub = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "slow one"))
-        .unwrap();
-    let pid = child_pid(&pidfile).await;
-
-    tokio::time::timeout(WAIT, env.state.chats.shutdown())
-        .await
-        .expect("shutdown is bounded");
-    assert_eq!(env.state.chats.running(&env.project), None);
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while alive(&pid) {
-        assert!(Instant::now() < deadline, "child {pid} survived shutdown");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(collect(sub).await.last(), Some(&UiChunk::Abort));
-}
-
-#[tokio::test]
-async fn server_shutdown_ends_watched_turns() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    let env = env(fake("slow", None)).await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (trigger, signal) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(orso::serve_until(listener, env.state.clone(), async move {
-        let _ = signal.await;
-    }));
-
-    let body = json!({
-        "id": CHAT,
-        "messages": [{"id": "u1", "role": "user", "parts": [{"type": "text", "text": "slow one"}]}],
-    })
-    .to_string();
-    let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let head = format!(
-        "POST /api/chat/{} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
-        env.project,
-        body.len()
-    );
-    sock.write_all(head.as_bytes()).await.unwrap();
-    sock.write_all(body.as_bytes()).await.unwrap();
-    let mut seen = String::new();
-    let mut buf = [0u8; 4096];
-    while !seen.contains("\"type\":\"start\"") {
-        let n = tokio::time::timeout(WAIT, sock.read(&mut buf))
-            .await
-            .expect("the turn starts streaming")
-            .unwrap();
-        assert!(n > 0, "the response ended early: {seen}");
-        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
-    }
-    assert!(env.state.chats.running(&env.project).is_some());
-
-    trigger.send(()).unwrap();
-    tokio::time::timeout(WAIT, server)
-        .await
-        .expect("the server shuts down while a browser watches the turn")
-        .unwrap()
-        .unwrap();
-    let mut rest = Vec::new();
-    tokio::time::timeout(WAIT, sock.read_to_end(&mut rest))
-        .await
-        .expect("the stream closes")
-        .unwrap();
-    seen.push_str(&String::from_utf8_lossy(&rest));
-    assert!(seen.contains("\"type\":\"abort\""), "{seen}");
-    assert!(seen.contains("[DONE]"), "{seen}");
-    assert_eq!(env.state.chats.running(&env.project), None);
-}
-
-#[tokio::test]
-async fn missing_cli_is_not_installed() {
-    let env = env(vec!["/nonexistent/cursor-agent".into()]).await;
-    let sub = env
-        .state
-        .chats
-        .start(env.state.clone(), request(&env, "hi"))
-        .unwrap();
-    let chunks = collect(sub).await;
     assert!(
-        chunks.iter().any(|c| matches!(
-            c,
-            UiChunk::DataAgentError { data } if data.code == AgentErrorCode::NotInstalled
-        )),
-        "{chunks:?}"
+        transcript.contains("\"type\":\"user_text\""),
+        "{transcript}"
     );
-    assert_eq!(chunks.last(), Some(&UiChunk::Finish));
+    env.state.chats.shutdown().await;
 }
 
-/// `/api/chat/*` through the router.
-mod http_routes {
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-    use std::time::Instant;
+#[tokio::test]
+async fn chat_stream_replays_then_live() {
+    let env = env().await;
+    let id = create_chat(&env, None).await;
+    let (status, _) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "replay-me" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    wait_text(&env, &id, "fake reply: replay-me").await;
 
-    use axum::body::Body;
-    use axum::http::{header, HeaderMap, Request, StatusCode};
-    use axum::response::Response;
-    use http_body_util::BodyExt;
-    use orso::chat::transcript;
-    use orso::projects::Source;
-    use orso::terminal::Output;
-    use orso::{git, http};
-    use serde_json::{json, Value};
-    use tower::ServiceExt;
-
-    use super::{env, fake, fake_cli, Env, CHAT, WAIT};
-
-    const FIXTURE_TEXT: &str = "I added the line to `about.md`";
-
-    fn req(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
-        let mut b = Request::builder()
-            .method(method)
-            .uri(uri)
-            .header(header::HOST, "localhost");
-        let body = match body {
-            Some(v) => {
-                b = b.header(header::CONTENT_TYPE, "application/json");
-                Body::from(v.to_string())
-            }
-            None => Body::empty(),
-        };
-        b.body(body).unwrap()
-    }
-
-    async fn send(env: &Env, r: Request<Body>) -> Response {
-        tokio::time::timeout(WAIT, http::router(env.state.clone()).oneshot(r))
-            .await
-            .expect("response head in time")
-            .unwrap()
-    }
-
-    async fn call(env: &Env, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let res = send(env, req(method, uri, body)).await;
-        let status = res.status();
-        let text = read_to_end(res).await;
-        (status, serde_json::from_str(&text).unwrap_or(Value::Null))
-    }
-
-    /// The whole body, which must end within [`WAIT`].
-    async fn read_to_end(res: Response) -> String {
-        let bytes = tokio::time::timeout(WAIT, res.into_body().collect())
-            .await
-            .expect("body ends in time")
-            .unwrap()
-            .to_bytes();
-        String::from_utf8_lossy(&bytes).into_owned()
-    }
-
-    /// Reads `body` into `acc` until `acc` contains `needle`; `false` if the body ended first.
-    async fn read_until(body: &mut Body, acc: &mut String, needle: &str) -> bool {
-        let deadline = Instant::now() + WAIT;
-        while !acc.contains(needle) {
-            let left = deadline.saturating_duration_since(Instant::now());
-            let frame = tokio::time::timeout(left, body.frame())
-                .await
-                .unwrap_or_else(|_| panic!("no {needle:?} in time; got {acc}"));
-            match frame {
-                Some(Ok(frame)) => {
-                    if let Ok(data) = frame.into_data() {
-                        acc.push_str(&String::from_utf8_lossy(&data));
-                    }
-                }
-                Some(Err(e)) => panic!("body error: {e}"),
-                None => return false,
-            }
-        }
-        true
-    }
-
-    fn chat_body(id: &str, provider: Option<&str>, text: &str) -> Value {
-        let mut body = json!({
-            "id": id,
-            "trigger": "submit-message",
-            "messages": [
-                {"id": "a1", "role": "assistant", "parts": [{"type": "text", "text": "earlier"}]},
-                {"id": "u1", "role": "user", "parts": [
-                    {"type": "text", "text": text},
-                    {"type": "file", "url": "data:,x", "mediaType": "text/plain"},
-                ]},
-            ],
-        });
-        if let Some(p) = provider {
-            body["provider"] = json!(p);
-        }
-        body
-    }
-
-    fn post_chat(env: &Env, body: Value) -> Request<Body> {
-        req("POST", &format!("/api/chat/{}", env.project), Some(body))
-    }
-
-    fn header<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
-        headers
-            .get(name)
+    let res = app(&env)
+        .oneshot(req(
+            "GET",
+            &format!("/api/chat/{}/{id}/stream", env.project),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        res.headers()
+            .get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-    }
+            .is_some_and(|v| v.starts_with("text/event-stream")),
+        "{:?}",
+        res.headers()
+    );
+    let mut body = res.into_body();
+    let mut buf = String::new();
+    read_until(&mut body, &mut buf, "fake reply: replay-me").await;
 
-    /// Ends the project's running turn and waits for it.
-    async fn stop_turn(env: &Env) -> Value {
-        let (s, v) = call(
-            env,
-            "DELETE",
-            &format!("/api/chat/{}/turn", env.project),
-            None,
-        )
-        .await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        v
-    }
-
-    #[tokio::test]
-    async fn post_returns_ai_sdk_sse() {
-        let env = env(fake("default", None)).await;
-        let res = send(
-            &env,
-            post_chat(
-                &env,
-                chat_body("new-chat", Some("cursor"), "Write a haiku\nplease"),
-            ),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let h = res.headers().clone();
-        assert_eq!(header(&h, "content-type"), "text/event-stream");
-        assert_eq!(header(&h, "cache-control"), "no-cache");
-        assert_eq!(header(&h, "x-vercel-ai-ui-message-stream"), "v1");
-        assert_eq!(header(&h, "x-accel-buffering"), "no");
-
-        let body = read_to_end(res).await;
-        assert!(body.ends_with("\n\n"), "{body}");
-        let frames: Vec<&str> = body.trim_end().split("\n\n").collect();
-        assert!(frames.iter().all(|f| f.starts_with("data: ")), "{body}");
-        assert_eq!(frames.last(), Some(&"data: [DONE]"));
-        let first: Value = serde_json::from_str(&frames[0]["data: ".len()..]).unwrap();
-        assert_eq!(first["type"], "start");
-        assert!(body.contains(FIXTURE_TEXT), "{body}");
-
-        let (s, v) = call(
-            &env,
-            "GET",
-            &format!("/api/chat/{}/new-chat", env.project),
-            None,
-        )
-        .await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        let roles: Vec<&Value> = v["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|m| &m["role"])
-            .collect();
-        assert_eq!(roles, [&json!("user"), &json!("assistant")], "{v}");
-        assert_eq!(
-            v["messages"][0]["parts"][0]["text"],
-            "Write a haiku\nplease"
-        );
-        assert_eq!(v["provider"], "cursor");
-        assert_eq!(v["running"], false);
-
-        let (s, v) = call(&env, "GET", &format!("/api/chat/{}", env.project), None).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        let chats = v["chats"].as_array().unwrap();
-        assert_eq!(chats.len(), 1, "only records with a transcript: {v}");
-        assert_eq!(chats[0]["id"], "new-chat");
-        assert_eq!(chats[0]["provider"], "cursor");
-        assert_eq!(chats[0]["title"], "Write a haiku");
-        assert!(chats[0]["updatedAt"].is_u64(), "{v}");
-        assert_eq!(v["running"], Value::Null);
-
-        let record =
-            orso::terminal::history::get(&env.state_dir, &env.project, "new-chat").unwrap();
-        assert_eq!(record.provider, "cursor");
-
-        let (s, _) = call(&env, "GET", "/api/chat/nope", None).await;
-        assert_eq!(s, StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn resume_replays_without_duplicates() {
-        let env = env(fake("slow", None)).await;
-        let stream = format!("/api/chat/{}/{CHAT}/stream", env.project);
-        let posted = send(&env, post_chat(&env, chat_body(CHAT, None, "slow one"))).await;
-        assert_eq!(posted.status(), StatusCode::OK);
-
-        let res = send(&env, req("GET", &stream, None)).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(header(res.headers(), "content-type"), "text/event-stream");
-        let mut body = res.into_body();
-        let mut acc = String::new();
-        assert!(read_until(&mut body, &mut acc, FIXTURE_TEXT).await, "{acc}");
-
-        let (s, v) = call(&env, "GET", &format!("/api/chat/{}", env.project), None).await;
-        assert_eq!(s, StatusCode::OK);
-        assert_eq!(v["running"], CHAT);
-        let (_, v) = call(
-            &env,
-            "GET",
-            &format!("/api/chat/{}/{CHAT}", env.project),
-            None,
-        )
-        .await;
-        assert_eq!(v["running"], true);
-
-        assert_eq!(stop_turn(&env).await["stopped"], true);
-        assert!(
-            read_until(&mut body, &mut acc, "data: [DONE]\n\n").await,
-            "{acc}"
-        );
-        assert_eq!(acc.matches(r#""type":"start""#).count(), 1, "{acc}");
-        assert_eq!(acc.matches(FIXTURE_TEXT).count(), 1, "{acc}");
-        drop(posted);
-
-        let res = send(&env, req("GET", &stream, None)).await;
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-        assert_eq!(stop_turn(&env).await["stopped"], false);
-    }
-
-    #[tokio::test]
-    async fn rejects_bad_input() {
-        let env = env(fake("default", None)).await;
-        let cases = [
-            (chat_body("../x", Some("cursor"), "hi"), "invalid chat id"),
-            (
-                chat_body("fresh", Some("fake"), "hi"),
-                "Chat supports Cursor CLI, Claude Code, Codex and OpenCode",
-            ),
-            (
-                chat_body("fresh", None, "hi"),
-                "provider is required for a new chat",
-            ),
-            (chat_body(CHAT, None, "  "), ""),
-            (
-                json!({"id": CHAT, "messages": [{"role": "assistant", "parts": [{"type": "text", "text": "x"}]}]}),
-                "",
-            ),
-            (json!({"id": CHAT}), ""),
-        ];
-        for (body, message) in cases {
-            let res = send(&env, post_chat(&env, body.clone())).await;
-            let status = res.status();
-            let v: Value = serde_json::from_str(&read_to_end(res).await).unwrap_or(Value::Null);
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {v}");
-            let got = v["error"]["message"].as_str().unwrap_or("");
-            assert!(got.contains(message), "{body}: {v}");
-        }
-        assert!(orso::terminal::history::get(&env.state_dir, &env.project, "fresh").is_none());
-        assert_eq!(env.state.chats.running(&env.project), None);
-
-        let res = send(
-            &env,
-            req(
-                "POST",
-                "/api/chat/nope",
-                Some(chat_body("fresh", Some("cursor"), "hi")),
-            ),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn model_is_passed_for_that_turn_only() {
-        let args = tempfile::NamedTempFile::new().unwrap();
-        let mut argv = vec![
-            "env".to_string(),
-            format!("FAKE_ARGSFILE={}", args.path().display()),
-        ];
-        argv.extend(fake("default", None));
-        let env = env(argv).await;
-        let read_args = || std::fs::read_to_string(args.path()).unwrap();
-
-        let mut body = chat_body("new-chat", Some("cursor"), "hi");
-        body["model"] = json!("gpt-5.2");
-        read_to_end(send(&env, post_chat(&env, body)).await).await;
-        assert!(
-            read_args().contains("\n--model\ngpt-5.2\n"),
-            "{}",
-            read_args()
-        );
-
-        read_to_end(send(&env, post_chat(&env, chat_body("new-chat", None, "again"))).await).await;
-        assert!(!read_args().contains("--model"), "{}", read_args());
-    }
-
-    #[tokio::test]
-    async fn models_come_from_the_cli() {
-        let script =
-            "printf 'Available models\\n\\nauto - Auto (current, default)\\ngpt-5.2 - GPT-5.2\\n'";
-        let env = env(vec!["sh".into(), "-c".into(), script.into()]).await;
-        let (s, v) = call(&env, "GET", "/api/terminal/providers/cursor/models", None).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(
-            v["models"],
-            json!([{"id": "auto", "name": "Auto"}, {"id": "gpt-5.2", "name": "GPT-5.2"}])
-        );
-        let (s, v) = call(&env, "GET", "/api/terminal/providers/fake/models", None).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(v["models"], json!([]));
-        let (s, _) = call(&env, "GET", "/api/terminal/providers/nope/models", None).await;
-        assert_eq!(s, StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn failed_first_turn_is_not_resumed() {
-        let env = env(fake("default", None)).await;
-        let agents = env.state.config.agents_config.clone().unwrap();
-        let use_claude = |argv: Vec<String>| {
-            std::fs::write(&agents, json!({ "claude": argv }).to_string()).unwrap();
-        };
-        use_claude(vec!["/nonexistent/claude".into()]);
-        let res = send(
-            &env,
-            post_chat(&env, chat_body("first", Some("claude"), "hi")),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = read_to_end(res).await;
-        assert!(body.contains("not_installed"), "{body}");
-        let record = orso::terminal::history::get(&env.state_dir, &env.project, "first").unwrap();
-        assert_eq!(
-            record.agent_session_id, None,
-            "an unconfirmed session id is forgotten"
-        );
-
-        let argv_file = env.state_dir.join("argv.txt");
-        let fixture = super::fixtures().join("chat/claude/turn.jsonl");
-        let script = format!(
-            "printf '%s\\n' \"$@\" > '{}'; cat '{}'",
-            argv_file.display(),
-            fixture.display()
-        );
-        use_claude(vec!["sh".into(), "-c".into(), script, "claude".into()]);
-        let res = send(&env, post_chat(&env, chat_body("first", None, "again"))).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        read_to_end(res).await;
-        let argv = std::fs::read_to_string(&argv_file).unwrap();
-        let argv: Vec<&str> = argv.lines().collect();
-        assert!(!argv.contains(&"--resume"), "{argv:?}");
-        assert!(argv.contains(&"--session-id"), "{argv:?}");
-    }
-
-    #[tokio::test]
-    async fn get_routes_reject_bad_chat_ids() {
-        let env = env(fake("default", None)).await;
-        let long = "a".repeat(65);
-        for id in ["bad.id", long.as_str(), "..%2Fx"] {
-            for suffix in ["", "/stream"] {
-                let uri = format!("/api/chat/{}/{id}{suffix}", env.project);
-                let (s, v) = call(&env, "GET", &uri, None).await;
-                assert_eq!(s, StatusCode::BAD_REQUEST, "{uri}: {v}");
-                assert!(
-                    v["error"]["message"]
-                        .as_str()
-                        .unwrap_or("")
-                        .contains("invalid chat id"),
-                    "{uri}: {v}"
-                );
-            }
+    let (status, _) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "live-me" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    read_until(&mut body, &mut buf, "fake reply: live-me").await;
+    let replayed_turns = buf.matches("\"type\":\"turn_end\"").count();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while buf.matches("\"type\":\"turn_end\"").count() <= replayed_turns {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let frame = tokio::time::timeout(left, body.frame())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for live turn_end; sse: {buf}"))
+            .unwrap_or_else(|| panic!("stream ended before live turn_end; sse: {buf}"))
+            .expect("sse frame");
+        if let Ok(data) = frame.into_data() {
+            buf.push_str(&String::from_utf8_lossy(&data));
         }
     }
+    assert!(!buf.contains("[DONE]"), "sse: {buf}");
 
-    #[tokio::test]
-    async fn delete_removes_a_chat_that_is_not_running() {
-        let env = env(fake("slow", None)).await;
-        let uri = |id: &str| format!("/api/chat/{}/{id}", env.project);
+    // The turn is finished and the response is still open: no trailer, no close.
+    let pending = tokio::time::timeout(Duration::from_millis(300), body.frame()).await;
+    assert!(pending.is_err(), "stream closed after the live turn: {buf}");
+    drop(body);
+    env.state.chats.shutdown().await;
+}
 
-        let posted = send(&env, post_chat(&env, chat_body(CHAT, None, "slow one"))).await;
-        assert_eq!(posted.status(), StatusCode::OK);
-        let (s, v) = call(&env, "DELETE", &uri(CHAT), None).await;
-        assert_eq!(s, StatusCode::CONFLICT, "{v}");
-        stop_turn(&env).await;
-        drop(posted);
-        let file = transcript::path(&env.state_dir, &env.project, CHAT);
-        assert!(file.is_file());
+#[tokio::test]
+async fn chat_stop_cancels_turn() {
+    let env = env().await;
+    let id = create_chat(&env, None).await;
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "slow please" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    wait_text(&env, &id, "slow started").await;
 
-        let (s, v) = call(&env, "DELETE", &uri(CHAT), None).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(v["deleted"], true);
-        assert!(!file.exists());
-        assert!(orso::terminal::history::get(&env.state_dir, &env.project, CHAT).is_none());
-        let (s, _) = call(&env, "GET", &uri(CHAT), None).await;
-        assert_eq!(s, StatusCode::NOT_FOUND);
-        let (s, _) = call(&env, "DELETE", &uri(CHAT), None).await;
-        assert_eq!(s, StatusCode::NOT_FOUND);
-        let (s, _) = call(&env, "DELETE", &uri("bad.id"), None).await;
-        assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/stop", env.project),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
-        let terminal = json!({ "project": env.project, "provider": "fake" });
-        let (s, v) = call(&env, "POST", "/api/terminal", Some(terminal)).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        let session = v["sessionId"].as_str().unwrap().to_string();
-        let (s, v) = call(&env, "DELETE", &uri(&session), None).await;
-        assert_eq!(s, StatusCode::CONFLICT, "{v}");
-        env.state.terminals.kill(&env.project).await;
-    }
+    let detail = wait_detail(
+        &env,
+        &id,
+        |body| {
+            body["chunks"].as_array().is_some_and(|chunks| {
+                chunks
+                    .iter()
+                    .any(|c| c["type"] == "turn_end" && c["stop_reason"] == "cancelled")
+            })
+        },
+        "turn_end cancelled",
+    )
+    .await;
+    assert!(
+        detail["chunks"].as_array().is_some_and(|chunks| {
+            chunks
+                .iter()
+                .any(|c| c["type"] == "turn_end" && c["stop_reason"] == "cancelled")
+        }),
+        "{detail}"
+    );
+    env.state.chats.shutdown().await;
+}
 
-    #[tokio::test]
-    async fn chat_and_terminal_exclusive() {
-        let env = env(fake("slow", None)).await;
-        let terminal = json!({ "project": env.project, "provider": "fake" });
-        let (s, v) = call(&env, "POST", "/api/terminal", Some(terminal.clone())).await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        let (s, v) = call(
+#[tokio::test]
+async fn chat_approve_permission() {
+    let env = env().await;
+    let id = create_chat(&env, None).await;
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "permission please" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let request_id = loop {
+        let (status, body) = call(
+            &env,
+            "GET",
+            &format!("/api/chat/{}/{id}", env.project),
+            None,
+        )
+        .await;
+        let found = body["chunks"].as_array().and_then(|chunks| {
+            chunks.iter().find_map(|c| {
+                (c["type"] == "permission")
+                    .then(|| c["request_id"].as_str().map(str::to_string))
+                    .flatten()
+            })
+        });
+        if let Some(id) = found {
+            break id;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for permission; last {status} {body}"
+        );
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/approve", env.project),
+        Some(json!({ "requestId": request_id, "allow": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let detail = wait_text(&env, &id, "permission outcome: selected:allow").await;
+    assert!(chunk_text(&detail).contains("permission outcome: selected:allow"));
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_id_traversal_rejected() {
+    let env = env().await;
+    let project = &env.project;
+    for id in ["..%2Fevil", "foo%2Fbar", &"a".repeat(65)] {
+        let (status, body) = call(
             &env,
             "POST",
-            &format!("/api/chat/{}", env.project),
-            Some(chat_body(CHAT, None, "hi")),
+            &format!("/api/chat/{project}/{id}/message"),
+            Some(json!({ "text": "hi" })),
         )
         .await;
-        assert_eq!(s, StatusCode::CONFLICT, "{v}");
-        assert_eq!(v["error"]["message"], "The agent is busy in Terminal");
-        env.state.terminals.kill(&env.project).await;
-
-        let posted = send(&env, post_chat(&env, chat_body(CHAT, None, "slow one"))).await;
-        assert_eq!(posted.status(), StatusCode::OK);
-        let (s, v) = call(&env, "POST", "/api/terminal", Some(terminal)).await;
-        assert_eq!(s, StatusCode::CONFLICT, "{v}");
-        assert_eq!(v["error"]["message"], "The agent is busy in Chat");
-        assert_eq!(env.state.terminals.status(&env.project), None);
-        stop_turn(&env).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{id}: {body}");
+        assert_eq!(body["error"]["code"], "BADREQ", "{id}: {body}");
     }
 
-    fn git_cli(dir: &Path, args: &[&str]) -> String {
-        let out = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
+    let state = env.root.join(".orso");
+    assert!(!state.join("evil.jsonl").exists());
+    assert!(!state.join(project).join("evil.jsonl").exists());
+    assert!(!state
+        .join(project)
+        .join("chats")
+        .join("..%2Fevil.jsonl")
+        .exists());
+    assert!(!env.root.join("evil.jsonl").exists());
+
+    // `turn` is an ordinary chat id. It is not the removed stop-all route.
+    let (status, body) = call(&env, "DELETE", &format!("/api/chat/{project}/turn"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("no such chat")),
+        "{body}"
+    );
+    let (status, body) = call(&env, "GET", &format!("/api/chat/{project}/turn"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_ne!(body["error"]["message"], "route not found");
+}
+
+async fn wait_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !path.exists() {
         assert!(
-            out.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
+            Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
         );
-        String::from_utf8_lossy(&out.stdout).trim().to_string()
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
 
-    fn seed_bare(tmp: &Path) -> PathBuf {
-        let src = tmp.join("src");
-        std::fs::create_dir_all(&src).unwrap();
-        git_cli(&src, &["init", "-b", "main"]);
-        git_cli(&src, &["config", "user.name", "Ada"]);
-        git_cli(&src, &["config", "user.email", "ada@example.com"]);
-        std::fs::write(src.join("package.json"), "{}\n").unwrap();
-        // Tracked, so the `edit` fake's append dirties the tree.
-        std::fs::write(src.join("notes.md"), "notes\n").unwrap();
-        git_cli(&src, &["add", "-A"]);
-        git_cli(&src, &["commit", "-m", "init"]);
-        git_cli(
-            tmp,
-            &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
-        );
-        tmp.join("remote.git")
-    }
+#[tokio::test]
+async fn delete_during_handshake_does_not_keep_terminal_blocked() {
+    let env = env().await;
+    let gate = env.root.join("hold");
+    let (cmd, args) = orso::chat::acp::fake_agent_hold(&gate);
+    let mut argv = vec![cmd];
+    argv.extend(args);
+    orso::providers::set_test_acp_argv("hold", argv);
 
-    #[tokio::test]
-    async fn blocked_on_main() {
-        let env = env(fake("edit", None)).await;
-        let git_dir = env.state.config.projects_dir.join("git");
-        let bare = seed_bare(&git_dir);
-        let gh = env
-            .state
-            .projects
-            .create_from(
-                "gh-site",
-                Source::Clone {
-                    repo: "acme/site".into(),
-                    url: format!("file://{}", bare.display()),
-                    env: vec![],
-                },
-                &git::Identity::orso(),
-            )
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}", env.project),
+        Some(json!({ "provider": "hold" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+
+    let state = env.state.clone();
+    let project = env.project.clone();
+    let start_id = id.clone();
+    let started = tokio::spawn(async move {
+        let res = http::router(state)
+            .oneshot(req(
+                "POST",
+                &format!("/api/chat/{project}/{start_id}/start"),
+                None,
+            ))
             .await
             .unwrap();
-        let res = send(
-            &env,
-            req(
-                "POST",
-                &format!("/api/chat/{}", gh.id),
-                Some(chat_body("on-main", Some("cursor"), "edit")),
-            ),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = read_to_end(res).await;
-        let checkpoint = body
-            .split("\n\n")
-            .filter_map(|f| f.strip_prefix("data: "))
-            .filter_map(|f| serde_json::from_str::<Value>(f).ok())
-            .find(|v| v["type"] == "data-checkpoint")
-            .unwrap_or_else(|| panic!("no data-checkpoint: {body}"));
-        assert!(checkpoint["data"]["blocked"].is_string(), "{checkpoint}");
+        res.status()
+    });
+    wait_path(&std::path::PathBuf::from(format!(
+        "{}.ready",
+        gate.display()
+    )))
+    .await;
+    assert!(
+        env.state.chats.any_live(&env.project),
+        "terminal start would not be blocked yet"
+    );
+
+    let (status, body) = call(
+        &env,
+        "DELETE",
+        &format!("/api/chat/{}/{id}", env.project),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !env.state.chats.any_live(&env.project),
+        "delete left the handshake up; terminal start stays 409"
+    );
+
+    std::fs::write(format!("{}.go", gate.display()), b"").unwrap();
+    let start_status = started.await.unwrap();
+    assert_ne!(
+        start_status,
+        StatusCode::ACCEPTED,
+        "start published after delete"
+    );
+    assert_ne!(start_status, StatusCode::NO_CONTENT);
+    assert!(!env.state.chats.any_live(&env.project));
+    assert!(!env.state.chats.is_live(&env.project, &id));
+
+    for (method, path) in [
+        ("GET", format!("/api/chat/{}/{id}", env.project)),
+        ("DELETE", format!("/api/chat/{}/{id}", env.project)),
+        ("POST", format!("/api/chat/{}/{id}/stop", env.project)),
+    ] {
+        let (status, body) = call(&env, method, &path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {body}");
+    }
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn turn_end_appends_checkpoint_chunk() {
+    let env = env().await;
+    let id = create_chat(&env, None).await;
+    let project = env.state.projects.get(&env.project).await.unwrap();
+    std::fs::write(project.dir.join("note.md"), "edited by the agent\n").unwrap();
+
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}/{id}/message", env.project),
+        Some(json!({ "text": "edit something" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let detail = wait_detail(
+        &env,
+        &id,
+        |body| {
+            body["chunks"]
+                .as_array()
+                .is_some_and(|chunks| chunks.iter().any(|c| c["type"] == "checkpoint"))
+        },
+        "checkpoint chunk",
+    )
+    .await;
+    let checkpoint = detail["chunks"]
+        .as_array()
+        .and_then(|chunks| chunks.iter().find(|c| c["type"] == "checkpoint"))
+        .unwrap()
+        .clone();
+    assert!(
+        checkpoint["sha"]
+            .as_str()
+            .is_some_and(|sha| !sha.is_empty()),
+        "{checkpoint}"
+    );
+    assert!(
+        checkpoint["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|f| f == "note.md")),
+        "{checkpoint}"
+    );
+    assert!(checkpoint.get("blocked").is_none(), "{checkpoint}");
+    assert_eq!(
+        checkpoint["summary"], "fake reply: edit something (done)",
+        "{checkpoint}"
+    );
+
+    let path = env
+        .root
+        .join(".orso")
+        .join(&env.project)
+        .join("chats")
+        .join(format!("{id}.jsonl"));
+    let transcript = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        transcript.contains("\"type\":\"checkpoint\""),
+        "{transcript}"
+    );
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn terminal_routes_are_gone() {
+    let env = env().await;
+    for path in [
+        "/api/terminal/providers",
+        "/api/terminal/providers/cursor/models",
+        "/api/terminal",
+        "/api/terminal/turn-end",
+        &format!("/api/terminal/{}", env.project),
+        &format!("/api/terminal/{}/sessions", env.project),
+    ] {
+        let (status, body) = call(&env, "GET", path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn providers_and_models_move_to_chat_paths() {
+    let env = env().await;
+    let (status, body) = call(&env, "GET", "/api/chat/providers", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ids: Vec<&str> = body["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["cursor", "claude", "codex", "opencode"], "{body}");
+    for provider in body["providers"].as_array().unwrap() {
+        assert!(
+            provider["acp"]
+                .as_array()
+                .is_some_and(|argv| !argv.is_empty()),
+            "{provider}"
+        );
     }
 
-    /// The hook token the token-echoing terminal printed.
-    async fn hook_token(env: &Env) -> String {
-        let attach = env.state.terminals.attach(&env.project).unwrap();
-        let mut acc = String::from_utf8_lossy(&attach.replay).into_owned();
-        let mut rx = attach.rx;
-        let deadline = Instant::now() + WAIT;
-        loop {
-            if let Some(rest) = acc.split("TOKEN=").nth(1) {
-                let token: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
-                if token.len() == 32 {
-                    return token;
-                }
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            match tokio::time::timeout(left, rx.recv()).await {
-                Ok(Ok(Output::Data(data))) => acc.push_str(&String::from_utf8_lossy(&data)),
-                other => panic!("no TOKEN= ({other:?}): {acc:?}"),
-            }
-        }
-    }
+    let (status, body) = call(&env, "GET", "/api/chat/providers/fake/models", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&env, "GET", "/api/chat/providers/cursor/models", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["models"].is_array(), "{body}");
+}
 
-    #[tokio::test]
-    async fn terminal_turn_marks_transcript() {
-        let script = format!("echo TOKEN=$ORSO_HOOK_TOKEN; exec {}", fake_cli());
-        let env = env(vec!["sh".into(), "-c".into(), script]).await;
-        transcript::append(
-            &env.state_dir,
-            &env.project,
-            CHAT,
-            &[transcript::user_message("u1", "hi")],
-        )
+fn raw_req(method: &str, path: &str, content_type: &str, bytes: Vec<u8>) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::HOST, "localhost")
+        .header(header::CONTENT_TYPE, content_type)
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn chat_attachments_work_under_the_chat_path() {
+    let env = env().await;
+    let upload = app(&env)
+        .oneshot(raw_req(
+            "POST",
+            &format!("/api/chat/{}/attachments", env.project),
+            "image/png",
+            vec![0x89, b'P', b'N', b'G'],
+        ))
+        .await
         .unwrap();
-        let (s, v) = call(
-            &env,
-            "POST",
-            "/api/terminal",
-            Some(json!({ "project": env.project, "provider": "cursor", "resume": CHAT })),
-        )
-        .await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(v["sessionId"], CHAT);
-        let token = hook_token(&env).await;
-        let (s, v) = call(
-            &env,
-            "POST",
-            "/api/terminal/turn-end",
-            Some(json!({ "project": env.project, "token": token })),
-        )
-        .await;
-        assert_eq!(s, StatusCode::OK, "{v}");
-        env.state.terminals.kill(&env.project).await;
+    assert_eq!(upload.status(), StatusCode::OK);
+    let bytes = upload.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let path = body["path"].as_str().unwrap();
+    let name = std::path::Path::new(path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
 
-        let messages = transcript::read(&env.state_dir, &env.project, CHAT);
-        assert_eq!(messages.len(), 2, "{messages:?}");
-        assert_eq!(messages[1]["parts"][0]["type"], "data-terminal");
-    }
+    let res = app(&env)
+        .oneshot(req(
+            "GET",
+            &format!("/api/chat/{}/attachments/{name}", env.project),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/png"
+    );
+    assert_eq!(
+        res.into_body().collect().await.unwrap().to_bytes().as_ref(),
+        [0x89, b'P', b'N', b'G']
+    );
+}
+
+#[tokio::test]
+async fn overlapping_cold_messages_with_stored_model_both_send() {
+    let env = env().await;
+    let id = create_chat(&env, Some("smart")).await;
+    let gate = orso::chat::manager::arm_model_gate(&env.project, &id);
+    let path = format!("/api/chat/{}/{id}/message", env.project);
+
+    // "slow" holds the first turn open so the other set_model runs mid-turn.
+    let alpha = call(
+        &env,
+        "POST",
+        &path,
+        Some(json!({ "text": "slow alpha-msg" })),
+    );
+    let beta = call(
+        &env,
+        "POST",
+        &path,
+        Some(json!({ "text": "slow beta-msg" })),
+    );
+    let ((), (status_a, body_a), (status_b, body_b)) = tokio::join!(
+        async {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while gate.entered() < 2 {
+                assert!(
+                    Instant::now() < deadline,
+                    "both messages did not reach set_model (entered {})",
+                    gate.entered()
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            gate.release_first();
+            let _ = wait_detail(
+                &env,
+                &id,
+                |body| {
+                    let text = chunk_text(body);
+                    text.contains("alpha-msg") || text.contains("beta-msg")
+                },
+                "first cold message recorded",
+            )
+            .await;
+            gate.release_rest();
+        },
+        alpha,
+        beta,
+    );
+    assert_eq!(status_a, StatusCode::ACCEPTED, "{body_a}");
+    assert_eq!(status_b, StatusCode::ACCEPTED, "{body_b}");
+    let detail = wait_detail(
+        &env,
+        &id,
+        |body| {
+            let text = chunk_text(body);
+            text.contains("alpha-msg") && text.contains("beta-msg")
+        },
+        "both messages recorded",
+    )
+    .await;
+    assert_eq!(detail["model"], "smart");
+    env.state.chats.shutdown().await;
 }

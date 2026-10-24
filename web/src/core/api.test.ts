@@ -109,22 +109,40 @@ describe("createApi", () => {
     expect(a.previewUrl("my proj")).toBe("http://b.test/preview/my%20proj/");
   });
 
-  it("builds chat routes, the stream URL and auth headers", async () => {
+  it("builds chat routes and auth headers", async () => {
     const fetchMock = vi.fn<FetchLike>(async () => json({ chats: [], running: null }));
     const a = api(fetchMock, "tok");
     await a.listChats("my proj");
-    fetchMock.mockResolvedValueOnce(json({ messages: [], provider: "claude", running: false }));
+    fetchMock.mockResolvedValueOnce(json({ chunks: [], provider: "claude", model: null, running: false }));
     await a.chatHistory("my proj", "c1");
-    fetchMock.mockResolvedValueOnce(json({ stopped: true }));
-    await a.stopChat("my proj");
+    fetchMock.mockResolvedValueOnce(json({ id: "c2", provider: "claude", live: false, running: false, updatedAt: 0 }));
+    await a.createChat("my proj", "claude", "sonnet");
+    fetchMock.mockResolvedValueOnce(json({ accepted: true }));
+    await a.sendChatMessage("my proj", "c2", "hello");
+    fetchMock.mockResolvedValueOnce(json({}));
+    await a.stopChat("my proj", "c2");
     expect(fetchMock.mock.calls.map(([url, init]) => `${init!.method} ${url}`)).toEqual([
       "GET http://127.0.0.1:7800/api/chat/my%20proj",
       "GET http://127.0.0.1:7800/api/chat/my%20proj/c1",
-      "DELETE http://127.0.0.1:7800/api/chat/my%20proj/turn",
+      "POST http://127.0.0.1:7800/api/chat/my%20proj",
+      "POST http://127.0.0.1:7800/api/chat/my%20proj/c2/message",
+      "POST http://127.0.0.1:7800/api/chat/my%20proj/c2/stop",
     ]);
-    expect(a.chatUrl("my proj")).toBe("http://127.0.0.1:7800/api/chat/my%20proj");
-    expect(a.authHeaders()).toEqual({ Authorization: "Bearer tok" });
-    expect(api(fetchMock).authHeaders()).toEqual({});
+    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({ provider: "claude", model: "sonnet" });
+    expect(JSON.parse(fetchMock.mock.calls[3]![1]!.body as string)).toEqual({ text: "hello" });
+    expect(a.attachmentUrl("my proj", "a.png")).toBe(
+      "http://127.0.0.1:7800/api/chat/my%20proj/attachments/a.png",
+    );
+  });
+
+  it("accepts the empty 202 body from sending a chat message", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => new Response(null, { status: 202 }));
+    await expect(api(fetchMock).sendChatMessage("p", "c1", "hello")).resolves.toBeUndefined();
+  });
+
+  it("accepts the empty 204 body from stopping a chat", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => new Response(null, { status: 204 }));
+    await expect(api(fetchMock).stopChat("p", "c1")).resolves.toBeUndefined();
   });
 });
 
