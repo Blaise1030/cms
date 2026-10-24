@@ -1,8 +1,7 @@
 //! One long-lived ACP agent per `(project_id, chat_id)`.
 //!
 //! Two chats in the same project are two processes. There is no PTY claim:
-//! the terminal module still asks [`ChatManager::any_live`] so a project
-//! delete / terminal start can see chat agents until the terminal goes away.
+//! project delete and Get latest use [`ChatManager::any_live`] to see chats.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -73,6 +72,8 @@ struct Key {
 struct LiveChat {
     client: Arc<AcpClient>,
     acp_session_id: String,
+    /// Token the agent was given in `ORSO_HOOK_TOKEN`; `orso ctl` presents it.
+    hook_token: String,
     tx: broadcast::Sender<UiChunk>,
     history: Mutex<Vec<UiChunk>>,
     models: Mutex<Option<ModelConfig>>,
@@ -302,7 +303,21 @@ impl ChatManager {
 
         let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
             let (cmd, args) = split_argv(acp_argv)?;
-            let client = AcpClient::spawn_with_env(cmd, args, cwd, env)
+            let hook_token = crate::config::random_token()[..32].to_string();
+            let child_env: Vec<(String, String)> = env
+                .iter()
+                .filter(|(k, _)| *k != "ORSO_HOOK_TOKEN")
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .chain(std::iter::once((
+                    "ORSO_HOOK_TOKEN".to_string(),
+                    hook_token.clone(),
+                )))
+                .collect();
+            let env_refs: Vec<(&str, &str)> = child_env
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let client = AcpClient::spawn_with_env(cmd, args, cwd, &env_refs)
                 .await
                 .map_err(|e| ChatError::Failed(e.to_string()))?;
             client
@@ -317,13 +332,13 @@ impl ChatManager {
             // process. Clear it so the first real message is accepted.
             let _ = client.cancel(&created.session_id).await;
             client.clear_cancelled();
-            Ok::<_, ChatError>((client, created))
+            Ok::<_, ChatError>((client, created, hook_token))
         })
         .await
         .map_err(|_| ChatError::Failed("ACP agent handshake timed out".into()))
         .and_then(|r| r);
 
-        let (client, created) = match handshake {
+        let (client, created, hook_token) = match handshake {
             Ok(pair) => pair,
             Err(e) => {
                 self.note_error(project_id, chat_id, &e.to_string());
@@ -337,6 +352,7 @@ impl ChatManager {
         let live = Arc::new(LiveChat {
             client,
             acp_session_id: created.session_id,
+            hook_token,
             tx: broadcast::channel(BROADCAST_CAPACITY).0,
             history: Mutex::new(transcript::load(&self.inner.state_dir, project_id, chat_id)),
             models: Mutex::new(created.models),
@@ -755,6 +771,23 @@ impl ChatManager {
             .chats
             .keys()
             .any(|key| key.project_id == project_id)
+    }
+
+    /// The hook token a live chat's agent was given (`ORSO_HOOK_TOKEN`).
+    /// `None` while the handshake is still running.
+    pub fn hook_token(&self, project_id: &str, chat_id: &str) -> Option<String> {
+        self.live(project_id, chat_id)
+            .map(|live| live.hook_token.clone())
+    }
+
+    /// True when `token` is a live chat agent's hook token in `project_id`.
+    pub fn token_matches(&self, project_id: &str, token: &str) -> bool {
+        self.slots().chats.values().any(|entry| match entry {
+            Entry::Live(live) => {
+                live.project_id == project_id && crate::auth::ct_eq(token, &live.hook_token)
+            }
+            Entry::Starting(_) => false,
+        })
     }
 
     /// Cancels and drops every chat agent for one project (project delete).

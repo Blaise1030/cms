@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::stream::Stream;
 use serde::Deserialize;
@@ -23,6 +24,7 @@ use tokio::sync::broadcast;
 use crate::chat::chunk::{sse_frame, UiChunk};
 use crate::chat::history::{self, SessionRecord};
 use crate::chat::manager::ChatError;
+use crate::chat::models;
 use crate::chat::transcript;
 use crate::config::random_token;
 use crate::error::ApiError;
@@ -124,9 +126,14 @@ async fn ensure_agent(
     let argv = acp_argv_for(state, &record.provider)?.ok_or_else(|| {
         ApiError::badreq(format!("provider {} has no ACP command", record.provider))
     })?;
+    let env = agent_env(state, project);
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
     state
         .chats
-        .start(project, chat, cwd, &argv, &[])
+        .start(project, chat, cwd, &argv, &env)
         .await
         .map_err(chat_error)?;
     if let Some(model) = record.model.clone() {
@@ -137,6 +144,37 @@ async fn ensure_agent(
             .map_err(chat_error)?;
     }
     Ok(())
+}
+
+/// The agent-facing environment a chat process gets: `orso ctl` reaches the
+/// daemon with the chat's hook token (added by [`ChatManager::start`]), the git
+/// shim leads `PATH`, and `ORSO_REAL_GIT` names the real git.
+pub fn agent_env(state: &AppState, project: &str) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = vec![
+        (
+            "ORSO_URL".into(),
+            format!("http://127.0.0.1:{}", state.config.port),
+        ),
+        ("ORSO_PROJECT".into(), project.to_string()),
+        (
+            "ORSO_HOOK_EXE".into(),
+            state.config.hook_exe_path().to_string_lossy().into_owned(),
+        ),
+        (
+            "ORSO_REAL_GIT".into(),
+            crate::git_shim::resolve_system_git()
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    ];
+    if let Some(shim) = crate::git_shim::ensure_shim_dir(&state.config) {
+        let own = std::env::var_os("PATH").unwrap_or_default();
+        let dirs = std::iter::once(shim).chain(std::env::split_paths(&own));
+        if let Ok(path) = std::env::join_paths(dirs) {
+            env.push(("PATH".into(), path.to_string_lossy().into_owned()));
+        }
+    }
+    env
 }
 
 fn touch(state: &AppState, project: &str, chat: &str, title_from: Option<&str>) {
@@ -352,7 +390,8 @@ pub fn checkpoint_chunk(outcome: &super::checkpoints::TurnOutcome) -> Option<UiC
     }
 }
 
-fn models_body(state: &AppState, project: &str, chat: &str) -> Value {    match state.chats.models(project, chat) {
+fn models_body(state: &AppState, project: &str, chat: &str) -> Value {
+    match state.chats.models(project, chat) {
         Some(cfg) => json!({ "current": cfg.current, "options": cfg.options }),
         None => json!({ "current": null, "options": [] }),
     }
@@ -454,4 +493,111 @@ pub async fn stream_chat(
         }
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// `GET /api/chat/providers` → `{ providers: [{ id, command, acp }] }`.
+pub async fn list_providers(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let providers = providers::load(state.config.agents_config.as_deref())?;
+    Ok(Json(json!({ "providers": providers })))
+}
+
+/// `GET /api/chat/providers/{provider}/models` → `{ models: [{ id, name }] }`;
+/// empty when the CLI cannot list them.
+pub async fn list_provider_models(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let provider = providers::load(state.config.agents_config.as_deref())?
+        .into_iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| ApiError::badreq(format!("unknown provider: {provider_id}")))?;
+    Ok(Json(json!({ "models": models::list(&provider).await })))
+}
+
+/// Largest file a chat accepts as an attachment.
+pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+/// What a chat may attach, with the extension each is saved under.
+const ATTACHMENT_TYPES: &[(&str, &str)] = &[
+    ("image/png", "png"),
+    ("image/jpeg", "jpg"),
+    ("image/gif", "gif"),
+    ("image/webp", "webp"),
+    ("application/pdf", "pdf"),
+    ("text/plain", "txt"),
+    ("text/markdown", "md"),
+    ("text/csv", "csv"),
+    ("application/json", "json"),
+];
+
+/// `POST /api/chat/{project}/attachments` with an image or document body → `{ path }`,
+/// an absolute path the agent can read. Kept in the daemon's state dir so checkpoints
+/// don't commit it.
+pub async fn attach(
+    State(state): State<AppState>,
+    Path(project): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .projects
+        .get(&project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+    let mime = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let Some(&(_, ext)) = ATTACHMENT_TYPES.iter().find(|(m, _)| *m == mime) else {
+        return Err(ApiError::badreq(format!(
+            "unsupported attachment type: {mime:?}"
+        )));
+    };
+    let dir = state_dir(&state).join(&project).join("attachments");
+    tokio::fs::create_dir_all(&dir).await?;
+    let path = dir.join(format!("{}.{ext}", &random_token()[..16]));
+    tokio::fs::write(&path, &body).await?;
+    Ok(Json(json!({ "path": path })))
+}
+
+/// `GET /api/chat/{project}/attachments/{name}` → the saved file, so the chat can show it.
+/// Only names [`attach`] generates resolve, which keeps the lookup inside the attachments dir.
+pub async fn attachment(
+    State(state): State<AppState>,
+    Path((project, name)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .projects
+        .get(&project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+    let mime = name
+        .split_once('.')
+        .filter(|(stem, _)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()))
+        .and_then(|(_, ext)| ATTACHMENT_TYPES.iter().find(|(_, e)| *e == ext))
+        .map(|(m, _)| *m)
+        .ok_or_else(|| ApiError::badreq(format!("invalid attachment name: {name}")))?;
+    let path = state_dir(&state)
+        .join(&project)
+        .join("attachments")
+        .join(&name);
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ApiError::enoent(format!("no such attachment: {name}")))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
 }

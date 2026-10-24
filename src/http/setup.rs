@@ -55,10 +55,10 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatus>, 
     }))
 }
 
-/// The login shell's `PATH` (where terminals find the agents; an app opened from the Finder
-/// only has launchd's minimal one), then the daemon's own.
+/// The login shell's `PATH` (where agents are found; an app opened from the Finder only
+/// has launchd's minimal one), then the daemon's own.
 async fn default_search_path() -> OsString {
-    let login = crate::terminal::login_path().await.unwrap_or_default();
+    let login = crate::shell::login_path().await.unwrap_or_default();
     let own = std::env::var_os("PATH").unwrap_or_default();
     let dirs: Vec<PathBuf> = std::env::split_paths(&login)
         .chain(std::env::split_paths(&own))

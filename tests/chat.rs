@@ -524,7 +524,12 @@ async fn turn_end_appends_checkpoint_chunk() {
         .and_then(|chunks| chunks.iter().find(|c| c["type"] == "checkpoint"))
         .unwrap()
         .clone();
-    assert!(checkpoint["sha"].as_str().is_some_and(|sha| !sha.is_empty()), "{checkpoint}");
+    assert!(
+        checkpoint["sha"]
+            .as_str()
+            .is_some_and(|sha| !sha.is_empty()),
+        "{checkpoint}"
+    );
     assert!(
         checkpoint["files"]
             .as_array()
@@ -540,8 +545,106 @@ async fn turn_end_appends_checkpoint_chunk() {
         .join("chats")
         .join(format!("{id}.jsonl"));
     let transcript = std::fs::read_to_string(&path).unwrap();
-    assert!(transcript.contains("\"type\":\"checkpoint\""), "{transcript}");
+    assert!(
+        transcript.contains("\"type\":\"checkpoint\""),
+        "{transcript}"
+    );
     env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn terminal_routes_are_gone() {
+    let env = env().await;
+    for path in [
+        "/api/terminal/providers",
+        "/api/terminal/providers/cursor/models",
+        "/api/terminal",
+        "/api/terminal/turn-end",
+        &format!("/api/terminal/{}", env.project),
+        &format!("/api/terminal/{}/sessions", env.project),
+    ] {
+        let (status, body) = call(&env, "GET", path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn providers_and_models_move_to_chat_paths() {
+    let env = env().await;
+    let (status, body) = call(&env, "GET", "/api/chat/providers", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ids: Vec<&str> = body["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["cursor", "claude", "codex", "opencode"], "{body}");
+    for provider in body["providers"].as_array().unwrap() {
+        assert!(
+            provider["acp"]
+                .as_array()
+                .is_some_and(|argv| !argv.is_empty()),
+            "{provider}"
+        );
+    }
+
+    let (status, body) = call(&env, "GET", "/api/chat/providers/fake/models", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = call(&env, "GET", "/api/chat/providers/cursor/models", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["models"].is_array(), "{body}");
+}
+
+fn raw_req(method: &str, path: &str, content_type: &str, bytes: Vec<u8>) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::HOST, "localhost")
+        .header(header::CONTENT_TYPE, content_type)
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn chat_attachments_work_under_the_chat_path() {
+    let env = env().await;
+    let upload = app(&env)
+        .oneshot(raw_req(
+            "POST",
+            &format!("/api/chat/{}/attachments", env.project),
+            "image/png",
+            vec![0x89, b'P', b'N', b'G'],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+    let bytes = upload.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let path = body["path"].as_str().unwrap();
+    let name = std::path::Path::new(path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let res = app(&env)
+        .oneshot(req(
+            "GET",
+            &format!("/api/chat/{}/attachments/{name}", env.project),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/png"
+    );
+    assert_eq!(
+        res.into_body().collect().await.unwrap().to_bytes().as_ref(),
+        [0x89, b'P', b'N', b'G']
+    );
 }
 
 #[tokio::test]

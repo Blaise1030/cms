@@ -15,9 +15,9 @@ use crate::static_files;
 
 pub const SESSION_COOKIE: &str = "wb_session";
 const HEALTH_PATH: &str = "/api/health";
-/// Hook-token routes: they check the agent's hook token themselves, not the daemon token.
-const HOOK_PATHS: [&str; 6] = [
-    "/api/terminal/turn-end",
+/// Hook-token routes: they check the live chat's hook token themselves, not the
+/// daemon token.
+const HOOK_PATHS: [&str; 5] = [
     "/api/ctl/preview-status",
     "/api/ctl/restart-preview",
     "/api/ctl/change-status",

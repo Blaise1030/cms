@@ -16,7 +16,6 @@ pub mod history;
 pub mod projects;
 pub mod settings;
 pub mod setup;
-pub mod terminal;
 
 use std::path::PathBuf;
 
@@ -84,6 +83,11 @@ pub fn router(state: AppState) -> Router {
         .route("/@fs/{*rest}", any(preview::handle_vite_root))
         .route("/node_modules/{*rest}", any(preview::handle_vite_root))
         .route("/src/{*rest}", any(preview::handle_vite_root))
+        .route("/api/chat/providers", get(chat::list_providers))
+        .route(
+            "/api/chat/providers/{provider}/models",
+            get(chat::list_provider_models),
+        )
         .route(
             "/api/chat/{project}",
             get(chat::list_chats).post(chat::create_chat),
@@ -105,32 +109,19 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/chat/{project}/{chat}/models", get(chat::list_models))
         .route("/api/chat/{project}/{chat}/model", post(chat::set_model))
-        .route("/api/terminal/providers", get(terminal::list_providers))
         .route(
-            "/api/terminal/providers/{provider}/models",
-            get(terminal::list_models),
+            "/api/chat/{project}/attachments",
+            post(chat::attach).layer(DefaultBodyLimit::max(chat::MAX_ATTACHMENT_BYTES)),
         )
-        .route("/api/terminal", post(terminal::start))
-        .route("/api/terminal/turn-end", post(terminal::turn_end))
+        .route(
+            "/api/chat/{project}/attachments/{name}",
+            get(chat::attachment),
+        )
         .route("/api/ctl/preview-status", post(ctl::preview_status))
         .route("/api/ctl/restart-preview", post(ctl::restart_preview))
         .route("/api/ctl/change-status", post(ctl::change_status))
         .route("/api/ctl/refresh-preview", post(ctl::refresh_preview))
         .route("/api/ctl/refresh-content", post(ctl::refresh_content))
-        .route(
-            "/api/terminal/{project}",
-            get(terminal::status).delete(terminal::stop),
-        )
-        .route("/api/terminal/{project}/ws", get(terminal::ws))
-        .route("/api/terminal/{project}/sessions", get(terminal::sessions))
-        .route(
-            "/api/terminal/{project}/attachments",
-            post(terminal::attach).layer(DefaultBodyLimit::max(terminal::MAX_ATTACHMENT_BYTES)),
-        )
-        .route(
-            "/api/terminal/{project}/attachments/{name}",
-            get(terminal::attachment),
-        )
         .route("/ws/events", get(events::ws))
         .route("/api/checkpoints", get(checkpoints::list))
         .route("/api/checkpoints/{sha}/diff", get(checkpoints::diff))
