@@ -8,10 +8,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@orso/utils";
 import PrMenu from "@/modules/changes/PrMenu.vue";
 import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
+import PublishButton from "@/modules/changes/PublishButton.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import { useGithubStore } from "@/modules/github/store";
 
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; repo?: string | null }>();
 const changes = useChangesStore();
 const github = useGithubStore();
 
@@ -21,6 +22,18 @@ const label = computed(() => {
   if (changes.prUrl) return changes.sharing ? "Updating…" : "Update preview";
   return changes.sharing ? "Sharing…" : "Share preview";
 });
+
+/** Publish sits in the same group when this is a GitHub-backed draft that isn't live. */
+const showPublish = computed(
+  () =>
+    props.repo != null &&
+    changes.active !== null &&
+    changes.status?.state !== "merged",
+);
+
+const showGroup = computed(
+  () => !!(changes.active || changes.prUrl || showPublish.value),
+);
 
 async function onShare() {
   if (!changes.active) return;
@@ -36,7 +49,7 @@ async function onShare() {
 
 <template>
   <div class="relative flex items-center gap-2">
-    <ButtonGroup v-if="changes.active || changes.prUrl">
+    <ButtonGroup v-if="showGroup" data-testid="share-publish-group">
       <Button
         v-if="changes.active"
         :variant="variant"
@@ -51,8 +64,17 @@ async function onShare() {
         <Share2 v-else class="size-4" />
         {{ label }}
       </Button>
-      <ButtonGroupSeparator v-if="changes.active && changes.prUrl" />
+      <ButtonGroupSeparator
+        v-if="changes.active && (changes.prUrl || showPublish)"
+        :class="!changes.prUrl ? 'bg-primary-foreground/25' : undefined"
+      />
       <PrMenu v-if="changes.prUrl" :variant="variant" />
+      <ButtonGroupSeparator v-if="changes.prUrl && showPublish" />
+      <PublishButton
+        v-if="showPublish"
+        :project-id="projectId"
+        :repo="repo ?? null"
+      />
     </ButtonGroup>
 
     <Button

@@ -140,6 +140,7 @@ describe("PreviewPanel", () => {
     const w = mountPanel("starting");
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("starting");
     expect(w.find("iframe").exists()).toBe(false);
+    expect(w.find("[data-testid='preview-starting'] [aria-label='Loading']").exists()).toBe(true);
     hDaemon.daemon.emit({ type: "devserver.status", projectId: "site-1", state: "ready", port: 4000 });
     await flushPromises();
     expect(w.find("[data-testid='status-dot']").attributes("data-state")).toBe("ready");

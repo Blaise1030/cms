@@ -9,7 +9,6 @@ import Shell from "@/app/Shell.vue";
 import Workspace from "@/app/Workspace.vue";
 import { useDaemon } from "@/core/daemon";
 import SharePreviewButton from "@/modules/changes/SharePreviewButton.vue";
-import PublishButton from "@/modules/changes/PublishButton.vue";
 import { report } from "@/modules/changes/getLatest";
 import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
@@ -113,8 +112,11 @@ watch(
       <EditorMenubar v-if="project" :project-id="project.id" />
     </template>
     <template #actions>
-      <SharePreviewButton v-if="project" :project-id="project.id" />
-      <PublishButton v-if="project" :project-id="project.id" :repo="project.repo" />
+      <SharePreviewButton
+        v-if="project"
+        :project-id="project.id"
+        :repo="project.repo"
+      />
     </template>
     <template #workspace>
       <Workspace v-if="project" :project="project" />

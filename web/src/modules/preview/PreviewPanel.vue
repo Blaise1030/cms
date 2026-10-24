@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Spinner } from "@/components/ui/spinner";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
@@ -497,8 +498,10 @@ function toggleFullscreen() {
         </div>
         <div
           v-else-if="state === 'starting'"
-          class="text-muted-foreground flex items-center justify-center text-sm"
+          class="text-muted-foreground flex flex-col items-center justify-center gap-3 text-sm"
+          data-testid="preview-starting"
         >
+          <Spinner class="size-5" />
           Starting dev server…
         </div>
         <div
