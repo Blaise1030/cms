@@ -47,6 +47,9 @@ pub struct AppState {
     pub pending_latest: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
+/// How long a content save waits for a `Starting` preview to become ready.
+const CONTENT_ENDPOINT_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl AppState {
     /// Production state: project creation runs `npm install` and supervises `npm run dev`.
     pub fn new(config: Config) -> Self {
@@ -89,11 +92,20 @@ impl AppState {
         &self,
         project: &str,
     ) -> Result<Option<ContentEndpoint>, ApiError> {
-        let p = self
-            .projects
-            .get(project)
-            .await
-            .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+        // A change create/switch restarts the preview just before a resumed save; give that
+        // restart time to come up instead of reporting the preview as down.
+        let deadline = tokio::time::Instant::now() + CONTENT_ENDPOINT_WAIT;
+        let p = loop {
+            let p = self
+                .projects
+                .get(project)
+                .await
+                .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+            if p.devserver != DevserverStatus::Starting || tokio::time::Instant::now() >= deadline {
+                break p;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        };
         if p.devserver != DevserverStatus::Ready {
             return Ok(None);
         }
