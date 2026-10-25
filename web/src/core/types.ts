@@ -116,7 +116,7 @@ export interface ChangesUpdate {
   updated: Change[];
   /** Changes whose merge conflicts; left untouched. */
   conflicts: Change[];
-  /** The current change, left as is because a terminal is running. */
+  /** The current change, left as is because an agent is running. */
   skipped?: Change | null;
   /** Branch → resolution session. Older daemons may omit this field. */
   conflictSessions?: Record<string, string>;
@@ -248,28 +248,52 @@ export interface FsChangeEvent {
   kind: string;
 }
 
-export interface TerminalExitedEvent {
-  type: "terminal.exited";
-  projectId: string;
-  code: number | null;
-  /** The history record of the session that ended. */
-  sessionId?: string | null;
-}
-
-/** A terminal session's history record changed (title, resumability). */
-export interface TerminalSessionEvent {
-  type: "terminal.session";
-  projectId: string;
-  sessionId: string;
-}
-
 /** A chat conversation, from `GET /api/chat/{project}`. */
 export interface ChatSummary {
   id: string;
   provider: string;
+  model?: string | null;
   title?: string | null;
   /** Unix milliseconds. */
   updatedAt: number;
+  /** The ACP agent process is up (a turn may or may not be running). */
+  live: boolean;
+  /** A prompt is in flight. */
+  running: boolean;
+}
+
+/** One line of a chat transcript, as `GET /api/chat/{project}/{chat}` returns it. */
+export type UiChunk =
+  | { type: "text_delta"; session_id: string; text: string }
+  | { type: "thought_delta"; session_id: string; text: string }
+  | { type: "user_text"; session_id: string; text: string }
+  | { type: "tool_call"; session_id: string; tool_call: Record<string, unknown> }
+  | { type: "tool_call_update"; session_id: string; tool_call: Record<string, unknown> }
+  | { type: "plan"; session_id: string; entries: unknown }
+  | {
+      type: "permission";
+      session_id: string;
+      request_id: string;
+      tool_call: Record<string, unknown>;
+      options: unknown;
+    }
+  | { type: "turn_end"; session_id: string; stop_reason: string }
+  | { type: "unknown"; session_id: string; update: unknown }
+  | { type: "error"; message: string }
+  | {
+      type: "checkpoint";
+      sha?: string | null;
+      summary?: string | null;
+      files: string[];
+      blocked?: string | null;
+    };
+
+/** `GET /api/chat/{project}/{chat}`. */
+export interface ChatHistory {
+  chunks: UiChunk[];
+  provider: string;
+  model: string | null;
+  running: boolean;
 }
 
 /** A chat turn ended; the chat list (titles, order, running) may have changed. */
@@ -285,17 +309,22 @@ export interface CheckpointBlockedEvent {
   reason: string;
 }
 
-/** An agent turn ended; it may have started or switched changes. */
-export interface TerminalTurnEvent {
-  type: "terminal.turn";
+/** Remount the preview iframe (agent ctl or turn-end). */
+export interface PreviewReloadEvent {
+  type: "preview.reload";
   projectId: string;
 }
 
-/** The agent started (a request was submitted) or stopped working on a request. */
-export interface TerminalBusyEvent {
-  type: "terminal.busy";
+/** The dev server is about to reinstall the draft's packages (its deps changed). */
+export interface PreviewDepsInstallingEvent {
+  type: "preview.deps_installing";
   projectId: string;
-  busy: boolean;
+}
+
+/** Reload Content collections, entry lists, and the open entry (agent ctl or turn-end). */
+export interface ContentRefreshEvent {
+  type: "content.refresh";
+  projectId: string;
 }
 
 /** Progress of an agent auto-resolving a conflict session. */
@@ -319,13 +348,12 @@ export type DaemonEvent =
   | DevserverStatusEvent
   | CheckpointCreatedEvent
   | FsChangeEvent
-  | TerminalExitedEvent
-  | TerminalSessionEvent
   | CheckpointBlockedEvent
   | ChangesUpdatedEvent
   | ChangesAutoResolveEvent
-  | TerminalTurnEvent
-  | TerminalBusyEvent
+  | PreviewReloadEvent
+  | PreviewDepsInstallingEvent
+  | ContentRefreshEvent
   | ChatTurnEvent
   | EventsLaggedEvent;
 
@@ -386,6 +414,7 @@ export interface GithubRepo {
   private: boolean;
   defaultBranch: string;
   canPush: boolean;
+  pushedAt: string | null;
 }
 
 export interface ContentCollection {

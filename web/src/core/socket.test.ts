@@ -37,9 +37,10 @@ describe("decodeEvent", () => {
       { type: "devserver.status", projectId: "p", state: "ready", port: 4000 },
       { type: "checkpoint.created", projectId: "p", sha: "abc", summary: "s", author: "a", ts: 1 },
       { type: "fs.change", projectId: "p", path: "a.md", kind: "modify" },
-      { type: "terminal.exited", projectId: "p", code: 0 },
       { type: "checkpoint.blocked", projectId: "p", reason: "main" },
       { type: "chat.turn", projectId: "p", chatId: "c1" },
+      { type: "preview.reload", projectId: "p" },
+      { type: "content.refresh", projectId: "p" },
       { type: "events.lagged", missed: 3 },
     ];
     for (const f of frames) expect(decodeEvent(JSON.stringify(f))).toEqual(f);

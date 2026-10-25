@@ -122,6 +122,7 @@ impl Setup {
             provider: Provider {
                 id: "fake".into(),
                 command,
+                acp: vec![],
             },
             author: Identity {
                 name: "Grace".into(),

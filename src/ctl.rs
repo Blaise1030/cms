@@ -1,4 +1,4 @@
-//! `orso ctl`: app state for the agent in a orso terminal. Posts the session's
+//! `orso ctl`: app state for the agent in a orso chat. Posts the session's
 //! hook token to `/api/ctl/*` and prints the daemon's JSON answer.
 
 use std::process::ExitCode;
@@ -16,6 +16,10 @@ pub enum CtlCommand {
     RestartPreview,
     /// The active change, unsaved edits, and other open changes.
     ChangeStatus,
+    /// Remount the preview iframe in the app UI.
+    RefreshPreview,
+    /// Reload Content collections, entry lists, and the open entry in the app UI.
+    RefreshContent,
 }
 
 impl CtlCommand {
@@ -24,6 +28,8 @@ impl CtlCommand {
             Self::PreviewStatus => "preview-status",
             Self::RestartPreview => "restart-preview",
             Self::ChangeStatus => "change-status",
+            Self::RefreshPreview => "refresh-preview",
+            Self::RefreshContent => "refresh-content",
         }
     }
 }
@@ -98,6 +104,8 @@ mod tests {
             (CtlCommand::PreviewStatus, "preview-status"),
             (CtlCommand::RestartPreview, "restart-preview"),
             (CtlCommand::ChangeStatus, "change-status"),
+            (CtlCommand::RefreshPreview, "refresh-preview"),
+            (CtlCommand::RefreshContent, "refresh-content"),
         ] {
             let (url, body) = request_for(cmd, "http://127.0.0.1:7800/", "site", "tok");
             assert_eq!(url, format!("http://127.0.0.1:7800/api/ctl/{route}"));

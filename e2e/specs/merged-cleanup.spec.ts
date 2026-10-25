@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, openPrMenu, test } from "../fixtures/orso";
 
 const BRANCH = "content/merged-post";
@@ -48,7 +48,7 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
   await startChange(orso, "New post: Merged post");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Merged post");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
   fs.writeFileSync(path.join(projectDir, FILE), CONTENT);
   git(projectDir, ["add", FILE]);
   git(projectDir, ["commit", "-m", "checkpoint: merged post"]);

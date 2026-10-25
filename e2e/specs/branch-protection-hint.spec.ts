@@ -1,4 +1,4 @@
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/orso";
 
 async function startChangeAndCheckpoint(
@@ -14,7 +14,7 @@ async function startChangeAndCheckpoint(
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 }
 
 test("unprotected main: hint after share, dismissal survives reload", async ({

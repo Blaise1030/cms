@@ -1,4 +1,4 @@
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, openPrMenu, test } from "../fixtures/orso";
 
 test("browser bar shows PR state, checks and preview link; changes menu shows PR state", async ({
@@ -13,7 +13,7 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   await startChange(orso, "New post: Launch week");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 
   // No PR yet: no status pill.
   await expect(page.getByTestId("pr-status")).toHaveCount(0);

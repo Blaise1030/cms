@@ -63,7 +63,7 @@ pub struct Config {
     /// Base URL printed in the ready link instead of the daemon's own address (dev: the Vite
     /// server, so the link opens the live HMR app rather than the embedded `web/dist` build).
     pub ui_url: Option<String>,
-    /// Executable terminal CLIs run as `<exe> hook turn-end`. `None` = this daemon's own
+    /// Executable chat agents run as `$ORSO_HOOK_EXE ctl …`. `None` = this daemon's own
     /// binary ([`Config::hook_exe_path`]); tests point it at the built `orso`.
     pub hook_exe: Option<PathBuf>,
     /// Directories the setup check searches for git, gh and the agent CLIs, `PATH`-style.

@@ -105,6 +105,8 @@ pub struct RepoInfo {
     pub private: bool,
     pub default_branch: String,
     pub can_push: bool,
+    /// ISO 8601 timestamp of the last push, when GitHub reports one.
+    pub pushed_at: Option<String>,
 }
 
 /// A pull request returned by [`GithubAuth::find_pr`] / [`GithubAuth::create_draft_pr`].
@@ -149,6 +151,7 @@ impl From<ApiRepo> for RepoInfo {
             private: r.private,
             default_branch: r.default_branch,
             can_push: r.permissions.is_some_and(|p| p.push),
+            pushed_at: r.pushed_at,
         }
     }
 }
@@ -168,6 +171,8 @@ struct ApiRepo {
     default_branch: String,
     #[serde(default)]
     permissions: Option<ApiPermissions>,
+    #[serde(default)]
+    pushed_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -198,6 +203,13 @@ struct ApiPull {
 struct ApiPullHead {
     #[serde(default)]
     sha: String,
+}
+
+/// Response of `PUT /repos/{repo}/pulls/{number}/merge`.
+#[derive(Deserialize)]
+struct ApiMerge {
+    #[serde(default)]
+    merged: bool,
 }
 
 /// Where a pull request stands, as shown in the preview browser bar.
@@ -242,6 +254,16 @@ pub struct PrStatus {
 pub struct PrRef {
     pub state: PrState,
     pub head_sha: String,
+}
+
+/// Result of [`GithubAuth::merge_pr`] (the Publish action): the change's pull request, now
+/// merged into the live site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishResult {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
 }
 
 /// The parts of a pull request that decide its [`PrState`] (besides reviews).
@@ -1148,6 +1170,37 @@ impl GithubAuth {
         Ok(())
     }
 
+    /// Merge `head_branch`'s open pull request into `main` (the Publish action), or say why
+    /// it could not be published in words a writer can act on:
+    /// - no permission on the repo → ask an owner to add them;
+    /// - not mergeable (including protection blocking the merge) → get latest first.
+    ///
+    /// The merge method is `merge`: this codebase has no squash convention.
+    pub async fn merge_pr(&self, repo: &str, head_branch: &str) -> Result<PublishResult, ApiError> {
+        let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
+            ApiError::enoent("Couldn't publish. Share the draft first, then try again.")
+        })?;
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::PUT,
+                &format!("/repos/{repo}/pulls/{}/merge", pull.number),
+                Some(&serde_json::json!({ "merge_method": "merge" })),
+            )
+            .await?;
+        if !status.is_success() {
+            return Err(publish_refused(status));
+        }
+        let merged = serde_json::from_slice::<ApiMerge>(&body).is_ok_and(|m| m.merged);
+        if !merged {
+            return Err(publish_failed());
+        }
+        Ok(PublishResult {
+            number: pull.number,
+            url: pull.html_url,
+            state: PrState::Merged,
+        })
+    }
+
     /// PR state, checks and preview URL for `head_branch`; `None` when it has no pull request.
     pub async fn pr_status(
         &self,
@@ -1336,8 +1389,65 @@ impl GithubAuth {
             .map_err(|_| ApiError::github("unexpected response from the GitHub CLI"))
     }
 
+    /// Like [`Self::api_json`], but returns GitHub's status and body instead of mapping a
+    /// failure to an error, so the caller can say what a refusal means for its own action.
+    async fn api_raw(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), ApiError> {
+        if let Some(token) = self.token().await {
+            let mut req = self
+                .http
+                .request(method, format!("{}{path}", self.api()))
+                .bearer_auth(&token)
+                .header(ACCEPT, GITHUB_JSON);
+            if let Some(body) = body {
+                req = req.json(body);
+            }
+            let res = req.send().await.map_err(unreachable)?;
+            let status = res.status();
+            let bytes = res.bytes().await.map_err(unreachable)?.to_vec();
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let _ = self.sign_out_if_token(&token).await;
+                return Err(ApiError::unauth(
+                    "your GitHub session expired — sign in again",
+                ));
+            }
+            return Ok((status, bytes));
+        }
+        let out = self.gh_raw(method.as_str(), path, body).await?;
+        if out.logged_out() {
+            *self.cli.lock().await = None;
+            return Err(not_signed_in());
+        }
+        match (out.code, gh_http_status(&out.stderr)) {
+            (Some(0), _) => Ok((reqwest::StatusCode::OK, out.stdout)),
+            (_, Some(status)) => Ok((status, out.stdout)),
+            _ => {
+                let tail: String = out.stderr.chars().take(300).collect();
+                Err(ApiError::github(format!("GitHub CLI: {tail}")).with_status(502))
+            }
+        }
+    }
+
     /// `gh api --method {method} {path}`, with `body` as the JSON request body.
     async fn gh_api(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<GhOutput, ApiError> {
+        let out = self.gh_raw(method, path, body).await?;
+        if out.code != Some(0) {
+            return Err(self.gh_api_error(out).await);
+        }
+        Ok(out)
+    }
+
+    /// Run `gh api` without interpreting its exit code (see [`Self::gh_api`] / [`Self::api_raw`]).
+    async fn gh_raw(
         &self,
         method: &str,
         path: &str,
@@ -1547,6 +1657,26 @@ fn github_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
     ApiError::github(format!("GitHub returned {status}: {text}"))
 }
 
+/// The `ApiError` for a failed publish (merge) response, in writer-plain words: permission
+/// refusals ask an owner, merge refusals suggest getting latest, anything else offers a retry.
+fn publish_refused(status: reqwest::StatusCode) -> ApiError {
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return ApiError::sandbox("Ask an owner to add you to this site, then try again.");
+    }
+    if status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        || status == reqwest::StatusCode::CONFLICT
+        || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    {
+        return ApiError::conflict("Couldn't publish. Get latest, then try again.");
+    }
+    publish_failed()
+}
+
+/// A publish that GitHub accepted but did nothing with, or answered unexpectedly.
+fn publish_failed() -> ApiError {
+    ApiError::github("Couldn't publish. Try again in a moment.")
+}
+
 /// The HTTP status in a failed `gh api`'s stderr, e.g. `gh: Not Found (HTTP 404)`.
 fn gh_http_status(stderr: &str) -> Option<reqwest::StatusCode> {
     let rest = &stderr[stderr.find("(HTTP ")? + "(HTTP ".len()..];
@@ -1719,6 +1849,36 @@ mod tests {
         ] {
             assert!(validate_repo(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn repo_info_exposes_the_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main","pushed_at":"2026-10-20T12:00:00Z"}"#,
+        )
+        .unwrap();
+        let info = RepoInfo::from(api);
+        assert_eq!(info.pushed_at.as_deref(), Some("2026-10-20T12:00:00Z"));
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["pushedAt"], "2026-10-20T12:00:00Z");
+    }
+
+    #[test]
+    fn repo_info_tolerates_a_missing_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main"}"#,
+        )
+        .unwrap();
+        assert_eq!(RepoInfo::from(api).pushed_at, None);
+    }
+
+    #[test]
+    fn repo_info_tolerates_a_null_push_time() {
+        let api: ApiRepo = serde_json::from_str(
+            r#"{"full_name":"acme/site","private":false,"default_branch":"main","pushed_at":null}"#,
+        )
+        .unwrap();
+        assert_eq!(RepoInfo::from(api).pushed_at, None);
     }
 
     #[test]
@@ -3290,6 +3450,165 @@ esac"#,
             }
         );
         stop();
+    }
+
+    /// `/repos/acme/site/pulls/4/merge` records each request body and answers `status`/`body`.
+    fn merge_endpoint(
+        status: axum::http::StatusCode,
+        response: serde_json::Value,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) -> axum::Router {
+        use axum::extract::Json as AxJson;
+        use axum::routing::put;
+        one_open_pull(false).route(
+            "/repos/acme/site/pulls/4/merge",
+            put(move |AxJson(body): AxJson<serde_json::Value>| {
+                let seen = seen.clone();
+                let response = response.clone();
+                async move {
+                    seen.lock().unwrap().push(body);
+                    (status, axum::Json(response))
+                }
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn merge_pr_merges_open_pull() {
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let routes = merge_endpoint(
+            axum::http::StatusCode::OK,
+            serde_json::json!({
+                "merged": true,
+                "message": "Pull Request successfully merged",
+                "sha": "def",
+            }),
+            seen.clone(),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-ok");
+        let merged = auth
+            .merge_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap();
+        stop();
+
+        assert_eq!(
+            merged,
+            PublishResult {
+                number: 4,
+                url: "https://github.com/acme/site/pull/4".into(),
+                state: PrState::Merged,
+            }
+        );
+        // The merge is a PUT on the PR found by head, with an explicit merge method.
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            vec![serde_json::json!({ "merge_method": "merge" })]
+        );
+    }
+
+    /// None of the words the spec keeps out of writer-facing copy.
+    fn assert_plain_publish_copy(message: &str) {
+        for word in ["branch", "commit", "merge", "conflict", "checkout", "clone"] {
+            assert!(
+                !message.to_lowercase().contains(word),
+                "{message:?} mentions {word}"
+            );
+        }
+        for word in ["pr", "main", "pull request"] {
+            assert!(
+                !message
+                    .to_lowercase()
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|w| w == word),
+                "{message:?} mentions {word}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn merge_pr_maps_not_mergeable() {
+        use std::sync::{Arc, Mutex};
+
+        for status in [
+            axum::http::StatusCode::METHOD_NOT_ALLOWED,
+            axum::http::StatusCode::CONFLICT,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        ] {
+            let routes = merge_endpoint(
+                status,
+                serde_json::json!({ "message": "Pull Request is not mergeable" }),
+                Arc::new(Mutex::new(Vec::new())),
+            );
+            let (base, stop) = mock_api(routes).await;
+            let auth = status_auth(base, &format!("merge-{status}"));
+            let err = auth
+                .merge_pr("acme/site", "content/launch-week")
+                .await
+                .unwrap_err();
+            stop();
+
+            assert_eq!(err.code, ErrorCode::Conflict, "{status}");
+            assert_eq!(err.http_status(), 409, "{status}");
+            assert!(
+                err.message.starts_with("Couldn't publish"),
+                "{status}: {}",
+                err.message
+            );
+            assert!(err.message.contains("latest"), "{status}: {}", err.message);
+            assert_plain_publish_copy(&err.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn merge_pr_asks_an_owner_for_permission() {
+        use std::sync::{Arc, Mutex};
+
+        let routes = merge_endpoint(
+            axum::http::StatusCode::FORBIDDEN,
+            serde_json::json!({ "message": "Resource not accessible by integration" }),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-403");
+        let err = auth
+            .merge_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+
+        assert_eq!(err.code, ErrorCode::Sandbox);
+        assert_eq!(err.http_status(), 403);
+        assert!(err.message.contains("Ask an owner"), "{}", err.message);
+        assert_plain_publish_copy(&err.message);
+    }
+
+    #[tokio::test]
+    async fn merge_pr_without_an_open_pull_says_share_first() {
+        use axum::routing::get;
+
+        let routes = axum::Router::new().route(
+            "/repos/acme/site/pulls",
+            get(|| async { axum::Json(serde_json::json!([])) }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-none");
+        let err = auth
+            .merge_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+
+        assert_eq!(err.code, ErrorCode::Enoent);
+        assert!(
+            err.message.starts_with("Couldn't publish"),
+            "{}",
+            err.message
+        );
+        assert_plain_publish_copy(&err.message);
     }
 
     #[test]

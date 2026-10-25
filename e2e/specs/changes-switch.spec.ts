@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
@@ -35,7 +35,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await startChange(orso, "New post: First change");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("First change");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-first-change\n");
 
   // Second (newer) change + different edit. "Newest first" compares commit times in whole
@@ -45,7 +45,7 @@ test("lists open changes newest first and switches working tree", async ({ page,
   await startChange(orso, "New post: Second change");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Second change");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
   commitDistinctEdit(projectDir, "content-from-second-change\n");
 
   // Menu: both listed, newest first.

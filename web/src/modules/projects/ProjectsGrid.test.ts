@@ -4,12 +4,13 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
-import type { Project } from "@/core/types";
+import type { GithubUser, Project } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { useGithubStore } from "@/modules/github/store";
 import ProjectsGrid from "./ProjectsGrid.vue";
 
 const p = (id: string, devserver: Project["devserver"]): Project => ({
@@ -24,9 +25,10 @@ const p = (id: string, devserver: Project["devserver"]): Project => ({
 let api: Record<string, ReturnType<typeof vi.fn>>;
 let router: Router;
 
-function mountGrid() {
+function mountGrid({ user = null }: { user?: GithubUser | null } = {}) {
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
+  if (user) useGithubStore().user = user;
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -63,27 +65,66 @@ afterEach(() => {
 });
 
 describe("ProjectsGrid", () => {
-  it("lists projects with status badges", async () => {
+  it("puts the brand mark above Recent and the account control in the page header", async () => {
+    const w = mountGrid({ user: { login: "ada", id: 1, name: "Ada", avatarUrl: "" } });
+    await flushPromises();
+    const brand = w.get("[data-testid='home-brand']");
+    expect(brand.get("[data-testid='home-logo']").classes()).toContain("size-7");
+    expect(brand.get("h1").text()).toBe("orso");
+    expect(brand.get("p").text()).toBe("Build and edit your sites with an AI agent");
+    expect(brand.element.nextElementSibling?.querySelector("h2")?.textContent).toBe("Recent");
+    const header = w.get("[data-testid='page-header']");
+    expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
+    expect(header.find("svg.paw-mark").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("shows recent projects first, then the two ways to start one", async () => {
+    const w = mountGrid();
+    await flushPromises();
+    expect(w.findAll("h2").map((h) => h.text())).toEqual([
+      "Recent",
+      "Open a project",
+      "Create from a template",
+    ]);
+    w.unmount();
+  });
+
+  it("lists projects newest first with status badges", async () => {
     const w = mountGrid();
     await flushPromises();
     const cards = w.findAll("[data-testid^='project-']").filter((c) => c.attributes("data-testid") !== "project-grid" && c.attributes("data-testid") !== "project-status");
     expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.attributes("data-testid"))).toEqual(["project-b", "project-a"]);
     const badges = w.findAll("[data-testid='project-status']").map((b) => b.text());
-    expect(badges).toEqual(["Ready", "Crashed"]);
+    expect(badges).toEqual(["Crashed", "Ready"]);
     w.unmount();
   });
 
-  it("links each row to its project page, but the actions menu does not navigate", async () => {
+  it("shows only the five most recent projects", async () => {
+    api.listProjects = vi.fn(async () => ["1", "2", "3", "4", "5", "6", "7"].map((id) => p(id, "ready")));
+    const w = mountGrid();
+    await flushPromises();
+    const rows = w
+      .findAll("[data-testid^='project-']")
+      .map((c) => c.attributes("data-testid")!)
+      .filter((id) => id !== "project-grid" && id !== "project-status");
+    expect(rows).toEqual(["project-7", "project-6", "project-5", "project-4", "project-3"]);
+    w.unmount();
+  });
+
+  it("opens a project from its row, but the actions menu does not navigate", async () => {
     const w = mountGrid();
     await flushPromises();
     const row = w.find("[data-testid='project-a']");
-    expect(row.element.tagName).toBe("A");
-    expect(row.attributes("href")).toBe("/p/a/preview");
-    expect(row.text()).toContain("localhost:4000");
+    expect(row.text()).toContain("Site a");
+    const open = row.get("a");
+    expect(open.attributes("href")).toBe("/p/a/preview");
+    expect(open.text()).toBe("Open");
     await w.find("[aria-label='Actions for Site a']").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/");
-    await row.trigger("click");
+    await open.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/p/a/preview");
     w.unmount();
@@ -92,7 +133,7 @@ describe("ProjectsGrid", () => {
   it("creates a project from the dialog", async () => {
     const w = mountGrid();
     await flushPromises();
-    byText("New project")!.click();
+    await w.get("[data-testid='template-astro-marketing']").trigger("click");
     await flushPromises();
     const input = document.body.querySelector<HTMLInputElement>("input[aria-label='Project name']")!;
     input.value = "Landing";
@@ -129,26 +170,39 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("drags the macOS desktop window from a strip along the top, and only there", async () => {
+  it("offers Invite in the project actions with a checklist and collaborators link", async () => {
+    api.listProjects = vi.fn(async () => [{ ...p("a", "ready"), repo: "acme/site" }]);
+    const w = mountGrid();
+    await flushPromises();
+    await w.find("[aria-label='Actions for Site a']").trigger("click");
+    await flushPromises();
+    const item = [...document.body.querySelectorAll("[role='menuitem']")].find((m) =>
+      m.textContent?.includes("Invite"),
+    ) as HTMLElement;
+    expect(item).toBeTruthy();
+    item.click();
+    await flushPromises();
+    expect(document.body.textContent).toContain("Add your teammate on GitHub");
+    expect(document.body.textContent).toContain("They sign in with GitHub");
+    expect(document.body.textContent).toContain("They open this site");
+    const link = document.body.querySelector<HTMLAnchorElement>("[data-testid='invite-collaborators-link']");
+    expect(link?.getAttribute("href")).toBe("https://github.com/acme/site/settings/access");
+    w.unmount();
+  });
+
+  it("keeps the header draggable only on desktop", async () => {
     const browser = mountGrid();
     await flushPromises();
-    expect(browser.find("[data-tauri-drag-region]").exists()).toBe(false);
+    expect(browser.get("[data-testid='page-header']").attributes("data-tauri-drag-region")).toBeUndefined();
     browser.unmount();
 
     document.documentElement.dataset.desktop = "macos";
     try {
       const desktop = mountGrid();
       await flushPromises();
-      expect(desktop.findAll("[data-tauri-drag-region]")).toHaveLength(1);
-      const strip = desktop.get("[data-testid='window-drag-strip']");
-      expect(strip.attributes("data-tauri-drag-region")).toBe("");
-      // Its own row above the scrolling page, so it never covers projects or the scrollbar.
-      expect(strip.classes()).not.toContain("fixed");
-      expect(strip.classes()).not.toContain("absolute");
-      const scroller = desktop.get("[data-testid='projects-scroll']");
-      expect(scroller.element.contains(strip.element)).toBe(false);
-      expect(strip.element.nextElementSibling).toBe(scroller.element);
-      expect(scroller.text()).toContain("Site a");
+      const header = desktop.get("[data-testid='page-header']");
+      expect(header.attributes("data-tauri-drag-region")).toBe("");
+      expect(header.element.nextElementSibling).toBe(desktop.get("[data-testid='projects-scroll']").element);
       desktop.unmount();
     } finally {
       delete document.documentElement.dataset.desktop;

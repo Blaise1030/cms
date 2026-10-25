@@ -1,4 +1,4 @@
-import { startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, openPrMenu, test } from "../fixtures/orso";
 
 test("writer marks a shared draft change ready for review", async ({ page, orso }) => {
@@ -10,7 +10,7 @@ test("writer marks a shared draft change ready for review", async ({ page, orso 
   await startChange(orso, "New post: Launch week");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 
   // Share → draft PR.
   await page.getByTestId("share-preview").click();

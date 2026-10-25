@@ -167,6 +167,7 @@ describe("SyncDialog", () => {
     const failed = find("sync-failed");
     expect(failed.text()).toContain("Nothing changed. Your draft is safe.");
     expect(failed.text()).toContain("The assistant stopped early.");
+    expect(find("sync-advanced").text()).toBe("I'll choose myself");
     await click("sync-retry");
     expect(api.startAutoResolve).toHaveBeenCalledWith("site", "s1", "claude");
   });
@@ -185,7 +186,7 @@ describe("SyncDialog", () => {
     const store = await mountWith({ state: "failed" });
     await click("sync-advanced");
     expect(find("sync-failed").exists()).toBe(true);
-    expect(find("sync-failed").text()).toContain("Couldn't open the advanced view. Please try again.");
+    expect(find("sync-failed").text()).toContain("Couldn't open that view. Please try again.");
     expect(store.syncSessionId).toBe("s1");
   });
 

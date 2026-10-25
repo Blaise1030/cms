@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { api, startChange, terminalCheckpoint } from "../fixtures/daemon";
+import { api, startChange, chatCheckpoint } from "../fixtures/daemon";
 import { expect, test } from "../fixtures/orso";
 
 function git(cwd: string, args: string[]): string {
@@ -15,7 +15,18 @@ test("GitHub project on main refuses an agent session, then runs on the new bran
   const mainBefore = git(projectDir, ["rev-parse", "main"]);
   expect(git(projectDir, ["branch", "--show-current"])).toBe("main");
 
-  const refused = await api(origin, token, "POST", "/api/terminal", { project: projectId, provider: "fake" });
+  const created = await api(origin, token, "POST", `/api/chat/${encodeURIComponent(projectId)}`, {
+    provider: "fake",
+  });
+  expect(created.status).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  const refused = await api(
+    origin,
+    token,
+    "POST",
+    `/api/chat/${encodeURIComponent(projectId)}/${id}/message`,
+    { text: "edit the notes" },
+  );
   expect(refused.status).toBe(409);
   const body = await refused.text();
   expect(body).toContain("CHANGE_REQUIRED");
@@ -29,7 +40,7 @@ test("GitHub project on main refuses an agent session, then runs on the new bran
     .poll(() => git(projectDir, ["branch", "--show-current"]))
     .toBe("content/launch-week");
 
-  await terminalCheckpoint(orso, "edit the notes");
+  await chatCheckpoint(orso, "edit the notes");
 
   await expect
     .poll(() => {
@@ -75,7 +86,7 @@ test("local-only project edits main with no Start a change dialog", async ({
   await page.goto(`${origin}/p/${localId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 120_000 });
 
-  await terminalCheckpoint({ origin, token, projectId: localId }, "edit the notes");
+  await chatCheckpoint({ origin, token, projectId: localId }, "edit the notes");
 
   await expect(page.getByRole("dialog", { name: "Start a change first" })).toHaveCount(0);
   await page.goto(`${origin}/p/${localId}/history`);

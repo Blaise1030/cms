@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use serde_json::json;
+
 use crate::changes::auto_resolve::{AutoResolveJobs, Timeouts};
 use crate::changes::conflict_sessions::ConflictSessions;
 use crate::chat::manager::ChatManager;
@@ -16,7 +18,6 @@ use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::{DevserverStatus, ProjectRegistry};
-use crate::terminal::TerminalManager;
 use crate::watch::WatchManager;
 
 #[derive(Clone)]
@@ -25,9 +26,7 @@ pub struct AppState {
     pub projects: Arc<ProjectRegistry>,
     /// Broadcaster behind `WS /ws/events`.
     pub events: EventBus,
-    /// PTY terminal sessions (one per project).
-    pub terminals: Arc<TerminalManager>,
-    /// Headless chat turns (one per project, never alongside its terminal).
+    /// ACP chat agents, one process per `(project, chat)`.
     pub chats: Arc<ChatManager>,
     /// Supervised `npm run dev` per project.
     pub devservers: Arc<DevServerManager>,
@@ -44,9 +43,12 @@ pub struct AppState {
     pub auto_resolve: Arc<AutoResolveJobs>,
     /// Serializes Get latest through session creation as one operation.
     pub conflict_updates: Arc<Mutex<()>>,
-    /// Projects whose Get latest skipped the checked-out change while a terminal was live.
+    /// Projects whose Get latest skipped the checked-out change while an agent was live.
     pub pending_latest: Arc<std::sync::Mutex<HashSet<String>>>,
 }
+
+/// How long a content save waits for a `Starting` preview to become ready.
+const CONTENT_ENDPOINT_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl AppState {
     /// Production state: project creation runs `npm install` and supervises `npm run dev`.
@@ -90,11 +92,20 @@ impl AppState {
         &self,
         project: &str,
     ) -> Result<Option<ContentEndpoint>, ApiError> {
-        let p = self
-            .projects
-            .get(project)
-            .await
-            .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+        // A change create/switch restarts the preview just before a resumed save; give that
+        // restart time to come up instead of reporting the preview as down.
+        let deadline = tokio::time::Instant::now() + CONTENT_ENDPOINT_WAIT;
+        let p = loop {
+            let p = self
+                .projects
+                .get(project)
+                .await
+                .ok_or_else(|| ApiError::enoent(format!("no such project: {project}")))?;
+            if p.devserver != DevserverStatus::Starting || tokio::time::Instant::now() >= deadline {
+                break p;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        };
         if p.devserver != DevserverStatus::Ready {
             return Ok(None);
         }
@@ -117,19 +128,18 @@ impl AppState {
         let config = Arc::new(config);
         let projects = Arc::new(projects);
         let events = EventBus::new();
-        let terminals = Arc::new(TerminalManager::new(config.clone(), events.clone()));
-        let chats = Arc::new(ChatManager::new(events.clone()));
+        let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
+        let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
             devserver,
         ));
         let watchers = Arc::new(WatchManager::new(events.clone()));
-        Self {
+        let state = Self {
             config,
             projects,
             events,
-            terminals,
             chats,
             devservers,
             watchers,
@@ -140,6 +150,46 @@ impl AppState {
             auto_resolve: Arc::new(AutoResolveJobs::new(Timeouts::default())),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
-        }
+        };
+        state.wire_chat_turn_end();
+        state
+    }
+
+    /// After an ACP turn ends: refresh the preview and Content panel, checkpoint
+    /// the edits, and record the resulting `checkpoint` chunk in the transcript.
+    fn wire_chat_turn_end(&self) {
+        let state = self.clone();
+        self.chats.set_on_turn_end(move |ended| {
+            if ended.stop_reason != "end_turn" {
+                return;
+            }
+            let state = state.clone();
+            tokio::spawn(async move {
+                crate::http::ctl::emit_preview_reload(&state, &ended.project_id);
+                crate::http::ctl::emit_content_refresh(&state, &ended.project_id);
+                match crate::http::checkpoints::finish_turn(
+                    &state,
+                    &ended.project_id,
+                    ended.summary.as_deref(),
+                )
+                .await
+                {
+                    Ok(outcome) => {
+                        if let Some(chunk) = crate::http::chat::checkpoint_chunk(&outcome) {
+                            state.chats.record(&ended.project_id, &ended.chat_id, chunk);
+                            // The turn-end event raced this async checkpoint; reload once more.
+                            state.events.emit(
+                                "chat.turn",
+                                json!({
+                                    "projectId": ended.project_id,
+                                    "chatId": ended.chat_id,
+                                }),
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("orso: checkpoint after chat turn failed: {e}"),
+                }
+            });
+        });
     }
 }
