@@ -300,6 +300,7 @@ pub async fn start_chat(
     if state.chats.is_live(&project, &chat) {
         return Ok(StatusCode::NO_CONTENT);
     }
+    super::checkpoints::require_change(&state, &project).await?;
     ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -322,6 +323,7 @@ pub async fn post_message(
         return Err(ApiError::badreq("text is required"));
     }
     let record = require_record(&state, &project, &chat)?;
+    super::checkpoints::require_change(&state, &project).await?;
     if !state.chats.is_live(&project, &chat) {
         ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     }

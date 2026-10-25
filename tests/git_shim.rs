@@ -15,8 +15,7 @@ fn orso() -> &'static str {
 }
 
 fn fake_git() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fake_git.sh")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_git.sh")
 }
 
 /// Run `orso git-shim -- <args>` with `ORSO_REAL_GIT` pointed at the fake git, logging the
@@ -70,8 +69,16 @@ fn head_moving_forms_are_blocked() {
         &["switch", "-"][..],
     ] {
         let out = run_shim(&log, args, false);
-        assert_eq!(out.status.code(), Some(1), "args {args:?} should be blocked");
-        assert_eq!(String::from_utf8_lossy(&out.stderr), BLOCKED_MSG, "{args:?}");
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "args {args:?} should be blocked"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            BLOCKED_MSG,
+            "{args:?}"
+        );
     }
     assert!(!log.exists(), "no blocked form may run the real git");
 }
@@ -84,7 +91,10 @@ fn non_checkout_commands_pass_through() {
         (&["status"][..], vec!["status"]),
         (&["add", "-A"][..], vec!["add", "-A"]),
         (&["commit", "-m", "hi"][..], vec!["commit", "-m", "hi"]),
-        (&["fetch", "origin", "main"][..], vec!["fetch", "origin", "main"]),
+        (
+            &["fetch", "origin", "main"][..],
+            vec!["fetch", "origin", "main"],
+        ),
         (&["merge", "origin/main"][..], vec!["merge", "origin/main"]),
         (&["push"][..], vec!["push"]),
     ] {
@@ -106,11 +116,26 @@ fn path_only_checkout_does_not_move_head_and_passes_through() {
     let tmp = tempfile::tempdir().unwrap();
     let log = tmp.path().join("git.log");
     for (args, expected) in [
-        (&["checkout", "--", "content/file.md"][..], vec!["checkout", "--", "content/file.md"]),
-        (&["checkout", "main", "--", "file.md"][..], vec!["checkout", "main", "--", "file.md"]),
-        (&["checkout", "origin/main", "--", "file.md"][..], vec!["checkout", "origin/main", "--", "file.md"]),
-        (&["checkout", "-p", "--", "content/file.md"][..], vec!["checkout", "-p", "--", "content/file.md"]),
-        (&["checkout", "--ours", "--", "content/file.md"][..], vec!["checkout", "--ours", "--", "content/file.md"]),
+        (
+            &["checkout", "--", "content/file.md"][..],
+            vec!["checkout", "--", "content/file.md"],
+        ),
+        (
+            &["checkout", "main", "--", "file.md"][..],
+            vec!["checkout", "main", "--", "file.md"],
+        ),
+        (
+            &["checkout", "origin/main", "--", "file.md"][..],
+            vec!["checkout", "origin/main", "--", "file.md"],
+        ),
+        (
+            &["checkout", "-p", "--", "content/file.md"][..],
+            vec!["checkout", "-p", "--", "content/file.md"],
+        ),
+        (
+            &["checkout", "--ours", "--", "content/file.md"][..],
+            vec!["checkout", "--ours", "--", "content/file.md"],
+        ),
     ] {
         std::fs::remove_file(&log).ok();
         let out = run_shim(&log, args, false);

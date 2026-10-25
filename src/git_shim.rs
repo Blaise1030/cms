@@ -294,7 +294,10 @@ mod tests {
             &["-C", "/tmp", "checkout", "--", "file.md"][..],
             &["-c", "user.name=x", "checkout", "main", "--", "file.md"][..],
         ] {
-            assert!(!is_head_moving(&v(allowed)), "{allowed:?} must pass through");
+            assert!(
+                !is_head_moving(&v(allowed)),
+                "{allowed:?} must pass through"
+            );
         }
     }
 
@@ -322,7 +325,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_ne!(std::fs::metadata(&script).unwrap().permissions().mode() & 0o111, 0);
+            assert_ne!(
+                std::fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+                0
+            );
         }
         // Idempotent: a second call leaves the file untouched.
         let before = std::fs::metadata(&script).unwrap().modified().unwrap();

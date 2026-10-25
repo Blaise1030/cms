@@ -832,7 +832,10 @@ mod tests {
     #[test]
     fn publish_step_errors_hide_git_and_github_details() {
         let push = publish_step_error(ApiError::git("git push failed: rejected"), true);
-        assert_eq!(push.message, "Couldn't publish. Get latest, then try again.");
+        assert_eq!(
+            push.message,
+            "Couldn't publish. Get latest, then try again."
+        );
         let ready = publish_step_error(
             ApiError::github("GitHub could not mark the pull request ready for review"),
             false,
@@ -847,12 +850,20 @@ mod tests {
             ApiError::sandbox("Ask an owner to add you to this site, then try again."),
             false,
         );
-        assert_eq!(owner.message, "Ask an owner to add you to this site, then try again.");
-        let already = publish_step_error(ApiError::conflict("Couldn't publish. Get latest, then try again."), true);
-        assert_eq!(already.message, "Couldn't publish. Get latest, then try again.");
+        assert_eq!(
+            owner.message,
+            "Ask an owner to add you to this site, then try again."
+        );
+        let already = publish_step_error(
+            ApiError::conflict("Couldn't publish. Get latest, then try again."),
+            true,
+        );
+        assert_eq!(
+            already.message,
+            "Couldn't publish. Get latest, then try again."
+        );
     }
 
-    use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
