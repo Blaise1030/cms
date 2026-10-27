@@ -27,6 +27,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "preview.deps_installing": { projectId: "string" },
   "content.refresh": { projectId: "string" },
   "chat.turn": { projectId: "string", chatId: "string" },
+  "chat.permission": { projectId: "string", chatId: "string" },
   "events.lagged": { missed: "number" },
 };
 

@@ -20,6 +20,18 @@ beforeEach(() => {
 });
 
 describe("chat store", () => {
+  it("moves queued follow-ups from a draft id to its saved chat id", () => {
+    const store = setup();
+    store.enqueue("site", "draft", "second", "Second");
+    store.enqueue("site", "draft", "third", "Third");
+    store.setQueuePaused("site", "draft", true);
+    store.moveQueued("site", "draft", "saved");
+    expect(store.queued.site?.draft).toBeUndefined();
+    expect(store.queued.site?.saved?.map(item => item.body)).toEqual(["second", "third"]);
+    expect(store.isQueuePaused("site", "draft")).toBe(false);
+    expect(store.isQueuePaused("site", "saved")).toBe(true);
+  });
+
   it("newChat sets and persists the active chat id", () => {
     const store = setup();
     const id = store.newChat("site");
@@ -42,6 +54,20 @@ describe("chat store", () => {
     expect(listChats).toHaveBeenCalledWith("site");
     expect(store.chats.site?.map((c) => c.id)).toEqual(["c1"]);
     expect(store.running.site).toBe("c1");
+  });
+
+  it("tracks concurrent running chats independently", async () => {
+    const store = setup({ listChats: vi.fn(async () => ({
+      chats: [
+        { id: "c1", provider: "claude", title: "One", updatedAt: 2, live: true, running: true },
+        { id: "c2", provider: "codex", title: "Two", updatedAt: 1, live: true, running: true },
+      ],
+      running: "c1",
+    })) });
+    await store.load("site");
+    expect(store.runningChatIds("site")).toEqual(["c1", "c2"]);
+    store.setChatRunning("site", "c1", false);
+    expect(store.runningChatIds("site")).toEqual(["c2"]);
   });
 
   it("reloads the list on chat.turn for the project", async () => {

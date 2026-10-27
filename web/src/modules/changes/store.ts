@@ -198,7 +198,7 @@ export const useChangesStore = defineStore("changes", () => {
   async function switchTo(id: string, branch: string): Promise<Change | null> {
     // A chat turn is running for this project: hold the switch until the user confirms,
     // so the agent is never left mid-thought on the wrong draft.
-    if (useChatStore().running[id]) {
+    if (useChatStore().runningChatIds(id).length) {
       pendingSwitch.value = {
         projectId: id,
         branch,
@@ -240,8 +240,11 @@ export const useChangesStore = defineStore("changes", () => {
     if (!pending) throw new Error("Nothing to confirm");
     pendingSwitch.value = null;
     try {
-      const runningId = useChatStore().running[pending.projectId];
-      if (runningId) await daemon.api.stopChat(pending.projectId, runningId);
+      const chats = useChatStore();
+      for (const runningId of chats.runningChatIds(pending.projectId)) {
+        chats.setQueuePaused(pending.projectId, runningId, true);
+        await daemon.api.stopChat(pending.projectId, runningId);
+      }
     } catch (e) {
       error.value = errorMessage(e);
       throw e;

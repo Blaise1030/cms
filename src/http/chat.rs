@@ -263,6 +263,7 @@ pub async fn get_chat(
         "provider": record.provider,
         "model": record.model,
         "running": state.chats.is_running(&project, &chat),
+        "pendingPermissions": state.chats.pending_permissions(&project, &chat),
     })))
 }
 
@@ -324,6 +325,9 @@ pub async fn post_message(
     }
     let record = require_record(&state, &project, &chat)?;
     super::checkpoints::require_change(&state, &project).await?;
+    if let Some(p) = state.projects.get(&project).await {
+        state.chats.set_auto_approve(&project, p.auto_approve);
+    }
     if !state.chats.is_live(&project, &chat) {
         ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     }

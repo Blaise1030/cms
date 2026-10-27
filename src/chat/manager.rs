@@ -180,6 +180,8 @@ struct Inner {
     state_dir: PathBuf,
     events: EventBus,
     on_turn_end: Mutex<Option<TurnEndHook>>,
+    /// Projects whose permission requests are allowed without asking.
+    auto_approve: Mutex<HashSet<String>>,
     /// Set by [`ChatManager::shutdown`]. A handshake that finishes after
     /// this does not publish a live chat.
     shutdown: AtomicBool,
@@ -215,11 +217,41 @@ impl ChatManager {
                 state_dir,
                 events,
                 on_turn_end: Mutex::new(None),
+                auto_approve: Mutex::new(HashSet::new()),
                 shutdown: AtomicBool::new(false),
                 #[cfg(test)]
                 stop_gate: Mutex::new(None),
             }),
         }
+    }
+
+    /// Turns auto-approval of permission requests on or off for a project.
+    pub fn set_auto_approve(&self, project_id: &str, on: bool) {
+        let mut set = self
+            .inner
+            .auto_approve
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if on {
+            set.insert(project_id.to_string());
+        } else {
+            set.remove(project_id);
+        }
+    }
+
+    fn auto_approves(&self, project_id: &str) -> bool {
+        self.inner
+            .auto_approve
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(project_id)
+    }
+
+    /// Permission requests the live chat's agent is still waiting on.
+    pub fn pending_permissions(&self, project_id: &str, chat_id: &str) -> Vec<String> {
+        self.live(project_id, chat_id)
+            .map(|live| live.client.pending_permission_ids())
+            .unwrap_or_default()
     }
 
     /// Checkpoint / content refresh runs after each `turn_end` chunk; wired by
@@ -499,6 +531,20 @@ impl ChatManager {
         });
         for chunk in chunks {
             live.record(chunk);
+        }
+        if let AcpEvent::PermissionRequest { request_id, .. } = ev {
+            if self.auto_approves(&live.project_id) {
+                let client = live.client.clone();
+                let request_id = request_id.clone();
+                tokio::spawn(async move {
+                    let _ = client.answer_permission(&request_id, true).await;
+                });
+            } else {
+                self.inner.events.emit(
+                    "chat.permission",
+                    json!({"projectId": live.project_id, "chatId": live.chat_id}),
+                );
+            }
         }
         if let Some((session_id, stop_reason)) = turn_end {
             self.note_turn_end(&live, &session_id, &stop_reason);

@@ -294,6 +294,15 @@ export interface ChatHistory {
   provider: string;
   model: string | null;
   running: boolean;
+  /** Request ids of permission prompts the agent is still blocked on. */
+  pendingPermissions?: string[];
+}
+
+/** The agent asked permission mid-turn; refetch the chat to show the card. */
+export interface ChatPermissionEvent {
+  type: "chat.permission";
+  projectId: string;
+  chatId: string;
 }
 
 /** A chat turn ended; the chat list (titles, order, running) may have changed. */
@@ -355,6 +364,7 @@ export type DaemonEvent =
   | PreviewDepsInstallingEvent
   | ContentRefreshEvent
   | ChatTurnEvent
+  | ChatPermissionEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];

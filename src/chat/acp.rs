@@ -511,6 +511,12 @@ impl AcpClient {
         Ok(())
     }
 
+    /// Request ids of the permission prompts the agent is still blocked on.
+    pub fn pending_permission_ids(&self) -> Vec<String> {
+        let permissions = self.permissions.lock().unwrap_or_else(|e| e.into_inner());
+        permissions.keys().cloned().collect()
+    }
+
     /// `allow` picks an allow option; otherwise a reject option. With no
     /// matching option the request is cancelled. An unknown id is a no-op
     /// so a repeated approve still acknowledges.

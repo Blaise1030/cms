@@ -199,6 +199,32 @@ describe("changes store", () => {
     expect(store.pendingSwitch).toBeNull();
   });
 
+  it("stops every running chat before switching drafts", async () => {
+    const switchChange = vi.fn(async () => ({ branch: "content/new", title: "New" }));
+    const stopChat = vi.fn(async () => ({ stopped: true }));
+    const store = setup({ switchChange, stopChat, tree: vi.fn(async () => ({ entries: [] })) });
+    const files = useFilesStore();
+    files.projectId = "site";
+    vi.spyOn(files, "refresh").mockResolvedValue();
+    vi.spyOn(usePreviewStore(), "reload");
+    const chats = useChatStore();
+    chats.setChatRunning("site", "c1", true);
+    chats.setChatRunning("site", "c2", true);
+    chats.enqueue("site", "c1", "queued one", "queued one");
+    chats.enqueue("site", "c2", "queued two", "queued two");
+    store.active = { branch: "content/old", title: "Old" };
+    store.items = [{ branch: "content/new", title: "New" }];
+
+    expect(await store.switchTo("site", "content/new")).toBeNull();
+    await store.confirmSwitch();
+    expect(stopChat).toHaveBeenCalledWith("site", "c1");
+    expect(stopChat).toHaveBeenCalledWith("site", "c2");
+    expect(stopChat).toHaveBeenCalledTimes(2);
+    expect(chats.isQueuePaused("site", "c1")).toBe(true);
+    expect(chats.isQueuePaused("site", "c2")).toBe(true);
+    expect(switchChange).toHaveBeenCalledOnce();
+  });
+
   it("switchTo toasts 'Opening this draft…' when it actually switches", async () => {
     const store = setup({
       switchChange: vi.fn(async () => ({ branch: "content/alpha", title: "Alpha" })),
