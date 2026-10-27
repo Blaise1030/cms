@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, Paperclip, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, ListPlus, Paperclip, Square, X } from "@lucide/vue";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -63,7 +63,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const dropping = ref(false);
 
 const canSend = computed(
-  () => !props.streaming && !props.blocked && !props.attaching && (!!text.value.trim() || props.attachments.length > 0) && !!provider.value,
+  () => !props.blocked && !props.attaching && (!!text.value.trim() || props.attachments.length > 0) && !!provider.value,
 );
 
 function submit() {
@@ -231,35 +231,38 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
               </PopoverContent>
             </Popover>
           </div>
-          <InputGroupButton
-            v-if="streaming"
-            variant="default"
-            size="icon-xs"
-            class="size-7 shrink-0"
-            aria-label="Stop"
-            data-testid="chat-stop"
-            @click="emit('stop')"
-          >
-            <Square />
-          </InputGroupButton>
-          <Tooltip v-else>
-            <TooltipTrigger as-child>
-              <span tabindex="0" class="shrink-0 rounded-md">
-                <InputGroupButton
-                  variant="default"
-                  size="icon-xs"
-                  class="size-7"
-                  :aria-label="blocked ?? 'Send'"
-                  data-testid="chat-send"
-                  :disabled="!canSend"
-                  @click="submit"
-                >
-                  <ArrowUp />
-                </InputGroupButton>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{{ blocked ?? "Send" }}</TooltipContent>
-          </Tooltip>
+          <div class="flex shrink-0 items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <span tabindex="0" class="shrink-0 rounded-md">
+                  <InputGroupButton
+                    variant="default"
+                    size="icon-xs"
+                    class="size-7"
+                    :aria-label="blocked ?? (streaming ? 'Queue message' : 'Send')"
+                    :data-testid="streaming ? 'chat-queue' : 'chat-send'"
+                    :disabled="!canSend"
+                    @click="submit"
+                  >
+                    <ListPlus v-if="streaming" />
+                    <ArrowUp v-else />
+                  </InputGroupButton>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{{ blocked ?? (streaming ? "Queue message" : "Send") }}</TooltipContent>
+            </Tooltip>
+            <InputGroupButton
+              v-if="streaming"
+              variant="ghost"
+              size="icon-xs"
+              class="size-7 shrink-0"
+              aria-label="Stop"
+              data-testid="chat-stop"
+              @click="emit('stop')"
+            >
+              <Square />
+            </InputGroupButton>
+          </div>
         </InputGroupAddon>
       </InputGroup>
     </div>

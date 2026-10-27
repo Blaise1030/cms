@@ -78,23 +78,18 @@ describe("AgentPanel", () => {
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 
-  it("holds a request while the chat is busy, and sends it once it isn't", async () => {
+  it("forwards a busy chat request into the visible chat queue", async () => {
     h.busy.value = true;
     await mountPanel();
     useAgentOutboxStore().send({ kind: "text", text: "Sync please", submit: true });
     useAgentOutboxStore().send({ kind: "element", element });
     await flushPromises();
-    expect(h.send).not.toHaveBeenCalled();
-    expect(h.insertReference).toHaveBeenCalledWith(elementText);
-    expect(useAgentOutboxStore().messages).toEqual([{ kind: "text", text: "Sync please", submit: true }]);
-
-    h.busy.value = false;
-    await flushPromises();
     expect(h.send).toHaveBeenCalledWith("Sync please");
+    expect(h.insertReference).toHaveBeenCalledWith(elementText);
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 
-  it("sends one request per turn and keeps the rest until the turn ends", async () => {
+  it("forwards several requests in order for the chat to queue", async () => {
     h.send = vi.fn(async () => {
       h.busy.value = true;
     });
@@ -102,14 +97,8 @@ describe("AgentPanel", () => {
     useAgentOutboxStore().send({ kind: "text", text: "First", submit: true });
     useAgentOutboxStore().send({ kind: "text", text: "Second", submit: true });
     await flushPromises();
-    expect(h.send).toHaveBeenCalledTimes(1);
-    expect(h.send).toHaveBeenCalledWith("First");
-    expect(useAgentOutboxStore().messages).toEqual([{ kind: "text", text: "Second", submit: true }]);
-
-    h.busy.value = false;
-    await flushPromises();
     expect(h.send).toHaveBeenCalledTimes(2);
-    expect(h.send).toHaveBeenLastCalledWith("Second");
+    expect(h.send.mock.calls).toEqual([["First"], ["Second"]]);
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 });

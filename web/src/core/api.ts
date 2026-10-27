@@ -285,6 +285,8 @@ export function createApi(
       json<ChatHistory>("GET", `/api/chat/${enc(project)}/${enc(chatId)}`),
     sendChatMessage: (project: string, chatId: string, text: string) =>
       empty("POST", `/api/chat/${enc(project)}/${enc(chatId)}/message`, { body: { text } }),
+    approveChat: (project: string, chatId: string, requestId: string, allow: boolean) =>
+      empty("POST", `/api/chat/${enc(project)}/${enc(chatId)}/approve`, { body: { requestId, allow } }),
     stopChat: (project: string, chatId: string) =>
       empty("POST", `/api/chat/${enc(project)}/${enc(chatId)}/stop`),
     setChatModel: (project: string, chatId: string, model: string) =>

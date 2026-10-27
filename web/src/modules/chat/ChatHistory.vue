@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-defineProps<{ chats: ChatSummary[]; activeId: string | null; runningId: string | null }>();
+defineProps<{ chats: ChatSummary[]; activeId: string | null; runningIds: string[] }>();
 const emit = defineEmits<{ pick: [id: string]; remove: [id: string] }>();
 const open = defineModel<boolean>("open", { default: false });
 const pendingDelete = ref<ChatSummary | null>(null);
@@ -63,11 +63,11 @@ function confirmDelete() {
           >
             <span class="w-full truncate">{{ titleOf(c) }}</span>
             <span class="text-muted-foreground text-xs">
-              {{ when(c.updatedAt) }}<template v-if="runningId === c.id"> · Running</template>
+              {{ when(c.updatedAt) }}<template v-if="runningIds.includes(c.id)"> · Running</template>
             </span>
           </button>
           <Button
-            v-if="runningId !== c.id"
+            v-if="!runningIds.includes(c.id)"
             variant="ghost"
             size="icon-sm"
             class="text-muted-foreground hover:text-destructive mr-1 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"

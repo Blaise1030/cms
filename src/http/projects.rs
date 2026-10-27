@@ -137,6 +137,7 @@ pub async fn update(
         .projects
         .update(&id, req.name.as_deref(), req.auto_approve)
         .await?;
+    state.chats.set_auto_approve(&id, info.auto_approve);
     Ok(Json(info))
 }
 

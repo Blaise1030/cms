@@ -27,7 +27,7 @@ type WireChat = {
   live: boolean;
   running: boolean;
 };
-type History = { chunks: Chunk[]; provider: string; model: string | null; running: boolean };
+type History = { chunks: Chunk[]; provider: string; model: string | null; running: boolean; pendingPermissions?: string[] };
 
 let calls: Call[];
 let chats: WireChat[];
@@ -37,6 +37,8 @@ let seq: number;
 let historyGate: Promise<void> | null;
 /** When set, the next message POST fails with it. */
 let messageFailure: Response | null;
+let messageGate: Promise<void> | null;
+let createGate: Promise<void> | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -75,6 +77,11 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   if (path === "/api/chat/p1" && method === "GET")
     return json({ chats, running: chats.find((c) => c.running)?.id ?? null });
   if (path === "/api/chat/p1" && method === "POST") {
+    if (createGate) {
+      const gate = createGate;
+      createGate = null;
+      await gate;
+    }
     const body = JSON.parse(String(init.body));
     const created: WireChat = {
       id: `c${++seq}`,
@@ -111,8 +118,14 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     if (histories[id]) histories[id]!.model = body.modelId;
     return json({ model: body.modelId });
   }
+  if (/^\/api\/chat\/p1\/[^/]+\/approve$/.test(path) && method === "POST") return new Response(null, { status: 204 });
   const message = path.match(/^\/api\/chat\/p1\/([^/]+)\/message$/);
   if (message && method === "POST") {
+    if (messageGate) {
+      const gate = messageGate;
+      messageGate = null;
+      await gate;
+    }
     if (messageFailure) return messageFailure;
     const id = message[1]!;
     const body = JSON.parse(String(init.body));
@@ -150,6 +163,8 @@ beforeEach(() => {
   seq = 0;
   historyGate = null;
   messageFailure = null;
+  messageGate = null;
+  createGate = null;
   vi.stubGlobal("fetch", vi.fn(fetchMock));
   const api = createApi({ origin: ORIGIN, token: "tok" }, (i, init) => fetchMock(i, init));
   h.daemon = createFakeDaemon(api);
@@ -203,6 +218,60 @@ function agentPicker(w: Awaited<ReturnType<typeof mountPanel>>) {
 }
 
 describe("ChatPanel", () => {
+  it("shows an approval card for a pending permission and posts the answer", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: true }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: true,
+      chunks: [
+        { type: "user_text", session_id: "s", text: "go" },
+        { type: "permission", session_id: "s", request_id: "7", tool_call: { title: "Run npm install" }, options: [] },
+      ],
+      pendingPermissions: ["7"],
+    } as History;
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    expect(w.find("[data-testid='chat-approval-title']").text()).toBe("Run npm install");
+    await w.find("[data-testid='chat-approval-allow']").trigger("click");
+    await flushPromises();
+    const post = calls.find((c) => c.url.endsWith("/api/chat/p1/c1/approve"))!;
+    expect(JSON.parse(String(post.init.body))).toEqual({ requestId: "7", allow: true });
+    expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
+  });
+
+  it("offers an auto-approve switch", async () => {
+    const w = await mountPanel();
+    expect(w.find("[data-testid='chat-auto-approve']").exists()).toBe(true);
+  });
+
+  it("starts with recent messages and loads earlier history when scrolling to the top", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Long chat", updatedAt: 1, live: true, running: false }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: false,
+      chunks: Array.from({ length: 12 }, (_, i) => [
+        { type: "user_text", session_id: "s", text: `Prompt ${i}` },
+        { type: "text_delta", session_id: "s", text: `Reply ${i}` },
+        { type: "turn_end", session_id: "s", stop_reason: "end_turn" },
+      ]).flat(),
+    };
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(10);
+    expect(w.find("[data-testid='chat-load-earlier']").exists()).toBe(false);
+    expect(w.text()).toContain("Reply 11");
+    expect(w.text()).not.toContain("Prompt 0");
+    const viewport = w.get<HTMLElement>("[data-testid='chat-viewport']");
+    viewport.element.scrollTop = 200;
+    await viewport.trigger("scroll");
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(10);
+    viewport.element.scrollTop = 60;
+    await viewport.trigger("scroll");
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(20);
+    viewport.element.scrollTop = 0;
+    await viewport.trigger("scroll");
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(24);
+    expect(w.text()).toContain("Prompt 0");
+  });
+
   it("creates a chat, posts only the new message with auth, then renders the saved reply", async () => {
     const w = await mountPanel();
     await send(w, "hi");
@@ -350,16 +419,232 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(false));
   });
 
-  it("doesn't send on Enter while a turn runs, and keeps the typed text", async () => {
+  it("queues a follow-up on Enter and sends it after the active turn ends", async () => {
     const w = await mountPanel();
     await send(w, "hi");
+    const id = useChatStore().activeChatId("p1")!;
     await vi.waitFor(() => expect(w.find("[data-testid='chat-stop']").exists()).toBe(true));
     const input = w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
     await input.setValue("next");
     await input.trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(messagePosts()).toHaveLength(1);
-    expect(input.element.value).toBe("next");
+    expect(input.element.value).toBe("");
+    expect(w.get("[data-testid='chat-queued']").text()).toContain("next");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("next");
+    expect(w.find("[data-testid='chat-queued']").exists()).toBe(false);
+  });
+
+  it("keeps queued messages in order and lets one be removed before sending", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    for (const text of ["second", "third", "fourth"]) {
+      await w.get("[data-testid='chat-input']").setValue(text);
+      await w.get("[data-testid='chat-queue']").trigger("click");
+    }
+    expect(messagePosts()).toHaveLength(1);
+    expect(w.findAll("[data-testid='chat-queued-item']").map(item => item.text())).toEqual([
+      expect.stringContaining("second"), expect.stringContaining("third"), expect.stringContaining("fourth"),
+    ]);
+    await w.findAll("[data-testid='chat-queued-remove']")[1]!.trigger("click");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("second");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(3));
+    expect(textOf(messagePosts()[2]!)).toBe("fourth");
+  });
+
+  it("sends a selected queued message next when the current turn finishes", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    for (const text of ["second", "third"]) {
+      await w.get("[data-testid='chat-input']").setValue(text);
+      await w.get("[data-testid='chat-queue']").trigger("click");
+    }
+    const sendButtons = w.findAll("[data-testid='chat-queued-send']");
+    expect(sendButtons[1]!.attributes("aria-label")).toBe("Send queued message: third");
+    await sendButtons[1]!.trigger("click");
+    expect(messagePosts()).toHaveLength(1);
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("third");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(3));
+    expect(textOf(messagePosts()[2]!)).toBe("second");
+  });
+
+  it("pauses queued prompts when the running turn is stopped", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    await w.get("[data-testid='chat-stop']").trigger("click");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "cancelled" }]);
+    await flushPromises();
+    expect(messagePosts()).toHaveLength(1);
+    expect(w.get("[data-testid='chat-queued']").text()).toContain("next");
+    await w.get("[data-testid='chat-queue-resume']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("next");
+  });
+
+  it("pauses a prompt added after Stop and preserves the pause across panel remount", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-stop']").trigger("click");
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "cancelled" }]);
+    await flushPromises();
+    expect(messagePosts()).toHaveLength(1);
+    w.unmount();
+    const reopened = await mountPanel();
+    await flushPromises();
+    expect(messagePosts()).toHaveLength(1);
+    expect(reopened.get("[data-testid='chat-queued']").text()).toContain("next");
+    await reopened.get("[data-testid='chat-queue-resume']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+  });
+
+  it("keeps a failed queued prompt for retry", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    messageFailure = json({ error: { code: "UNKNOWN", message: "temporary failure" } }, 500);
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-error']").exists()).toBe(true));
+    expect(messagePosts()).toHaveLength(2);
+    expect(w.get("[data-testid='chat-queued']").text()).toContain("next");
+    messageFailure = null;
+    await w.get("[data-testid='chat-queue-resume']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(3));
+    expect(textOf(messagePosts()[2]!)).toBe("next");
+  });
+
+  it("queues an uploaded attachment with its prompt", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    const input = w.get<HTMLInputElement>("[data-testid='chat-attach-input']");
+    Object.defineProperty(input.element, "files", { value: [new File(["image"], "cat.png", { type: "image/png" })], configurable: true });
+    await input.trigger("change");
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-attachment']").exists()).toBe(true));
+    await w.get("[data-testid='chat-input']").setValue("use this");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    expect(messagePosts()).toHaveLength(1);
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toContain("use this\n/state/p1/attachments/abc123.png");
+  });
+
+  it("keeps a queue with its chat and sends it after that chat finishes in the background", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    useChatStore().newChat("p1");
+    await flushPromises();
+    expect(w.find("[data-testid='chat-queued']").exists()).toBe(false);
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("next");
+    useChatStore().setActive("p1", id);
+    await flushPromises();
+    expect(messagePosts()).toHaveLength(2);
+  });
+
+  it("drains the old chat if selection changes while its turn-end reload is pending", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    let release!: () => void;
+    historyGate = new Promise<void>(resolve => { release = resolve; });
+    finish(id, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    useChatStore().newChat("p1");
+    release();
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("next");
+  });
+
+  it("runs turns in two chats independently", async () => {
+    const w = await mountPanel();
+    await send(w, "first chat");
+    const first = useChatStore().activeChatId("p1")!;
+    useChatStore().newChat("p1");
+    await flushPromises();
+    await send(w, "second chat");
+    const second = useChatStore().activeChatId("p1")!;
+    expect(second).not.toBe(first);
+    expect(messagePosts().map(textOf)).toEqual(["first chat", "second chat"]);
+    expect(useChatStore().runningChatIds("p1")).toEqual([first, second]);
+
+    finish(first, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
+    await vi.waitFor(() => expect(useChatStore().runningChatIds("p1")).toEqual([second]));
+    expect(w.find("[data-testid='chat-stop']").exists()).toBe(true);
+  });
+
+  it("allows another chat to send while the first chat's POST is pending", async () => {
+    let release!: () => void;
+    messageGate = new Promise<void>(resolve => { release = resolve; });
+    const w = await mountPanel();
+    await w.get("[data-testid='chat-input']").setValue("first chat");
+    await w.get("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(1));
+    const first = useChatStore().activeChatId("p1")!;
+    useChatStore().newChat("p1");
+    await flushPromises();
+    await w.get("[data-testid='chat-input']").setValue("second chat");
+    await w.get("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("second chat");
+    expect(useChatStore().activeChatId("p1")).not.toBe(first);
+    release();
+    await flushPromises();
+    expect(w.text()).not.toContain("first chat");
+  });
+
+  it("finishes creating a draft in its own session after another chat is selected", async () => {
+    chats = [{ id: "existing", provider: "claude", model: null, title: "Existing", updatedAt: 1, live: true, running: false }];
+    histories.existing = { chunks: [], provider: "claude", model: null, running: false };
+    const draft = useChatStore().newChat("p1");
+    let release!: () => void;
+    createGate = new Promise<void>(resolve => { release = resolve; });
+    const w = await mountPanel();
+    await w.get("[data-testid='chat-input']").setValue("draft prompt");
+    await w.get("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(createPosts()).toHaveLength(1));
+    useChatStore().setActive("p1", "existing");
+    await flushPromises();
+    release();
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(useChatStore().activeChatId("p1")).toBe("existing");
+    expect(messagePosts()[0]!.url).toContain("/c1/message");
+    expect(w.text()).not.toContain("draft prompt");
+    expect(useChatStore().queued.p1?.[draft]).toBeUndefined();
+  });
+
+  it("recovers a queued prompt after reconnecting when the turn event was missed", async () => {
+    const w = await mountPanel();
+    await send(w, "first");
+    const id = useChatStore().activeChatId("p1")!;
+    await w.get("[data-testid='chat-input']").setValue("next");
+    await w.get("[data-testid='chat-queue']").trigger("click");
+    histories[id]!.running = false;
+    h.daemon.simulateReconnect();
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("next");
   });
 
   it("is busy until the draft's history check finishes, and while a turn runs", async () => {
@@ -399,6 +684,11 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-error']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-error']").text()).toBe("A chat turn is already running");
     expect(useChatStore().running.p1 ?? null).toBeNull();
+    messageFailure = null;
+    await w.get("[data-testid='chat-input']").setValue("try again");
+    await w.get("[data-testid='chat-send']").trigger("click");
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("try again");
   });
 
   it("starts an empty chat with a new active id", async () => {
