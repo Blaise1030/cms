@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -79,6 +79,9 @@ struct LiveChat {
     hook_token: String,
     /// A prompt is in flight (a turn is running).
     running: AtomicBool,
+    /// Bumped for every prompt dispatched. A watchdog armed for one turn can
+    /// tell that a newer turn has started, so it never stops that newer turn.
+    generation: AtomicU64,
     tx: broadcast::Sender<UiChunk>,
     history: Mutex<Vec<UiChunk>>,
     models: Mutex<Option<ModelConfig>>,
@@ -409,6 +412,7 @@ impl ChatManager {
             acp_session_id: created.session_id,
             hook_token,
             running: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
             tx: broadcast::channel(BROADCAST_CAPACITY).0,
             history: Mutex::new(transcript::load(&self.inner.state_dir, project_id, chat_id)),
             models: Mutex::new(created.models),
@@ -584,6 +588,7 @@ impl ChatManager {
     /// Records `shown` (or `text`) as the user's chunk and runs `text` as an
     /// ACP prompt. The turn's chunks arrive through the event pump.
     fn dispatch(&self, live: &Arc<LiveChat>, text: &str, shown: Option<&str>, record_user: bool) {
+        live.generation.fetch_add(1, Ordering::SeqCst);
         live.running.store(true, Ordering::SeqCst);
         if record_user {
             live.record(UiChunk::UserText {
@@ -891,6 +896,13 @@ impl ChatManager {
     pub fn is_running(&self, project_id: &str, chat_id: &str) -> bool {
         self.live(project_id, chat_id)
             .is_some_and(|live| live.running.load(Ordering::SeqCst))
+    }
+
+    /// How many prompts this chat has dispatched. A caller that arms a timer for
+    /// one turn rereads this to see whether a newer turn has since started.
+    pub fn generation(&self, project_id: &str, chat_id: &str) -> Option<u64> {
+        self.live(project_id, chat_id)
+            .map(|live| live.generation.load(Ordering::SeqCst))
     }
 
     /// A prompt is in flight in any chat of this project. Unlike [`Self::any_live`],

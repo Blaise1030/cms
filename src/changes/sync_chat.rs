@@ -342,7 +342,7 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
         return;
     }
     let Some(site) = record.cwd.clone() else {
-        note(state, &record, UNEXPECTED);
+        fail(state, project, chat, UNEXPECTED).await;
         return;
     };
     let checking = match set_phase(state, project, chat, SyncPhase::Checking) {
@@ -362,7 +362,7 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("orso: cannot verify sync chat {chat}: {e}");
-            note(state, &checking, UNEXPECTED);
+            fail(state, project, chat, UNEXPECTED).await;
             return;
         }
     };
@@ -372,12 +372,12 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
                 eprintln!("orso: cannot end sync chat {chat}: {e}");
             }
         }
-        Ok(Verdict::AgentMovedGit) => note(state, &checking, AGENT_MOVED),
-        Ok(Verdict::Markers(n)) => note(state, &checking, &pages_needing_decision(n)),
-        Ok(Verdict::Symlink) => note(state, &checking, ONE_FILE),
+        Ok(Verdict::AgentMovedGit) => fail(state, project, chat, AGENT_MOVED).await,
+        Ok(Verdict::Markers(n)) => fail(state, project, chat, &pages_needing_decision(n)).await,
+        Ok(Verdict::Symlink) => fail(state, project, chat, ONE_FILE).await,
         Ok(Verdict::Pass) => {
-            if let Err(fail) = build(state, &checking).await {
-                eprintln!("orso: sync chat {chat} did not build: {fail:?}");
+            if let Err(why) = build(state, &checking).await {
+                eprintln!("orso: sync chat {chat} did not build: {why:?}");
                 after_build_failure(state, project, chat).await;
                 return;
             }
@@ -400,14 +400,24 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
                 }
                 Err(e) => {
                     eprintln!("orso: cannot land sync chat {chat}: {e}");
-                    note(state, &fresh, UNEXPECTED);
+                    fail(state, project, chat, UNEXPECTED).await;
                 }
             }
         }
         Err(e) => {
             eprintln!("orso: cannot verify sync chat {chat}: {e}");
-            note(state, &checking, UNEXPECTED);
+            fail(state, project, chat, UNEXPECTED).await;
         }
+    }
+}
+
+/// A failed check: reopen the chat and post one plain line. The reopen is
+/// explicit here; [`note`] itself refuses to pull a sync out of `checking`.
+async fn fail(state: &AppState, project: &str, chat: &str, text: &str) {
+    match set_phase(state, project, chat, SyncPhase::Working) {
+        Ok(Some(record)) => note(state, &record, text),
+        Ok(None) => {}
+        Err(e) => eprintln!("orso: cannot reopen sync chat {chat}: {e}"),
     }
 }
 
@@ -432,6 +442,7 @@ async fn after_build_failure(state: &AppState, project: &str, chat: &str) {
     let marked = match update_live(state, project, chat, |record| {
         if let Some(st) = record.sync.as_mut() {
             st.repair_attempted = true;
+            st.phase = SyncPhase::Working;
         }
         record.updated_at = now;
     }) {
@@ -660,11 +671,19 @@ fn turn_limit() -> Duration {
 /// on a working sync is cancelled and the writer is told how to continue.
 /// Ordinary chats have no watchdog.
 pub fn watch_turn(state: &AppState, project: &str, chat: &str) {
+    // A timer belongs to the turn it was armed for. A newer prompt is a newer
+    // generation, and this timer must never stop it.
+    let Some(turn) = state.chats.generation(project, chat) else {
+        return;
+    };
     let state = state.clone();
     let project = project.to_string();
     let chat = chat.to_string();
     tokio::spawn(async move {
         tokio::time::sleep(turn_limit()).await;
+        if state.chats.generation(&project, &chat) != Some(turn) {
+            return;
+        }
         let Some(record) = history::get(&state_dir(&state), &project, &chat) else {
             return;
         };
@@ -701,14 +720,26 @@ async fn build_log_tail(state: &AppState, chat: &str) -> String {
 }
 
 /// One plain line from the assistant: records the status chunk, reopens the
-/// chat, and tells the UI. A terminal sync is left alone.
+/// chat, and tells the UI. A terminal or `checking` sync is left alone: the note
+/// is a `working` outcome, and re-opening a sync mid-check would let a message
+/// race the build and land. The phase precondition lives inside the history
+/// write lock, with the note, so no interleaving can slip between them.
 pub fn note(state: &AppState, record: &SessionRecord, text: &str) {
     let dir = state_dir(state);
     let Some(project) = project_of(&dir, &record.id) else {
         return;
     };
     let now = history::now_ms();
+    let mut refused = false;
     let updated = update_live(state, &project, &record.id, |record| {
+        if record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase != SyncPhase::Working)
+        {
+            refused = true;
+            return;
+        }
         if let Some(st) = record.sync.as_mut() {
             st.phase = SyncPhase::Working;
         }
@@ -717,6 +748,9 @@ pub fn note(state: &AppState, record: &SessionRecord, text: &str) {
     let Ok(Some(updated)) = updated else {
         return;
     };
+    if refused {
+        return;
+    }
     state.chats.record(
         &project,
         &record.id,
@@ -1204,6 +1238,45 @@ mod tests {
         assert!(
             events.try_recv().is_err(),
             "no sync.changed for a skipped write"
+        );
+    }
+
+    /// A note is a `working` outcome. It must never pull a sync out of
+    /// `checking`, or a message accepted by `post_message` could race the build
+    /// and land. Like the terminal case, the refusal is decided under the lock.
+    #[tokio::test]
+    async fn note_does_not_reopen_a_checking_sync() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::with_scaffold_install(
+            crate::config::Config {
+                port: 0,
+                projects_dir: tmp.path().join("projects"),
+                no_auth: true,
+                ..Default::default()
+            },
+            false,
+        );
+        let dir = state_dir(&state);
+        let mut st = record("content/page", "tip", "incoming", &["page.md"]);
+        st.phase = SyncPhase::Checking;
+        history::insert(&dir, "p", session_record("c1", st)).unwrap();
+        let mut events = state.events.subscribe();
+
+        note(&state, &history::get(&dir, "p", "c1").unwrap(), TOO_LONG);
+
+        let got = history::get(&dir, "p", "c1").unwrap();
+        assert_eq!(got.sync.unwrap().phase, SyncPhase::Checking);
+        assert_eq!(
+            got.updated_at, 0,
+            "the refused note must not touch the record"
+        );
+        assert!(
+            state.chats.history("p", "c1").is_empty(),
+            "the refused note must not append a status chunk"
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "no sync.changed for a refused note"
         );
     }
 

@@ -132,11 +132,17 @@ impl Setup {
     }
 }
 
+/// The test seam, set once: both tests in this binary share one process.
+fn short_limit() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| std::env::set_var("ORSO_SYNC_TURN_LIMIT_SECS", "1"));
+}
+
 /// A turn that outlives the limit is cancelled and the writer gets one plain
 /// line; the chat stays open so they can ask it to continue.
 #[tokio::test]
 async fn a_long_turn_is_cancelled_and_noted() {
-    std::env::set_var("ORSO_SYNC_TURN_LIMIT_SECS", "1");
+    short_limit();
     let h = Setup::new("true").await;
 
     let script = h._tmp.path().join("slow.sh");
@@ -172,5 +178,49 @@ async fn a_long_turn_is_cancelled_and_noted() {
         .sync
         .unwrap();
     assert_eq!(st.phase, SyncPhase::Working);
+    h.state.chats.shutdown().await;
+}
+
+/// A timer belongs to the turn that armed it. The second turn here is sent
+/// straight through the manager, so the opening prompt's timer is the only one
+/// in flight; past its deadline the newer turn must still be running and un-noted.
+#[tokio::test]
+async fn a_stale_watchdog_does_not_cancel_a_newer_turn() {
+    short_limit();
+    let h = Setup::new("true").await;
+
+    let script = h._tmp.path().join("stale.sh");
+    std::fs::write(&script, "sleep 5\n").unwrap();
+    let (cmd, args) = orso::chat::acp::fake_agent_sync(&script);
+    let mut argv = vec![cmd];
+    argv.extend(args);
+    providers::set_test_acp_argv("fake-stale", argv);
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-stale")
+        .await
+        .unwrap();
+    assert!(h.state.chats.is_running(&h.project, &chat));
+
+    // A newer turn, with no watchdog armed for it.
+    h.state
+        .chats
+        .send_message(&h.project, &chat, "keep going")
+        .await
+        .unwrap();
+
+    // Past the opening turn's deadline, while the newer turn is still running.
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    assert!(
+        h.state.chats.is_running(&h.project, &chat),
+        "the older turn's timer stopped the newer turn"
+    );
+    let noted = h.chunks(&chat).iter().any(
+        |chunk| matches!(chunk, UiChunk::SyncStatus { text, .. } if text == sync_chat::TOO_LONG),
+    );
+    assert!(
+        !noted,
+        "the older turn's timer noted the newer turn: {:?}",
+        h.chunks(&chat)
+    );
     h.state.chats.shutdown().await;
 }
