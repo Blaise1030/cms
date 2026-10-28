@@ -71,6 +71,19 @@ fn fake_argv() -> Vec<String> {
     argv
 }
 
+const FORBIDDEN: &[&str] = &[
+    "branch", "commit", "merge", "conflict", "worktree", "checkout", "clone", "git", "origin",
+    "main", "markers", "npm", "<<<<<<<",
+];
+
+/// Every message an HTTP response can carry must avoid git vocabulary.
+fn assert_plain(text: &str) {
+    let lower = text.to_ascii_lowercase();
+    for word in FORBIDDEN {
+        assert!(!lower.contains(word), "{word:?} in writer-visible {text:?}");
+    }
+}
+
 /// A project whose `content/page` draft conflicts with `main` in `page.md`,
 /// with a conflict session opened by Get latest.
 struct SyncSetup {
@@ -239,6 +252,7 @@ async fn a_second_sync_for_the_same_project_is_refused() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert_eq!(err.message, "Combining is in progress.");
+    assert_plain(&err.message);
     let syncs = history::list(&h.state_dir(), &h.project)
         .into_iter()
         .filter(|r| r.kind == RecordKind::Sync)
@@ -256,8 +270,24 @@ async fn an_unknown_provider_is_a_bad_request() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Badreq);
     assert_eq!(err.message, "unknown provider: nope");
+    assert_plain(&err.message);
     assert!(history::list(&h.state_dir(), &h.project).is_empty());
     assert!(sync_chat::active_for_project(&h.state, &h.project).is_none());
+}
+
+/// An expired/unknown session used to surface "conflict session expired or not
+/// found". `start` must hand the writer the plain line instead.
+#[tokio::test]
+async fn a_missing_session_returns_plain_copy() {
+    let h = SyncSetup::new().await;
+    let err = sync_chat::start(&h.state, &h.project, "no-such-session", "fake-ok")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Enoent);
+    assert_eq!(err.message, sync_chat::UNEXPECTED);
+    assert_plain(&err.message);
+    assert!(history::list(&h.state_dir(), &h.project).is_empty());
+    assert!(!h.state_dir().join("sync").exists());
 }
 
 #[tokio::test]

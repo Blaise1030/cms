@@ -18,6 +18,15 @@ use crate::state::AppState;
 pub const INTRO: &str = "You and a teammate both changed {pages}. I'll keep both changes and check the site still works.";
 /// The assistant could not be started for this sync.
 pub const UNAVAILABLE: &str = "Your assistant isn't available.";
+/// An unexpected internal failure while starting or advancing a sync.
+pub const UNEXPECTED: &str = "I couldn't finish combining. Nothing changed.";
+
+/// Replaces an internal error's message with the writer-facing copy, keeping its
+/// status. The technical detail goes to the log; it must never reach the writer.
+fn internal(what: &str, err: ApiError) -> ApiError {
+    eprintln!("orso: cannot start a sync chat ({what}): {err}");
+    ApiError::new(err.code, UNEXPECTED)
+}
 
 /// Opens a sync chat for the conflict session `session_id`: a worktree at the
 /// draft tip mid-merge with the live site, a `Sync` record pointing at it, and
@@ -35,12 +44,27 @@ pub async fn start(
         if active_for_project(state, project_id).is_some() {
             return Err(ApiError::conflict("Combining is in progress."));
         }
-        let project_dir = crate::http::project_dir(state, project_id).await?;
-        let session = state.conflicts.get(session_id).await?;
+        let project_dir = crate::http::project_dir(state, project_id)
+            .await
+            .map_err(|e| internal("project", e))?;
+        let session = state
+            .conflicts
+            .get(session_id)
+            .await
+            .map_err(|e| internal(&format!("session {session_id}"), e))?;
         if session.project_id != project_id {
-            return Err(ApiError::enoent(format!("no such conflict: {session_id}")));
+            let reason = format!(
+                "session {session_id} belongs to project {}, not {project_id}",
+                session.project_id
+            );
+            return Err(internal(
+                &reason,
+                ApiError::enoent(format!("no such conflict: {session_id}")),
+            ));
         }
-        if acp_argv_for(state, provider)?.is_none() {
+        let known_provider = acp_argv_for(state, provider)
+            .map_err(|e| internal(&format!("provider {provider}"), e))?;
+        if known_provider.is_none() {
             return Err(ApiError::badreq(format!("unknown provider: {provider}")));
         }
 
@@ -83,7 +107,7 @@ pub async fn start(
         .await
         {
             remove_worktree(&project_dir, &chat_dir);
-            return Err(e);
+            return Err(internal("worktree", e));
         }
         (chat_id, site, record, st)
     };
@@ -103,7 +127,9 @@ pub async fn start(
         }
     };
     if !started {
-        end(state, project_id, &chat_id, SyncPhase::Ended, UNAVAILABLE).await?;
+        end(state, project_id, &chat_id, SyncPhase::Ended, UNAVAILABLE)
+            .await
+            .map_err(|e| internal("end", e))?;
         return Ok(chat_id);
     }
     emit(state, &record);
@@ -747,7 +773,14 @@ mod tests {
         let intro = intro(&st);
         let prompt = opening_prompt(&st);
         assert!(prompt.contains(intro.as_str()), "{prompt}");
-        for text in [INTRO, UNAVAILABLE, intro.as_str(), prompt.as_str()] {
+        assert_eq!(UNEXPECTED, "I couldn't finish combining. Nothing changed.");
+        for text in [
+            INTRO,
+            UNAVAILABLE,
+            UNEXPECTED,
+            intro.as_str(),
+            prompt.as_str(),
+        ] {
             let lower = text.to_ascii_lowercase();
             for word in [
                 "branch", "commit", "merge", "conflict", "worktree", "checkout", "clone", "git",
