@@ -583,12 +583,14 @@ impl ChatManager {
 
     /// Records `shown` (or `text`) as the user's chunk and runs `text` as an
     /// ACP prompt. The turn's chunks arrive through the event pump.
-    fn dispatch(&self, live: &Arc<LiveChat>, text: &str, shown: Option<&str>) {
+    fn dispatch(&self, live: &Arc<LiveChat>, text: &str, shown: Option<&str>, record_user: bool) {
         live.running.store(true, Ordering::SeqCst);
-        live.record(UiChunk::UserText {
-            session_id: live.acp_session_id.clone(),
-            text: shown.unwrap_or(text).to_string(),
-        });
+        if record_user {
+            live.record(UiChunk::UserText {
+                session_id: live.acp_session_id.clone(),
+                text: shown.unwrap_or(text).to_string(),
+            });
+        }
         if live.cancel.load(Ordering::SeqCst) {
             let session_id = live.acp_session_id.clone();
             live.record(UiChunk::TurnEnd {
@@ -675,7 +677,7 @@ impl ChatManager {
         // A stop latches the chat until the user sends again.
         live.cancel.store(false, Ordering::SeqCst);
         live.client.clear_cancelled();
-        self.dispatch(&live, text, None);
+        self.dispatch(&live, text, None, true);
         Ok(())
     }
 
@@ -692,7 +694,22 @@ impl ChatManager {
         let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
         live.cancel.store(false, Ordering::SeqCst);
         live.client.clear_cancelled();
-        self.dispatch(&live, prompt, Some(shown));
+        self.dispatch(&live, prompt, Some(shown), true);
+        Ok(())
+    }
+
+    /// [`send_message`] with no user chunk at all: the prompt is the daemon's,
+    /// so the writer must never see it in the transcript.
+    pub async fn send_message_hidden(
+        &self,
+        project_id: &str,
+        chat_id: &str,
+        prompt: &str,
+    ) -> ChatResult<()> {
+        let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
+        live.cancel.store(false, Ordering::SeqCst);
+        live.client.clear_cancelled();
+        self.dispatch(&live, prompt, None, false);
         Ok(())
     }
 
@@ -1424,7 +1441,7 @@ mod tests {
         let mut events = chats.inner.events.subscribe();
         let live = chats.live("proj", "chat-1").unwrap();
         live.cancel.store(true, Ordering::SeqCst);
-        chats.dispatch(&live, "nope", None);
+        chats.dispatch(&live, "nope", None, true);
         assert_eq!(
             reasons.lock().unwrap().as_slice(),
             [("chat-1".to_string(), "cancelled".to_string())]

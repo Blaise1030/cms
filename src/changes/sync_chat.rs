@@ -1,9 +1,12 @@
 //! Sync chats: a durable merge worktree, its record and intro, and verification
 //! of every finished turn.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 
 use serde_json::json;
+use tokio::process::Command;
 
 use super::conflict_sessions::ConflictSession;
 use super::conflicts;
@@ -11,7 +14,8 @@ use crate::chat::chunk::UiChunk;
 use crate::chat::history::{self, RecordKind, SessionRecord, SyncPhase, SyncState};
 use crate::chat::manager::TurnEnded;
 use crate::config::random_token;
-use crate::error::ApiError;
+use crate::error::{ApiError, ErrorCode};
+use crate::git;
 use crate::http::chat::{acp_argv_for, ensure_agent, state_dir};
 use crate::state::AppState;
 
@@ -45,6 +49,13 @@ pub const RECOVERY_FAILED: &str = "I lost track of this combine. Nothing changed
 pub const UNEXPECTED: &str = "I couldn't finish combining. Nothing changed.";
 /// The agent moved git itself; the chat stays open so the writer can redirect it.
 pub const AGENT_MOVED: &str = "Still working on this one.";
+
+/// How long a site build may take before the repair turn is offered as timed out.
+const BUILD_LIMIT: Duration = Duration::from_secs(300);
+/// How much of a failed build's output the repair prompt carries.
+const LOG_TAIL_CHARS: usize = 1800;
+/// The default a sync prompt may run before the watchdog stops it: ten minutes.
+const TURN_LIMIT: Duration = Duration::from_secs(600);
 
 /// The decision-needed line for `n` pages, singular when there is one.
 pub fn pages_needing_decision(n: usize) -> String {
@@ -146,11 +157,15 @@ pub async fn start(
     let started = match ensure_agent(state, project_id, &chat_id, &site, &record).await {
         Ok(()) => {
             let prompt = opening_prompt(&st);
-            state
+            let sent = state
                 .chats
                 .send_message_displayed(project_id, &chat_id, &prompt, &intro(&st))
                 .await
-                .is_ok()
+                .is_ok();
+            if sent {
+                watch_turn(state, project_id, &chat_id);
+            }
+            sent
         }
         Err(e) => {
             eprintln!("orso: sync chat {chat_id} has no assistant: {e}");
@@ -340,7 +355,7 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
             return;
         }
     };
-    let Some(st) = checking.sync.as_ref() else {
+    let Some(st) = checking.sync.clone() else {
         return;
     };
     let project_dir = match crate::http::project_dir(state, project).await {
@@ -351,7 +366,7 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
             return;
         }
     };
-    match verify(st, &project_dir, &site).await {
+    match verify(&st, &project_dir, &site).await {
         Ok(Verdict::DraftMoved) => {
             if let Err(e) = end(state, project, chat, SyncPhase::Ended, DRAFT_MOVED).await {
                 eprintln!("orso: cannot end sync chat {chat}: {e}");
@@ -360,10 +375,33 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
         Ok(Verdict::AgentMovedGit) => note(state, &checking, AGENT_MOVED),
         Ok(Verdict::Markers(n)) => note(state, &checking, &pages_needing_decision(n)),
         Ok(Verdict::Symlink) => note(state, &checking, ONE_FILE),
-        // Task 6 builds and lands a clean check; until then it just reopens.
         Ok(Verdict::Pass) => {
-            if let Err(e) = set_phase(state, project, chat, SyncPhase::Working) {
-                eprintln!("orso: cannot reopen sync chat {chat}: {e}");
+            if let Err(fail) = build(state, &checking).await {
+                eprintln!("orso: sync chat {chat} did not build: {fail:?}");
+                after_build_failure(state, project, chat).await;
+                return;
+            }
+            // A build can take minutes. An End, delete, or expiry meanwhile must
+            // never land the draft, so the record is read again before it moves.
+            let Some(fresh) = history::get(&dir, project, chat) else {
+                return;
+            };
+            if !is_active(&fresh) {
+                return;
+            }
+            match commit_and_land(state, &project_dir, &site, &fresh).await {
+                Ok(()) => combined(state, &fresh),
+                // Only a moved (or busy) draft refuses the land; a hard failure
+                // leaves the worktree and the conversation in place.
+                Err(e) if e.code == ErrorCode::Conflict => {
+                    if let Err(e) = end(state, project, chat, SyncPhase::Ended, DRAFT_MOVED).await {
+                        eprintln!("orso: cannot end sync chat {chat}: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("orso: cannot land sync chat {chat}: {e}");
+                    note(state, &fresh, UNEXPECTED);
+                }
             }
         }
         Err(e) => {
@@ -371,6 +409,295 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
             note(state, &checking, UNEXPECTED);
         }
     }
+}
+
+/// A failed build: one repair turn, then the sync ends with the draft untouched.
+async fn after_build_failure(state: &AppState, project: &str, chat: &str) {
+    let Some(record) = history::get(&state_dir(state), project, chat) else {
+        return;
+    };
+    if !is_active(&record) {
+        return;
+    }
+    let Some(st) = record.sync.as_ref() else {
+        return;
+    };
+    if st.repair_attempted {
+        if let Err(e) = end(state, project, chat, SyncPhase::Ended, BUILD_FAILED_TWICE).await {
+            eprintln!("orso: cannot end sync chat {chat}: {e}");
+        }
+        return;
+    }
+    let now = history::now_ms();
+    let marked = match update_live(state, project, chat, |record| {
+        if let Some(st) = record.sync.as_mut() {
+            st.repair_attempted = true;
+        }
+        record.updated_at = now;
+    }) {
+        Ok(Some(record)) => record,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("orso: cannot mark sync chat {chat} for a repair: {e}");
+            return;
+        }
+    };
+    note(state, &marked, BUILD_RETRY);
+    repair(state, project, chat).await;
+}
+
+/// Asks the agent once to fix the site, carrying the tail of the build output.
+/// Hidden: the build log is an instruction, never the writer's message.
+async fn repair(state: &AppState, project: &str, chat: &str) {
+    let Some(record) = history::get(&state_dir(state), project, chat) else {
+        return;
+    };
+    // A sync that ended while the build ran gets no prompt; only `working` sends.
+    if !record
+        .sync
+        .as_ref()
+        .is_some_and(|st| st.phase == SyncPhase::Working)
+    {
+        return;
+    }
+    let prompt = repair_prompt(&build_log_tail(state, chat).await);
+    match state
+        .chats
+        .send_message_hidden(project, chat, &prompt)
+        .await
+    {
+        Ok(()) => watch_turn(state, project, chat),
+        Err(e) => eprintln!("orso: cannot ask sync chat {chat} to repair the site: {e}"),
+    }
+}
+
+/// The one repair instruction: what broke, then the pages it may touch.
+fn repair_prompt(tail: &str) -> String {
+    format!(
+        "The site didn't work after those changes. The end of the build output was:\n\n{tail}\n\n\
+         Find what broke it and fix it, then reply when the site works again. \
+         Leave every page you didn't need to change alone, and don't save, undo, or switch drafts yourself."
+    )
+}
+
+/// Builds the sync's worktree as the writer's site: dependencies linked in,
+/// `npm run build` with a 300 s cap, and the output appended to the chat's log.
+pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), BuildFail> {
+    let Some(site) = record.cwd.clone() else {
+        return Err(BuildFail::Failed);
+    };
+    let Some(project) = project_of(&state_dir(state), &record.id) else {
+        return Err(BuildFail::Failed);
+    };
+    let project_dir = match crate::http::project_dir(state, &project).await {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("orso: cannot build sync chat {}: {e}", record.id);
+            return Err(BuildFail::Failed);
+        }
+    };
+    // A repair build finds the link already there.
+    match crate::conflict_preview::link_node_modules(&project_dir, &site) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            eprintln!(
+                "orso: cannot link dependencies for sync chat {}: {e}",
+                record.id
+            );
+            return Err(BuildFail::Failed);
+        }
+    }
+    let log = build_log(state, &record.id);
+    if let Some(dir) = log.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(dir).await {
+            eprintln!("orso: cannot create {}: {e}", dir.display());
+            return Err(BuildFail::Failed);
+        }
+    }
+    let mut file = match tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .await
+    {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("orso: cannot open {}: {e}", log.display());
+            return Err(BuildFail::Failed);
+        }
+    };
+
+    let mut command = Command::new("npm");
+    command
+        .args(["run", "build"])
+        .current_dir(&site)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .process_group(0);
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!("orso: cannot build sync chat {}: {e}", record.id);
+            return Err(BuildFail::Failed);
+        }
+    };
+    // Dropping the group kills npm and everything it started, including after a timeout.
+    let group = crate::conflict_preview::BuildGroup(child.id().map(|pid| pid as i32));
+    let waited = tokio::time::timeout(BUILD_LIMIT, child.wait_with_output()).await;
+    drop(group);
+    let (failed, output) = match waited {
+        Ok(Ok(out)) => {
+            let mut output = out.stdout;
+            output.extend_from_slice(&out.stderr);
+            ((!out.status.success()).then_some(BuildFail::Failed), output)
+        }
+        Ok(Err(e)) => {
+            eprintln!("orso: cannot build sync chat {}: {e}", record.id);
+            (Some(BuildFail::Failed), Vec::new())
+        }
+        Err(_) => (
+            Some(BuildFail::TimedOut),
+            format!(
+                "The build did not finish within {} seconds.\n",
+                BUILD_LIMIT.as_secs()
+            )
+            .into_bytes(),
+        ),
+    };
+    use tokio::io::AsyncWriteExt;
+    let _ = file
+        .write_all(format!("\n--- build {} ---\n", history::now_ms()).as_bytes())
+        .await;
+    let _ = file.write_all(&output).await;
+    let _ = file.flush().await;
+    match failed {
+        Some(fail) => Err(fail),
+        None => Ok(()),
+    }
+}
+
+/// The worktree's staged tree, committed with both sides, then landed on the draft.
+async fn commit_and_land(
+    state: &AppState,
+    project_dir: &Path,
+    site: &Path,
+    record: &SessionRecord,
+) -> Result<(), ApiError> {
+    let Some(st) = record.sync.as_ref() else {
+        return Err(ApiError::git("the sync record has no state"));
+    };
+    let tree = conflicts::text(site, &["write-tree"]).await?;
+    let author = state.github.identity().await;
+    let commit = conflicts::merge_commit(
+        project_dir,
+        &tree,
+        &st.tip,
+        &st.incoming,
+        &author,
+        "Sync with live site",
+    )
+    .await?;
+    land(state, record, &commit).await
+}
+
+/// Moves the draft branch to `commit`, only while its tip is still the sync's.
+/// This is the one place a sync moves the draft, and it runs under the project's
+/// git lock; `advance` already holds the process-wide sync lock, never the reverse.
+pub async fn land(state: &AppState, record: &SessionRecord, commit: &str) -> Result<(), ApiError> {
+    let Some(st) = record.sync.as_ref() else {
+        return Err(ApiError::git("the sync record has no state"));
+    };
+    let project = project_of(&state_dir(state), &record.id)
+        .ok_or_else(|| ApiError::enoent(format!("no such chat: {}", record.id)))?;
+    let project_dir = crate::http::project_dir(state, &project).await?;
+    let lock = git::lock_for(&project_dir);
+    let _guard = lock.lock().await;
+    conflicts::advance_branch(&project_dir, &st.branch, &st.tip, commit).await
+}
+
+/// Finishes a landed sync: its conflict session and previews are done, then the
+/// chat ends `combined` and loses its worktree. Best effort: a leftover session
+/// costs the writer a manual path, never the land.
+pub fn combined(state: &AppState, record: &SessionRecord) {
+    let state = state.clone();
+    let record = record.clone();
+    tokio::spawn(async move {
+        let Some(project) = project_of(&state_dir(&state), &record.id) else {
+            return;
+        };
+        if let Some(st) = record.sync.as_ref() {
+            if let Err(e) = state.conflicts.abandon(&st.conflict_session_id).await {
+                eprintln!(
+                    "orso: cannot finish conflict session {}: {e}",
+                    st.conflict_session_id
+                );
+            }
+            state
+                .conflict_previews
+                .remove_session(&st.conflict_session_id)
+                .await;
+        }
+        if let Err(e) = end(&state, &project, &record.id, SyncPhase::Combined, DONE).await {
+            eprintln!("orso: cannot finish sync chat {}: {e}", record.id);
+        }
+    });
+}
+
+/// How long a sync prompt may run. `ORSO_SYNC_TURN_LIMIT_SECS` is a test seam.
+fn turn_limit() -> Duration {
+    std::env::var("ORSO_SYNC_TURN_LIMIT_SECS")
+        .ok()
+        .and_then(|secs| secs.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(TURN_LIMIT)
+}
+
+/// The watchdog every sync prompt gets: after the limit, a turn that still runs
+/// on a working sync is cancelled and the writer is told how to continue.
+/// Ordinary chats have no watchdog.
+pub fn watch_turn(state: &AppState, project: &str, chat: &str) {
+    let state = state.clone();
+    let project = project.to_string();
+    let chat = chat.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(turn_limit()).await;
+        let Some(record) = history::get(&state_dir(&state), &project, &chat) else {
+            return;
+        };
+        if !state.chats.is_running(&project, &chat)
+            || !record
+                .sync
+                .as_ref()
+                .is_some_and(|st| st.phase == SyncPhase::Working)
+        {
+            return;
+        }
+        if let Err(e) = state.chats.cancel(&project, &chat).await {
+            eprintln!("orso: cannot stop an overlong sync turn: {e}");
+        }
+        note(&state, &record, TOO_LONG);
+    });
+}
+
+/// Where a sync chat's build output goes, one file per chat, across attempts.
+fn build_log(state: &AppState, chat: &str) -> PathBuf {
+    state_dir(state)
+        .join("sync-logs")
+        .join(format!("{chat}.log"))
+}
+
+/// The last [`LOG_TAIL_CHARS`] characters of a chat's build log.
+async fn build_log_tail(state: &AppState, chat: &str) -> String {
+    let text = tokio::fs::read_to_string(build_log(state, chat))
+        .await
+        .unwrap_or_default();
+    let mut tail: Vec<char> = text.trim_end().chars().rev().take(LOG_TAIL_CHARS).collect();
+    tail.reverse();
+    tail.into_iter().collect()
 }
 
 /// One plain line from the assistant: records the status chunk, reopens the
@@ -590,6 +917,15 @@ fn wire_phase(phase: SyncPhase) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
         .expect("a SyncPhase serializes to a string")
+}
+
+/// Why a sync's build did not pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildFail {
+    /// The site build exited non-zero.
+    Failed,
+    /// The site build did not finish inside the 300 s cap.
+    TimedOut,
 }
 
 /// What the agent's work in the sync worktree looks like.

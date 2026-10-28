@@ -105,6 +105,11 @@ struct SyncSetup {
 
 impl SyncSetup {
     async fn new() -> Self {
+        Self::with_build("true").await
+    }
+
+    /// A sync fixture whose site runs `build_script` for `npm run build`.
+    async fn with_build(build_script: &str) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let projects = tmp.path().join("projects");
         std::fs::create_dir(&projects).unwrap();
@@ -128,7 +133,8 @@ impl SyncSetup {
         std::fs::write(dir.join("page.md"), "old\n").unwrap();
         std::fs::write(
             dir.join("package.json"),
-            r#"{"name":"site","private":true,"scripts":{"build":"true"}}"#,
+            json!({"name": "site", "private": true, "scripts": {"build": build_script}})
+                .to_string(),
         )
         .unwrap();
         git(&dir, &["add", "-A"]);
@@ -179,6 +185,48 @@ impl SyncSetup {
         sync_chat::start(&self.state, &self.project, &self.session, "fake-ok")
             .await
             .unwrap()
+    }
+
+    /// A fake provider whose agent runs `body` in the worktree before replying.
+    fn provider(&self, id: &str, body: &str) {
+        let script = self._tmp.path().join(format!("{id}.sh"));
+        std::fs::write(&script, body).unwrap();
+        sync_provider(id, &script);
+    }
+
+    /// The status lines the writer sees, in order.
+    fn notes(&self, chat: &str) -> Vec<String> {
+        self.chunks(chat)
+            .into_iter()
+            .filter_map(|chunk| match chunk {
+                UiChunk::SyncStatus { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Everything the writer typed or was shown as their own message.
+    fn user_texts(&self, chat: &str) -> Vec<String> {
+        self.chunks(chat)
+            .into_iter()
+            .filter_map(|chunk| match chunk {
+                UiChunk::UserText { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Poll until the sync's worktree directory is gone.
+    async fn wait_for_gone(&self, chat: &str) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        while self.site(chat).exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the worktree {} is still there",
+                self.site(chat).display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     /// Poll the transcript until a sync note reads exactly `text`.
@@ -509,9 +557,185 @@ async fn draft_moved_ends() {
                 if text == sync_chat::DRAFT_MOVED)),
         "{chunks:?}"
     );
-    assert!(!h.site(&chat).exists(), "ending removes the worktree");
+    h.wait_for_gone(&chat).await;
     assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
     assert_plain(sync_chat::DRAFT_MOVED);
+    h.state.chats.shutdown().await;
+}
+
+/// A resolved turn builds the site and lands the draft as one combine commit.
+#[tokio::test]
+async fn resolved_turn_builds_and_lands() {
+    let h = SyncSetup::new().await;
+    h.provider(
+        "fake-resolve",
+        "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve")
+        .await
+        .unwrap();
+    let before = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    // The draft and its checkout stay put while the assistant works.
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), before.tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    h.wait_for_gone(&chat).await;
+
+    let rec = history::get(&h.state_dir(), &h.project, &chat).unwrap();
+    let st = rec.sync.unwrap();
+    assert_eq!(st.phase, SyncPhase::Combined);
+    assert!(st.ended_at.is_some());
+
+    // The draft moved exactly once, to a commit with both sides.
+    let tip = git(&h.dir, &["rev-parse", "content/page"]);
+    let log = git(&h.dir, &["rev-list", "--parents", "-n", "1", &tip]);
+    let parents: Vec<&str> = log.split(' ').collect();
+    assert_eq!(parents, [tip.as_str(), &st.tip, &st.incoming]);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "latest");
+
+    assert!(
+        h.state.conflicts.get(&h.session).await.is_err(),
+        "a combined sync finishes its conflict session"
+    );
+    let chunks = h.chunks(&chat);
+    assert!(
+        matches!(chunks.last(), Some(UiChunk::SyncStatus { phase, text })
+            if phase == "combined" && text == sync_chat::DONE),
+        "{chunks:?}"
+    );
+    h.state.chats.shutdown().await;
+}
+
+/// A failed build gets exactly one hidden repair turn; the second build passes.
+#[tokio::test]
+async fn build_failure_repairs_once() {
+    let h = SyncSetup::with_build("test -f ok").await;
+    let runs = h._tmp.path().join("runs");
+    h.provider(
+        "fake-resolve-once",
+        &format!(
+            "n=0\n[ -f {runs} ] && n=$(cat {runs})\nn=$((n+1))\necho $n > {runs}\n\
+             [ \"$n\" -ge 2 ] && touch ok\n\
+             paths=$(git diff --name-only --diff-filter=U)\n\
+             [ -n \"$paths\" ] && git checkout --theirs -- $paths\n\
+             git add -A\n",
+            runs = runs.display()
+        ),
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-once")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert!(st.repair_attempted);
+    assert_eq!(
+        h.notes(&chat)
+            .iter()
+            .filter(|note| *note == sync_chat::BUILD_RETRY)
+            .count(),
+        1,
+        "{:?}",
+        h.notes(&chat)
+    );
+    // The repair prompt and the build output are not the writer's words.
+    assert_eq!(h.user_texts(&chat).len(), 1, "{:?}", h.user_texts(&chat));
+    h.state.chats.shutdown().await;
+}
+
+/// A second failed build ends the sync with the draft untouched.
+#[tokio::test]
+async fn second_build_failure_ends() {
+    let h = SyncSetup::with_build("false").await;
+    h.provider(
+        "fake-resolve-bad",
+        "paths=$(git diff --name-only --diff-filter=U)\n\
+         [ -n \"$paths\" ] && git checkout --theirs -- $paths\n\
+         git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-bad")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Ended).await;
+    h.wait_for_gone(&chat).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(h
+        .notes(&chat)
+        .iter()
+        .any(|note| note == sync_chat::BUILD_FAILED_TWICE));
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), st.tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    // The writer can still pick the changes themselves.
+    assert!(h.state.conflicts.get(&h.session).await.is_ok());
+    h.state.chats.shutdown().await;
+}
+
+/// The composer is locked while the site is checked, so a message cannot race
+/// the build or land the draft twice.
+#[tokio::test]
+async fn message_during_checking_is_rejected() {
+    let h = SyncSetup::with_build("sleep 2").await;
+    h.provider(
+        "fake-resolve-slow",
+        "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-slow")
+        .await
+        .unwrap();
+    let before = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap()
+        .tip;
+
+    h.wait_for_phase(&chat, SyncPhase::Checking).await;
+    let app = http::router(h.state.clone());
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/api/chat/{}/{chat}/message", h.project),
+        Some(json!({ "text": "hello" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["message"].as_str(),
+        Some("Checking the site still works.")
+    );
+    assert_plain(body["error"]["message"].as_str().unwrap());
+
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    let tip = git(&h.dir, &["rev-parse", "content/page"]);
+    assert_eq!(
+        git(
+            &h.dir,
+            &[
+                "rev-list",
+                "--first-parent",
+                "--count",
+                &format!("{before}..{tip}")
+            ]
+        ),
+        "1",
+        "the rejected message must not land twice"
+    );
+    assert_eq!(h.user_texts(&chat).len(), 1, "{:?}", h.user_texts(&chat));
     h.state.chats.shutdown().await;
 }
 

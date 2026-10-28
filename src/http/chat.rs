@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::chat::chunk::{sse_frame, UiChunk};
-use crate::chat::history::{self, RecordKind, SessionRecord};
+use crate::chat::history::{self, RecordKind, SessionRecord, SyncPhase};
 use crate::chat::manager::ChatError;
 use crate::chat::models;
 use crate::chat::transcript;
@@ -332,6 +332,16 @@ pub async fn post_message(
         return Err(ApiError::badreq("text is required"));
     }
     let record = require_record(&state, &project, &chat)?;
+    // `checking` covers verification and the build; a message must not race it
+    // or land the draft twice, so the composer is locked for that phase only.
+    if record.kind == RecordKind::Sync
+        && record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase == SyncPhase::Checking)
+    {
+        return Err(ApiError::conflict("Checking the site still works."));
+    }
     super::checkpoints::require_change(&state, &project).await?;
     if let Some(p) = state.projects.get(&project).await {
         state.chats.set_auto_approve(&project, p.auto_approve);
@@ -345,6 +355,9 @@ pub async fn post_message(
         .await
         .map_err(chat_error)?;
     touch(&state, &project, &chat, Some(&req.text));
+    if record.kind == RecordKind::Sync {
+        crate::changes::sync_chat::watch_turn(&state, &project, &chat);
+    }
     Ok(StatusCode::ACCEPTED)
 }
 
