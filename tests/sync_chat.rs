@@ -8,7 +8,7 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use orso::changes::sync_chat;
 use orso::chat::chunk::UiChunk;
-use orso::chat::history::{self, RecordKind, SyncPhase};
+use orso::chat::history::{self, RecordKind, SessionRecord, SyncPhase, SyncState};
 use orso::error::ErrorCode;
 use orso::{config::Config, http, providers, state::AppState};
 use serde_json::{json, Value};
@@ -279,6 +279,32 @@ fn event_after(mut rx: tokio::sync::broadcast::Receiver<std::sync::Arc<str>>, ki
     last.unwrap_or_else(|| panic!("no {kind} event"))
 }
 
+/// A sync record written without a real agent, for the guard and sweep tests.
+fn sync_record(id: &str, started_at: u64, phase: SyncPhase, cwd: Option<PathBuf>) -> SessionRecord {
+    SessionRecord {
+        id: id.into(),
+        provider: "fake-ok".into(),
+        model: None,
+        agent_session_id: None,
+        title: None,
+        created_at: started_at,
+        updated_at: started_at,
+        kind: RecordKind::Sync,
+        cwd,
+        sync: Some(SyncState {
+            conflict_session_id: "session".into(),
+            branch: "content/page".into(),
+            tip: "tip".into(),
+            incoming: "incoming".into(),
+            files: vec!["page.md".into()],
+            phase,
+            started_at,
+            ended_at: phase.is_terminal().then_some(started_at),
+            repair_attempted: false,
+        }),
+    }
+}
+
 #[tokio::test]
 async fn start_creates_worktree_record_and_intro() {
     let h = SyncSetup::new().await;
@@ -445,6 +471,173 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
         .filter(|c| matches!(c, UiChunk::SyncStatus { .. }))
         .count();
     assert_eq!(statuses, 1);
+}
+
+/// The plan's ending contract: a terminal phase, the end time, no live agent,
+/// no worktree, and the writer's copy in the transcript.
+#[tokio::test]
+async fn end_cancels_forgets_and_removes() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-end", "sleep 5\n");
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-slow-end")
+        .await
+        .unwrap();
+    assert!(h.site(&chat).is_dir());
+    assert!(h.state.chats.is_live(&h.project, &chat));
+    assert!(h.state.chats.is_running(&h.project, &chat));
+
+    sync_chat::end(
+        &h.state,
+        &h.project,
+        &chat,
+        SyncPhase::Ended,
+        sync_chat::ENDED,
+    )
+    .await
+    .unwrap();
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(st.ended_at.is_some());
+    assert!(!h.state.chats.is_live(&h.project, &chat));
+    assert!(!h.site(&chat).exists());
+    assert!(!h.state_dir().join("sync").join(&chat).exists());
+    h.wait_for_note(&chat, sync_chat::ENDED).await;
+    assert_plain(sync_chat::ENDED);
+    h.state.chats.shutdown().await;
+}
+
+/// Deleting a running sync chat through the normal route ends it first, so
+/// neither the record nor the worktree survives the delete.
+#[tokio::test]
+async fn deleting_a_sync_chat_ends_it() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-delete", "sleep 5\n");
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-slow-delete")
+        .await
+        .unwrap();
+    assert!(h.state.chats.is_running(&h.project, &chat));
+
+    let app = http::router(h.state.clone());
+    let (status, body) = call(
+        &app,
+        "DELETE",
+        &format!("/api/chat/{}/{chat}", h.project),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert!(
+        history::get(&h.state_dir(), &h.project, &chat).is_none(),
+        "the record is gone"
+    );
+    assert!(!h.state.chats.is_live(&h.project, &chat));
+    assert!(
+        !h.state_dir().join("sync").join(&chat).exists(),
+        "the worktree is gone"
+    );
+    h.state.chats.shutdown().await;
+}
+
+/// The record id names a directory that `end` deletes. An id that is not a safe
+/// path segment must never reach the filesystem, even if a record carries one.
+#[tokio::test]
+async fn end_refuses_an_unsafe_chat_id() {
+    let h = SyncSetup::new().await;
+    let victim = h.state_dir().join("victim");
+    std::fs::create_dir_all(&victim).unwrap();
+    std::fs::write(victim.join("keep"), "keep").unwrap();
+    history::insert(
+        &h.state_dir(),
+        &h.project,
+        sync_record("../../victim", history::now_ms(), SyncPhase::Working, None),
+    )
+    .unwrap();
+
+    let err = sync_chat::end(
+        &h.state,
+        &h.project,
+        "../../victim",
+        SyncPhase::Ended,
+        sync_chat::ENDED,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::Badreq);
+    assert_plain(&err.message);
+    assert!(
+        victim.join("keep").is_file(),
+        "nothing outside the sync dir is deleted"
+    );
+    assert_eq!(
+        history::get(&h.state_dir(), &h.project, "../../victim")
+            .unwrap()
+            .sync
+            .unwrap()
+            .phase,
+        SyncPhase::Working,
+        "the refused record is not marked"
+    );
+}
+
+/// A non-terminal sync past its one-hour TTL expires: no live agent, no
+/// worktree, and the expiry copy in the transcript.
+#[tokio::test]
+async fn sweep_expires_after_an_hour() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-sweep", "sleep 5\n");
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-slow-sweep")
+        .await
+        .unwrap();
+    let started = history::now_ms() - 3_601_000;
+    history::update(&h.state_dir(), &h.project, &chat, |record| {
+        if let Some(st) = record.sync.as_mut() {
+            st.started_at = started;
+        }
+    })
+    .unwrap();
+
+    sync_chat::sweep(&h.state).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Expired);
+    assert!(st.ended_at.is_some());
+    assert!(!h.state.chats.is_live(&h.project, &chat));
+    assert!(!h.state_dir().join("sync").join(&chat).exists());
+    assert!(h.notes(&chat).iter().any(|note| note == sync_chat::EXPIRED));
+    assert_plain(sync_chat::EXPIRED);
+    h.state.chats.shutdown().await;
+}
+
+/// A terminal sync can still have a worktree left on disk (a crashed end).
+/// The sweep removes the directory and leaves the record alone.
+#[tokio::test]
+async fn sweep_removes_orphan_worktrees() {
+    let h = SyncSetup::new().await;
+    let chat = "orphan1";
+    let chat_dir = h.state_dir().join("sync").join(chat);
+    std::fs::create_dir_all(chat_dir.join("site")).unwrap();
+    std::fs::write(chat_dir.join("site").join("page.md"), "left\n").unwrap();
+    let record = sync_record(chat, 1_000, SyncPhase::Ended, Some(chat_dir.join("site")));
+    history::insert(&h.state_dir(), &h.project, record.clone()).unwrap();
+
+    sync_chat::sweep(&h.state).await;
+
+    assert!(!chat_dir.exists(), "the leftover worktree is removed");
+    assert_eq!(
+        history::get(&h.state_dir(), &h.project, chat),
+        Some(record),
+        "the record is untouched"
+    );
+    assert!(h.notes(chat).is_empty(), "no status line is appended");
 }
 
 /// An unfinished turn leaves the merge alone, so the writer gets one plain line

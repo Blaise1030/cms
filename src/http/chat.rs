@@ -282,6 +282,25 @@ pub async fn delete_chat(
 ) -> Result<Json<Value>, ApiError> {
     project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
+    // A running sync must not lose its record while its worktree is still on
+    // disk: end it first so the normal ending cleans both up.
+    let active_sync = history::get(&state_dir(&state), &project, &chat).is_some_and(|record| {
+        record.kind == RecordKind::Sync
+            && record
+                .sync
+                .as_ref()
+                .is_some_and(|st| !st.phase.is_terminal())
+    });
+    if active_sync {
+        crate::changes::sync_chat::end(
+            &state,
+            &project,
+            &chat,
+            SyncPhase::Ended,
+            crate::changes::sync_chat::ENDED,
+        )
+        .await?;
+    }
     if !history::remove(&state_dir(&state), &project, &chat)? {
         return Err(ApiError::enoent(format!("no such chat: {chat}")));
     }

@@ -13,6 +13,7 @@ use super::conflicts;
 use crate::chat::chunk::UiChunk;
 use crate::chat::history::{self, RecordKind, SessionRecord, SyncPhase, SyncState};
 use crate::chat::manager::TurnEnded;
+use crate::chat::transcript;
 use crate::config::random_token;
 use crate::error::{ApiError, ErrorCode};
 use crate::git;
@@ -56,6 +57,9 @@ const BUILD_LIMIT: Duration = Duration::from_secs(300);
 const LOG_TAIL_CHARS: usize = 1800;
 /// The default a sync prompt may run before the watchdog stops it: ten minutes.
 const TURN_LIMIT: Duration = Duration::from_secs(600);
+/// How long a sync may run from `started_at` before it expires: one hour, in
+/// the Unix milliseconds the record stores.
+const TTL_MS: u64 = 3_600_000;
 
 /// The decision-needed line for `n` pages, singular when there is one.
 pub fn pages_needing_decision(n: usize) -> String {
@@ -271,6 +275,11 @@ pub async fn end(
     phase: SyncPhase,
     copy: &str,
 ) -> Result<(), ApiError> {
+    // The chat id names a directory this call deletes. Refuse anything that is
+    // not a safe path segment, even if a record somehow carries such an id.
+    if !transcript::valid_chat_id(chat) {
+        return Err(ApiError::badreq(format!("invalid chat id: {chat}")));
+    }
     let dir = state_dir(state);
     let Some(record) = history::get(&dir, project, chat) else {
         return Ok(());
@@ -303,6 +312,40 @@ pub async fn end(
     state.chats.forget(project, chat);
     discard_worktree(state, project, &dir.join("sync").join(chat)).await;
     Ok(())
+}
+
+/// Expires stale syncs and removes worktrees left behind by terminal ones.
+/// Best effort: one project's error never stops the sweep for the others.
+pub async fn sweep(state: &AppState) {
+    let dir = state_dir(state);
+    let now = history::now_ms();
+    for project in state.projects.list().await {
+        for record in history::list(&dir, &project.id) {
+            let Some(st) = record.sync.as_ref() else {
+                continue;
+            };
+            // The record id names a directory under `sync/`. A record that is
+            // not a sync, or whose id is not a safe path segment, is left alone.
+            if record.kind != RecordKind::Sync || !transcript::valid_chat_id(&record.id) {
+                continue;
+            }
+            if !st.phase.is_terminal() {
+                if st.started_at.saturating_add(TTL_MS) < now {
+                    if let Err(e) =
+                        end(state, &project.id, &record.id, SyncPhase::Expired, EXPIRED).await
+                    {
+                        eprintln!("orso: cannot expire sync chat {}: {e}", record.id);
+                    }
+                }
+                continue;
+            }
+            let chat_dir = dir.join("sync").join(&record.id);
+            if !chat_dir.is_dir() {
+                continue;
+            }
+            discard_worktree(state, &project.id, &chat_dir).await;
+        }
+    }
 }
 
 /// One verification at a time, process-wide: two syncs must never race on the
@@ -813,6 +856,32 @@ pub fn remove_worktree(project_dir: &Path, chat_dir: &Path) {
             ),
             Ok(_) => {}
         }
+    } else {
+        // The site is already gone, e.g. a removal that crashed halfway. Prune
+        // so the project does not keep a stale entry pointing at a missing path.
+        match std::process::Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "worktree",
+                "prune",
+            ])
+            .current_dir(project_dir)
+            .output()
+        {
+            Ok(out) if !out.status.success() => eprintln!(
+                "orso: cannot prune sync worktrees in {}: {}",
+                project_dir.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => eprintln!(
+                "orso: cannot prune sync worktrees in {}: {e}",
+                project_dir.display()
+            ),
+            Ok(_) => {}
+        }
     }
     if let Err(e) = std::fs::remove_dir_all(chat_dir) {
         if e.kind() != std::io::ErrorKind::NotFound {
@@ -1192,6 +1261,41 @@ mod tests {
             cwd: None,
             sync: Some(sync),
         }
+    }
+
+    /// A crashed removal can leave the site directory gone while the project
+    /// still lists the worktree. Removing the chat must prune that stale entry.
+    #[test]
+    fn remove_worktree_prunes_a_missing_site() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        sh(&project, &["init", "-q", "-b", "main"]);
+        std::fs::write(project.join("page.md"), "x\n").unwrap();
+        sh(&project, &["add", "."]);
+        sh(&project, &["commit", "-qm", "base"]);
+        let chat = tmp.path().join("chat");
+        std::fs::create_dir_all(&chat).unwrap();
+        let site = chat.join("site");
+        sh(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                site.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        assert!(site.is_dir());
+        std::fs::remove_dir_all(&site).unwrap();
+
+        remove_worktree(&project, &chat);
+
+        let list = sh(&project, &["worktree", "list", "--porcelain"]);
+        assert!(!list.contains(site.to_str().unwrap()), "{list}");
+        assert!(!chat.exists());
     }
 
     /// Once the writer ended a sync, a verification that read it a moment
