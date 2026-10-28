@@ -157,10 +157,19 @@ impl AppState {
 
     /// After an ACP turn ends: refresh the preview and Content panel, checkpoint
     /// the edits, and record the resulting `checkpoint` chunk in the transcript.
+    /// A sync chat is verified and advances instead; its worktree never touches
+    /// the project checkout, so nothing is checkpointed there.
     fn wire_chat_turn_end(&self) {
         let state = self.clone();
         self.chats.set_on_turn_end(move |ended| {
             if ended.stop_reason != "end_turn" {
+                return;
+            }
+            let state_dir = crate::http::chat::state_dir(&state);
+            let is_sync = crate::chat::history::get(&state_dir, &ended.project_id, &ended.chat_id)
+                .is_some_and(|record| record.kind == crate::chat::history::RecordKind::Sync);
+            if is_sync {
+                crate::changes::sync_chat::on_turn_end(&state, &ended);
                 return;
             }
             let state = state.clone();

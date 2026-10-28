@@ -610,7 +610,7 @@ impl AcpClient {
 /// through the real `AcpClient` stdio path — no extra binary target ships
 /// in the daemon. Shared by later chat tests.
 const FAKE_AGENT_PY: &str = r#"
-import json, os, sys, time
+import json, os, subprocess, sys, time
 
 # Tests pass hold:<path> to pause before initialize so a stop can land
 # while the card is still starting.
@@ -669,6 +669,10 @@ while True:
         sid = params.get("sessionId", "")
         text = "".join(c.get("text", "") for c in params.get("prompt", [])
                        if c.get("type") == "text")
+        # A sync chat's provider runs a shell script in the worktree first, so a
+        # test can leave the merge untouched or move git the way a wrong agent would.
+        if len(sys.argv) > 1 and sys.argv[1].startswith("sync:"):
+            subprocess.run(["sh", sys.argv[1][5:]], check=False)
         if "stuck" in text:
             update(sid, {"sessionUpdate": "agent_message_chunk",
                          "content": {"type": "text", "text": "stuck started"}})
@@ -753,6 +757,13 @@ while True:
 pub fn fake_agent_hold(gate: &std::path::Path) -> (String, Vec<String>) {
     let (cmd, mut args) = fake_agent();
     args.push(format!("hold:{}", gate.display()));
+    (cmd, args)
+}
+
+/// The fake agent, running `script` in its working directory before every reply.
+pub fn fake_agent_sync(script: &std::path::Path) -> (String, Vec<String>) {
+    let (cmd, mut args) = fake_agent();
+    args.push(format!("sync:{}", script.display()));
     (cmd, args)
 }
 

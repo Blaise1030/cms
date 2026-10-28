@@ -9,6 +9,7 @@ use super::conflict_sessions::ConflictSession;
 use super::conflicts;
 use crate::chat::chunk::UiChunk;
 use crate::chat::history::{self, RecordKind, SessionRecord, SyncPhase, SyncState};
+use crate::chat::manager::TurnEnded;
 use crate::config::random_token;
 use crate::error::ApiError;
 use crate::http::chat::{acp_argv_for, ensure_agent, state_dir};
@@ -16,10 +17,40 @@ use crate::state::AppState;
 
 /// The one message the writer sees when a sync begins.
 pub const INTRO: &str = "You and a teammate both changed {pages}. I'll keep both changes and check the site still works.";
+/// The site built and the draft now has both sides.
+pub const DONE: &str = "Done. Your changes and the latest site are combined.";
+/// A decision is still needed; `{n}` is the number of pages.
+pub const MARKERS: &str = "{n} pages still need a decision.";
+/// The decision-needed line for a single page.
+pub const MARKERS_ONE: &str = "{n} page still needs a decision.";
+/// The agent introduced something a site cannot serve.
+pub const ONE_FILE: &str = "One file still needs another look.";
+/// The build failed once; the agent gets one repair turn.
+pub const BUILD_RETRY: &str = "The site didn't work after those changes. I'll try once more.";
+/// The build failed again; the sync ends with the draft untouched.
+pub const BUILD_FAILED_TWICE: &str = "I couldn't get your site working again. Nothing changed.";
+/// The draft moved while combining; the sync ends with no land.
+pub const DRAFT_MOVED: &str = "Your draft changed while combining. Get latest again.";
+/// The writer ended the sync.
+pub const ENDED: &str = "You ended this combine. Nothing changed.";
+/// The sync outlived its time limit.
+pub const EXPIRED: &str = "This combine ran out of time. Nothing changed.";
 /// The assistant could not be started for this sync.
 pub const UNAVAILABLE: &str = "Your assistant isn't available.";
+/// A turn ran too long; the writer can ask it to continue.
+pub const TOO_LONG: &str = "That took too long. Tell me to continue when you're ready.";
+/// A restart could not restore the sync.
+pub const RECOVERY_FAILED: &str = "I lost track of this combine. Nothing changed.";
 /// An unexpected internal failure while starting or advancing a sync.
 pub const UNEXPECTED: &str = "I couldn't finish combining. Nothing changed.";
+/// The agent moved git itself; the chat stays open so the writer can redirect it.
+pub const AGENT_MOVED: &str = "Still working on this one.";
+
+/// The decision-needed line for `n` pages, singular when there is one.
+pub fn pages_needing_decision(n: usize) -> String {
+    let template = if n == 1 { MARKERS_ONE } else { MARKERS };
+    template.replace("{n}", &n.to_string())
+}
 
 /// Replaces an internal error's message with the writer-facing copy, keeping its
 /// status. The technical detail goes to the log; it must never reach the writer.
@@ -233,6 +264,138 @@ pub async fn end(
     Ok(())
 }
 
+/// One verification at a time, process-wide: two syncs must never race on the
+/// project checkout they both inspect.
+fn advance_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// A finished `end_turn` on a sync chat: verify its worktree off the event pump.
+pub fn on_turn_end(state: &AppState, ended: &TurnEnded) {
+    if ended.stop_reason != "end_turn" {
+        return;
+    }
+    let state = state.clone();
+    let project = ended.project_id.clone();
+    let chat = ended.chat_id.clone();
+    tokio::spawn(async move {
+        let _guard = advance_lock().lock().await;
+        advance(&state, &project, &chat).await;
+    });
+}
+
+/// Verifies the agent's work after a turn. A failed check posts one plain line
+/// and returns to `working`; a moved draft ends the sync.
+pub async fn advance(state: &AppState, project: &str, chat: &str) {
+    let dir = state_dir(state);
+    let Some(record) = history::get(&dir, project, chat) else {
+        return;
+    };
+    let active = record.kind == RecordKind::Sync
+        && record
+            .sync
+            .as_ref()
+            .is_some_and(|st| !st.phase.is_terminal());
+    if !active {
+        return;
+    }
+    let Some(site) = record.cwd.clone() else {
+        note(state, &record, UNEXPECTED);
+        return;
+    };
+    let Some(checking) = set_phase(state, project, chat, SyncPhase::Checking) else {
+        return;
+    };
+    let Some(st) = checking.sync.as_ref() else {
+        return;
+    };
+    let project_dir = match crate::http::project_dir(state, project).await {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("orso: cannot verify sync chat {chat}: {e}");
+            note(state, &checking, UNEXPECTED);
+            return;
+        }
+    };
+    match verify(st, &project_dir, &site).await {
+        Ok(Verdict::DraftMoved) => {
+            if let Err(e) = end(state, project, chat, SyncPhase::Ended, DRAFT_MOVED).await {
+                eprintln!("orso: cannot end sync chat {chat}: {e}");
+            }
+        }
+        Ok(Verdict::AgentMovedGit) => note(state, &checking, AGENT_MOVED),
+        Ok(Verdict::Markers(n)) => note(state, &checking, &pages_needing_decision(n)),
+        Ok(Verdict::Symlink) => note(state, &checking, ONE_FILE),
+        // Task 6 builds and lands a clean check; until then it just reopens.
+        Ok(Verdict::Pass) => {
+            set_phase(state, project, chat, SyncPhase::Working);
+        }
+        Err(e) => {
+            eprintln!("orso: cannot verify sync chat {chat}: {e}");
+            note(state, &checking, UNEXPECTED);
+        }
+    }
+}
+
+/// One plain line from the assistant: records the status chunk, reopens the
+/// chat, and tells the UI. A terminal sync is left alone.
+pub fn note(state: &AppState, record: &SessionRecord, text: &str) {
+    let dir = state_dir(state);
+    let Some(project) = project_of(&dir, &record.id) else {
+        return;
+    };
+    let Some(current) = history::get(&dir, &project, &record.id) else {
+        return;
+    };
+    if current
+        .sync
+        .as_ref()
+        .is_none_or(|st| st.phase.is_terminal())
+    {
+        return;
+    }
+    let now = history::now_ms();
+    let updated = history::update(&dir, &project, &record.id, |record| {
+        if let Some(st) = record.sync.as_mut() {
+            st.phase = SyncPhase::Working;
+        }
+        record.updated_at = now;
+    });
+    let Ok(Some(updated)) = updated else {
+        return;
+    };
+    state.chats.record(
+        &project,
+        &record.id,
+        UiChunk::SyncStatus {
+            phase: wire_phase(SyncPhase::Working),
+            text: text.to_string(),
+        },
+    );
+    emit(state, &updated);
+}
+
+/// Moves a sync to `phase` and tells the UI; `None` when its record is gone.
+fn set_phase(
+    state: &AppState,
+    project: &str,
+    chat: &str,
+    phase: SyncPhase,
+) -> Option<SessionRecord> {
+    let now = history::now_ms();
+    let updated = history::update(&state_dir(state), project, chat, |record| {
+        if let Some(st) = record.sync.as_mut() {
+            st.phase = phase;
+        }
+        record.updated_at = now;
+    })
+    .ok()
+    .flatten()?;
+    emit(state, &updated);
+    Some(updated)
+}
+
 /// Removes a sync chat's worktree and its directory. Failures are logged: a
 /// leftover is recoverable, a failed end is not.
 pub fn remove_worktree(project_dir: &Path, chat_dir: &Path) {
@@ -333,16 +496,21 @@ fn project_ids(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// The project holding record `id`. Records carry no project id, so the
+/// synchronous lookups scan the projects the daemon keeps state for.
+fn project_of(dir: &Path, id: &str) -> Option<String> {
+    project_ids(dir)
+        .into_iter()
+        .find(|project| history::get(dir, project, id).is_some())
+}
+
 /// `sync.changed` for the UI: creation, every phase change, and ending.
 pub fn emit(state: &AppState, record: &SessionRecord) {
     let Some(st) = record.sync.as_ref() else {
         return;
     };
     let dir = state_dir(state);
-    let Some(project) = project_ids(&dir)
-        .into_iter()
-        .find(|project| history::get(&dir, project, &record.id).is_some())
-    else {
+    let Some(project) = project_of(&dir, &record.id) else {
         return;
     };
     state.events.emit(
@@ -390,10 +558,12 @@ fn pages(files: &[String]) -> String {
 
 /// The snake_case phase name a [`UiChunk::SyncStatus`] carries.
 fn wire_phase(phase: SyncPhase) -> String {
+    // A unit enum always serializes to a string; an empty fallback would hide
+    // the transition from the UI instead.
     serde_json::to_value(phase)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default()
+        .expect("a SyncPhase serializes to a string")
 }
 
 /// What the agent's work in the sync worktree looks like.
@@ -774,12 +944,30 @@ mod tests {
         let prompt = opening_prompt(&st);
         assert!(prompt.contains(intro.as_str()), "{prompt}");
         assert_eq!(UNEXPECTED, "I couldn't finish combining. Nothing changed.");
+        let one = pages_needing_decision(1);
+        let many = pages_needing_decision(2);
+        assert_eq!(one, "1 page still needs a decision.");
+        assert_eq!(many, "2 pages still need a decision.");
         for text in [
             INTRO,
+            DONE,
+            MARKERS,
+            MARKERS_ONE,
+            ONE_FILE,
+            BUILD_RETRY,
+            BUILD_FAILED_TWICE,
+            DRAFT_MOVED,
+            ENDED,
+            EXPIRED,
             UNAVAILABLE,
+            TOO_LONG,
+            RECOVERY_FAILED,
             UNEXPECTED,
+            AGENT_MOVED,
             intro.as_str(),
             prompt.as_str(),
+            one.as_str(),
+            many.as_str(),
         ] {
             let lower = text.to_ascii_lowercase();
             for word in [
@@ -788,6 +976,19 @@ mod tests {
             ] {
                 assert!(!lower.contains(word), "{word:?} in {text:?}");
             }
+        }
+    }
+
+    #[test]
+    fn every_wire_phase_is_a_nonempty_name() {
+        for (phase, wire) in [
+            (SyncPhase::Working, "working"),
+            (SyncPhase::Checking, "checking"),
+            (SyncPhase::Combined, "combined"),
+            (SyncPhase::Ended, "ended"),
+            (SyncPhase::Expired, "expired"),
+        ] {
+            assert_eq!(wire_phase(phase), wire);
         }
     }
 }

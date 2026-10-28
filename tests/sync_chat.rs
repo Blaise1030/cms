@@ -71,6 +71,14 @@ fn fake_argv() -> Vec<String> {
     argv
 }
 
+/// A fake agent that runs `script` in its working directory before replying.
+fn sync_provider(id: &str, script: &Path) {
+    let (cmd, args) = orso::chat::acp::fake_agent_sync(script);
+    let mut argv = vec![cmd];
+    argv.extend(args);
+    providers::set_test_acp_argv(id, argv);
+}
+
 const FORBIDDEN: &[&str] = &[
     "branch", "commit", "merge", "conflict", "worktree", "checkout", "clone", "git", "origin",
     "main", "markers", "npm", "<<<<<<<",
@@ -106,6 +114,9 @@ impl SyncSetup {
                 port: 0,
                 projects_dir: projects.clone(),
                 no_auth: true,
+                // The git launcher agents get must reach the real `git-shim`, not this
+                // test binary (which would parse `git-shim` as a test filter).
+                hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_orso"))),
                 ..Default::default()
             },
             false,
@@ -168,6 +179,43 @@ impl SyncSetup {
         sync_chat::start(&self.state, &self.project, &self.session, "fake-ok")
             .await
             .unwrap()
+    }
+
+    /// Poll the transcript until a sync note reads exactly `text`.
+    async fn wait_for_note(&self, chat: &str, text: &str) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let has_note = self.chunks(chat).iter().any(
+                |chunk| matches!(chunk, UiChunk::SyncStatus { text: note, .. } if note == text),
+            );
+            if has_note {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no note {text:?}; transcript: {:?}",
+                self.chunks(chat)
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Poll the record until the sync reaches `phase`.
+    async fn wait_for_phase(&self, chat: &str, phase: SyncPhase) {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let current = history::get(&self.state_dir(), &self.project, chat)
+                .and_then(|record| record.sync)
+                .map(|st| st.phase);
+            if current == Some(phase) {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "phase stayed {current:?}, wanted {phase:?}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 }
 
@@ -349,4 +397,138 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
         .filter(|c| matches!(c, UiChunk::SyncStatus { .. }))
         .count();
     assert_eq!(statuses, 1);
+}
+
+/// An unfinished turn leaves the merge alone, so the writer gets one plain line
+/// and the chat stays open instead of landing markers.
+#[tokio::test]
+async fn markers_leave_a_note_and_keep_working() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("leave.sh");
+    std::fs::write(&script, "exit 0\n").unwrap();
+    sync_provider("fake-leave", &script);
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-leave")
+        .await
+        .unwrap();
+    let before = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+
+    let rec = history::get(&h.state_dir(), &h.project, &chat).unwrap();
+    assert_eq!(rec.sync.unwrap().phase, SyncPhase::Working);
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), before.tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    assert!(h.site(&chat).is_dir(), "the sync keeps its worktree");
+    h.state.chats.shutdown().await;
+}
+
+/// An agent that saves the merge itself must not land; it gets one plain line
+/// and the writer keeps the conversation.
+#[tokio::test]
+async fn agent_commit_keeps_working() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("commit.sh");
+    std::fs::write(
+        &script,
+        "git checkout --ours -- $(git diff --name-only --diff-filter=U); \
+         git add -A; git commit -qm x\n",
+    )
+    .unwrap();
+    sync_provider("fake-commit", &script);
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-commit")
+        .await
+        .unwrap();
+    let before = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+
+    h.wait_for_note(&chat, sync_chat::AGENT_MOVED).await;
+
+    let rec = history::get(&h.state_dir(), &h.project, &chat).unwrap();
+    assert_eq!(rec.sync.unwrap().phase, SyncPhase::Working);
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), before.tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    assert!(h.site(&chat).is_dir());
+    let notes: Vec<String> = h
+        .chunks(&chat)
+        .into_iter()
+        .filter_map(|chunk| match chunk {
+            UiChunk::SyncStatus { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !notes.iter().any(|note| note == sync_chat::ONE_FILE),
+        "{notes:?}"
+    );
+    assert_plain(sync_chat::AGENT_MOVED);
+    h.state.chats.shutdown().await;
+}
+
+/// A draft that moves while the assistant works ends the sync: no land, no
+/// worktree, and the writer is told to get latest again.
+#[tokio::test]
+async fn draft_moved_ends() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("leave.sh");
+    std::fs::write(&script, "exit 0\n").unwrap();
+    sync_provider("fake-leave-draft", &script);
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-leave-draft")
+        .await
+        .unwrap();
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+
+    // The writer saves another change to the draft while the sync is open.
+    git(&h.dir, &["commit", "--allow-empty", "-m", "x"]);
+    h.state
+        .chats
+        .send_message(&h.project, &chat, "please continue")
+        .await
+        .unwrap();
+
+    h.wait_for_phase(&chat, SyncPhase::Ended).await;
+
+    let rec = history::get(&h.state_dir(), &h.project, &chat).unwrap();
+    let st = rec.sync.unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(st.ended_at.is_some());
+    let chunks = h.chunks(&chat);
+    assert!(
+        chunks
+            .iter()
+            .any(|chunk| matches!(chunk, UiChunk::SyncStatus { text, .. }
+                if text == sync_chat::DRAFT_MOVED)),
+        "{chunks:?}"
+    );
+    assert!(!h.site(&chat).exists(), "ending removes the worktree");
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    assert_plain(sync_chat::DRAFT_MOVED);
+    h.state.chats.shutdown().await;
+}
+
+#[test]
+fn decision_line_is_singular_only_for_one() {
+    assert_eq!(
+        sync_chat::pages_needing_decision(1),
+        "1 page still needs a decision."
+    );
+    assert_eq!(
+        sync_chat::pages_needing_decision(2),
+        "2 pages still need a decision."
+    );
+    assert_eq!(
+        sync_chat::pages_needing_decision(5),
+        "5 pages still need a decision."
+    );
+    assert_plain(&sync_chat::pages_needing_decision(1));
+    assert_plain(&sync_chat::pages_needing_decision(2));
 }
