@@ -11,6 +11,7 @@ use crate::projects;
 pub mod auto_resolve;
 pub mod conflict_sessions;
 pub mod conflicts;
+pub mod sync_chat;
 
 /// An open change branch plus its display title.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

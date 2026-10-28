@@ -13,6 +13,8 @@ use tokio::sync::{oneshot, Mutex, Notify};
 
 use super::conflict_sessions::{ConflictSession, ConflictSessions};
 use super::conflicts::{self, ConflictFile};
+use super::sync_chat::{self, label, Verdict};
+use crate::chat::history::{SyncPhase, SyncState};
 use crate::conflict_preview::{link_node_modules, BuildGroup, ConflictPreviewManager};
 use crate::error::ApiError;
 use crate::events::EventBus;
@@ -115,73 +117,37 @@ pub async fn stage_and_verify(
     incoming: &str,
     conflicted: &[String],
 ) -> Result<(), Failure> {
-    let head = conflicts::text(worktree, &["rev-parse", "HEAD"])
-        .await
-        .map_err(fail)?;
-    let merge_head = conflicts::text(worktree, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
-        .await
-        .map_err(fail)?;
-    if head != tip || merge_head != incoming {
-        return Err(Failure::AgentFailed);
-    }
-    conflicts::checked(
+    // This job keeps no sync state and its worktree is detached: name a local branch still at
+    // `tip` (the draft it started from) so `verify` can check the draft hasn't moved.
+    let branches = conflicts::text(
         worktree,
-        &["add", "-A", "--", ".", ":!node_modules"],
-        &[],
-        None,
+        &[
+            "for-each-ref",
+            "--points-at",
+            tip,
+            "--format=%(refname:short)",
+            "refs/heads/",
+        ],
     )
     .await
     .map_err(fail)?;
-    if !conflicted.is_empty() {
-        let mut args = vec![
-            "--literal-pathspecs",
-            "grep",
-            "--cached",
-            "-l",
-            "-E",
-            "^(<<<<<<< |=======$|>>>>>>> )",
-            "--",
-        ];
-        args.extend(conflicted.iter().map(String::as_str));
-        let (status, _, stderr) = conflicts::git(worktree, &args, &[], None)
-            .await
-            .map_err(fail)?;
-        match status {
-            1 => {}
-            0 => return Err(Failure::AgentFailed),
-            _ => {
-                return Err(fail(ApiError::git(format!(
-                    "git grep failed: {}",
-                    String::from_utf8_lossy(&stderr).trim()
-                ))))
-            }
-        }
+    let state = SyncState {
+        conflict_session_id: String::new(),
+        branch: branches.lines().next().unwrap_or("").trim().to_string(),
+        tip: tip.to_string(),
+        incoming: incoming.to_string(),
+        files: conflicted.to_vec(),
+        phase: SyncPhase::Checking,
+        started_at: 0,
+        ended_at: None,
+        repair_attempted: false,
+    };
+    match sync_chat::verify(&state, worktree, worktree).await {
+        Ok(Verdict::Pass) => Ok(()),
+        Ok(Verdict::DraftMoved) => Err(Failure::DraftMoved),
+        Ok(_) => Err(Failure::AgentFailed),
+        Err(e) => Err(fail(e)),
     }
-    let raw = conflicts::checked(
-        worktree,
-        &["diff", "--cached", "--raw", "-z", "--no-renames", tip],
-        &[],
-        None,
-    )
-    .await
-    .map_err(fail)?;
-    let raw = String::from_utf8_lossy(&raw);
-    let mut fields = raw.split('\0');
-    while let (Some(header), Some(path)) = (fields.next(), fields.next()) {
-        if header.split_whitespace().nth(1) != Some("120000") {
-            continue;
-        }
-        let entry = conflicts::text(
-            worktree,
-            &["--literal-pathspecs", "ls-tree", incoming, "--", path],
-        )
-        .await
-        .map_err(fail)?;
-        if !entry.starts_with("120000 ") {
-            return Err(Failure::AgentFailed);
-        }
-    }
-    Ok(())
 }
 
 fn fail(e: ApiError) -> Failure {
@@ -399,20 +365,6 @@ fn emit(ctx: &JobContext, status: &JobStatus) {
         map.insert("projectId".into(), Value::String(ctx.project_id.clone()));
     }
     ctx.events.emit("changes.auto_resolve", fields);
-}
-
-/// "src/content/pricing-plans.md" → "Pricing plans".
-fn label(path: &str) -> String {
-    let stem = Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .replace(['-', '_'], " ");
-    let mut chars = stem.trim().chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => path.to_string(),
-    }
 }
 
 fn resolving_stage(files: &[ConflictFile]) -> String {
@@ -808,10 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn labels_from_file_stems() {
-        assert_eq!(label("src/content/pricing-plans.md"), "Pricing plans");
-        assert_eq!(label("about_us.yaml"), "About us");
-        assert_eq!(label(".md"), ".md");
+    fn resolving_stage_names_files() {
         let file = |path: &str| ConflictFile {
             path: path.into(),
             binary: false,
@@ -905,53 +854,6 @@ mod tests {
 
     async fn verify(dir: &Path, tip: &str, incoming: &str) -> Result<(), Failure> {
         stage_and_verify(dir, tip, incoming, &["page.md".to_string()]).await
-    }
-
-    #[tokio::test]
-    async fn verify_rejects_markers() {
-        let (tmp, tip, incoming) = conflicted();
-        assert_eq!(
-            verify(tmp.path(), &tip, &incoming).await,
-            Err(Failure::AgentFailed)
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_ignores_markers_outside_conflicted_files() {
-        let (tmp, tip, incoming) = conflicted();
-        resolve(tmp.path());
-        assert_eq!(verify(tmp.path(), &tip, &incoming).await, Ok(()));
-    }
-
-    #[tokio::test]
-    async fn verify_rejects_agent_commit() {
-        let (tmp, tip, incoming) = conflicted();
-        resolve(tmp.path());
-        sh(tmp.path(), &["commit", "-qam", "agent"]);
-        assert_eq!(
-            verify(tmp.path(), &tip, &incoming).await,
-            Err(Failure::AgentFailed)
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_rejects_new_symlink() {
-        let (tmp, tip, incoming) = conflicted();
-        resolve(tmp.path());
-        std::os::unix::fs::symlink("/etc/passwd", tmp.path().join("link")).unwrap();
-        assert_eq!(
-            verify(tmp.path(), &tip, &incoming).await,
-            Err(Failure::AgentFailed)
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_allows_symlink_from_incoming() {
-        let (tmp, tip, incoming) = conflicted_with(|dir| {
-            std::os::unix::fs::symlink("page.md", dir.join("link")).unwrap();
-        });
-        resolve(tmp.path());
-        assert_eq!(verify(tmp.path(), &tip, &incoming).await, Ok(()));
     }
 
     #[tokio::test]
