@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::chat::chunk::{sse_frame, UiChunk};
-use crate::chat::history::{self, SessionRecord};
+use crate::chat::history::{self, RecordKind, SessionRecord};
 use crate::chat::manager::ChatError;
 use crate::chat::models;
 use crate::chat::transcript;
@@ -66,6 +66,8 @@ fn summary(state: &AppState, project: &str, record: &SessionRecord) -> Value {
         "model": record.model,
         "title": record.title,
         "updatedAt": record.updated_at,
+        "kind": record.kind,
+        "sync": record.sync,
         "live": state.chats.is_live(project, &record.id),
         "running": state.chats.is_running(project, &record.id),
     })
@@ -196,7 +198,7 @@ struct CreateBody {
     model: Option<String>,
 }
 
-/// `GET /api/chat/{project}` → `{ chats: [{ id, provider, model, title, updatedAt, live }] }`.
+/// `GET /api/chat/{project}` → `{ chats: [{ id, provider, model, title, updatedAt, kind, sync, live, running }] }`.
 pub async fn list_chats(
     State(state): State<AppState>,
     Path(project): Path<String>,
@@ -242,6 +244,9 @@ pub async fn create_chat(
         title: None,
         created_at: now,
         updated_at: now,
+        kind: RecordKind::Chat,
+        cwd: None,
+        sync: None,
     };
     history::insert(&state_dir(&state), &project, record.clone())?;
     Ok((

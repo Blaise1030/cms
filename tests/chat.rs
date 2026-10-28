@@ -150,6 +150,31 @@ async fn read_until(body: &mut Body, buf: &mut String, needle: &str) {
 }
 
 #[tokio::test]
+async fn chat_summary_includes_kind_and_sync() {
+    let env = env().await;
+    let (status, body) = call(
+        &env,
+        "POST",
+        &format!("/api/chat/{}", env.project),
+        Some(json!({ "provider": "fake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["kind"], "chat", "{body}");
+    assert!(body["sync"].is_null(), "{body}");
+
+    let (status, list) = call(&env, "GET", &format!("/api/chat/{}", env.project), None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let chat = list["chats"]
+        .as_array()
+        .and_then(|chats| chats.iter().find(|c| c["id"] == id))
+        .unwrap_or_else(|| panic!("missing chat in {list}"));
+    assert_eq!(chat["kind"], "chat", "{list}");
+    assert!(chat["sync"].is_null(), "{list}");
+}
+
+#[tokio::test]
 async fn chat_message_against_fake_acp_appends_transcript() {
     let env = env().await;
     let id = create_chat(&env, Some("fast")).await;
