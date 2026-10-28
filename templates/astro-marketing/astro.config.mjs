@@ -5,7 +5,9 @@ import { orso } from "orso-astro";
 
 // The orso dev server proxies the site under /preview/{id}/.
 const base = process.env.PUBLIC_BASE ?? "/";
-const proxyPort = Number(process.env.ORSO_PROXY_PORT || 0);
+// The browser's HMR socket: the dev server's own port when the preview is framed directly
+// (orso's Vite dev UI), otherwise the daemon that proxies the preview.
+const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT || 0);
 
 export default defineConfig({
   base,
@@ -14,11 +16,11 @@ export default defineConfig({
     plugins: [tailwindcss()],
     server: {
       // Astro keeps Vite's own base at "/", so without this the HMR socket would connect to
-      // the proxy root instead of the /preview/{id}/ prefix. clientPort makes the browser
-      // talk to the orso daemon (not the raw Astro port) when the iframe is proxied.
+      // the proxy root instead of the /preview/{id}/ prefix. clientPort points it at this dev
+      // server (direct preview) or at the orso daemon that proxies it.
       hmr: {
         path: `${base}vite-hmr`.replace(/\/{2,}/g, "/"),
-        ...(proxyPort > 0 ? { clientPort: proxyPort } : {}),
+        ...(hmrPort > 0 ? { clientPort: hmrPort } : {}),
       },
     },
   },

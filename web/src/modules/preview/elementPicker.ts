@@ -63,7 +63,7 @@ function cssPath(el: Element): string {
 }
 
 /** `/Users/me/orso-projects/site-1/src/pages/index.astro` → `src/pages/index.astro`. */
-function relativeFile(file: string, projectId: string): string {
+export function relativeFile(file: string, projectId: string): string {
   const marker = `/${projectId}/`;
   const at = file.lastIndexOf(marker);
   return at >= 0 ? file.slice(at + marker.length) : file;

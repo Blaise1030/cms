@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DynamicToolUIPart } from "ai";
-import { chunksToMessages } from "./chunks";
+import type { UiChunk } from "@/core/types";
+import { chunksToMessages, createTranscript } from "./chunks";
 
 const s = "session-1";
 
@@ -120,5 +121,40 @@ describe("chunksToMessages", () => {
     ]);
     expect(messages).toHaveLength(1);
     expect(messages[0]!.parts).toEqual([{ type: "text", text: "go" }]);
+  });
+});
+
+describe("createTranscript", () => {
+  it("builds the same messages as a full pass, one streamed chunk at a time", () => {
+    const chunks = [
+      { type: "user_text", session_id: s, text: "hi" },
+      { type: "thought_delta", session_id: s, text: "let me look" },
+      {
+        type: "tool_call",
+        session_id: s,
+        tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "a.md" }] },
+      },
+      {
+        type: "tool_call_update",
+        session_id: s,
+        tool_call: { toolCallId: "t1", status: "completed", content: "done" },
+      },
+      { type: "text_delta", session_id: s, text: "Hel" },
+      { type: "text_delta", session_id: s, text: "lo" },
+    ] satisfies UiChunk[];
+    const transcript = createTranscript();
+    for (const chunk of chunks) transcript.push(chunk);
+    expect(transcript.messages).toEqual(chunksToMessages(chunks));
+  });
+
+  it("appends a delta to the open assistant message in place", () => {
+    const transcript = createTranscript();
+    transcript.push({ type: "user_text", session_id: s, text: "hi" });
+    transcript.push({ type: "text_delta", session_id: s, text: "one" });
+    const assistant = transcript.messages.at(-1)!;
+    transcript.push({ type: "text_delta", session_id: s, text: " two" });
+    expect(transcript.messages).toHaveLength(2);
+    expect(transcript.messages.at(-1)).toBe(assistant);
+    expect(assistant.parts).toEqual([{ type: "text", text: "one two" }]);
   });
 });

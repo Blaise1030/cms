@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, ListPlus, Paperclip, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
@@ -9,6 +17,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import ProviderIcon from "./ProviderIcon.vue";
 
 export type ChatAttachment = { name: string; path: string };
+/** An element picked from the preview, carried with the next message. */
+export type ChatReference = { label: string; full: string };
 
 const props = defineProps<{
   providers: string[];
@@ -24,12 +34,18 @@ const props = defineProps<{
   attachments: ChatAttachment[];
   /** An upload is in flight. */
   attaching: boolean;
+  /** Elements picked from the preview for the next message. */
+  references: ChatReference[];
+  /** Run the agent's tools without asking. */
+  autoApprove: boolean;
 }>();
 const emit = defineEmits<{
   submit: [text: string];
   stop: [];
   attach: [files: File[]];
   removeAttachment: [index: number];
+  removeReference: [index: number];
+  setAutoApprove: [on: boolean];
 }>();
 const text = defineModel<string>({ required: true });
 const provider = defineModel<string | null>("provider", { required: true });
@@ -63,7 +79,11 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const dropping = ref(false);
 
 const canSend = computed(
-  () => !props.blocked && !props.attaching && (!!text.value.trim() || props.attachments.length > 0) && !!provider.value,
+  () =>
+    !props.blocked &&
+    !props.attaching &&
+    (!!text.value.trim() || props.attachments.length > 0 || props.references.length > 0) &&
+    !!provider.value,
 );
 
 function submit() {
@@ -133,7 +153,26 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
         Drop files for the agent
       </div>
       <InputGroup>
-        <div v-if="attachments.length || attaching" class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5">
+        <div v-if="attachments.length || attaching || references.length" class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5">
+          <Badge
+            v-for="(reference, i) in references"
+            :key="reference.full"
+            variant="secondary"
+            data-testid="chat-reference"
+            class="max-w-full py-1 pr-1 pl-2 text-xs"
+          >
+            <MousePointerClick class="size-3 shrink-0" aria-hidden="true" />
+            <span class="min-w-0 truncate">{{ reference.label }}</span>
+            <button
+              type="button"
+              class="hover:bg-background shrink-0 rounded p-0.5"
+              :aria-label="`Remove ${reference.label}`"
+              data-testid="chat-reference-remove"
+              @click="emit('removeReference', i)"
+            >
+              <X class="size-3" aria-hidden="true" />
+            </button>
+          </Badge>
           <span
             v-for="(a, i) in attachments"
             :key="a.path"
@@ -230,6 +269,34 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                 </Command>
               </PopoverContent>
             </Popover>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <button
+                  type="button"
+                  data-testid="chat-auto-approve"
+                  :data-approve="autoApprove ? 'auto' : 'ask'"
+                  :aria-label="`Tool approvals: ${autoApprove ? 'Auto-approve' : 'Ask each time'}`"
+                  title="Choose whether the agent asks before running tools"
+                  class="bg-card hover:bg-accent btn-raised-soft dark:bg-input/30 dark:hover:bg-input/50 focus-visible:ring-ring/50 flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent py-0 pr-1.5 pl-2 text-xs whitespace-nowrap outline-none focus-visible:ring-3"
+                >
+                  <ShieldCheck v-if="autoApprove" class="size-3.5" aria-hidden="true" />
+                  <ShieldQuestion v-else class="size-3.5" aria-hidden="true" />
+                  <span>{{ autoApprove ? "Auto" : "Ask" }}</span>
+                  <ChevronDown class="text-muted-foreground size-4 shrink-0 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-56">
+                <DropdownMenuLabel>Tool approvals</DropdownMenuLabel>
+                <DropdownMenuItem data-testid="chat-approval-ask" @select="emit('setAutoApprove', false)">
+                  <span class="flex-1">Ask each time</span>
+                  <Check v-if="!autoApprove" class="size-4" aria-hidden="true" />
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="chat-approval-auto" @select="emit('setAutoApprove', true)">
+                  <span class="flex-1">Auto-approve</span>
+                  <Check v-if="autoApprove" class="size-4" aria-hidden="true" />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div class="flex shrink-0 items-center gap-1">
             <Tooltip>

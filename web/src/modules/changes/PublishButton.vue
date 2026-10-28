@@ -15,12 +15,30 @@ const visible = computed(
   () => props.repo !== null && store.active !== null && store.status?.state !== "merged",
 );
 
+/** GitHub's answer: conflicts, branch protection, or being behind `main` stop a merge. */
+const canMerge = computed(() => {
+  const status = store.status;
+  if (!status) return true;
+  if (status.state === "closed") return false;
+  // Publish marks a draft ready itself; GitHub reports drafts as unmergeable until then.
+  if (status.state === "draft") return true;
+  if (status.mergeable === false) return false;
+  return !["dirty", "blocked", "behind"].includes(status.mergeableState ?? "");
+});
+
+/** Explained on hover, so a disabled Publish still says why. */
+const disabledReason = computed(() =>
+  store.status?.state === "closed"
+    ? "This pull request is closed."
+    : "This pull request can't be merged yet.",
+);
+
 async function onPublish() {
   const branch = store.active?.branch;
   if (!branch) return;
   try {
-    await store.publish(props.projectId, branch);
-    toast.success("It's live.");
+    const outcome = await store.publish(props.projectId, branch);
+    if (outcome === "published") toast.success("It's live.");
   } catch (e) {
     toast.error(errorMessage(e));
   }
@@ -33,7 +51,8 @@ async function onPublish() {
     size="sm"
     class="h-7 gap-1.5 px-2.5 text-xs"
     data-testid="publish-change"
-    :disabled="store.publishing"
+    :title="canMerge ? undefined : disabledReason"
+    :disabled="store.publishing || !canMerge"
     @click="onPublish"
   >
     <Spinner v-if="store.publishing" class="size-4" />

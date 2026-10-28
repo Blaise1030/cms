@@ -1,32 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { expandReferences, referenceTag, segmentReferences } from "./references";
+import { referenceLabel, segmentReferences } from "./references";
 
 const hero =
   '[element <section class="mx-auto max-w-5xl px-8 py-24 text-center" id="hero"> "Stop building. Start launching." in src/components/sections/Hero.astro:5:69]';
 const shot = "/Users/me/orso-projects/.orso/astro-marketing/attachments/4b788490f55975c0.png";
 
-describe("referenceTag", () => {
-  it("numbers element tags", () => {
-    expect(referenceTag(1)).toBe("[Element #1]");
-    expect(referenceTag(12)).toBe("[Element #12]");
-  });
-});
-
-describe("expandReferences", () => {
-  it("replaces each tag with the text it stands for", () => {
-    const refs = new Map([
-      ["[Element #1]", `${hero} ${shot}`],
-      ["[Element #2]", "[element <h1> at `h1`]"],
-    ]);
-    expect(expandReferences("Make [Element #1] bolder, like [Element #2]", refs)).toBe(
-      `Make ${hero} ${shot} bolder, like [element <h1> at \`h1\`]`,
-    );
+describe("referenceLabel", () => {
+  it("labels an element reference by tag and id", () => {
+    expect(referenceLabel(`${hero} ${shot}`)).toBe("section#hero");
   });
 
-  it("leaves text without tags, and tags it doesn't know, unchanged", () => {
-    const refs = new Map([["[Element #1]", hero]]);
-    expect(expandReferences("Fix the typo", refs)).toBe("Fix the typo");
-    expect(expandReferences("See [Element #3]", refs)).toBe("See [Element #3]");
+  it("falls back to the first class, then the tag", () => {
+    expect(referenceLabel('[element <h1 class="title big"> "Hi" at `h1`]')).toBe("h1.title");
+    expect(referenceLabel("[element <p> at `p`]")).toBe("p");
+  });
+
+  it("names anything it cannot parse as an element", () => {
+    expect(referenceLabel("Make the hero bolder")).toBe("element");
   });
 });
 

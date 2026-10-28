@@ -27,6 +27,13 @@ interface PendingSwitch {
   toTitle: string;
 }
 
+/** A share/publish that hit a colliding remote copy, retried once combining succeeds. */
+interface PendingPush {
+  kind: "share" | "publish";
+  projectId: string;
+  branch: string;
+}
+
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
 
@@ -55,6 +62,8 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /** Whether Get latest would change anything; null while unknown (the button stays enabled). */
+  const syncNeeded = ref<boolean | null>(null);
   const conflictSessions = ref<ConflictSession[]>([]);
   const selectedConflictId = ref<string | null>(null);
   const currentConflict = ref<ConflictSession | null>(null);
@@ -64,6 +73,8 @@ export const useChangesStore = defineStore("changes", () => {
   /** The conflict session the auto-resolve dialog shows; null when closed. */
   const syncSessionId = ref<string | null>(null);
   const syncStatus = ref<AutoResolveStatus | null>(null);
+  /** The share/publish to retry once the writer's assistant has combined a push collision. */
+  const pendingPush = ref<PendingPush | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
    *  applies its result nor schedules a poll, so at most one timer ever exists. */
@@ -96,8 +107,28 @@ export const useChangesStore = defineStore("changes", () => {
     } catch {
       if (run !== statusRun) return;
     }
+    await refreshSync();
+    if (run !== statusRun) return;
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+    }
+  }
+
+  /**
+   * Re-read whether Get latest would change anything. A failure leaves it unknown, so the
+   * button stays enabled rather than being wrongly disabled.
+   */
+  async function refreshSync() {
+    const id = projectId.value;
+    if (!id) {
+      syncNeeded.value = null;
+      return;
+    }
+    try {
+      const needed = await daemon.api.changesSyncNeeded(id);
+      if (projectId.value === id) syncNeeded.value = needed;
+    } catch {
+      if (projectId.value === id) syncNeeded.value = null;
     }
   }
 
@@ -120,6 +151,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = null;
       prUrl.value = null;
       status.value = null;
+      syncNeeded.value = null;
       protectionHint.value = null;
       items.value = [];
       error.value = null;
@@ -153,7 +185,9 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       if (projectId.value === id) loading.value = false;
     }
-    if (projectId.value === id && active.value) await refreshStatus();
+    if (projectId.value !== id) return;
+    if (active.value) await refreshStatus();
+    else await refreshSync();
   }
 
   async function list(id: string) {
@@ -328,6 +362,25 @@ export const useChangesStore = defineStore("changes", () => {
   function closeSync() {
     syncSessionId.value = null;
     syncStatus.value = null;
+    pendingPush.value = null;
+  }
+
+  /** Continue the share/publish that hit a collision, now that combining succeeded. */
+  async function retryPendingPush(id: string) {
+    const pending = pendingPush.value;
+    if (!pending || pending.projectId !== id) return;
+    pendingPush.value = null;
+    try {
+      if (pending.kind === "publish") {
+        if ((await publish(id, pending.branch)) === "published") {
+          toast.success("It's live.");
+        }
+      } else {
+        await share(id, pending.branch);
+      }
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
   }
 
   /** Leave the agent and pick each file by hand in the conflict view. */
@@ -352,6 +405,7 @@ export const useChangesStore = defineStore("changes", () => {
         () => undefined,
       ),
     ]);
+    await retryPendingPush(id);
   }
 
   /** Re-read the active change (the agent may have started or switched one); refresh every
@@ -485,6 +539,7 @@ export const useChangesStore = defineStore("changes", () => {
         status.value = null;
       }
       await refreshTreeAndPreview("main");
+      void refreshSync();
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);
@@ -496,7 +551,7 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function share(id: string, branch: string): Promise<string> {
+  async function share(id: string, branch: string): Promise<string | null> {
     sharing.value = true;
     error.value = null;
     needsSignIn.value = false;
@@ -504,12 +559,18 @@ export const useChangesStore = defineStore("changes", () => {
     try {
       const result = await daemon.api.shareChange(id, branch);
       projectId.value = id;
+      if (result.conflict) {
+        pendingPush.value = { kind: "share", projectId: id, branch };
+        await startSync(id, result.conflict.sessionId);
+        return null;
+      }
       prUrl.value = result.prUrl;
       protectionHint.value = result.protectionHint ?? null;
       if (active.value?.branch === branch) {
-        active.value = { ...active.value, title: result.title, prUrl: result.prUrl };
+        active.value = { ...active.value, title: result.title, prUrl: result.prUrl ?? undefined };
         await refreshStatus();
       }
+      void refreshSync();
       return result.prUrl;
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
@@ -582,13 +643,22 @@ export const useChangesStore = defineStore("changes", () => {
    * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
    * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
    * after the usual interval.
+   *
+   * Returns `combining` when someone else moved the change first: the combine dialog opens and
+   * publishing retries automatically once it succeeds.
    */
-  async function publish(id: string, branch: string): Promise<void> {
+  async function publish(id: string, branch: string): Promise<"published" | "combining"> {
     publishing.value = true;
     needsSignIn.value = false;
     try {
-      const pr = await daemon.api.publishChange(id, branch);
+      const result = await daemon.api.publishChange(id, branch);
       projectId.value = id;
+      if (result && "conflict" in result) {
+        pendingPush.value = { kind: "publish", projectId: id, branch };
+        await startSync(id, result.conflict.sessionId);
+        return "combining";
+      }
+      const pr = result;
       if (active.value?.branch === branch) {
         stopStatusPolling();
         status.value = pr;
@@ -599,6 +669,8 @@ export const useChangesStore = defineStore("changes", () => {
       }
       // The drafts menu drops the published change; the change itself stays until Clean up.
       await list(id).catch(() => undefined);
+      void refreshSync();
+      return "published";
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
         needsSignIn.value = true;
@@ -628,6 +700,7 @@ export const useChangesStore = defineStore("changes", () => {
     pendingSwitch,
     needsSignIn,
     status,
+    syncNeeded,
     conflictSessions,
     selectedConflictId,
     currentConflict,

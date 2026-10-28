@@ -459,6 +459,52 @@ async fn diverged_main_is_kept_and_changes_get_github_main() {
     assert!(is_ancestor(&work, &remote_main, &branch));
 }
 
+#[tokio::test]
+async fn needs_latest_is_false_when_nothing_would_move() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let remote = rev(&work, "main");
+    change_with_edit(&work, "First", "first.md", "one\n").await;
+
+    assert!(!changes::needs_latest(&work, Some(&remote)).await);
+    assert!(!changes::needs_latest(&work, None).await);
+}
+
+#[tokio::test]
+async fn needs_latest_when_remote_main_moved() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let remote_main = push_to_remote_main(tmp.path(), "news.md", "fresh\n");
+
+    assert!(changes::needs_latest(&work, Some(&remote_main)).await);
+}
+
+#[tokio::test]
+async fn needs_latest_when_a_change_missed_local_main() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let remote = rev(&work, "main");
+    let branch = change_with_edit(&work, "First", "first.md", "one\n").await;
+    git_cli(&work, &["checkout", "main"]);
+    commit_file(&work, "news.md", "fresh\n", "move main");
+    git_cli(&work, &["checkout", &branch]);
+
+    assert!(changes::needs_latest(&work, Some(&remote)).await);
+    assert!(changes::needs_latest(&work, None).await);
+}
+
+#[tokio::test]
+async fn tip_is_only_matches_the_branch_head() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let branch = change_with_edit(&work, "First", "first.md", "one\n").await;
+    let tip = rev(&work, &branch);
+
+    assert!(changes::tip_is(&work, &branch, &tip).await);
+    assert!(!changes::tip_is(&work, &branch, "").await);
+    assert!(!changes::tip_is(&work, &branch, "0".repeat(40).as_str()).await);
+}
+
 #[test]
 fn git_version_check() {
     assert!(changes::check_git_version("git version 2.54.0").is_ok());

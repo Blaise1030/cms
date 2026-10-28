@@ -1,15 +1,3 @@
-/** The placeholder the composer shows for the `n`th picked element of a message. */
-export function referenceTag(n: number): string {
-  return `[Element #${n}]`;
-}
-
-/** Swap each placeholder in `text` for the full reference it stands for. */
-export function expandReferences(text: string, refs: ReadonlyMap<string, string>): string {
-  let out = text;
-  for (const [tag, full] of refs) out = out.split(tag).join(full);
-  return out;
-}
-
 export type Segment =
   | { kind: "text"; text: string }
   | { kind: "element"; label: string; full: string; screenshot: boolean };
@@ -24,6 +12,12 @@ function label(tag: string): string {
   if (id) return `${name}#${id}`;
   const cls = /\sclass="\s*([^"\s]+)/.exec(tag)?.[1];
   return cls ? `${name}.${cls}` : name;
+}
+
+/** A short badge label for a picked-element prompt. */
+export function referenceLabel(text: string): string {
+  const [first] = segmentReferences(text);
+  return first?.kind === "element" ? first.label : "element";
 }
 
 /** Split sent text into plain runs and picked-element references, for compact display. */

@@ -39,6 +39,12 @@ just dev     # daemon :7800, Vite :5173
 Open **http://localhost:5173**. Vite proxies `/api`, `/ws`, and `/preview` to the daemon.
 Port `:7800` serves the embedded `web/dist` build (no HMR). Ctrl-C stops both.
 
+In this dev UI the preview frame loads the project's dev server directly (`127.0.0.1:<port>`),
+so Astro islands and other client modules hydrate; the daemon-served build frames the proxied
+preview instead. The direct frame is cross-origin, so the element picker and appearance
+controls go through a small `postMessage` bridge that `orso()` injects into dev pages. The
+page-error overlay and address-bar history still need the proxied preview.
+
 Without `just`:
 
 ```sh

@@ -195,6 +195,12 @@ struct ApiPull {
     state: Option<String>,
     #[serde(default)]
     merged_at: Option<String>,
+    /// GitHub's verdict on merging: null until it has computed one.
+    #[serde(default)]
+    mergeable: Option<bool>,
+    /// `clean`, `dirty`, `blocked`, `behind`, `unstable`, `draft`, …
+    #[serde(default)]
+    mergeable_state: Option<String>,
     #[serde(default)]
     head: Option<ApiPullHead>,
 }
@@ -244,6 +250,12 @@ pub struct PrStatus {
     pub checks: ChecksState,
     /// `environment_url` of the latest successful deployment of the head SHA.
     pub preview_url: Option<String>,
+    /// Whether GitHub can merge the PR as it stands; null until it has computed that.
+    pub mergeable: Option<bool>,
+    /// GitHub's finer-grained merge state (`clean`, `dirty`, `blocked`, `behind`, …).
+    pub mergeable_state: Option<String>,
+    /// The local branch tip is the PR head: nothing new to push.
+    pub up_to_date: bool,
     /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
     #[serde(skip)]
     pub head_sha: String,
@@ -310,6 +322,16 @@ struct ApiDeploymentStatus {
     state: String,
     #[serde(default)]
     environment_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiBranch {
+    commit: ApiBranchCommit,
+}
+
+#[derive(Deserialize)]
+struct ApiBranchCommit {
+    sha: String,
 }
 
 /// Merged / closed win; then draft; then approved when every reviewer's latest decisive review
@@ -1073,6 +1095,9 @@ impl GithubAuth {
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                mergeable: None,
+                mergeable_state: None,
+                up_to_date: false,
                 // Unknown without the re-read; only used server-side (cleanup), never sent.
                 head_sha: String::new(),
             },
@@ -1232,8 +1257,19 @@ impl GithubAuth {
             state,
             checks,
             preview_url,
+            mergeable: pull.mergeable,
+            mergeable_state: pull.mergeable_state,
+            up_to_date: false,
             head_sha: sha,
         }))
+    }
+
+    /// The commit GitHub's `main` currently points at.
+    pub async fn main_head(&self, repo: &str) -> Result<String, ApiError> {
+        let branch: ApiBranch = self
+            .get_json(&format!("/repos/{repo}/branches/main"))
+            .await?;
+        Ok(branch.commit.sha)
     }
 
     /// Just the [`PrState`] and head of `head_branch`'s pull request (no checks or deployments).
@@ -2625,6 +2661,8 @@ esac"#,
                         "draft": false,
                         "state": "open",
                         "merged_at": null,
+                        "mergeable": false,
+                        "mergeable_state": "dirty",
                         "head": { "ref": "content/launch-week", "sha": "abc" }
                     }]))
                 }),
@@ -2668,10 +2706,15 @@ esac"#,
         assert_eq!(st.state, PrState::Approved);
         assert_eq!(st.checks, ChecksState::Passing);
         assert_eq!(st.preview_url.as_deref(), Some("https://lw.pages.dev"));
+        assert_eq!(st.mergeable, Some(false));
+        assert_eq!(st.mergeable_state.as_deref(), Some("dirty"));
         let json = serde_json::to_value(&st).unwrap();
         assert_eq!(json["state"], "approved");
         assert_eq!(json["checks"], "passing");
         assert_eq!(json["previewUrl"], "https://lw.pages.dev");
+        assert_eq!(json["mergeable"], false);
+        assert_eq!(json["mergeableState"], "dirty");
+        assert_eq!(json["upToDate"], false);
         stop();
     }
 
@@ -2690,6 +2733,23 @@ esac"#,
             auth.pr_status("acme/site", "content/x").await.unwrap(),
             None
         );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn main_head_reads_the_github_branch_tip() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/branches/main",
+            get(|| async {
+                Json(serde_json::json!({ "name": "main", "commit": { "sha": "abc" } }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "mainhead");
+        assert_eq!(auth.main_head("acme/site").await.unwrap(), "abc");
         stop();
     }
 
@@ -3446,6 +3506,9 @@ esac"#,
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                mergeable: None,
+                mergeable_state: None,
+                up_to_date: false,
                 head_sha: String::new(),
             }
         );

@@ -36,9 +36,10 @@ import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
 import { frameHref, framePath, readPref, writePref } from "@orso/utils";
-import { attachPicker, describeElement } from "./elementPicker";
+import { attachPicker, describeElement, relativeFile } from "./elementPicker";
 import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
+import { BRIDGE_TYPE, isBridgeMessage } from "./frameBridge";
 import { DESKTOP_MIN_WIDTH, frameFit } from "./frameFit";
 import { useFrameHistory } from "./frameHistory";
 import { type PageError, watchPageErrors } from "./pageErrors";
@@ -60,7 +61,19 @@ watch(
 const state = computed<DevserverState>(
   () => store.status[props.projectId] ?? props.devserver ?? "starting",
 );
-const src = computed(() => daemon.api.previewUrl(props.projectId));
+/**
+ * In a Vite dev build the UI and the framed preview share an origin, so the project's
+ * root-absolute dev URLs (`/src/…`, `/@vite/client`, …) would hit the UI's own dev server
+ * and islands never hydrate. Framing the project's dev server directly avoids that. The
+ * frame is then cross-origin, so picking and appearance go through the small bridge the
+ * orso Astro integration injects into every dev page (see `packages/astro/src/bridge.js`).
+ */
+const directFrame = computed(() => import.meta.env.DEV && (props.port ?? 0) > 0);
+const src = computed(() =>
+  directFrame.value
+    ? `http://127.0.0.1:${props.port}/preview/${encodeURIComponent(props.projectId)}/`
+    : daemon.api.previewUrl(props.projectId),
+);
 const base = computed(() => new URL(src.value, window.location.href).pathname);
 // A cross-site daemon cannot authenticate the framed preview (SameSite=Lax `wb_session`); see
 // `previewUrl` in core/api.ts. Explain instead of showing a wall of 401s; the user may override
@@ -149,9 +162,43 @@ function frameWindow(): Window | null {
   }
 }
 
+// --- Direct-frame bridge -------------------------------------------------------------------------
+
+/** The dev-server origin the bridge runs on; null while framing the proxied preview. */
+const bridgeOrigin = computed(() => (directFrame.value ? new URL(src.value).origin : null));
+
+/** Drive the direct frame's page over `postMessage` (the proxied frame is driven via its DOM). */
+function postToFrame(op: string, extra: Record<string, unknown> = {}) {
+  const origin = bridgeOrigin.value;
+  if (!origin) return;
+  frame.value?.contentWindow?.postMessage({ type: BRIDGE_TYPE, op, ...extra }, origin);
+}
+
+function onFrameMessage(e: MessageEvent) {
+  if (!e.source || e.source !== frame.value?.contentWindow) return;
+  if (!isBridgeMessage(e.data)) return;
+  if (e.data.op === "cancel") {
+    store.setPicking(false);
+    return;
+  }
+  const element = { ...e.data.element };
+  const file = element.file;
+  store.pick(file ? { ...element, file: relativeFile(file, props.projectId) } : element);
+}
+
+useEventListener(window, "message", onFrameMessage);
+
+/** Esc leaves picking wherever the focus is; the page handles its own copy inside the frame. */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && store.picking) store.setPicking(false);
+}
+
+useEventListener(window, "keydown", onKeydown);
+
 function onLoad() {
   const win = frameWindow();
   syncPicker();
+  syncAppearance();
   watchErrors(win);
   if (!win) return;
   const sync = () => history.visit(framePath(win.location.href, base.value));
@@ -160,7 +207,6 @@ function onLoad() {
   win.addEventListener("popstate", sync);
   win.addEventListener("hashchange", sync);
   win.document.addEventListener("astro:page-load", sync);
-  syncAppearance();
   // Astro's router copies the next page's `<html>` attributes over ours.
   win.document.addEventListener("astro:after-swap", () => syncAppearance(true));
 }
@@ -198,6 +244,10 @@ function fixPageError() {
 // --- RTL / dark mode -----------------------------------------------------------------------------
 
 function syncAppearance(fresh = false) {
+  if (directFrame.value) {
+    postToFrame("appearance", { rtl: store.rtl, dark: store.dark });
+    return;
+  }
   const doc = frameWindow()?.document;
   if (doc) applyFrameAppearance(doc, { rtl: store.rtl, dark: store.dark }, fresh);
 }
@@ -212,6 +262,11 @@ let detachPicker: (() => void) | null = null;
 function syncPicker() {
   detachPicker?.();
   detachPicker = null;
+  if (directFrame.value) {
+    // The page owns the overlay; ask it to start or stop.
+    postToFrame(store.picking ? "pick:start" : "pick:stop");
+    return;
+  }
   if (!store.picking) return;
   const win = frameWindow();
   // Cross-origin or not yet loaded: nothing to pick from.
@@ -266,7 +321,13 @@ function navigate() {
   draft.value = null;
   const win = frameWindow();
   if (win) win.location.assign(href);
-  else if (frame.value) frame.value.src = new URL(href, src.value).href;
+  else {
+    // A cross-origin (direct) frame hides its path: remember the one we asked for, so a
+    // reload or a pick session reopens the same page.
+    lastPath.value = framePath(href, base.value);
+    writePref(lastPathKey(props.projectId), lastPath.value);
+    startHref.value = new URL(href, src.value).href;
+  }
 }
 
 /**
@@ -521,7 +582,8 @@ function toggleFullscreen() {
         <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
         <div
           v-else
-          class="h-full shrink-0 overflow-hidden"
+          class="relative h-full shrink-0 overflow-hidden"
+          data-testid="preview-canvas"
           :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
         >
           <iframe
@@ -539,6 +601,13 @@ function toggleFullscreen() {
             }"
             data-testid="preview-frame"
             @load="onLoad"
+          />
+          <!-- A device-sized frame has no visible edge against the panel; outline it. -->
+          <div
+            v-if="store.device !== 'desktop'"
+            class="border-border pointer-events-none absolute inset-0 border"
+            data-testid="preview-boundary"
+            aria-hidden="true"
           />
         </div>
       </div>

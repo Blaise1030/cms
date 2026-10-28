@@ -9,10 +9,12 @@ import type { AutoResolveState, AutoResolveStatus, PrStatus } from "@/core/types
 const h = vi.hoisted(() => ({
   daemon: null as unknown as FakeDaemon,
   toastInfo: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({
-  toast: { info: h.toastInfo, success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+  toast: { info: h.toastInfo, success: h.toastSuccess, warning: vi.fn(), error: h.toastError },
 }));
 
 import { STATUS_POLL_MS, useChangesStore } from "./store";
@@ -614,6 +616,62 @@ describe("changes store", () => {
       expect(store.status).toBeNull();
     });
   });
+
+  describe("sync state", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("load reads whether syncing would change anything", async () => {
+      const changesSyncNeeded = vi.fn(async () => false);
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus: vi.fn(async () => null),
+        changesSyncNeeded,
+      });
+      await store.load("site");
+      expect(changesSyncNeeded).toHaveBeenCalledWith("site");
+      expect(store.syncNeeded).toBe(false);
+    });
+
+    it("re-reads sync state with the PR status poll", async () => {
+      vi.useFakeTimers();
+      const changesSyncNeeded = vi.fn(async () => true);
+      const pr = {
+        number: 1,
+        url: "https://github.com/acme/site/pull/1",
+        state: "open" as const,
+        checks: "none" as const,
+        previewUrl: null,
+        mergeable: true,
+        mergeableState: "clean",
+        upToDate: false,
+      };
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus: vi.fn(async () => pr),
+        changesSyncNeeded,
+      });
+      await store.load("site");
+      expect(changesSyncNeeded).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_MS);
+      expect(changesSyncNeeded).toHaveBeenCalledTimes(2);
+      store.stopStatusPolling();
+    });
+
+    it("keeps sync enabled when the check fails", async () => {
+      const store = setup({
+        activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+        changeStatus: vi.fn(async () => null),
+        changesSyncNeeded: vi.fn(async () => {
+          throw new Error("GitHub is unreachable");
+        }),
+      });
+      await store.load("site");
+      expect(store.syncNeeded).toBeNull();
+    });
+  });
+
   it("share exposes the protection hint for an unprotected main", async () => {
     const store = setup({
       shareChange: vi.fn(async () => ({
@@ -765,6 +823,9 @@ describe("changes store cleanup", () => {
     state: "merged" as const,
     checks: "none" as const,
     previewUrl: null,
+    mergeable: true,
+    mergeableState: "clean",
+    upToDate: true,
   };
 
   it("deletes the merged change, returns to main and drops it from the list", async () => {
@@ -858,6 +919,9 @@ describe("changes store publish", () => {
     state: "merged",
     checks: "none",
     previewUrl: null,
+    mergeable: true,
+    mergeableState: "clean",
+    upToDate: true,
   };
 
   function publishStore(api: Record<string, unknown> = {}) {
@@ -907,7 +971,7 @@ describe("changes store publish", () => {
       const pending = store.publish("site", "content/lw");
       expect(store.publishing).toBe(true);
       release(pr);
-      await expect(pending).resolves.toBeUndefined();
+      await expect(pending).resolves.toBe("published");
       expect(store.publishing).toBe(false);
     } finally {
       store.stopStatusPolling();
@@ -1065,8 +1129,82 @@ describe("changes store auto-resolve", () => {
     expect(store.syncSessionId).toBe("s2");
   });
 
-  it("onAutoResolve_done_refreshes", async () => {
-    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
+  const merged: PrStatus = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged",
+    checks: "none",
+    previewUrl: null,
+    mergeable: true,
+    mergeableState: "clean",
+    upToDate: true,
+  };
+
+  it("publish_that_collides_combines_then_publishes", async () => {
+    const startAutoResolve = vi.fn(async () => ({ started: true }));
+    const publishChange = vi
+      .fn()
+      .mockResolvedValueOnce({ conflict: { branch: "content/a", sessionId: "s1" } })
+      .mockResolvedValueOnce(merged);
+    const store = setupSync({
+      startAutoResolve,
+      publishChange,
+      listConflicts: vi.fn(async () => []),
+    });
+    useAgentProvidersStore().provider = "fake";
+    store.projectId = "site";
+    store.active = { branch: "content/a", title: "A" };
+
+    try {
+      await expect(store.publish("site", "content/a")).resolves.toBe("combining");
+      expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
+      expect(store.syncSessionId).toBe("s1");
+      expect(store.status).toBeNull();
+
+      await store.onAutoResolve("site", status("done"));
+
+      expect(publishChange).toHaveBeenCalledTimes(2);
+      expect(store.status).toEqual(merged);
+      expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("share_that_collides_combines_then_shares", async () => {
+    const startAutoResolve = vi.fn(async () => ({ started: true }));
+    const shareChange = vi
+      .fn()
+      .mockResolvedValueOnce({
+        branch: "content/a",
+        title: "A",
+        prUrl: null,
+        conflict: { branch: "content/a", sessionId: "s1" },
+      })
+      .mockResolvedValueOnce({
+        branch: "content/a",
+        title: "A",
+        prUrl: "https://github.com/acme/site/pull/1",
+      });
+    const store = setupSync({
+      startAutoResolve,
+      shareChange,
+      listConflicts: vi.fn(async () => []),
+    });
+    useAgentProvidersStore().provider = "fake";
+    store.projectId = "site";
+    store.active = { branch: "content/a", title: "A" };
+
+    await expect(store.share("site", "content/a")).resolves.toBeNull();
+    expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
+
+    await store.onAutoResolve("site", status("done"));
+
+    expect(shareChange).toHaveBeenCalledTimes(2);
+    expect(store.prUrl).toBe("https://github.com/acme/site/pull/1");
+  });
+
+  it("onAutoResolve_done_refreshes", async () => {    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
     const listChanges = vi.fn(async () => []);
     const listConflicts = vi.fn(async () => []);
     const store = setupSync({ activeChange, listChanges, listConflicts });

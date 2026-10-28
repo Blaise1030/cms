@@ -63,6 +63,20 @@ function toolPart(call: ToolCall, id: string): DynamicToolUIPart {
 
 /** Rebuild one transcript's chunks as the assistant/user messages ChatMessage renders. */
 export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
+  const transcript = createTranscript();
+  for (const chunk of chunks) transcript.push(chunk);
+  return transcript.messages;
+}
+
+export interface Transcript {
+  /** Complete message list so far; later pushes may mutate already-returned messages. */
+  readonly messages: UIMessage[];
+  /** Fold one chunk in. A live stream calls this per frame. */
+  push(chunk: UiChunk): void;
+}
+
+/** Incremental form of [`chunksToMessages`], so a streaming chat does not re-walk its history. */
+export function createTranscript(): Transcript {
   const messages: UIMessage[] = [];
   /** Raw tool calls by id, so a later update can merge into its part. */
   const calls = new Map<string, ToolCall>();
@@ -77,7 +91,7 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
     return assistant;
   };
 
-  for (const chunk of chunks) {
+  function push(chunk: UiChunk) {
     switch (chunk.type) {
       case "user_text":
         assistant = null;
@@ -143,5 +157,6 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         break;
     }
   }
-  return messages;
+
+  return { messages, push };
 }

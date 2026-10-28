@@ -23,6 +23,9 @@ const label = computed(() => {
   return changes.sharing ? "Sharing…" : "Share preview";
 });
 
+/** Nothing to push once the branch tip is the PR head; hide rather than offer a no-op. */
+const showShare = computed(() => changes.active !== null && !changes.status?.upToDate);
+
 /** Publish sits in the same group when this is a GitHub-backed draft that isn't live. */
 const showPublish = computed(
   () =>
@@ -32,7 +35,7 @@ const showPublish = computed(
 );
 
 const showGroup = computed(
-  () => !!(changes.active || changes.prUrl || showPublish.value),
+  () => !!(showShare.value || changes.prUrl || showPublish.value),
 );
 
 async function onShare() {
@@ -51,7 +54,7 @@ async function onShare() {
   <div class="relative flex items-center gap-2">
     <ButtonGroup v-if="showGroup" data-testid="share-publish-group">
       <Button
-        v-if="changes.active"
+        v-if="showShare"
         :variant="variant"
         size="sm"
         class="h-7 gap-1.5 px-2.5 text-xs"
@@ -65,7 +68,7 @@ async function onShare() {
         {{ label }}
       </Button>
       <ButtonGroupSeparator
-        v-if="changes.active && (changes.prUrl || showPublish)"
+        v-if="showShare && (changes.prUrl || showPublish)"
         :class="!changes.prUrl ? 'bg-primary-foreground/25' : undefined"
       />
       <PrMenu v-if="changes.prUrl" :variant="variant" />

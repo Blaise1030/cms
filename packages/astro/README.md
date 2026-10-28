@@ -20,6 +20,14 @@ path:
 The template in this repository depends on `file:../../packages/astro`; scaffolding rewrites
 that path in `package.json` and `package-lock.json`.
 
+## Preview bridge
+
+During `astro dev`, `orso()` injects a small inline script into every page. The Orso dev UI
+frames the project's dev server directly (so Astro islands and other client modules hydrate);
+the script lets that cross-origin frame pick elements and apply the app's appearance
+overrides over `postMessage`. It does nothing unless the app posts an `orso:preview` message,
+and it is not part of a build.
+
 ## Usage
 
 `astro.config.mjs`:

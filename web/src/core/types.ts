@@ -96,6 +96,18 @@ export interface PrStatus {
   checks: ChecksState;
   /** Deployed preview of the PR head, once the template's workflow published it. */
   previewUrl: string | null;
+  /** GitHub can merge the PR as it stands; null while GitHub is still working it out. */
+  mergeable: boolean | null;
+  /** GitHub's finer-grained merge state (`clean`, `dirty`, `blocked`, `behind`, …). */
+  mergeableState: string | null;
+  /** The local branch tip is the PR head: there is nothing new to push. */
+  upToDate: boolean;
+}
+
+/** Push needed newer commits from this change's remote copy combined in first. */
+export interface PendingCombine {
+  branch: string;
+  sessionId: string;
 }
 
 /** Shown after sharing when the repo's `main` has no branch protection. */
@@ -190,10 +202,16 @@ export interface ConflictPreviews {
 export interface SharedChange {
   branch: string;
   title: string;
-  prUrl: string;
+  /** Null when the push needs combining with newer commits from the remote copy. */
+  prUrl: string | null;
+  /** Set instead of `prUrl` when someone else moved this change first. */
+  conflict?: PendingCombine;
   /** Null when `main` is protected, unknown (no admin rights) or the hint was dismissed. */
   protectionHint?: ProtectionHint | null;
 }
+
+/** Result of `POST /api/changes/{branch}/publish`: the merged PR, or a combine to finish. */
+export type PublishResult = PrStatus | null | { conflict: PendingCombine };
 
 export interface TreeEntry {
   name: string;

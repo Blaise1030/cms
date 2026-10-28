@@ -578,6 +578,18 @@ impl Drop for GroupGuard {
     }
 }
 
+/// Environment a supervised dev server needs: its preview base and content token, the
+/// dev-server port (a directly framed preview opens HMR straight at it) and, when proxied,
+/// the daemon port Vite routes HMR to instead.
+fn launch_env(cmd: &mut Command, spec: &LaunchSpec, token: &str, proxy_port: u16) {
+    cmd.env("PUBLIC_BASE", &spec.public_base)
+        .env("ORSO_CONTENT_TOKEN", token)
+        .env("ORSO_DEV_PORT", spec.port.to_string());
+    if proxy_port > 0 {
+        cmd.env("ORSO_PROXY_PORT", proxy_port.to_string());
+    }
+}
+
 async fn run_once(
     shared: &Arc<Shared>,
     id: &str,
@@ -616,17 +628,13 @@ async fn run_once(
     if !matches!(shared.opts.launcher, Launcher::Configured) {
         cmd.current_dir(&dir);
     }
-    cmd.env("PUBLIC_BASE", &spec.public_base)
-        .env("ORSO_CONTENT_TOKEN", token)
-        .stdin(Stdio::null())
+    launch_env(&mut cmd, &spec, token, shared.opts.proxy_port);
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         // Own group, so terminating also reaches npm's node grandchild.
         .process_group(0);
-    if shared.opts.proxy_port > 0 {
-        cmd.env("ORSO_PROXY_PORT", shared.opts.proxy_port.to_string());
-    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -830,6 +838,52 @@ mod tests {
         assert_eq!(ready_port("Network http://192.168.1.4:4321/"), None);
         assert_eq!(ready_port("astro v7 ready in 300 ms"), None);
         assert_eq!(ready_port("see http://example.com:80/ for docs"), None);
+    }
+
+    #[test]
+    fn dev_server_env_names_the_preview_base_and_ports() {
+        let spec = LaunchSpec {
+            project_id: "site".into(),
+            dir: PathBuf::from("/tmp/site"),
+            port: 4567,
+            public_base: "/preview/site/".into(),
+        };
+        let mut cmd = Command::new("true");
+        launch_env(&mut cmd, &spec, "tok", 7800);
+        let envs: HashMap<_, _> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("PUBLIC_BASE").cloned().flatten().as_deref(),
+            Some("/preview/site/")
+        );
+        assert_eq!(
+            envs.get("ORSO_CONTENT_TOKEN").cloned().flatten().as_deref(),
+            Some("tok")
+        );
+        // The browser opens HMR straight at the dev server, not only through the daemon.
+        assert_eq!(
+            envs.get("ORSO_DEV_PORT").cloned().flatten().as_deref(),
+            Some("4567")
+        );
+        assert_eq!(
+            envs.get("ORSO_PROXY_PORT").cloned().flatten().as_deref(),
+            Some("7800")
+        );
+
+        let mut no_proxy = Command::new("true");
+        launch_env(&mut no_proxy, &spec, "tok", 0);
+        assert!(!no_proxy
+            .as_std()
+            .get_envs()
+            .any(|(k, _)| k == "ORSO_PROXY_PORT"));
     }
 
     #[test]

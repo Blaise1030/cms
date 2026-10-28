@@ -21,6 +21,9 @@ const draft: PrStatus = {
   state: "draft",
   checks: "failing",
   previewUrl: null,
+  mergeable: false,
+  mergeableState: "dirty",
+  upToDate: true,
 };
 
 /** Render the menu inline (no portal, always open); items emit `select` on click. */

@@ -15,6 +15,9 @@ const open: PrStatus = {
   state: "open",
   checks: "none",
   previewUrl: null,
+  mergeable: true,
+  mergeableState: "clean",
+  upToDate: true,
 };
 const merged: PrStatus = { ...open, state: "merged" };
 
@@ -48,12 +51,60 @@ describe("PublishButton", () => {
 
   it("publishes the active change on click and toasts that it is live", async () => {
     const { store, wrapper } = mountWith();
-    const publish = vi.spyOn(store, "publish").mockResolvedValue();
+    const publish = vi.spyOn(store, "publish").mockResolvedValue("published");
     await wrapper.get('[data-testid="publish-change"]').trigger("click");
     await flushPromises();
     expect(publish).toHaveBeenCalledWith("site", "content/lw");
     expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
     expect(h.toastError).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when the publish opened a combine first", async () => {
+    const { store, wrapper } = mountWith();
+    vi.spyOn(store, "publish").mockResolvedValue("combining");
+    await wrapper.get('[data-testid="publish-change"]').trigger("click");
+    await flushPromises();
+    expect(h.toastSuccess).not.toHaveBeenCalled();
+    expect(h.toastError).not.toHaveBeenCalled();
+  });
+
+  it("is disabled when GitHub says the pull request cannot be merged", async () => {
+    const { wrapper } = mountWith({
+      status: { ...open, mergeable: false, mergeableState: "dirty" },
+    });
+    const button = wrapper.get('[data-testid="publish-change"]');
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toBe("This pull request can't be merged yet.");
+  });
+
+  it("is disabled when branch protection blocks the merge", async () => {
+    const { wrapper } = mountWith({
+      status: { ...open, mergeable: true, mergeableState: "blocked" },
+    });
+    expect(wrapper.get('[data-testid="publish-change"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("is disabled once the pull request is closed", async () => {
+    const { wrapper } = mountWith({ status: { ...open, state: "closed" } });
+    const button = wrapper.get('[data-testid="publish-change"]');
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toBe("This pull request is closed.");
+  });
+
+  it("stays enabled for a draft, which Publish marks ready itself", async () => {
+    const { wrapper } = mountWith({
+      status: { ...open, state: "draft", mergeable: false, mergeableState: "draft" },
+    });
+    expect(wrapper.get('[data-testid="publish-change"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("stays enabled while GitHub has not worked out mergeability", async () => {
+    const { wrapper } = mountWith({
+      status: { ...open, mergeable: null, mergeableState: "unknown" },
+    });
+    const button = wrapper.get('[data-testid="publish-change"]');
+    expect(button.attributes("disabled")).toBeUndefined();
+    expect(button.attributes("title")).toBeUndefined();
   });
 
   it("shows the in-flight state while publishing", async () => {

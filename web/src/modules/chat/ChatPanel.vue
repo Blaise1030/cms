@@ -9,6 +9,7 @@ import { useDaemon } from "@/core/daemon";
 import type { ChatHistory as ChatHistoryData, UiChunk } from "@/core/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import {
   MessageScroller,
@@ -19,15 +20,15 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
-import ChatComposer, { type ChatAttachment } from "./ChatComposer.vue";
+import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { attachmentMessage } from "./attachments";
-import { chunksToMessages } from "./chunks";
-import { expandReferences, referenceTag } from "./references";
+import { createTranscript, type Transcript } from "./chunks";
+import { referenceLabel } from "./references";
+import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
@@ -107,8 +108,8 @@ const chosen = ref<string | null>(null);
 let opening = 0;
 let openId: string | null = null;
 let openPromise: Promise<ChatHistoryData | null> = Promise.resolve(null);
-/** What each `[Element #n]` in the input stands for, until the input is sent. */
-const references = new Map<string, string>();
+/** Elements picked in the preview, sent ahead of the typed text. */
+const references = ref<ChatReference[]>([]);
 /** Files uploaded for the next message; the agent reads them from their saved paths. */
 const attachments = ref<ChatAttachment[]>([]);
 const attaching = ref(false);
@@ -163,6 +164,76 @@ const queuePaused = computed(() => !!activeId.value && store.isQueuePaused(props
 const drainingQueue = new Set<string>();
 const isSaved = (id: string) => chats.value.some((c) => c.id === id);
 
+/** Chunks already rendered; the SSE replays the transcript, so its first frames are duplicates. */
+let renderedChunks = 0;
+let transcript: Transcript | null = null;
+let stream: ChatStream | null = null;
+let streamChatId: string | null = null;
+
+/** Rebuild the transcript from a snapshot; streamed chunks then append to it. */
+function setTranscript(chunks: UiChunk[]) {
+  transcript = createTranscript();
+  for (const chunk of chunks) transcript.push(chunk);
+  renderedChunks = chunks.length;
+  publishTranscript();
+}
+
+/**
+ * Hand Vue a new list with a new identity for the message that changed, so ChatMessage
+ * re-renders even though the builder mutates its last message in place.
+ */
+function publishTranscript() {
+  if (!transcript) return;
+  const next = transcript.messages.slice();
+  const last = next.length - 1;
+  if (last >= 0) next[last] = { ...next[last]! };
+  messages.value = next;
+}
+
+function stopStream() {
+  stream?.close();
+  stream = null;
+  streamChatId = null;
+}
+
+/** Follow `id` live. `restart` reconnects so a fresh snapshot is followed from its end. */
+function startStream(id: string, restart = false) {
+  if (!restart && stream && streamChatId === id) return;
+  stopStream();
+  const next = createChatStream({
+    url: () => buildChatStreamUrl(daemon.config.value, props.projectId, id),
+    skipOnFirstOpen: () => renderedChunks,
+    onReset: () => {
+      // EventSource reconnected: the daemon replays the transcript from the first chunk.
+      // Keep the last snapshot on screen until the replay's first frame replaces it.
+      transcript = createTranscript();
+      renderedChunks = 0;
+      firstVisibleMessage.value = 0;
+    },
+    onChunk: (chunk) => applyChunk(id, chunk),
+  });
+  if (!next.connect()) return;
+  stream = next;
+  streamChatId = id;
+}
+
+function applyChunk(id: string, chunk: UiChunk) {
+  if (id !== activeId.value) return;
+  transcript ??= createTranscript();
+  transcript.push(chunk);
+  publishTranscript();
+  if (chunk.type === "turn_end") {
+    // The turn is over even if its `chat.turn` event never arrives.
+    store.clearChatSending(props.projectId, id);
+    void drainQueue();
+  } else if (
+    chunk.type === "permission"
+    && !permissions.value.some((p) => p.request_id === chunk.request_id)
+  ) {
+    permissions.value.push(chunk);
+  }
+}
+
 /** Fetch one chat's transcript. Draft ids (not saved yet) come back empty. */
 async function loadChat(id: string): Promise<ChatHistoryData | null> {
   const seq = ++opening;
@@ -185,10 +256,11 @@ async function loadChat(id: string): Promise<ChatHistoryData | null> {
   chatModel.value = history.model;
   // The chat's model becomes this agent's pick, so the picker shows what is running.
   agentProviders.setModel(history.provider, history.model);
-  messages.value = chunksToMessages(history.chunks);
+  setTranscript(history.chunks);
   permissions.value = pendingPermissions(history);
   firstVisibleMessage.value = Math.max(0, messages.value.length - 10);
   store.setChatRunning(props.projectId, id, history.running);
+  if (id === activeId.value) startStream(id);
   return history;
 }
 
@@ -212,17 +284,29 @@ async function reload(id: string) {
   try {
     const history = await daemon.api.chatHistory(props.projectId, id);
     if (id !== activeId.value) return;
-    messages.value = chunksToMessages(history.chunks);
+    setTranscript(history.chunks);
     permissions.value = pendingPermissions(history);
     store.setChatRunning(props.projectId, id, history.running);
+    // Reconnect so the stream skips this snapshot and then follows live chunks,
+    // including the checkpoint the daemon records just after the turn.
+    startStream(id, true);
   } catch {
     // Keep what we have; the next turn or reopen catches up.
   }
 }
 
 watch(
+  historyOpen,
+  (open) => {
+    // Sessions are created by other sends/tabs too; the popover is the moment to be current.
+    if (open) void store.load(props.projectId);
+  },
+);
+
+watch(
   activeId,
   (id) => {
+    stopStream();
     if (id) void open(id);
     else startNew();
   },
@@ -240,8 +324,17 @@ async function removeChat(id: string) {
 watch(
   () => props.active,
   (active) => {
-    if (!active) return;
-    void store.load(props.projectId);
+    if (!active) {
+      stopStream();
+      return;
+    }
+    void store.load(props.projectId).then(() => {
+      // The chat list may arrive after the history loaded; follow it once we know it exists.
+      const id = activeId.value;
+      if (id) void open(id).then((history) => {
+        if (history && id === activeId.value) startStream(id);
+      });
+    });
     if (!agentProviders.providers.length) void agentProviders.loadProviders();
   },
   { immediate: true },
@@ -259,7 +352,10 @@ const offs = [
     if (activeId.value) void reload(activeId.value).then(() => drainQueue());
   }),
 ];
-onBeforeUnmount(() => offs.forEach((off) => off()));
+onBeforeUnmount(() => {
+  offs.forEach((off) => off());
+  stopStream();
+});
 
 async function sendNow(text: string): Promise<boolean> {
   const trimmed = text.trim();
@@ -305,6 +401,9 @@ async function sendNow(text: string): Promise<boolean> {
       ];
     }
     await daemon.api.sendChatMessage(props.projectId, id, trimmed);
+    // A chat is created by its first message; refresh the list so the new session
+    // shows (with its title and running mark) before the turn ends.
+    void store.load(props.projectId);
     return true;
   } catch (e) {
     if (optimisticId && id === activeId.value) messages.value = messages.value.filter(m => m.id !== optimisticId);
@@ -354,13 +453,16 @@ async function send(text: string, preview = text) {
 }
 
 function submit(text: string) {
-  const preview = text.trim() || attachments.value.map(a => a.name).join(", ");
+  const picked = references.value.map((r) => r.full);
+  const typed = text.trim();
+  const preview = typed
+    || references.value.map((r) => r.label).join(", ")
+    || attachments.value.map((a) => a.name).join(", ");
   input.value = "";
-  const expanded = expandReferences(text, references);
-  references.clear();
+  references.value = [];
   const paths = attachments.value.map((a) => a.path);
   attachments.value = [];
-  void send(attachmentMessage(expanded, paths), preview);
+  void send(attachmentMessage([...picked, typed].filter(Boolean).join(" "), paths), preview);
 }
 
 async function stop() {
@@ -397,11 +499,13 @@ function insert(text: string) {
   composer.value?.focus();
 }
 
-/** Show a picked element as a short tag; `submit` puts the full reference back. */
+/** Carry a picked element into the next message as a badge. */
 function insertReference(text: string) {
-  const tag = referenceTag(references.size + 1);
-  references.set(tag, text.trim());
-  insert(tag);
+  const full = text.trim();
+  if (full && !references.value.some((r) => r.full === full)) {
+    references.value.push({ label: referenceLabel(full), full });
+  }
+  composer.value?.focus();
 }
 
 function suggest(text: string) {
@@ -435,15 +539,6 @@ defineExpose({ insert, insertReference, send, busy });
       <span class="min-w-0 flex-1 truncate px-1 text-sm">
         {{ chats.find((c) => c.id === activeId)?.title || "New chat" }}
       </span>
-      <label class="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs" title="Run tools without asking">
-        <span>Auto-approve</span>
-        <Switch
-          :model-value="autoApprove"
-          aria-label="Auto-approve"
-          data-testid="chat-auto-approve"
-          @update:model-value="setAutoApprove(!!$event)"
-        />
-      </label>
       <Button variant="ghost" size="icon-sm" aria-label="New chat" data-testid="chat-new" @click="startNew">
         <Plus />
       </Button>
@@ -535,23 +630,27 @@ defineExpose({ insert, insertReference, send, busy });
           <Button size="sm" :disabled="answering" data-testid="chat-approval-allow" @click="answerPermission(perm, true)">Allow</Button>
         </div>
       </div>
-      <div v-if="queued.length" data-testid="chat-queued" class="rounded-lg border bg-muted/30 p-2 text-xs">
-        <div class="mb-1 flex items-center justify-between gap-2 font-medium">
-          <span>Queued ({{ queued.length }})</span>
-          <button v-if="queuePaused" type="button" class="text-primary hover:underline" data-testid="chat-queue-resume" @click="resumeQueue">Resume queue</button>
-        </div>
-        <div class="flex max-h-28 flex-col gap-1 overflow-y-auto">
-          <div v-for="item in queued" :key="item.id" data-testid="chat-queued-item" class="flex items-center gap-2">
-            <span class="min-w-0 flex-1 truncate">{{ item.preview }}</span>
-            <Button variant="ghost" size="icon-sm" class="size-6 shrink-0" :aria-label="`Send queued message: ${item.preview}`" title="Send next" data-testid="chat-queued-send" @click="sendQueued(item.id)">
-              <ArrowUp class="size-3.5" aria-hidden="true" />
-            </Button>
-            <Button variant="ghost" size="icon-sm" class="size-6 shrink-0 text-muted-foreground hover:text-destructive" :aria-label="`Remove queued message: ${item.preview}`" title="Remove" data-testid="chat-queued-remove" @click="removeQueued(item.id)">
-              <X class="size-3.5" aria-hidden="true" />
-            </Button>
+      <Card v-if="queued.length" data-testid="chat-queued" class="gap-2 py-3 text-xs shadow-none">
+        <CardHeader class="px-3">
+          <CardTitle class="text-xs">Queued ({{ queued.length }})</CardTitle>
+          <CardAction>
+            <button v-if="queuePaused" type="button" class="text-primary hover:underline" data-testid="chat-queue-resume" @click="resumeQueue">Resume queue</button>
+          </CardAction>
+        </CardHeader>
+        <CardContent class="px-3">
+          <div class="-m-1 flex max-h-28 flex-col gap-1 overflow-y-auto p-1">
+            <div v-for="item in queued" :key="item.id" data-testid="chat-queued-item" class="flex items-center gap-2">
+              <span class="min-w-0 flex-1 truncate">{{ item.preview }}</span>
+              <Button variant="outline" size="icon-xs" class="shrink-0" :aria-label="`Send queued message: ${item.preview}`" title="Send next" data-testid="chat-queued-send" @click="sendQueued(item.id)">
+                <ArrowUp class="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button variant="outline" size="icon-xs" class="text-muted-foreground hover:text-destructive shrink-0" :aria-label="`Remove queued message: ${item.preview}`" title="Remove" data-testid="chat-queued-remove" @click="removeQueued(item.id)">
+                <X class="size-3.5" aria-hidden="true" />
+              </Button>
+            </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
       <ChatComposer
         ref="composer"
         v-model="input"
@@ -564,10 +663,14 @@ defineExpose({ insert, insertReference, send, busy });
         :blocked="loadingChat ? 'Loading chat' : provider ? null : 'No agent is available'"
         :attachments="attachments"
         :attaching="attaching"
+        :references="references"
+        :auto-approve="autoApprove"
         @submit="submit"
         @stop="stop"
         @attach="attach"
         @remove-attachment="attachments.splice($event, 1)"
+        @remove-reference="references.splice($event, 1)"
+        @set-auto-approve="setAutoApprove"
       />
     </div>
   </div>

@@ -150,8 +150,46 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   return json({ error: { code: "UNKNOWN", message: `unrouted ${method} ${path}` } }, 500);
 }
 
-const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));
-const createPosts = () =>
+/** Stand-in for the browser's `EventSource`, driven by the tests. */
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  onopen: ((ev: unknown) => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  closed = false;
+  readonly url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  open() {
+    this.onopen?.({});
+  }
+
+  frame(chunk: Chunk) {
+    this.onmessage?.({ data: JSON.stringify(chunk) });
+  }
+
+  static forChat(id: string) {
+    return FakeEventSource.instances.filter((s) => s.url.includes(`/api/chat/p1/${id}/stream`));
+  }
+}
+
+async function streamFor(id: string) {
+  return vi.waitFor(() => {
+    const src = FakeEventSource.forChat(id).at(-1);
+    expect(src).toBeDefined();
+    return src!;
+  });
+}
+
+const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));const createPosts = () =>
   calls.filter((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1`);
 const textOf = (call: Call) => JSON.parse(String(call.init.body)).text as string;
 
@@ -165,6 +203,8 @@ beforeEach(() => {
   messageFailure = null;
   messageGate = null;
   createGate = null;
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("fetch", vi.fn(fetchMock));
   const api = createApi({ origin: ORIGIN, token: "tok" }, (i, init) => fetchMock(i, init));
   h.daemon = createFakeDaemon(api);
@@ -238,9 +278,12 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
   });
 
-  it("offers an auto-approve switch", async () => {
+  it("offers tool approvals beside the agent picker", async () => {
     const w = await mountPanel();
-    expect(w.find("[data-testid='chat-auto-approve']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-header'] [data-testid='chat-auto-approve']").exists()).toBe(false);
+    const composer = w.find("[data-testid='chat-composer']");
+    expect(composer.find("[data-testid='chat-agent']").exists()).toBe(true);
+    expect(composer.find("[data-testid='chat-auto-approve']").attributes("data-approve")).toBe("ask");
   });
 
   it("starts with recent messages and loads earlier history when scrolling to the top", async () => {
@@ -395,6 +438,35 @@ describe("ChatPanel", () => {
     expect(calls.indexOf(model!)).toBeLessThan(calls.indexOf(messagePosts()[1]!));
   });
 
+  it("refreshes the chat list when the history opens", async () => {
+    const w = await mountPanel();
+    chats.unshift({
+      id: "c9",
+      provider: "cursor",
+      model: null,
+      title: "From another tab",
+      updatedAt: Date.now(),
+      live: true,
+      running: false,
+    });
+    histories.c9 = { chunks: [], provider: "cursor", model: null, running: false };
+    await w.find("[data-testid='chat-history-toggle']").trigger("click");
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("From another tab");
+    });
+  });
+
+  it("adds a newly created chat to the history without waiting for its turn to end", async () => {
+    const w = await mountPanel();
+    await send(w, "hi");
+    const id = useChatStore().activeChatId("p1")!;
+    await vi.waitFor(() => expect(useChatStore().chats.p1?.map((c) => c.id)).toContain(id));
+    await w.find("[data-testid='chat-history-toggle']").trigger("click");
+    await flushPromises();
+    const items = [...document.body.querySelectorAll("[data-testid='chat-history-item']")];
+    expect(items).toHaveLength(1);
+  });
+
   it("marks the chat running in the store until chat.turn ends it", async () => {
     const w = await mountPanel();
     const store = useChatStore();
@@ -404,6 +476,67 @@ describe("ChatPanel", () => {
     expect(store.running.p1).toBe(id);
     finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);
     await vi.waitFor(() => expect(store.running.p1).toBeNull());
+  });
+
+  it("renders streamed chunks and ends the turn from the stream, without chat.turn", async () => {
+    const w = await mountPanel();
+    await send(w, "hello");
+    const id = useChatStore().activeChatId("p1")!;
+    const src = await streamFor(id);
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hello" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Streamed " });
+    src.frame({ type: "text_delta", session_id: "s", text: "reply" });
+    await vi.waitFor(() => expect(w.text()).toContain("Streamed reply"));
+    expect(w.find("[data-testid='chat-working']").exists()).toBe(true);
+    // The optimistic bubble was replaced by the echoed user_text, not added next to it.
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+
+    src.frame({ type: "turn_end", session_id: "s", stop_reason: "end_turn" });
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
+  });
+
+  it("skips history it already rendered, and rebuilds from the replay after a reconnect", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: false,
+      chunks: [
+        { type: "user_text", session_id: "s", text: "hi" },
+        { type: "text_delta", session_id: "s", text: "Hello there" },
+      ],
+    };
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    const src = await streamFor("c1");
+    src.open();
+    // The daemon replays the whole transcript; these two chunks are already on screen.
+    src.frame({ type: "user_text", session_id: "s", text: "hi" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
+    await flushPromises();
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+
+    // EventSource reconnected: the replay starts again from the first chunk.
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hi" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
+    await flushPromises();
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+    expect(w.text()).toContain("Hello there");
+  });
+
+  it("closes the old chat's stream when another chat opens", async () => {
+    chats = [
+      { id: "c1", provider: "cursor", model: null, title: "One", updatedAt: 2, live: true, running: false },
+      { id: "c2", provider: "cursor", model: null, title: "Two", updatedAt: 1, live: true, running: false },
+    ];
+    histories.c1 = { provider: "cursor", model: null, running: false, chunks: [] };
+    histories.c2 = { provider: "cursor", model: null, running: false, chunks: [] };
+    useChatStore().setActive("p1", "c1");
+    await mountPanel();
+    const first = await streamFor("c1");
+    useChatStore().setActive("p1", "c2");
+    await vi.waitFor(() => expect(first.closed).toBe(true));
+    await streamFor("c2");
   });
 
   it("stops the running turn on the daemon and clears the spinner when it ends", async () => {
@@ -588,7 +721,7 @@ describe("ChatPanel", () => {
     const second = useChatStore().activeChatId("p1")!;
     expect(second).not.toBe(first);
     expect(messagePosts().map(textOf)).toEqual(["first chat", "second chat"]);
-    expect(useChatStore().runningChatIds("p1")).toEqual([first, second]);
+    expect(useChatStore().runningChatIds("p1").sort()).toEqual([first, second].sort());
 
     finish(first, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
     await vi.waitFor(() => expect(useChatStore().runningChatIds("p1")).toEqual([second]));
@@ -888,35 +1021,51 @@ describe("ChatPanel", () => {
     const ref2 = "[element <h1> at `h1`]";
     const input = (w: Awaited<ReturnType<typeof mountPanel>>) =>
       w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
+    const badges = (w: Awaited<ReturnType<typeof mountPanel>>) =>
+      w.findAll("[data-testid='chat-reference']");
 
-    it("shows a short numbered tag in the input instead of the full reference", async () => {
+    it("shows a picked element as a badge instead of a tag in the input", async () => {
       const w = await mountPanel();
       const vm = w.vm as unknown as Vm;
       vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      expect(input(w).element.value).toBe("[Element #1] [Element #2]");
+      expect(input(w).element.value).toBe("");
+      expect(badges(w).map((b) => b.text())).toEqual(["section#hero", "h1"]);
     });
 
-    it("sends the full reference text in place of each tag", async () => {
-      const w = await mountPanel();
-      (w.vm as unknown as Vm).insertReference(ref1);
-      await flushPromises();
-      await send(w, `${input(w).element.value} make it shorter`);
-      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} make it shorter`);
-    });
-
-    it("drops a reference whose tag was deleted, and numbers afresh after sending", async () => {
+    it("sends each picked element ahead of the typed text", async () => {
       const w = await mountPanel();
       const vm = w.vm as unknown as Vm;
       vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      await send(w, "[Element #2] only");
-      expect(textOf(messagePosts()[0]!)).toBe(`${ref2} only`);
+      await send(w, "make it shorter");
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} ${ref2} make it shorter`);
+    });
+
+    it("removes a picked element with its badge and clears them after sending", async () => {
+      const w = await mountPanel();
+      const vm = w.vm as unknown as Vm;
+      vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      expect(input(w).element.value).toBe("[Element #1]");
+      await w.findAll("[data-testid='chat-reference-remove']")[1]!.trigger("click");
+      expect(badges(w).map((b) => b.text())).toEqual(["section#hero"]);
+      await send(w, "only the hero");
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} only the hero`);
+      expect(badges(w)).toHaveLength(0);
+      vm.insertReference(ref2);
+      await flushPromises();
+      expect(badges(w).map((b) => b.text())).toEqual(["h1"]);
+    });
+
+    it("sends with only picked elements", async () => {
+      const w = await mountPanel();
+      (w.vm as unknown as Vm).insertReference(ref2);
+      await flushPromises();
+      await send(w, "");
+      expect(textOf(messagePosts()[0]!)).toBe(ref2);
     });
   });
 });

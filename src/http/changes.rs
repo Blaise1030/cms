@@ -228,14 +228,18 @@ pub async fn share(
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
-    let repo = project.repo.ok_or_else(|| {
+    let repo = project.repo.clone().ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
-    let dir = project.dir;
-    let change = changes::get(&dir, &branch).await?;
-    let env = state.github.git_env().await?;
-    changes::push(&dir, &branch, &env).await?;
-
+    let change = changes::get(&project.dir, &branch).await?;
+    if let Some(conflict) = push_after_combining(&state, &project, &branch).await? {
+        return Ok(Json(json!({
+            "branch": change.branch,
+            "title": change.title,
+            "prUrl": null,
+            "conflict": { "branch": branch, "sessionId": conflict.id },
+        })));
+    }
     let pr = match state.github.find_pr(&repo, &branch).await? {
         Some(existing) => existing,
         None => {
@@ -717,13 +721,40 @@ pub async fn status(
     let Some(repo) = project.repo else {
         return Ok(Json(json!({ "pr": null })));
     };
-    let pr = state.github.pr_status(&repo, &branch).await?;
+    let mut pr = state.github.pr_status(&repo, &branch).await?;
+    if let Some(pr) = pr.as_mut() {
+        pr.up_to_date = changes::tip_is(&project.dir, &branch, &pr.head_sha).await;
+    }
     // A PR for other commits belongs to an earlier change that had this name.
     let pr = match pr {
         Some(pr) if changes::pr_matches(&project.dir, &branch, &pr.head_sha).await => Some(pr),
         _ => None,
     };
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// `GET /api/changes/sync?project=` → `{ needed }`. False when Get latest would do nothing:
+/// GitHub's `main` is already contained in local `main`, and every draft contains it.
+/// Unreadable or unreachable GitHub reports true, so the Sync button is never wrongly disabled.
+pub async fn sync(
+    State(state): State<AppState>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    let remote_main = match project.repo.as_deref() {
+        Some(repo) => match state.github.main_head(repo).await {
+            Ok(sha) => Some(sha),
+            Err(_) => return Ok(Json(json!({ "needed": true }))),
+        },
+        None => None,
+    };
+    let needed = changes::needs_latest(&project.dir, remote_main.as_deref()).await;
+    Ok(Json(json!({ "needed": needed })))
 }
 
 /// `POST /api/changes/{branch}/ready` `{ project }` → `{ pr: { number, url, state, checks,
@@ -747,7 +778,8 @@ pub async fn ready(
     let repo = project.repo.ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
-    let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
+    let mut pr = state.github.mark_ready_for_review(&repo, &branch).await?;
+    pr.up_to_date = changes::tip_is(&project.dir, &branch, &pr.head_sha).await;
     Ok(Json(json!({ "pr": pr })))
 }
 
@@ -771,14 +803,19 @@ pub async fn publish(
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
     // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
     let change = changes::get(&project.dir, &branch).await?;
-    let repo = project.repo.ok_or_else(|| {
+    let repo = project.repo.clone().ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
     // Publish the change's latest commits, not an older shared copy.
-    let env = state.github.git_env().await?;
-    changes::push(&project.dir, &branch, &env)
+    if let Some(conflict) = push_after_combining(&state, &project, &branch)
         .await
-        .map_err(|e| publish_step_error(e, true))?;
+        .map_err(|e| publish_step_error(e, true))?
+    {
+        return Ok(Json(json!({
+            "pr": null,
+            "conflict": { "branch": branch, "sessionId": conflict.id },
+        })));
+    }
     let shared = match state
         .github
         .find_pr(&repo, &branch)
@@ -810,6 +847,36 @@ pub async fn publish(
         .await
         .map_err(|e| publish_step_error(e, false))?;
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// Push a change after combining newer commits from its remote copy. A collision opens a
+/// conflict session for the writer's assistant instead of failing the push.
+async fn push_after_combining(
+    state: &AppState,
+    project: &crate::projects::Project,
+    branch: &str,
+) -> Result<Option<changes::conflict_sessions::ConflictSession>, ApiError> {
+    let env = state.github.git_env().await?;
+    // Serialise with Get latest and other pushes on the same repo.
+    let _guard = state.conflict_updates.lock().await;
+    if !state.conflicts.list(&project.id).await.is_empty() {
+        return Err(ApiError::conflict(
+            "Couldn't publish. Finish the open combine first.",
+        ));
+    }
+    let author = state.github.identity().await;
+    match changes::integrate_remote(&project.dir, branch, &env, &author).await? {
+        changes::Integration::Ready => {
+            changes::push(&project.dir, branch, &env).await?;
+            Ok(None)
+        }
+        changes::Integration::Conflict { incoming } => Ok(Some(
+            state
+                .conflicts
+                .start(&project.dir, &project.id, branch, &incoming)
+                .await?,
+        )),
+    }
 }
 
 /// Writer-plain copy for a failed publish step: git/GitHub details never reach the

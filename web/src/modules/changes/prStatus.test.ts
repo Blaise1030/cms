@@ -8,6 +8,9 @@ const base: PrStatus = {
   state: "draft",
   checks: "pending",
   previewUrl: null,
+  mergeable: null,
+  mergeableState: "draft",
+  upToDate: false,
 };
 
 describe("prStatusLabel", () => {

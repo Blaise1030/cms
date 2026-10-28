@@ -26,6 +26,8 @@ import {
   type ConflictSession,
   type ConflictPreviews,
   type SharedChange,
+  type PendingCombine,
+  type PublishResult,
   type PrStatus,
   type Checkpoint,
   type ErrorCode,
@@ -303,6 +305,9 @@ export function createApi(
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
+    /** Whether Get latest would change anything (remote `main`, or a draft behind it). */
+    changesSyncNeeded: async (project: string): Promise<boolean> =>
+      (await json<{ needed: boolean }>("GET", "/api/changes/sync", { query: { project } })).needed,
     listConflicts: async (project: string): Promise<ConflictSession[]> =>
       (await json<{ sessions: ConflictSession[] }>("GET", "/api/changes/conflicts", { query: { project } })).sessions,
     getConflict: (project: string, id: string) =>
@@ -349,13 +354,13 @@ export function createApi(
       ).pr,
 
     /** Publish a change: push it, open + ready its PR if needed, then merge it on GitHub.
-     *  Returns the merged PR's status; the local change stays until it is cleaned up. */
-    publishChange: async (project: string, branch: string): Promise<PrStatus | null> =>
-      (
-        await json<{ pr: PrStatus | null }>("POST", `/api/changes/${enc(branch)}/publish`, {
-          body: { project },
-        })
-      ).pr,
+     *  A colliding remote copy comes back as a combine to finish first. */
+    publishChange: async (project: string, branch: string): Promise<PublishResult> => {
+      const { pr, conflict } = await json<{ pr: PrStatus | null; conflict?: PendingCombine }>(
+        "POST", `/api/changes/${enc(branch)}/publish`, { body: { project } },
+      );
+      return conflict ? { conflict } : pr;
+    },
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))

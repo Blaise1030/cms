@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import SharePreviewButton from "./SharePreviewButton.vue";
 import { useChangesStore } from "./store";
@@ -17,6 +17,9 @@ function mountWith(repo: string | null = "acme/site") {
     state: "open",
     checks: "none",
     previewUrl: null,
+    mergeable: true,
+    mergeableState: "clean",
+    upToDate: false,
   };
   const wrapper = mount(SharePreviewButton, {
     props: { projectId: "site", repo },
@@ -40,5 +43,21 @@ describe("SharePreviewButton", () => {
     expect(wrapper.find('[data-testid="share-publish-group"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="share-preview"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="publish-change"]').exists()).toBe(false);
+  });
+
+  it("hides Update preview once the branch matches the pull request", async () => {
+    const { store, wrapper } = mountWith();
+    store.prUrl = "https://github.com/acme/site/pull/1";
+    store.status = { ...store.status!, upToDate: true };
+    await flushPromises();
+    expect(wrapper.find('[data-testid="share-preview"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="publish-change"]').exists()).toBe(true);
+  });
+
+  it("keeps Update preview while there are local commits to push", async () => {
+    const { store, wrapper } = mountWith();
+    store.prUrl = "https://github.com/acme/site/pull/1";
+    await flushPromises();
+    expect(wrapper.find('[data-testid="share-preview"]').exists()).toBe(true);
   });
 });
