@@ -34,7 +34,7 @@ use crate::state::AppState;
 
 const TITLE_MAX: usize = 72;
 
-fn state_dir(state: &AppState) -> PathBuf {
+pub(crate) fn state_dir(state: &AppState) -> PathBuf {
     state.config.projects_dir.join(STATE_DIR)
 }
 
@@ -107,7 +107,10 @@ fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
 /// ACP argv for `provider_id`: the test/env override first, then the provider
 /// registry (`agents.json` or the built-in defaults). `None` when the provider
 /// has no ACP command.
-fn acp_argv_for(state: &AppState, provider_id: &str) -> Result<Option<Vec<String>>, ApiError> {
+pub(crate) fn acp_argv_for(
+    state: &AppState,
+    provider_id: &str,
+) -> Result<Option<Vec<String>>, ApiError> {
     if let Some(argv) = providers::acp_argv(provider_id) {
         return Ok(Some(argv));
     }
@@ -119,7 +122,7 @@ fn acp_argv_for(state: &AppState, provider_id: &str) -> Result<Option<Vec<String
 }
 
 /// Spawn the chat's ACP process with `session/new` (not a terminal `AgentSession`).
-async fn ensure_agent(
+pub(crate) async fn ensure_agent(
     state: &AppState,
     project: &str,
     chat: &str,

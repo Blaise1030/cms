@@ -581,13 +581,13 @@ impl ChatManager {
         }
     }
 
-    /// Records `text` as the user's chunk and runs it as an ACP prompt.
-    /// The turn's chunks arrive through the event pump.
-    fn dispatch(&self, live: &Arc<LiveChat>, text: &str) {
+    /// Records `shown` (or `text`) as the user's chunk and runs `text` as an
+    /// ACP prompt. The turn's chunks arrive through the event pump.
+    fn dispatch(&self, live: &Arc<LiveChat>, text: &str, shown: Option<&str>) {
         live.running.store(true, Ordering::SeqCst);
         live.record(UiChunk::UserText {
             session_id: live.acp_session_id.clone(),
-            text: text.to_string(),
+            text: shown.unwrap_or(text).to_string(),
         });
         if live.cancel.load(Ordering::SeqCst) {
             let session_id = live.acp_session_id.clone();
@@ -675,7 +675,24 @@ impl ChatManager {
         // A stop latches the chat until the user sends again.
         live.cancel.store(false, Ordering::SeqCst);
         live.client.clear_cancelled();
-        self.dispatch(&live, text);
+        self.dispatch(&live, text, None);
+        Ok(())
+    }
+
+    /// [`send_message`], but the transcript records `shown` instead of `prompt`.
+    /// A sync chat sends the agent its full instructions and shows the writer
+    /// only the plain-language intro.
+    pub async fn send_message_displayed(
+        &self,
+        project_id: &str,
+        chat_id: &str,
+        prompt: &str,
+        shown: &str,
+    ) -> ChatResult<()> {
+        let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
+        live.cancel.store(false, Ordering::SeqCst);
+        live.client.clear_cancelled();
+        self.dispatch(&live, prompt, Some(shown));
         Ok(())
     }
 
@@ -1407,7 +1424,7 @@ mod tests {
         let mut events = chats.inner.events.subscribe();
         let live = chats.live("proj", "chat-1").unwrap();
         live.cancel.store(true, Ordering::SeqCst);
-        chats.dispatch(&live, "nope");
+        chats.dispatch(&live, "nope", None);
         assert_eq!(
             reasons.lock().unwrap().as_slice(),
             [("chat-1".to_string(), "cancelled".to_string())]
@@ -1422,6 +1439,48 @@ mod tests {
             }
         }
         assert!(saw, "cancel latch did not emit chat.turn");
+        chats.shutdown().await;
+    }
+
+    /// A sync chat runs the writer's intro as the prompt: the transcript shows
+    /// only the intro, while the agent receives the full instructions.
+    #[tokio::test]
+    async fn displayed_message_records_shown_text_only() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        chats
+            .send_message_displayed(
+                "proj",
+                "chat-1",
+                "SECRET INSTRUCTIONS",
+                "You and a teammate both changed About.",
+            )
+            .await
+            .unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(|c| matches!(c, UiChunk::TurnEnd { .. }))
+        })
+        .await;
+        let users: Vec<_> = history
+            .iter()
+            .filter_map(|c| match c {
+                UiChunk::UserText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(users, vec!["You and a teammate both changed About."]);
+        assert!(
+            history
+                .iter()
+                .any(|c| matches!(c, UiChunk::TextDelta { text, .. }
+                if text.contains("fake reply: SECRET INSTRUCTIONS"))),
+            "the agent did not receive the prompt: {history:?}"
+        );
         chats.shutdown().await;
     }
 }
