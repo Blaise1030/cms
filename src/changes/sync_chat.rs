@@ -218,6 +218,35 @@ async fn prepare(
     Ok(())
 }
 
+/// Runs `change` on a sync record only while it is live, inside the history
+/// write lock. `None` means there was nothing to change: the record is gone,
+/// is not a sync, or already reached a terminal phase. Checking terminality in
+/// here — not before the call — is what stops a finishing verification from
+/// resurrecting a sync the writer just ended.
+fn update_live(
+    state: &AppState,
+    project: &str,
+    chat: &str,
+    change: impl FnOnce(&mut SessionRecord),
+) -> Result<Option<SessionRecord>, ApiError> {
+    let mut skipped = false;
+    let updated = history::update(&state_dir(state), project, chat, |record| {
+        if !record
+            .sync
+            .as_ref()
+            .is_some_and(|st| !st.phase.is_terminal())
+        {
+            skipped = true;
+            return;
+        }
+        change(record);
+    })?;
+    Ok(match updated {
+        Some(record) if !skipped => Some(record),
+        _ => None,
+    })
+}
+
 /// Ends a sync chat: no running turn, one final status line, and no worktree.
 /// Ending an already-terminal chat is a no-op.
 pub async fn end(
@@ -231,15 +260,12 @@ pub async fn end(
     let Some(record) = history::get(&dir, project, chat) else {
         return Ok(());
     };
-    let Some(st) = record.sync.as_ref() else {
-        return Ok(());
-    };
-    if st.phase.is_terminal() {
+    if record.sync.is_none() {
         return Ok(());
     }
     // The record first, so a turn that ends during cleanup sees a terminal phase.
     let now = history::now_ms();
-    let Some(updated) = history::update(&dir, project, chat, |record| {
+    let Some(updated) = update_live(state, project, chat, |record| {
         if let Some(st) = record.sync.as_mut() {
             st.phase = phase;
             st.ended_at = Some(now);
@@ -304,8 +330,15 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
         note(state, &record, UNEXPECTED);
         return;
     };
-    let Some(checking) = set_phase(state, project, chat, SyncPhase::Checking) else {
-        return;
+    let checking = match set_phase(state, project, chat, SyncPhase::Checking) {
+        Ok(Some(record)) => record,
+        // The record disappeared or ended between the read above and the write:
+        // aborts before touching the worktree `end` may already be removing.
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("orso: cannot check sync chat {chat}: {e}");
+            return;
+        }
     };
     let Some(st) = checking.sync.as_ref() else {
         return;
@@ -329,7 +362,9 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
         Ok(Verdict::Symlink) => note(state, &checking, ONE_FILE),
         // Task 6 builds and lands a clean check; until then it just reopens.
         Ok(Verdict::Pass) => {
-            set_phase(state, project, chat, SyncPhase::Working);
+            if let Err(e) = set_phase(state, project, chat, SyncPhase::Working) {
+                eprintln!("orso: cannot reopen sync chat {chat}: {e}");
+            }
         }
         Err(e) => {
             eprintln!("orso: cannot verify sync chat {chat}: {e}");
@@ -345,18 +380,8 @@ pub fn note(state: &AppState, record: &SessionRecord, text: &str) {
     let Some(project) = project_of(&dir, &record.id) else {
         return;
     };
-    let Some(current) = history::get(&dir, &project, &record.id) else {
-        return;
-    };
-    if current
-        .sync
-        .as_ref()
-        .is_none_or(|st| st.phase.is_terminal())
-    {
-        return;
-    }
     let now = history::now_ms();
-    let updated = history::update(&dir, &project, &record.id, |record| {
+    let updated = update_live(state, &project, &record.id, |record| {
         if let Some(st) = record.sync.as_mut() {
             st.phase = SyncPhase::Working;
         }
@@ -376,24 +401,25 @@ pub fn note(state: &AppState, record: &SessionRecord, text: &str) {
     emit(state, &updated);
 }
 
-/// Moves a sync to `phase` and tells the UI; `None` when its record is gone.
+/// Moves a live sync to `phase` and tells the UI. `Ok(None)` when the record is
+/// gone or already terminal: the write was skipped under the lock.
 fn set_phase(
     state: &AppState,
     project: &str,
     chat: &str,
     phase: SyncPhase,
-) -> Option<SessionRecord> {
+) -> Result<Option<SessionRecord>, ApiError> {
     let now = history::now_ms();
-    let updated = history::update(&state_dir(state), project, chat, |record| {
+    let updated = update_live(state, project, chat, |record| {
         if let Some(st) = record.sync.as_mut() {
             st.phase = phase;
         }
         record.updated_at = now;
-    })
-    .ok()
-    .flatten()?;
-    emit(state, &updated);
-    Some(updated)
+    })?;
+    if let Some(record) = &updated {
+        emit(state, record);
+    }
+    Ok(updated)
 }
 
 /// Removes a sync chat's worktree and its directory. Failures are logged: a
@@ -781,6 +807,68 @@ mod tests {
             ended_at: None,
             repair_attempted: false,
         }
+    }
+
+    fn session_record(id: &str, sync: SyncState) -> SessionRecord {
+        SessionRecord {
+            id: id.into(),
+            provider: "fake".into(),
+            model: None,
+            agent_session_id: None,
+            title: None,
+            created_at: 0,
+            updated_at: 0,
+            kind: RecordKind::Sync,
+            cwd: None,
+            sync: Some(sync),
+        }
+    }
+
+    /// Once the writer ended a sync, a verification that read it a moment
+    /// earlier must not move it back to checking or working, and must not leave
+    /// a status chunk behind. The guard runs under the history write lock, at
+    /// the exact point where an `end` can otherwise interleave.
+    #[tokio::test]
+    async fn terminal_sync_ignores_later_phase_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::with_scaffold_install(
+            crate::config::Config {
+                port: 0,
+                projects_dir: tmp.path().join("projects"),
+                no_auth: true,
+                ..Default::default()
+            },
+            false,
+        );
+        let dir = state_dir(&state);
+        let mut st = record("content/page", "tip", "incoming", &["page.md"]);
+        st.phase = SyncPhase::Ended;
+        st.ended_at = Some(1);
+        history::insert(&dir, "p", session_record("c1", st)).unwrap();
+        let mut events = state.events.subscribe();
+
+        assert!(set_phase(&state, "p", "c1", SyncPhase::Checking)
+            .unwrap()
+            .is_none());
+        note(&state, &history::get(&dir, "p", "c1").unwrap(), AGENT_MOVED);
+
+        let got = history::get(&dir, "p", "c1").unwrap();
+        let got = got.sync.unwrap();
+        assert_eq!(got.phase, SyncPhase::Ended);
+        assert_eq!(got.ended_at, Some(1));
+        assert_eq!(
+            history::get(&dir, "p", "c1").unwrap().updated_at,
+            0,
+            "the skipped write must not touch the record"
+        );
+        assert!(
+            state.chats.history("p", "c1").is_empty(),
+            "the skipped note must not append a status chunk"
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "no sync.changed for a skipped write"
+        );
     }
 
     /// A sync state whose `branch` is the fixture's current HEAD — the draft it started from.
