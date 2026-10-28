@@ -280,6 +280,9 @@ export interface ChatSummary {
   running: boolean;
 }
 
+/** Where a sync chat is; mirrors the backend `SyncPhase`. */
+export type SyncPhase = "working" | "checking" | "combined" | "ended" | "expired";
+
 /** One line of a chat transcript, as `GET /api/chat/{project}/{chat}` returns it. */
 export type UiChunk =
   | { type: "text_delta"; session_id: string; text: string }
@@ -304,7 +307,8 @@ export type UiChunk =
       summary?: string | null;
       files: string[];
       blocked?: string | null;
-    };
+    }
+  | { type: "sync_status"; phase: SyncPhase; text: string };
 
 /** `GET /api/chat/{project}/{chat}`. */
 export interface ChatHistory {

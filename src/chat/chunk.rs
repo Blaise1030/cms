@@ -1,8 +1,8 @@
 //! Tabsh-shaped chat chunks and their SSE framing.
 //!
 //! One flat object per transcript line / SSE `data:` payload, discriminated
-//! by `type` (snake_case). CMS adds `checkpoint`; `blocked` is the reason a
-//! commit did not happen, not a boolean.
+//! by `type` (snake_case). CMS adds `checkpoint` and `sync_status`; `blocked`
+//! is the reason a commit did not happen, not a boolean.
 
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,8 @@ pub enum UiChunk {
     },
     /// A spawn, auth, or protocol failure.
     Error { message: String },
+    /// A CMS-authored sync stage line; `text` is already writer-facing.
+    SyncStatus { phase: String, text: String },
     /// CMS checkpoint after a turn. `blocked` is why the commit did not happen.
     Checkpoint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,6 +116,22 @@ mod tests {
             "blocked": true
         }))
         .is_err());
+    }
+
+    #[test]
+    fn sync_status_round_trips() {
+        let c = UiChunk::SyncStatus {
+            phase: "working".into(),
+            text: "Reading your pages…".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&c).unwrap(),
+            json!({"type": "sync_status", "phase": "working", "text": "Reading your pages…"})
+        );
+        assert_eq!(
+            serde_json::from_value::<UiChunk>(serde_json::to_value(&c).unwrap()).unwrap(),
+            c
+        );
     }
 
     #[test]
