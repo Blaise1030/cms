@@ -67,6 +67,8 @@ Copy is canonical:
 | Stages | "Reading your pages…", "Comparing the two versions…", "Checking the site still works…" |
 | Combined | "Done. Your changes and the latest site are combined." |
 | Decision needed | "{n} pages still need a decision." |
+| One file left | "One file still needs another look." |
+| Unexpected failure | "I couldn't finish combining. Nothing changed." |
 | Build failed once | "The site didn't work after those changes. I'll try once more." |
 | Build failed twice | "I couldn't get your site working again. Nothing changed." |
 | Draft moved | "Your draft changed while combining. Get latest again." |
@@ -128,6 +130,10 @@ pub sync: Option<SyncState>,   // sync only
 ```rust
 pub struct SyncState {
     pub conflict_session_id: String,
+    pub branch: String,
+    pub tip: String,
+    pub incoming: String,
+    pub files: Vec<String>,
     pub phase: SyncPhase,      // working | checking | combined | ended | expired
     pub started_at: u64,
     pub ended_at: Option<u64>,
@@ -135,15 +141,19 @@ pub struct SyncState {
 }
 ```
 
+The branch, tip, incoming, and file list are copied from the conflict session at
+start, so a sync can verify and land after a restart even though conflict
+sessions themselves are in-memory and do not survive one.
+
 On disk:
 
 - Worktree: `{state_dir}/sync/{chatId}/site` — durable across daemon restarts.
 - Build/turn logs: `{state_dir}/sync-logs/{chatId}.log` (unchanged naming,
   chat id instead of conflict-session id).
 
-Provider and model come from the project's configured assistant. There is no
-picker; if none is configured the sync starts and ends immediately with the
-"assistant isn't available" copy.
+Provider and model come from the project's configured assistant (the same pick
+the chat panel uses). There is no picker; if none is configured, no sync chat is
+created and the writer sees "Your assistant isn't available."
 
 ## Verification
 
@@ -179,7 +189,7 @@ read-only. They differ only in copy and in the conflict session's fate:
 | --- | --- | --- |
 | `combined` | build + land passed | abandoned (done) |
 | `ended` | **End sync**, hard failure, draft moved, second build failure, delete of the chat | kept, so "Pick the changes myself" and a fresh sync still work |
-| `expired` | the 1-hour conflict-session TTL | already expiring |
+| `expired` | the sync's own 1-hour TTL (the conflict session may already be gone) | expiring |
 
 The final transcript line carries **Pick the changes myself** and **Combine
 again**. Ending a sync is not abandoning the conflict.
