@@ -22,10 +22,21 @@ function pushConflictingMain(tmp: string, bareRemote: string, file = "index.html
   return git(pusher, ["rev-parse", "HEAD"]);
 }
 
-/** The agent gives up, so the writer picks each file by hand from the dialog's Advanced link. */
-async function openAdvanced(page: Page) {
-  await expect(page.getByTestId("sync-failed")).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId("sync-advanced").click();
+/** The agent leaves every collision in place, so the writer ends the combine and picks by hand. */
+async function endAndPick(page: Page) {
+  const panel = page.getByTestId("chat-panel");
+  await expect(panel).toBeVisible({ timeout: 60_000 });
+  await expect(panel.getByTestId("sync-status").last()).toHaveText("1 page still needs a decision.", { timeout: 60_000 });
+  await page.getByTestId("sync-end").click();
+  await expect(page.getByTestId("sync-pick")).toBeVisible();
+  await page.getByTestId("sync-pick").click();
+  await expect(page.getByTestId("conflict-view")).toBeVisible();
+}
+
+/** After a reload the combine is already ended; its chat still offers the manual route. */
+async function pickFromEndedChat(page: Page) {
+  await expect(page.getByTestId("sync-pick")).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId("sync-pick").click();
   await expect(page.getByTestId("conflict-view")).toBeVisible();
 }
 
@@ -57,14 +68,14 @@ test("writer resolves a conflicting page with a visible file choice", async ({ p
   const latest = pushConflictingMain(tmp, bareRemote, hero);
 
   await page.getByTestId("get-latest").click();
-  await openAdvanced(page);
+  await endAndPick(page);
   await expect(page.getByTestId("conflict-file")).toContainText("hero.mdx");
   await expect(page.frameLocator('iframe[title="yours preview"]').locator("h1")).toHaveText("Your headline");
   await expect(page.frameLocator('iframe[title="latest preview"]').locator("h1")).toHaveText("Latest headline");
   await expect(page.frameLocator('iframe[title="yours preview"]').locator("section#hero")).toHaveCSS("outline-style", "solid");
   await expect(page.getByTestId("finish-conflict")).toBeDisabled();
   await page.reload();
-  await openAdvanced(page);
+  await pickFromEndedChat(page);
   await page.getByTestId("keep-yours").click();
   await expect(page.frameLocator('iframe[title="result preview"]').locator("h1")).toHaveText("Your headline");
   await expect(page.getByTestId("finish-conflict")).toBeEnabled();
@@ -87,7 +98,7 @@ test("writer can abandon a conflict without moving the branch", async ({ page, o
   const before = git(projectDir, ["rev-parse", "HEAD"]);
   pushConflictingMain(tmp, bareRemote);
   await page.getByTestId("get-latest").click();
-  await openAdvanced(page);
+  await endAndPick(page);
   await page.getByTestId("abandon-conflict").click();
   await page.getByTestId("confirm-abandon").click();
   await expect(page.getByTestId("conflict-view")).toHaveCount(0);
@@ -109,7 +120,7 @@ test("writer resolves a deleted-versus-edited page by choosing a side", async ({
   git(projectDir, ["commit", "-m", "remove home"]);
   pushConflictingMain(tmp, bareRemote);
   await page.getByTestId("get-latest").click();
-  await openAdvanced(page);
+  await endAndPick(page);
   await expect(page.getByTestId("conflict-file")).toContainText("index.html");
   await expect(page.getByTestId("keep-yours")).toHaveText("Keep your deletion");
   await expect(page.getByTestId("keep-both")).toBeDisabled();

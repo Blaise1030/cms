@@ -191,7 +191,6 @@ export async function startorso(): Promise<orsoEnv> {
 
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
-  const resolver = path.join(root, "tests/fixtures/fake_resolver.sh");
   const acp = fakeAcpPath(root);
   fs.writeFileSync(
     agents,
@@ -200,8 +199,14 @@ export async function startorso(): Promise<orsoEnv> {
         command: ["python3", acp, "edit"],
         acp: ["python3", acp, "edit"],
       },
-      "fake-resolver": ["sh", resolver, "needs-input"],
-      "fake-garbage": ["sh", resolver, "garbage"],
+      "fake-sync": {
+        command: ["python3", acp, "sync"],
+        acp: ["python3", acp, "sync"],
+      },
+      "fake-garbage": {
+        command: ["python3", acp, "garbage"],
+        acp: ["python3", acp, "garbage"],
+      },
       cursor: {
         command: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
         acp: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
