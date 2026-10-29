@@ -6,7 +6,6 @@ use tokio::sync::Mutex;
 
 use serde_json::json;
 
-use crate::changes::auto_resolve::{AutoResolveJobs, Timeouts};
 use crate::changes::conflict_sessions::ConflictSessions;
 use crate::chat::manager::ChatManager;
 use crate::config::Config;
@@ -39,8 +38,6 @@ pub struct AppState {
     /// Proposed conflict resolutions; never mutates a branch until Finish.
     pub conflicts: Arc<ConflictSessions>,
     pub conflict_previews: Arc<ConflictPreviewManager>,
-    /// Headless agent runs that resolve a conflict session in a temp worktree.
-    pub auto_resolve: Arc<AutoResolveJobs>,
     /// Serializes Get latest through session creation as one operation.
     pub conflict_updates: Arc<Mutex<()>>,
     /// Projects whose Get latest skipped the checked-out change while an agent was live.
@@ -147,7 +144,6 @@ impl AppState {
             preview: preview::new_client(),
             conflicts: Arc::new(ConflictSessions::new()),
             conflict_previews: Arc::new(ConflictPreviewManager::new()),
-            auto_resolve: Arc::new(AutoResolveJobs::new(Timeouts::default())),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
         };

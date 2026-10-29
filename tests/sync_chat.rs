@@ -181,10 +181,48 @@ impl SyncSetup {
         self.state.chats.history(&self.project, chat)
     }
 
+    fn url(&self, suffix: &str) -> String {
+        format!("/api/changes/conflicts/{}/sync{suffix}", self.session)
+    }
+
+    /// Start a sync through the route the web client uses.
+    async fn start_with(&self, provider: &str) -> (StatusCode, Value) {
+        call(
+            &http::router(self.state.clone()),
+            "POST",
+            &self.url(""),
+            Some(json!({ "project": self.project, "provider": provider })),
+        )
+        .await
+    }
+
     async fn start(&self) -> String {
-        sync_chat::start(&self.state, &self.project, &self.session, "fake-ok")
-            .await
-            .unwrap()
+        let (status, body) = self.start_with("fake-ok").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["chatId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no chatId: {body}"))
+            .to_string()
+    }
+
+    async fn get_sync(&self, project: &str) -> (StatusCode, Value) {
+        call(
+            &http::router(self.state.clone()),
+            "GET",
+            &format!("{}?project={project}", self.url("")),
+            None,
+        )
+        .await
+    }
+
+    async fn post_end(&self, chat: &str, project: &str) -> (StatusCode, Value) {
+        call(
+            &http::router(self.state.clone()),
+            "POST",
+            &self.url(&format!("/{chat}/end")),
+            Some(json!({ "project": project })),
+        )
+        .await
     }
 
     /// A fake provider whose agent runs `body` in the worktree before replying.
@@ -391,12 +429,11 @@ async fn start_creates_worktree_record_and_intro() {
 async fn a_second_sync_for_the_same_project_is_refused() {
     let h = SyncSetup::new().await;
     let _chat = h.start().await;
-    let err = sync_chat::start(&h.state, &h.project, &h.session, "fake-ok")
-        .await
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Conflict);
-    assert_eq!(err.message, "Combining is in progress.");
-    assert_plain(&err.message);
+    let (status, body) = h.start_with("fake-ok").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert_eq!(message, "Combining is in progress.");
+    assert_plain(message);
     let syncs = history::list(&h.state_dir(), &h.project)
         .into_iter()
         .filter(|r| r.kind == RecordKind::Sync)
@@ -409,12 +446,11 @@ async fn a_second_sync_for_the_same_project_is_refused() {
 #[tokio::test]
 async fn an_unknown_provider_is_a_bad_request() {
     let h = SyncSetup::new().await;
-    let err = sync_chat::start(&h.state, &h.project, &h.session, "nope")
-        .await
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Badreq);
-    assert_eq!(err.message, "unknown provider: nope");
-    assert_plain(&err.message);
+    let (status, body) = h.start_with("nope").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert_eq!(message, "unknown provider: nope");
+    assert_plain(message);
     assert!(history::list(&h.state_dir(), &h.project).is_empty());
     assert!(sync_chat::active_for_project(&h.state, &h.project).is_none());
 }
@@ -424,16 +460,179 @@ async fn an_unknown_provider_is_a_bad_request() {
 #[tokio::test]
 async fn a_missing_session_returns_plain_copy() {
     let h = SyncSetup::new().await;
-    let err = sync_chat::start(&h.state, &h.project, "no-such-session", "fake-ok")
-        .await
-        .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Enoent);
-    assert_eq!(err.message, sync_chat::UNEXPECTED);
-    assert_plain(&err.message);
+    let (status, body) = call(
+        &http::router(h.state.clone()),
+        "POST",
+        "/api/changes/conflicts/no-such-session/sync",
+        Some(json!({ "project": h.project, "provider": "fake-ok" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert_eq!(message, sync_chat::UNEXPECTED);
+    assert_plain(message);
     assert!(history::list(&h.state_dir(), &h.project).is_empty());
     assert!(!h.state_dir().join("sync").exists());
 }
 
+/// The wire shape the client gets when it starts a sync: one chat id and one
+/// `sync.changed` for the new working chat.
+#[tokio::test]
+async fn http_start_returns_a_chat_id() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-http", "sleep 2\n");
+    let mut events = h.state.events.subscribe();
+
+    let (status, body) = h.start_with("fake-slow-http").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.as_object().map(|o| o.len()), Some(1), "{body}");
+    let chat = body["chatId"].as_str().unwrap_or_else(|| panic!("{body}"));
+
+    let rec = history::get(&h.state_dir(), &h.project, chat).unwrap();
+    assert_eq!(rec.kind, RecordKind::Sync);
+    assert_eq!(rec.sync.unwrap().phase, SyncPhase::Working);
+
+    let mut changed = Vec::new();
+    while let Ok(frame) = events.try_recv() {
+        let event: Value = serde_json::from_str(&frame).unwrap();
+        if event["type"] == "sync.changed" {
+            changed.push(event);
+        }
+    }
+    assert_eq!(changed.len(), 1, "{changed:?}");
+    let event = &changed[0];
+    assert_eq!(event["projectId"].as_str(), Some(h.project.as_str()));
+    assert_eq!(
+        event["conflictSessionId"].as_str(),
+        Some(h.session.as_str())
+    );
+    assert_eq!(event["chatId"].as_str(), Some(chat));
+    assert_eq!(event["phase"].as_str(), Some("working"));
+    h.state.chats.shutdown().await;
+}
+
+/// `GET …/sync` reports the active chat and phase for its own project only.
+#[tokio::test]
+async fn http_sync_status_is_scoped_to_the_project() {
+    let h = SyncSetup::new().await;
+    let (status, body) = h.get_sync(&h.project).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    h.provider("fake-slow-status", "sleep 2\n");
+    let (status, body) = h.start_with("fake-slow-status").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chat = body["chatId"].as_str().unwrap().to_string();
+    let (status, body) = h.get_sync(&h.project).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "chatId": chat, "phase": "working" }));
+
+    let other = h.state.projects.create("Other").await.unwrap();
+    let (status, body) = h.get_sync(&other.id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_plain(body["error"]["message"].as_str().unwrap_or(""));
+
+    let (status, body) = h.get_sync("no-such-project").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, body) = h.post_end(&chat, &h.project).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, body) = h.get_sync(&h.project).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    h.state.chats.shutdown().await;
+}
+
+/// Ending checks both the project and the conflict session named in the record,
+/// so neither another project nor another session can end this chat.
+#[tokio::test]
+async fn http_end_requires_the_project_and_session() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-end-http", "sleep 2\n");
+    let (status, body) = h.start_with("fake-slow-end-http").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chat = body["chatId"].as_str().unwrap().to_string();
+
+    let other = h.state.projects.create("Other").await.unwrap();
+    let (status, body) = h.post_end(&chat, &other.id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, body) = call(
+        &http::router(h.state.clone()),
+        "POST",
+        &format!("/api/changes/conflicts/some-other-session/sync/{chat}/end"),
+        Some(json!({ "project": h.project })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_plain(body["error"]["message"].as_str().unwrap_or(""));
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Working, "a refused end leaves it live");
+    assert!(h.site(&chat).is_dir());
+
+    let (status, body) = h.post_end(&chat, &h.project).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    h.state.chats.shutdown().await;
+}
+
+/// The old headless job's routes are gone.
+#[tokio::test]
+async fn http_auto_route_is_gone() {
+    let h = SyncSetup::new().await;
+    let app = http::router(h.state.clone());
+    let uri = format!(
+        "/api/changes/conflicts/{}/auto?project={}",
+        h.session, h.project
+    );
+    let (status, body) = call(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let uri = format!("/api/changes/conflicts/{}/auto", h.session);
+    let (status, body) = call(
+        &app,
+        "POST",
+        &uri,
+        Some(json!({ "project": h.project, "provider": "fake-ok" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+/// Manual choices, Finish and Abandon still refuse while a combine is live.
+#[tokio::test]
+async fn http_finish_choice_abandon_blocked_while_combining() {
+    let h = SyncSetup::new().await;
+    h.provider("fake-slow-block", "sleep 5\n");
+    let (status, body) = h.start_with("fake-slow-block").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let app = http::router(h.state.clone());
+    let project = json!({ "project": h.project });
+    for (suffix, body) in [
+        ("/finish", project.clone()),
+        (
+            "/choice",
+            json!({ "project": h.project, "path": "page.md", "choice": "yours" }),
+        ),
+        ("/abandon", project),
+    ] {
+        let uri = format!("/api/changes/conflicts/{}{suffix}", h.session);
+        let (status, body) = call(&app, "POST", &uri, Some(body)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        let message = body["error"]["message"].as_str().unwrap();
+        assert_eq!(message, "Combining is in progress.");
+        assert_plain(message);
+    }
+    h.state.chats.shutdown().await;
+}
+
+/// Ending through the route marks the chat and removes its worktree.
 #[tokio::test]
 async fn end_marks_the_chat_and_removes_the_worktree() {
     let h = SyncSetup::new().await;
@@ -443,15 +642,8 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
     assert!(h.state.chats.is_live(&h.project, &chat));
     let events = h.state.events.subscribe();
 
-    sync_chat::end(
-        &h.state,
-        &h.project,
-        &chat,
-        SyncPhase::Ended,
-        sync_chat::UNAVAILABLE,
-    )
-    .await
-    .unwrap();
+    let (status, body) = h.post_end(&chat, &h.project).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
     let rec = history::get(&h.state_dir(), &h.project, &chat).unwrap();
     let st = rec.sync.unwrap();
@@ -468,7 +660,7 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
         chunks
             .iter()
             .any(|c| matches!(c, UiChunk::SyncStatus { phase, text }
-            if phase == "ended" && text == sync_chat::UNAVAILABLE)),
+            if phase == "ended" && text == sync_chat::ENDED)),
         "{chunks:?}"
     );
 
@@ -478,15 +670,8 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
     assert_eq!(event["phase"].as_str(), Some("ended"));
 
     // Ending twice is a no-op: one status line, phase unchanged.
-    sync_chat::end(
-        &h.state,
-        &h.project,
-        &chat,
-        SyncPhase::Ended,
-        sync_chat::UNAVAILABLE,
-    )
-    .await
-    .unwrap();
+    let (status, body) = h.post_end(&chat, &h.project).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     let statuses = h
         .chunks(&chat)
         .into_iter()
@@ -501,22 +686,15 @@ async fn end_marks_the_chat_and_removes_the_worktree() {
 async fn end_cancels_forgets_and_removes() {
     let h = SyncSetup::new().await;
     h.provider("fake-slow-end", "sleep 5\n");
-    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-slow-end")
-        .await
-        .unwrap();
+    let (status, body) = h.start_with("fake-slow-end").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chat = body["chatId"].as_str().unwrap().to_string();
     assert!(h.site(&chat).is_dir());
     assert!(h.state.chats.is_live(&h.project, &chat));
     assert!(h.state.chats.is_running(&h.project, &chat));
 
-    sync_chat::end(
-        &h.state,
-        &h.project,
-        &chat,
-        SyncPhase::Ended,
-        sync_chat::ENDED,
-    )
-    .await
-    .unwrap();
+    let (status, body) = h.post_end(&chat, &h.project).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
     let st = history::get(&h.state_dir(), &h.project, &chat)
         .unwrap()
@@ -538,9 +716,9 @@ async fn end_cancels_forgets_and_removes() {
 async fn deleting_a_sync_chat_ends_it() {
     let h = SyncSetup::new().await;
     h.provider("fake-slow-delete", "sleep 5\n");
-    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-slow-delete")
-        .await
-        .unwrap();
+    let (status, body) = h.start_with("fake-slow-delete").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chat = body["chatId"].as_str().unwrap().to_string();
     assert!(h.state.chats.is_running(&h.project, &chat));
 
     let app = http::router(h.state.clone());
@@ -1038,6 +1216,30 @@ async fn resolved_turn_builds_and_lands() {
             if phase == "combined" && text == sync_chat::DONE),
         "{chunks:?}"
     );
+    h.state.chats.shutdown().await;
+}
+
+/// The dependencies link lets the site build, but it must never enter the
+/// combine's result: only the conflicted page and its resolution are saved.
+#[tokio::test]
+async fn merge_commit_excludes_node_modules_link() {
+    let h = SyncSetup::new().await;
+    std::fs::create_dir(h.dir.join("node_modules")).unwrap();
+    std::fs::write(h.dir.join("node_modules/x.js"), "<<<<<<< x\n").unwrap();
+    h.provider(
+        "fake-resolve-deps",
+        "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-deps")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+
+    let tree = git(&h.dir, &["ls-tree", "-r", "--name-only", "content/page"]);
+    assert!(!tree.contains("node_modules"), "{tree}");
+    assert!(tree.contains("page.md"), "{tree}");
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "latest");
     h.state.chats.shutdown().await;
 }
 

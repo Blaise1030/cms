@@ -148,16 +148,12 @@ pub fn router(state: AppState) -> Router {
             post(changes::abandon_conflict),
         )
         .route(
-            "/api/changes/conflicts/{id}/auto",
-            get(changes::auto_status).post(changes::start_auto),
+            "/api/changes/conflicts/{id}/sync",
+            get(changes::sync_status).post(changes::start_sync),
         )
         .route(
-            "/api/changes/conflicts/{id}/auto/answers",
-            post(changes::answer_auto),
-        )
-        .route(
-            "/api/changes/conflicts/{id}/auto/cancel",
-            post(changes::cancel_auto),
+            "/api/changes/conflicts/{id}/sync/{chat}/end",
+            post(changes::end_sync),
         )
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
