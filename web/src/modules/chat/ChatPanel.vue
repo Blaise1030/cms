@@ -171,6 +171,12 @@ const activeSummary = computed(() => chats.value.find((c) => c.id === activeId.v
 const isSync = computed(() => activeSummary.value?.kind === "sync");
 const syncPhase = computed(() => activeSummary.value?.sync?.phase ?? null);
 const syncTerminal = computed(() => syncIsTerminal(syncPhase.value));
+/** A successful combine abandoned its conflict session, so neither terminal
+ * action can work: the chat is read-only and done. They remain for `ended` and
+ * `expired`, where the session still exists. */
+const syncFinalActions = computed(
+  () => isSync.value && (syncPhase.value === "ended" || syncPhase.value === "expired"),
+);
 /** A finished sync chat is final: its transcript must not be followed or reconnected. */
 const syncFinished = computed(() => isSync.value && syncTerminal.value);
 /** The combine this chat is doing; the chat summary is the source of truth for every action. */
@@ -714,7 +720,7 @@ defineExpose({ insert, insertReference, send, busy });
           </div>
         </CardContent>
       </Card>
-      <div v-if="isSync && syncTerminal" data-testid="sync-final" class="flex flex-col gap-2">
+      <div v-if="syncFinalActions" data-testid="sync-final" class="flex flex-col gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -733,7 +739,7 @@ defineExpose({ insert, insertReference, send, busy });
         </Button>
       </div>
       <ChatComposer
-        v-else
+        v-if="!syncTerminal"
         ref="composer"
         v-model="input"
         v-model:provider="provider"

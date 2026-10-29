@@ -428,6 +428,12 @@ pub fn on_turn_end(state: &AppState, ended: &TurnEnded) {
     if ended.stop_reason != "end_turn" {
         return;
     }
+    // Take `checking` synchronously, before spawning: `post_message` refuses a
+    // `checking` chat, so the composer is locked for the whole wait on the
+    // process-wide advance lock, including behind another project's slow build.
+    if begin_check(state, &ended.project_id, &ended.chat_id).is_none() {
+        return;
+    }
     let state = state.clone();
     let project = ended.project_id.clone();
     let chat = ended.chat_id.clone();
@@ -437,6 +443,41 @@ pub fn on_turn_end(state: &AppState, ended: &TurnEnded) {
     });
 }
 
+/// Moves a `working` sync to `checking` at the turn end, before verification
+/// queues for [`advance_lock`]. The phase write and the turn end are one step:
+/// a message posted at the boundary is refused instead of killing a turn that
+/// the later build would verify around. `None` means the sync is gone, ended, or
+/// no longer `working`, and must not be advanced.
+fn begin_check(state: &AppState, project: &str, chat: &str) -> Option<SessionRecord> {
+    let now = history::now_ms();
+    let mut refused = false;
+    let updated = update_live(state, project, chat, |record| {
+        if record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase != SyncPhase::Working)
+        {
+            refused = true;
+            return;
+        }
+        if let Some(st) = record.sync.as_mut() {
+            st.phase = SyncPhase::Checking;
+        }
+        record.updated_at = now;
+    });
+    match updated {
+        Ok(Some(record)) if !refused => {
+            emit(state, &record);
+            Some(record)
+        }
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("orso: cannot check sync chat {chat}: {e}");
+            None
+        }
+    }
+}
+
 /// Verifies the agent's work after a turn. A failed check posts one plain line
 /// and returns to `working`; a moved draft ends the sync.
 pub async fn advance(state: &AppState, project: &str, chat: &str) {
@@ -444,28 +485,22 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
     let Some(record) = history::get(&dir, project, chat) else {
         return;
     };
-    let active = record.kind == RecordKind::Sync
-        && record
-            .sync
-            .as_ref()
-            .is_some_and(|st| !st.phase.is_terminal());
-    if !active {
+    // [`on_turn_end`] set `checking` before spawning this task, so only a sync
+    // still in that phase is this check's to run. A `working` record was not
+    // handed here by a turn end (or ended while the task waited), and verifying
+    // it would race the writer.
+    let checking_phase = record
+        .sync
+        .as_ref()
+        .is_some_and(|st| st.phase == SyncPhase::Checking);
+    if !is_active(&record) || !checking_phase {
         return;
     }
     let Some(site) = record.cwd.clone() else {
         fail(state, project, chat, UNEXPECTED).await;
         return;
     };
-    let checking = match set_phase(state, project, chat, SyncPhase::Checking) {
-        Ok(Some(record)) => record,
-        // The record disappeared or ended between the read above and the write:
-        // aborts before touching the worktree `end` may already be removing.
-        Ok(None) => return,
-        Err(e) => {
-            eprintln!("orso: cannot check sync chat {chat}: {e}");
-            return;
-        }
-    };
+    let checking = record;
     let Some(st) = checking.sync.clone() else {
         return;
     };
@@ -502,14 +537,18 @@ pub async fn advance(state: &AppState, project: &str, chat: &str) {
             }
             match commit_and_land(state, &project_dir, &site, &fresh).await {
                 Ok(()) => combined(state, &fresh),
+                // Ended, deleted, or expired while git built the commit. The
+                // check inside `land` refused to move the draft, and the record
+                // already says why; there is nothing left to add.
+                Err(LandError::Stale) => {}
                 // Only a moved (or busy) draft refuses the land; a hard failure
                 // leaves the worktree and the conversation in place.
-                Err(e) if e.code == ErrorCode::Conflict => {
+                Err(LandError::Moved(_)) => {
                     if let Err(e) = end(state, project, chat, SyncPhase::Ended, DRAFT_MOVED).await {
                         eprintln!("orso: cannot end sync chat {chat}: {e}");
                     }
                 }
-                Err(e) => {
+                Err(LandError::Failed(e)) => {
                     eprintln!("orso: cannot land sync chat {chat}: {e}");
                     fail(state, project, chat, UNEXPECTED).await;
                 }
@@ -580,6 +619,13 @@ async fn repair(state: &AppState, project: &str, chat: &str) {
         .as_ref()
         .is_some_and(|st| st.phase == SyncPhase::Working)
     {
+        return;
+    }
+    // Reopening the chat for `working` lets `post_message` start a turn at the
+    // same moment. Never dispatch the hidden prompt on top of one: the two
+    // prompts would interleave and a build could report a false failure.
+    if state.chats.is_running(project, chat) {
+        eprintln!("orso: sync chat {chat} is mid-turn; leaving the repair prompt unsent");
         return;
     }
     let prompt = repair_prompt(&build_log_tail(state, chat).await);
@@ -701,17 +747,34 @@ pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), Build
     }
 }
 
+/// Why [`land`] did not move the draft.
+#[derive(Debug)]
+pub enum LandError {
+    /// The sync ended — or its record vanished or its tip moved — while git was
+    /// building the commit. The draft did not move and the record keeps the
+    /// terminal copy it was given; `advance` exits quietly.
+    Stale,
+    /// The draft is no longer where the sync started; it ends with `DRAFT_MOVED`.
+    Moved(ApiError),
+    /// Any other failure; the conversation stays open.
+    Failed(ApiError),
+}
+
 /// The worktree's staged tree, committed with both sides, then landed on the draft.
 async fn commit_and_land(
     state: &AppState,
     project_dir: &Path,
     site: &Path,
     record: &SessionRecord,
-) -> Result<(), ApiError> {
+) -> Result<(), LandError> {
     let Some(st) = record.sync.as_ref() else {
-        return Err(ApiError::git("the sync record has no state"));
+        return Err(LandError::Failed(ApiError::git(
+            "the sync record has no state",
+        )));
     };
-    let tree = conflicts::text(site, &["write-tree"]).await?;
+    let tree = conflicts::text(site, &["write-tree"])
+        .await
+        .map_err(LandError::Failed)?;
     let author = state.github.identity().await;
     let commit = conflicts::merge_commit(
         project_dir,
@@ -721,23 +784,52 @@ async fn commit_and_land(
         &author,
         "Sync with live site",
     )
-    .await?;
+    .await
+    .map_err(LandError::Failed)?;
     land(state, record, &commit).await
 }
 
 /// Moves the draft branch to `commit`, only while its tip is still the sync's.
 /// This is the one place a sync moves the draft, and it runs under the project's
 /// git lock; `advance` already holds the process-wide sync lock, never the reverse.
-pub async fn land(state: &AppState, record: &SessionRecord, commit: &str) -> Result<(), ApiError> {
+///
+/// The record is read again inside the lock: `commit_and_land` runs `write-tree`
+/// and `merge_commit` first, and an End, delete, or expiry during that window
+/// makes the sync terminal and removes its worktree. Landing then would move the
+/// draft after telling the writer nothing changed, so it is refused here.
+pub async fn land(state: &AppState, record: &SessionRecord, commit: &str) -> Result<(), LandError> {
     let Some(st) = record.sync.as_ref() else {
-        return Err(ApiError::git("the sync record has no state"));
+        return Err(LandError::Failed(ApiError::git(
+            "the sync record has no state",
+        )));
     };
-    let project = project_of(&state_dir(state), &record.id)
-        .ok_or_else(|| ApiError::enoent(format!("no such chat: {}", record.id)))?;
-    let project_dir = crate::http::project_dir(state, &project).await?;
+    let project = project_of(&state_dir(state), &record.id).ok_or_else(|| {
+        LandError::Failed(ApiError::enoent(format!("no such chat: {}", record.id)))
+    })?;
+    let project_dir = crate::http::project_dir(state, &project)
+        .await
+        .map_err(LandError::Failed)?;
     let lock = git::lock_for(&project_dir);
     let _guard = lock.lock().await;
-    conflicts::advance_branch(&project_dir, &st.branch, &st.tip, commit).await
+    let dir = state_dir(state);
+    let Some(live) = history::get(&dir, &project, &record.id) else {
+        return Err(LandError::Stale);
+    };
+    let Some(live_st) = live.sync.as_ref() else {
+        return Err(LandError::Stale);
+    };
+    if !is_active(&live) || live_st.tip != st.tip {
+        return Err(LandError::Stale);
+    }
+    conflicts::advance_branch(&project_dir, &live_st.branch, &live_st.tip, commit)
+        .await
+        .map_err(|e| {
+            if e.code == ErrorCode::Conflict {
+                LandError::Moved(e)
+            } else {
+                LandError::Failed(e)
+            }
+        })
 }
 
 /// Finishes a landed sync: its conflict session and previews are done, then the
@@ -1456,6 +1548,136 @@ mod tests {
     fn state(dir: &Path, branch: &str, tip: &str, incoming: &str, files: &[&str]) -> SyncState {
         sh(dir, &["branch", "-f", branch, "HEAD"]);
         record(branch, tip, incoming, files)
+    }
+
+    fn scaffold_state(tmp: &Path) -> AppState {
+        AppState::with_scaffold_install(
+            crate::config::Config {
+                port: 0,
+                projects_dir: tmp.join("projects"),
+                no_auth: true,
+                ..Default::default()
+            },
+            false,
+        )
+    }
+
+    /// The composer must be locked for the whole wait, not only once the build
+    /// starts. With another project's slow build holding the process-wide lock,
+    /// a turn end still flips its sync to `checking`, and a message posted then
+    /// is refused instead of starting a turn the queued verification would build
+    /// around and then kill.
+    #[tokio::test]
+    async fn turn_end_locks_the_composer_before_waiting_for_the_check_lock() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let state = scaffold_state(tmp.path());
+        let project = state.projects.create("Site").await.unwrap().id;
+        let dir = state_dir(&state);
+        let mut st = record("content/page", "tip", "incoming", &["page.md"]);
+        st.phase = SyncPhase::Working;
+        history::insert(&dir, &project, session_record("c1", st)).unwrap();
+
+        // Another project's verification is building, so it holds the lock.
+        let held = advance_lock().lock().await;
+
+        on_turn_end(
+            &state,
+            &TurnEnded {
+                project_id: project.clone(),
+                chat_id: "c1".into(),
+                session_id: "s".into(),
+                stop_reason: "end_turn".into(),
+                summary: None,
+                cwd: tmp.path().to_path_buf(),
+            },
+        );
+
+        // The hook itself wrote `checking`; its task has not reached the lock.
+        assert_eq!(
+            history::get(&dir, &project, "c1")
+                .unwrap()
+                .sync
+                .unwrap()
+                .phase,
+            SyncPhase::Checking
+        );
+
+        let response = crate::http::router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/chat/{project}/c1/message"))
+                    .header(header::HOST, "localhost")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"text":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::CONFLICT,
+            "a message at the turn boundary is refused while the check waits"
+        );
+
+        // End the sync so the queued check exits without touching the fixture.
+        history::update(&dir, &project, "c1", |record| {
+            if let Some(st) = record.sync.as_mut() {
+                st.phase = SyncPhase::Ended;
+            }
+        })
+        .unwrap();
+        drop(held);
+        state.chats.shutdown().await;
+    }
+
+    /// The failed build reopens `working` so the writer can answer, which also
+    /// lets `post_message` start a turn. The hidden repair prompt must not be
+    /// dispatched on top of one: two prompts would interleave.
+    #[tokio::test]
+    async fn repair_refuses_while_a_turn_is_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = scaffold_state(tmp.path());
+        let project = state.projects.create("Site").await.unwrap().id;
+        let dir = state_dir(&state);
+        let mut st = record("content/page", "tip", "incoming", &["page.md"]);
+        st.phase = SyncPhase::Working;
+        history::insert(&dir, &project, session_record("c1", st)).unwrap();
+
+        let script = tmp.path().join("slow.sh");
+        std::fs::write(&script, "sleep 5\n").unwrap();
+        let (cmd, args) = crate::chat::acp::fake_agent_sync(&script);
+        let mut argv = vec![cmd];
+        argv.extend(args);
+        state
+            .chats
+            .start(&project, "c1", tmp.path(), &argv, &[])
+            .await
+            .unwrap();
+        state
+            .chats
+            .send_message(&project, "c1", "hello")
+            .await
+            .unwrap();
+        assert!(state.chats.is_running(&project, "c1"));
+        let generation = state.chats.generation(&project, "c1");
+
+        repair(&state, &project, "c1").await;
+
+        assert_eq!(
+            state.chats.generation(&project, "c1"),
+            generation,
+            "the repair prompt must not dispatch while a turn is running"
+        );
+        assert!(
+            state.chats.is_running(&project, "c1"),
+            "the writer's turn is left alone"
+        );
+        state.chats.shutdown().await;
     }
 
     #[tokio::test]

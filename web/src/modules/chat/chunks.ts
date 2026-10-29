@@ -162,6 +162,10 @@ export function createTranscript(opts: TranscriptOptions = {}): Transcript {
         } as Part);
         break;
       case "error":
+        // A sync transcript is the writer's view. The raw chunk stays on disk
+        // for support, but an agent error can name a path or a binary, so it
+        // never reaches these rendered parts.
+        if (hideSteps) break;
         assistantMessage().parts.push({
           type: "data-agent-error",
           data: { code: "failed", message: chunk.message },

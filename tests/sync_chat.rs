@@ -1408,6 +1408,80 @@ async fn message_during_checking_is_rejected() {
     h.state.chats.shutdown().await;
 }
 
+/// An End, delete, or expiry after the build but before the draft moves must
+/// never land: `land` re-reads the record under the git lock and refuses, and
+/// the terminal copy the writer was shown is left exactly as it is.
+#[tokio::test]
+async fn land_refuses_a_sync_that_ended_while_the_commit_was_built() {
+    let h = SyncSetup::new().await;
+    let tip = git(&h.dir, &["rev-parse", "content/page"]);
+    let other = git(&h.dir, &["rev-parse", "main"]);
+    let mut record = sync_record("ended-land", history::now_ms(), SyncPhase::Ended, None);
+    {
+        let st = record.sync.as_mut().unwrap();
+        st.branch = "content/page".into();
+        st.tip = tip.clone();
+        st.incoming = other.clone();
+        st.ended_at = Some(1);
+    }
+    history::insert(&h.state_dir(), &h.project, record.clone()).unwrap();
+
+    let err = sync_chat::land(&h.state, &record, &other)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, sync_chat::LandError::Stale),
+        "a terminal record must refuse quietly: {err:?}"
+    );
+    assert_eq!(
+        git(&h.dir, &["rev-parse", "content/page"]),
+        tip,
+        "the draft did not move"
+    );
+    assert_eq!(
+        history::get(&h.state_dir(), &h.project, "ended-land").unwrap(),
+        record,
+        "the terminal record is not overwritten"
+    );
+}
+
+/// The record's tip can move while `advance` builds the commit. `land` trusts
+/// the record it re-reads under the lock, not the caller's copy.
+#[tokio::test]
+async fn land_refuses_a_record_whose_tip_moved_after_the_build() {
+    let h = SyncSetup::new().await;
+    let tip = git(&h.dir, &["rev-parse", "content/page"]);
+    let other = git(&h.dir, &["rev-parse", "main"]);
+    let mut record = sync_record("moved-tip", history::now_ms(), SyncPhase::Checking, None);
+    {
+        let st = record.sync.as_mut().unwrap();
+        st.branch = "content/page".into();
+        st.tip = tip.clone();
+        st.incoming = other.clone();
+    }
+    history::insert(&h.state_dir(), &h.project, record.clone()).unwrap();
+    // Something updated the sync after `advance` read it.
+    let moved = git(&h.dir, &["rev-parse", "main"]);
+    history::update(&h.state_dir(), &h.project, "moved-tip", |fresh| {
+        if let Some(st) = fresh.sync.as_mut() {
+            st.tip = moved.clone();
+        }
+        fresh.updated_at = 7;
+    })
+    .unwrap();
+
+    let err = sync_chat::land(&h.state, &record, &other)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, sync_chat::LandError::Stale),
+        "a changed tip must refuse quietly: {err:?}"
+    );
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), tip);
+}
+
 #[test]
 fn decision_line_is_singular_only_for_one() {
     assert_eq!(

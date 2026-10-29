@@ -1112,6 +1112,40 @@ describe("ChatPanel", () => {
       expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
     });
 
+    it("hides a raw agent error and its path from a sync transcript", async () => {
+      const w = await openSync("ended", [
+        { type: "user_text", session_id: "s", text: "combine these" },
+        {
+          type: "error",
+          message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`: No such file or directory",
+        },
+        { type: "sync_status", phase: "ended", text: "Your assistant isn't available." },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-status']").text()).toBe("Your assistant isn't available."),
+      );
+      expect(w.text()).not.toContain("cursor-agent");
+      expect(w.text()).not.toContain("/usr/local/bin");
+    });
+
+    it("keeps a raw agent error in a normal chat", async () => {
+      chats = [
+        { id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false },
+      ];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [
+          { type: "user_text", session_id: "s", text: "hi" },
+          { type: "error", message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`" },
+        ],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      await vi.waitFor(() => expect(w.text()).toContain("/usr/local/bin/cursor-agent"));
+    });
+
     it("locks the composer with the stage copy while checking", async () => {
       const w = await openSync("checking", [
         { type: "sync_status", phase: "checking", text: "Checking the site still works…" },
@@ -1123,22 +1157,26 @@ describe("ChatPanel", () => {
       expect(w.find("[data-testid='sync-end']").exists()).toBe(true);
     });
 
-    it("offers the two final actions instead of the composer once combined", async () => {
+    it("keeps a combined sync read-only, with no final actions and no composer", async () => {
       const w = await openSync("combined", [
         { type: "sync_status", phase: "combined", text: "Done. Your changes and the latest site are combined." },
       ]);
-      await vi.waitFor(() => expect(w.find("[data-testid='sync-final']").exists()).toBe(true));
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
+      );
       expect(w.find("[data-testid='chat-composer']").exists()).toBe(false);
       expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
-      expect(w.find("[data-testid='sync-pick']").text()).toBe(SYNC_ACTIONS.pick);
-      expect(w.find("[data-testid='sync-again']").text()).toBe(SYNC_ACTIONS.again);
-      expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined);
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-pick']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-again']").exists()).toBe(false);
     });
 
     it.each(["ended", "expired"] as const)("labels a %s sync as Ended", async (phase) => {
       const w = await openSync(phase);
       await vi.waitFor(() => expect(w.find("[data-testid='sync-phase']").text()).toBe("Ended"));
       expect(w.find("[data-testid='sync-final']").exists()).toBe(true);
+      expect(w.find("[data-testid='sync-pick']").text()).toBe(SYNC_ACTIONS.pick);
+      expect(w.find("[data-testid='sync-again']").text()).toBe(SYNC_ACTIONS.again);
       expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
     });
 
@@ -1160,7 +1198,7 @@ describe("ChatPanel", () => {
     });
 
     it("picks the changes by hand from the summary after a reload", async () => {
-      const w = await openSync("combined");
+      const w = await openSync("ended");
       const changes = useChangesStore();
       expect(changes.syncSessionId).toBeNull();
       await w.find("[data-testid='sync-pick']").trigger("click");
@@ -1176,8 +1214,36 @@ describe("ChatPanel", () => {
     });
 
     it("combines again with the summary's session after a reload", async () => {
-      const w = await openSync("combined");
+      const w = await openSync("ended");
       expect(useChangesStore().syncSessionId).toBeNull();
+      await vi.waitFor(() => expect(useAgentProvidersStore().provider).toBe("cursor"));
+      await w.find("[data-testid='sync-again']").trigger("click");
+      await vi.waitFor(() => {
+        const post = calls.find(
+          (c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync`,
+        );
+        expect(post).toBeDefined();
+        expect(JSON.parse(String(post!.init.body))).toEqual({ project: "p1", provider: "cursor" });
+      });
+      await vi.waitFor(() => expect(useChatStore().activeChatId("p1")).not.toBe("c1"));
+    });
+
+    it("issues both final actions on an expired sync", async () => {
+      const w = await openSync("expired");
+      const changes = useChangesStore();
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-pick']").exists()).toBe(true));
+
+      await w.find("[data-testid='sync-pick']").trigger("click");
+      await vi.waitFor(() => expect(changes.selectedConflictId).toBe("cs1"));
+      expect(changes.currentConflict?.id).toBe("cs1");
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "GET"
+            && c.url === `${ORIGIN}/api/changes/conflicts/cs1?project=p1`,
+        ),
+      ).toBe(true);
+
       await vi.waitFor(() => expect(useAgentProvidersStore().provider).toBe("cursor"));
       await w.find("[data-testid='sync-again']").trigger("click");
       await vi.waitFor(() => {
@@ -1231,7 +1297,9 @@ describe("ChatPanel", () => {
 
     it("does not follow a finished sync chat", async () => {
       const w = await openSync("combined");
-      await vi.waitFor(() => expect(w.find("[data-testid='sync-final']").exists()).toBe(true));
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
+      );
       await flushPromises();
       expect(FakeEventSource.forChat("c1").filter((s) => !s.closed)).toHaveLength(0);
     });

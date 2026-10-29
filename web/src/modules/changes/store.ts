@@ -355,7 +355,13 @@ export const useChangesStore = defineStore("changes", () => {
   /** Leave the chat and pick each file by hand in the conflict view. */
   async function pickMyself(id: string, sessionId = syncSessionId.value) {
     if (!sessionId) return;
-    await openConflict(id, sessionId);
+    try {
+      await openConflict(id, sessionId);
+    } catch {
+      // The session may be gone (a combine can finish, or another tab ended it).
+      // Never reject: the click gets one plain line instead of an unhandled error.
+      toast.error(SYNC_REQUEST_FAILED);
+    }
   }
 
   /** Ask the assistant to combine this draft again, opening a fresh chat. */

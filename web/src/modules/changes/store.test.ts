@@ -1252,4 +1252,18 @@ describe("changes store sync chats", () => {
     expect(store.selectedConflictId).toBe("s1");
     expect(store.currentConflict).toEqual(session);
   });
+
+  it("pickMyself_reports_a_missing_session_instead_of_rejecting", async () => {
+    const getConflict = vi.fn(async () => {
+      throw new ApiError("ENOENT", "no such conflict", 404);
+    });
+    const store = setupSync({ getConflict });
+    store.syncSessionId = "s1";
+
+    await expect(store.pickMyself("site")).resolves.toBeUndefined();
+
+    expect(h.toastError).toHaveBeenCalledWith("Something went wrong. Please try again.");
+    expect(store.selectedConflictId).toBeNull();
+    expect(store.currentConflict).toBeNull();
+  });
 });
