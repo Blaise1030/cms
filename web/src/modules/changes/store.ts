@@ -329,6 +329,8 @@ export const useChangesStore = defineStore("changes", () => {
     const chatId = useChatStore().activeChatId(id);
     if (!sessionId || !chatId) return;
     syncError.value = null;
+    // The writer cancelled the combine: a share/publish held for it must not fire later.
+    pendingPush.value = null;
     try {
       await daemon.api.endSyncChat(id, sessionId, chatId);
       syncSessionId.value = null;
@@ -703,6 +705,7 @@ export const useChangesStore = defineStore("changes", () => {
     conflictError,
     syncSessionId,
     syncError,
+    pendingPush,
     load,
     list,
     create,

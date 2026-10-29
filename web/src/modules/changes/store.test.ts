@@ -1080,6 +1080,47 @@ describe("changes store sync chats", () => {
     expect(h.toastError).toHaveBeenCalledWith("Couldn't start combining. Please try again.");
   });
 
+  it("endSyncChat_drops_a_pending_push", async () => {
+    const startSyncChat = vi
+      .fn()
+      .mockResolvedValueOnce({ chatId: "c1" })
+      .mockResolvedValueOnce({ chatId: "c2" });
+    const endSyncChat = vi.fn(async () => undefined);
+    const publishChange = vi
+      .fn()
+      .mockResolvedValueOnce({ conflict: { branch: "content/a", sessionId: "s1" } })
+      .mockResolvedValueOnce(merged);
+    const store = setupSync({ startSyncChat, endSyncChat, publishChange });
+    useAgentProvidersStore().provider = "fake";
+    store.projectId = "site";
+    store.active = { branch: "content/a", title: "A" };
+
+    try {
+      await expect(store.publish("site", "content/a")).resolves.toBe("combining");
+      expect(store.pendingPush).toEqual({ kind: "publish", projectId: "site", branch: "content/a" });
+
+      await store.endSyncChat("site");
+
+      expect(endSyncChat).toHaveBeenCalledWith("site", "s1", "c1");
+      expect(store.pendingPush).toBeNull();
+      expect(store.syncSessionId).toBeNull();
+
+      // A later combine finishes; the publish the writer cancelled must not fire.
+      await store.startSyncChat("site", "s2");
+      await store.onSyncChanged("site", {
+        type: "sync.changed",
+        projectId: "site",
+        conflictSessionId: "s2",
+        chatId: "c2",
+        phase: "combined",
+      });
+
+      expect(publishChange).toHaveBeenCalledTimes(1);
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
   it("onSyncChanged_combined_refreshes_and_retries_pending_push", async () => {
     const startSyncChat = vi.fn(async () => ({ chatId: "c1" }));
     const publishChange = vi
