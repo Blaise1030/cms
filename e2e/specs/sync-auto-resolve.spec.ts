@@ -13,8 +13,10 @@ function isAncestor(cwd: string, ancestor: string, descendant: string): boolean 
   try {
     execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd });
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    // `--is-ancestor` exits 1 for "not an ancestor"; anything else is a real failure.
+    if ((e as { status?: number | null }).status === 1) return false;
+    throw e;
   }
 }
 
@@ -66,8 +68,8 @@ test("a colliding draft is combined by the sync chat and keeps both sides", asyn
   expect(git(projectDir, ["rev-list", "--parents", "-n", "1", landed]).split(" ")).toHaveLength(3);
   expect(isAncestor(projectDir, ours, landed)).toBe(true);
 
-  // Every writer-visible line in the chat avoids the implementation's words.
-  const copy = await panel.innerText();
+  // Every writer-visible line on the page avoids the implementation's words.
+  const copy = await page.locator("body").innerText();
   expect(copy).toContain(DONE);
   expect(copy).not.toMatch(FORBIDDEN);
 });

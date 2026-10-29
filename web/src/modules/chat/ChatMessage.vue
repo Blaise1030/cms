@@ -37,7 +37,7 @@ import {
   formatValue,
   groupSteps,
   stepsTitle,
-  syncStatusData,
+  syncPhaseData,
   toolLabel,
   type AgentErrorData,
   type CheckpointData,
@@ -190,7 +190,7 @@ const agentError = (data: unknown) => data as AgentErrorData;
           data-testid="sync-status"
           class="text-muted-foreground text-xs"
         >
-          {{ syncStatusData(group.part.data).text }}
+          {{ syncPhaseData(group.part.data).text }}
         </p>
 
         <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">

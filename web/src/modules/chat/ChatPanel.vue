@@ -171,6 +171,8 @@ const activeSummary = computed(() => chats.value.find((c) => c.id === activeId.v
 const isSync = computed(() => activeSummary.value?.kind === "sync");
 const syncPhase = computed(() => activeSummary.value?.sync?.phase ?? null);
 const syncTerminal = computed(() => syncIsTerminal(syncPhase.value));
+/** A finished sync chat is final: its transcript must not be followed or reconnected. */
+const syncFinished = computed(() => isSync.value && syncTerminal.value);
 /** The combine this chat is doing; the chat summary is the source of truth for every action. */
 const activeSyncSessionId = computed(() => activeSummary.value?.sync?.conflictSessionId ?? undefined);
 /** What the composer shows in place of the input while a sync checks the site. */
@@ -230,6 +232,12 @@ function stopStream() {
 
 /** Follow `id` live. `restart` reconnects so a fresh snapshot is followed from its end. */
 function startStream(id: string, restart = false) {
+  // A terminal sync has nothing left to stream; reconnecting would keep an SSE
+  // response open until the daemon shuts down.
+  if (syncFinished.value) {
+    stopStream();
+    return;
+  }
   if (!restart && stream && streamChatId === id) return;
   stopStream();
   const next = createChatStream({
@@ -346,6 +354,11 @@ watch(
   },
   { immediate: true },
 );
+
+/** The sync just ended (or landed): stop following its now-final transcript. */
+watch(syncFinished, (done) => {
+  if (done) stopStream();
+});
 
 async function removeChat(id: string) {
   try {

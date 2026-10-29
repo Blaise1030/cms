@@ -286,12 +286,29 @@ export async function startorso(): Promise<orsoEnv> {
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
     },
     stop: async () => {
+      const exitedWithin = (ms: number) =>
+        exited !== null
+          ? Promise.resolve(true)
+          : new Promise<boolean>((resolve) => {
+              const timer = setTimeout(() => resolve(false), ms);
+              child.once("exit", () => {
+                clearTimeout(timer);
+                resolve(true);
+              });
+            });
+
+      let timedOut = false;
       if (exited === null) {
         child.kill("SIGTERM");
-        await new Promise<void>((r) => child.once("exit", () => r()));
+        timedOut = !(await exitedWithin(10_000));
+        if (timedOut) {
+          child.kill("SIGKILL");
+          await exitedWithin(5_000);
+        }
       }
       await stub.close();
       fs.rmSync(tmp, { recursive: true, force: true });
+      if (timedOut) throw new Error("orso did not exit within 10s of SIGTERM");
     },
   };
 }

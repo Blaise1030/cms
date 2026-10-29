@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
+use orso::chat::history::{self, RecordKind, SessionRecord, SyncPhase, SyncState};
 use orso::config::Config;
 use orso::http;
 use orso::state::AppState;
@@ -91,6 +92,75 @@ async fn create_chat(env: &Env, model: Option<&str>) -> String {
     assert_eq!(body["provider"], "fake");
     assert_eq!(body["live"], false);
     body["id"].as_str().unwrap().to_string()
+}
+
+/// Insert a chat record directly: a stream test needs a saved chat, not a live one.
+fn insert_chat(env: &Env, id: &str) {
+    let record = SessionRecord {
+        id: id.to_string(),
+        provider: "fake".into(),
+        model: None,
+        agent_session_id: None,
+        title: None,
+        created_at: 1,
+        updated_at: 1,
+        kind: RecordKind::Chat,
+        cwd: None,
+        sync: None,
+    };
+    history::insert(&env.root.join(".orso"), &env.project, record).unwrap();
+}
+
+/// Insert a sync record in `phase`, with no agent process behind it.
+fn insert_sync(env: &Env, id: &str, phase: SyncPhase) {
+    let record = SessionRecord {
+        id: id.to_string(),
+        provider: "fake".into(),
+        model: None,
+        agent_session_id: None,
+        title: None,
+        created_at: 1,
+        updated_at: 1,
+        kind: RecordKind::Sync,
+        cwd: None,
+        sync: Some(SyncState {
+            conflict_session_id: "cs1".into(),
+            branch: "content/page".into(),
+            tip: "tip".into(),
+            incoming: "incoming".into(),
+            files: vec![],
+            phase,
+            started_at: 1,
+            ended_at: None,
+            repair_attempted: false,
+        }),
+    };
+    history::insert(&env.root.join(".orso"), &env.project, record).unwrap();
+}
+
+async fn stream_body(env: &Env, chat: &str) -> axum::body::Body {
+    let res = app(env)
+        .oneshot(req(
+            "GET",
+            &format!("/api/chat/{}/{chat}/stream", env.project),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    res.into_body()
+}
+
+/// Drain an SSE body until it ends; panics when it is still open after `secs`.
+async fn expect_stream_ends(body: axum::body::Body, secs: u64, what: &str) {
+    let ended = tokio::time::timeout(Duration::from_secs(secs), async {
+        let mut body = body;
+        while let Some(frame) = body.frame().await {
+            frame.expect("sse frame");
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "{what}");
 }
 
 fn chunk_text(body: &Value) -> String {
@@ -286,6 +356,52 @@ async fn chat_stream_replays_then_live() {
     let pending = tokio::time::timeout(Duration::from_millis(300), body.frame()).await;
     assert!(pending.is_err(), "stream closed after the live turn: {buf}");
     drop(body);
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_terminal_sync_stream_ends() {
+    let env = env().await;
+    insert_sync(&env, "s-ended", SyncPhase::Ended);
+
+    let body = stream_body(&env, "s-ended").await;
+    expect_stream_ends(body, 5, "a terminal sync chat's stream must end").await;
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_working_sync_stream_waits_and_ends_once_terminal() {
+    let env = env().await;
+    insert_sync(&env, "s-working", SyncPhase::Working);
+
+    let mut body = stream_body(&env, "s-working").await;
+    // No live agent yet, but a message may start one: the stream must stay open.
+    let pending = tokio::time::timeout(Duration::from_millis(750), body.frame()).await;
+    assert!(
+        pending.is_err(),
+        "a working sync chat with no live agent must keep waiting"
+    );
+    drop(body);
+
+    history::update(&env.root.join(".orso"), &env.project, "s-working", |r| {
+        if let Some(st) = r.sync.as_mut() {
+            st.phase = SyncPhase::Ended;
+        }
+    })
+    .unwrap();
+    let body = stream_body(&env, "s-working").await;
+    expect_stream_ends(body, 5, "the stream ends once its sync is terminal").await;
+    env.state.chats.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_stream_ends_when_its_chat_is_deleted() {
+    let env = env().await;
+    insert_chat(&env, "c-gone");
+
+    let body = stream_body(&env, "c-gone").await;
+    history::remove(&env.root.join(".orso"), &env.project, "c-gone").unwrap();
+    expect_stream_ends(body, 5, "a stream whose chat was deleted must end").await;
     env.state.chats.shutdown().await;
 }
 

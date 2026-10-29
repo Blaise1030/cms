@@ -26,7 +26,7 @@ export const SYNC_ACTIONS = {
 export const syncIsTerminal = (phase: SyncPhase | null | undefined): boolean =>
   phase === "combined" || phase === "ended" || phase === "expired";
 
-export const syncStatusData = (data: unknown) => data as SyncStatusData;
+export const syncPhaseData = (data: unknown) => data as SyncStatusData;
 
 /** The daemon's normalized tool input: `raw` is the agent's own arguments. */
 export interface ToolInput {

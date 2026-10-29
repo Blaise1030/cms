@@ -16,12 +16,9 @@ export const test = base.extend<{ orso: orsoEnv; templateProject: TemplateProjec
     await context.addInitScript(() => localStorage.setItem("cms:setup-dismissed", "1"));
     await use(context);
   },
-  orso: async ({ page }, use) => {
+  orso: async ({}, use) => {
     const env = await startorso();
     await use(env);
-    // The daemon's graceful shutdown waits for open responses, and a finished
-    // chat's SSE stream only ends when its client leaves. Close the page first.
-    await page.close();
     await env.stop();
   },
   // Scaffolding runs `npm install` for the template, which is slow; it gets its own budget.

@@ -515,6 +515,21 @@ struct StreamState {
     seen: usize,
 }
 
+/// Whether a chat with no live subscription is already final: its record is
+/// gone, or it is a sync that reached a terminal phase. Such a stream must end
+/// rather than poll forever; the final status chunk was broadcast before the
+/// agent was forgotten. A `working`/`checking` sync (a restart, or an agent that
+/// starts on the next message) is not final and keeps waiting.
+fn stream_is_final(state: &AppState, project: &str, chat: &str) -> bool {
+    match history::get(&state_dir(state), project, chat) {
+        None => true,
+        Some(record) => record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase.is_terminal()),
+    }
+}
+
 /// `GET /api/chat/{project}/{chat}/stream` — replay, then live chunks, until the client leaves.
 pub async fn stream_chat(
     State(state): State<AppState>,
@@ -553,6 +568,11 @@ pub async fn stream_chat(
                     | Err(broadcast::error::RecvError::Closed) => return None,
                 },
                 None => {
+                    // Nothing is live: wait for an agent to start, unless this
+                    // chat can never produce another chunk.
+                    if stream_is_final(&state.st, &state.project, &state.chat) {
+                        return None;
+                    }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     if let Some(sub) = state.st.chats.subscribe(&state.project, &state.chat) {
                         state.replay = sub.replay.into_iter().skip(state.seen).collect();

@@ -1229,6 +1229,28 @@ describe("ChatPanel", () => {
       });
     });
 
+    it("does not follow a finished sync chat", async () => {
+      const w = await openSync("combined");
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-final']").exists()).toBe(true));
+      await flushPromises();
+      expect(FakeEventSource.forChat("c1").filter((s) => !s.closed)).toHaveLength(0);
+    });
+
+    it("stops following the stream when the sync ends", async () => {
+      const w = await openSync("working");
+      const src = await streamFor("c1");
+      src.open();
+      expect(src.closed).toBe(false);
+
+      chats = [syncChat("ended")];
+      await useChatStore().load("p1");
+      await vi.waitFor(() => expect(src.closed).toBe(true));
+      await flushPromises();
+      expect(FakeEventSource.forChat("c1").filter((s) => !s.closed)).toHaveLength(0);
+      // The ended chat still renders, now with the final actions.
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-pick']").exists()).toBe(true));
+    });
+
     it("keeps its copy free of implementation words", () => {
       const forbidden = /branch|commit|merge|conflict|worktree|checkout|clone|\bgit\b|origin|main|markers|npm|<<<<<<</i;
       const copy = [
