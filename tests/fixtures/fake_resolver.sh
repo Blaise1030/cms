@@ -1,5 +1,6 @@
 #!/bin/sh
-# Stand-in headless agent for auto-resolve tests: `fake_resolver.sh <mode> … <prompt>`.
+# Stand-in headless agent for the e2e combine flow: `fake_resolver.sh <mode> … <prompt>`.
+# Only e2e/fixtures/daemon.ts uses it now; delete this fixture with that e2e rewrite.
 mode=$1
 for prompt; do :; done
 out=$ORSO_RESOLVE_RESULT

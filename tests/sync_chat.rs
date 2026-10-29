@@ -475,6 +475,43 @@ async fn a_missing_session_returns_plain_copy() {
     assert!(!h.state_dir().join("sync").exists());
 }
 
+/// A provider whose command cannot run still opens the chat: the writer gets a
+/// chat id, one plain unavailable line, and the draft is left alone.
+#[tokio::test]
+async fn missing_cli_is_unavailable() {
+    let h = SyncSetup::new().await;
+    let tip = git(&h.dir, &["rev-parse", "content/page"]);
+    providers::set_test_acp_argv("fake-missing", vec!["/nonexistent/orso-agent".into()]);
+
+    let (status, body) = h.start_with("fake-missing").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chat = body["chatId"].as_str().unwrap_or_else(|| panic!("{body}"));
+
+    let st = history::get(&h.state_dir(), &h.project, chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(st.ended_at.is_some());
+
+    assert_eq!(
+        h.notes(chat),
+        vec![sync_chat::UNAVAILABLE.to_string()],
+        "one plain line and nothing else"
+    );
+    assert_plain(sync_chat::UNAVAILABLE);
+
+    assert!(!h.site(chat).exists());
+    assert!(
+        !h.state_dir().join("sync").join(chat).exists(),
+        "no worktree directory is left behind"
+    );
+
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    h.state.chats.shutdown().await;
+}
+
 /// The wire shape the client gets when it starts a sync: one chat id and one
 /// `sync.changed` for the new working chat.
 #[tokio::test]
