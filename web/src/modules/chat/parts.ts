@@ -26,9 +26,9 @@ export const SYNC_ACTIONS = {
 export const syncIsTerminal = (phase: SyncPhase | null | undefined): boolean =>
   phase === "combined" || phase === "ended" || phase === "expired";
 
-/** The phase badge's tone: a landed combine is the one that stands out. */
-export const syncPhaseBadge = (phase: SyncPhase): "default" | "secondary" | "outline" =>
-  phase === "combined" ? "default" : syncIsTerminal(phase) ? "outline" : "secondary";
+/** The phase badge's tone: active and landed combines read as quiet; a stopped one is quieter still. */
+export const syncPhaseBadge = (phase: SyncPhase): "secondary" | "outline" =>
+  phase === "ended" || phase === "expired" ? "outline" : "secondary";
 
 /**
  * An outcome line ends the combine; a stage note is progress inside one. The

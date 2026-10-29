@@ -1112,14 +1112,14 @@ describe("ChatPanel", () => {
       expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
     });
 
-    it("wears the phase as a badge, filled once combined", async () => {
+    it("wears the phase as a quiet badge once combined", async () => {
       const w = await openSync("combined");
       await vi.waitFor(() =>
         expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
       );
       const badge = w.find("[data-testid='sync-phase']");
       expect(badge.attributes("data-slot")).toBe("badge");
-      expect(badge.classes()).toContain("bg-primary");
+      expect(badge.classes()).toContain("bg-secondary");
     });
 
     it("keeps a combining phase in a quiet badge", async () => {
