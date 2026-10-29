@@ -4,7 +4,7 @@ import { flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
-import type { AutoResolveState, AutoResolveStatus, PrStatus } from "@/core/types";
+import type { PrStatus } from "@/core/types";
 
 const h = vi.hoisted(() => ({
   daemon: null as unknown as FakeDaemon,
@@ -1002,7 +1002,7 @@ describe("changes store publish", () => {
   });
 });
 
-describe("changes store auto-resolve", () => {
+describe("changes store sync chats", () => {
   const conflictResult = {
     mainUpdated: true,
     mainDiverged: false,
@@ -1010,124 +1010,6 @@ describe("changes store auto-resolve", () => {
     conflicts: [{ branch: "content/a", title: "A" }],
     conflictSessions: { "content/a": "s1" },
   };
-
-  function status(state: AutoResolveState, sessionId = "s1"): AutoResolveStatus {
-    return { sessionId, state, stage: "", questions: [], summary: null, error: null };
-  }
-
-  function setupSync(api: Record<string, unknown> = {}) {
-    const store = setup({
-      activeChange: vi.fn(async () => ({ branch: "content/a", title: "A" })),
-      listChanges: vi.fn(async () => []),
-      tree: vi.fn(async () => ({ entries: [] })),
-      ...api,
-    });
-    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
-    return store;
-  }
-
-  it("applyUpdate_with_conflict_starts_sync", async () => {
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
-    const getConflict = vi.fn();
-    const store = setupSync({ startAutoResolve, getConflict });
-    useAgentProvidersStore().provider = "fake";
-
-    await store.applyUpdate("site", conflictResult);
-
-    expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
-    expect(getConflict).not.toHaveBeenCalled();
-    expect(store.selectedConflictId).toBeNull();
-    expect(store.syncSessionId).toBe("s1");
-    expect(store.syncStatus?.state).toBe("preparing");
-  });
-
-  it("startSync_without_provider_fails_plainly", async () => {
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
-    const store = setupSync({ startAutoResolve });
-    useAgentProvidersStore().provider = null;
-
-    await store.startSync("site", "s1");
-
-    expect(startAutoResolve).not.toHaveBeenCalled();
-    expect(store.syncSessionId).toBe("s1");
-    expect(store.syncStatus?.state).toBe("failed");
-    expect(store.syncStatus?.error).toBe("Your AI assistant isn't available.");
-  });
-
-  it("startSync shows a plain sentence for a start error", async () => {
-    const store = setupSync({
-      startAutoResolve: vi.fn(async () => {
-        throw new ApiError("CONFLICT", "already running", 409);
-      }),
-    });
-    useAgentProvidersStore().provider = "fake";
-
-    await store.startSync("site", "s1");
-
-    expect(store.syncStatus?.state).toBe("failed");
-    expect(store.syncStatus?.error).toBe("Couldn't start combining. Please try again.");
-  });
-
-  it("sync_errors_are_plain", async () => {
-    const raw = "conflict session expired or not found";
-    const fail = (status: number) =>
-      vi.fn(async () => {
-        throw new ApiError(status === 400 ? "BADREQ" : "ENOENT", raw, status);
-      });
-    const seen: string[] = [];
-
-    let store = setupSync({ startAutoResolve: fail(400) });
-    useAgentProvidersStore().provider = "fake";
-    await store.startSync("site", "s1");
-    expect(store.syncStatus?.error).toBe("Your AI assistant isn't available.");
-    seen.push(store.syncStatus!.error!);
-
-    store = setupSync({ startAutoResolve: fail(404), answerAutoResolve: fail(404), cancelAutoResolve: fail(404) });
-    useAgentProvidersStore().provider = "fake";
-    await store.startSync("site", "s1");
-    expect(store.syncStatus?.error).toBe("Couldn't start combining. Please try again.");
-    seen.push(store.syncStatus!.error!);
-
-    store.syncStatus = status("needs_input");
-    await store.answerSync("site", { q1: "A" });
-    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
-    seen.push(store.syncStatus!.error!);
-    store.syncStatus = status("resolving");
-    await store.stopSync("site");
-    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
-
-    store.syncStatus = status("done");
-    await store.stopSync("site");
-    expect(store.syncStatus?.error).toBeNull();
-
-    store = setupSync({
-      listConflicts: vi.fn(async () => [{ id: "s1", branch: "content/a" }]),
-      autoResolveStatus: fail(404),
-    });
-    await store.loadConflicts("site");
-    expect(store.syncStatus?.error).toBe("Something went wrong. Please try again.");
-
-    for (const s of seen) {
-      expect(s).not.toMatch(/conflict|merge|branch|\bmain\b/i);
-      expect(s).not.toContain(raw);
-    }
-  });
-
-  it("retry_after_draft_moved_resyncs", async () => {
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
-    const updateChanges = vi.fn(async () => ({ ...conflictResult, conflictSessions: { "content/a": "s2" } }));
-    const store = setupSync({ startAutoResolve, updateChanges });
-    useAgentProvidersStore().provider = "fake";
-    store.syncSessionId = "s1";
-    store.syncStatus = { ...status("failed"), error: "Your draft changed while combining. Please sync again." };
-
-    await store.retrySync("site");
-
-    expect(updateChanges).toHaveBeenCalledWith("site");
-    expect(startAutoResolve).not.toHaveBeenCalledWith("site", "s1", "fake");
-    expect(startAutoResolve).toHaveBeenCalledWith("site", "s2", "fake");
-    expect(store.syncSessionId).toBe("s2");
-  });
 
   const merged: PrStatus = {
     number: 1,
@@ -1140,29 +1022,98 @@ describe("changes store auto-resolve", () => {
     upToDate: true,
   };
 
-  it("publish_that_collides_combines_then_publishes", async () => {
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
+  function setupSync(api: Record<string, unknown> = {}) {
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/a", title: "A" })),
+      listChanges: vi.fn(async () => []),
+      listConflicts: vi.fn(async () => []),
+      listChats: vi.fn(async () => ({ chats: [], running: null })),
+      tree: vi.fn(async () => ({ entries: [] })),
+      ...api,
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    return store;
+  }
+
+  it("applyUpdate_with_conflict_starts_a_sync_chat", async () => {
+    const startSyncChat = vi.fn(async () => ({ chatId: "c1" }));
+    const getConflict = vi.fn();
+    const store = setupSync({ startSyncChat, getConflict });
+    useAgentProvidersStore().provider = "fake";
+    const setActive = vi.spyOn(useChatStore(), "setActive").mockImplementation(() => {});
+
+    await store.applyUpdate("site", conflictResult);
+
+    expect(startSyncChat).toHaveBeenCalledWith("site", "s1", "fake");
+    expect(setActive).toHaveBeenCalledWith("site", "c1");
+    expect(getConflict).not.toHaveBeenCalled();
+    expect(store.selectedConflictId).toBeNull();
+    expect(store.syncSessionId).toBe("s1");
+    expect(store.syncError).toBeNull();
+  });
+
+  it("start_sync_without_provider_fails_plainly", async () => {
+    const startSyncChat = vi.fn(async () => ({ chatId: "c1" }));
+    const store = setupSync({ startSyncChat });
+    useAgentProvidersStore().provider = null;
+
+    await store.startSyncChat("site", "s1");
+
+    expect(startSyncChat).not.toHaveBeenCalled();
+    expect(store.syncSessionId).toBeNull();
+    expect(store.syncError).toBe("Your assistant isn't available.");
+    expect(h.toastError).toHaveBeenCalledWith("Your assistant isn't available.");
+  });
+
+  it("sync_start_error_is_plain", async () => {
+    const store = setupSync({
+      startSyncChat: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "Combining is in progress.", 409);
+      }),
+    });
+    useAgentProvidersStore().provider = "fake";
+
+    await store.startSyncChat("site", "s1");
+
+    expect(store.syncSessionId).toBeNull();
+    expect(store.syncError).toBe("Couldn't start combining. Please try again.");
+    expect(h.toastError).toHaveBeenCalledWith("Couldn't start combining. Please try again.");
+  });
+
+  it("onSyncChanged_combined_refreshes_and_retries_pending_push", async () => {
+    const startSyncChat = vi.fn(async () => ({ chatId: "c1" }));
     const publishChange = vi
       .fn()
       .mockResolvedValueOnce({ conflict: { branch: "content/a", sessionId: "s1" } })
       .mockResolvedValueOnce(merged);
-    const store = setupSync({
-      startAutoResolve,
-      publishChange,
-      listConflicts: vi.fn(async () => []),
-    });
+    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
+    const listChanges = vi.fn(async () => []);
+    const listConflicts = vi.fn(async () => []);
+    const store = setupSync({ startSyncChat, publishChange, activeChange, listChanges, listConflicts });
     useAgentProvidersStore().provider = "fake";
     store.projectId = "site";
     store.active = { branch: "content/a", title: "A" };
+    const reload = vi.spyOn(usePreviewStore(), "reload");
 
     try {
       await expect(store.publish("site", "content/a")).resolves.toBe("combining");
-      expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
+      expect(startSyncChat).toHaveBeenCalledWith("site", "s1", "fake");
       expect(store.syncSessionId).toBe("s1");
       expect(store.status).toBeNull();
 
-      await store.onAutoResolve("site", status("done"));
+      await store.onSyncChanged("site", {
+        type: "sync.changed",
+        projectId: "site",
+        conflictSessionId: "s1",
+        chatId: "c1",
+        phase: "combined",
+      });
 
+      expect(useFilesStore().refresh).toHaveBeenCalled();
+      expect(reload).toHaveBeenCalled();
+      expect(activeChange).toHaveBeenCalledWith("site");
+      expect(listChanges).toHaveBeenCalledWith("site");
+      expect(listConflicts).toHaveBeenCalledWith("site");
       expect(publishChange).toHaveBeenCalledTimes(2);
       expect(store.status).toEqual(merged);
       expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
@@ -1171,120 +1122,93 @@ describe("changes store auto-resolve", () => {
     }
   });
 
-  it("share_that_collides_combines_then_shares", async () => {
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
-    const shareChange = vi
-      .fn()
-      .mockResolvedValueOnce({
-        branch: "content/a",
-        title: "A",
-        prUrl: null,
-        conflict: { branch: "content/a", sessionId: "s1" },
-      })
-      .mockResolvedValueOnce({
-        branch: "content/a",
-        title: "A",
-        prUrl: "https://github.com/acme/site/pull/1",
-      });
-    const store = setupSync({
-      startAutoResolve,
-      shareChange,
-      listConflicts: vi.fn(async () => []),
-    });
-    useAgentProvidersStore().provider = "fake";
-    store.projectId = "site";
-    store.active = { branch: "content/a", title: "A" };
-
-    await expect(store.share("site", "content/a")).resolves.toBeNull();
-    expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
-
-    await store.onAutoResolve("site", status("done"));
-
-    expect(shareChange).toHaveBeenCalledTimes(2);
-    expect(store.prUrl).toBe("https://github.com/acme/site/pull/1");
-  });
-
-  it("onAutoResolve_done_refreshes", async () => {    const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
-    const listChanges = vi.fn(async () => []);
-    const listConflicts = vi.fn(async () => []);
-    const store = setupSync({ activeChange, listChanges, listConflicts });
-    const reload = vi.spyOn(usePreviewStore(), "reload");
-    store.projectId = "site";
-    store.syncSessionId = "s1";
-
-    await store.onAutoResolve("site", { ...status("done"), summary: "Merged" });
-
-    expect(store.syncStatus?.state).toBe("done");
-    expect(store.syncStatus?.summary).toBe("Merged");
-    expect(useFilesStore().refresh).toHaveBeenCalled();
-    expect(reload).toHaveBeenCalled();
-    expect(activeChange).toHaveBeenCalledWith("site");
-    expect(listChanges).toHaveBeenCalledWith("site");
-    expect(listConflicts).toHaveBeenCalledWith("site");
-    expect(store.syncSessionId).toBe("s1");
-  });
-
-  it("onAutoResolve_ignores_other_session", async () => {
+  it("onSyncChanged_ignores_other_project", async () => {
     const activeChange = vi.fn();
     const store = setupSync({ activeChange });
+    store.projectId = "site";
     store.syncSessionId = "s1";
-    store.syncStatus = status("resolving");
 
-    await store.onAutoResolve("site", status("done", "s2"));
+    await store.onSyncChanged("site", {
+      type: "sync.changed",
+      projectId: "other",
+      conflictSessionId: "s1",
+      chatId: "c1",
+      phase: "combined",
+    });
+    await store.onSyncChanged("site", {
+      type: "sync.changed",
+      projectId: "site",
+      conflictSessionId: "s2",
+      chatId: "c1",
+      phase: "combined",
+    });
 
-    expect(store.syncStatus?.state).toBe("resolving");
     expect(activeChange).not.toHaveBeenCalled();
   });
 
-  it("loadConflicts_opens_sync_dialog_for_existing_session", async () => {
-    const getConflict = vi.fn();
-    const autoResolveStatus = vi.fn(async () => ({ ...status("needs_input"), questions: [{ id: "q1", text: "?", options: [] }] }));
+  it("loadConflicts_reopens_the_sync_chat", async () => {
+    const syncChatStatus = vi.fn(async () => ({ chatId: "c1", phase: "working" as const }));
     const store = setupSync({
       listConflicts: vi.fn(async () => [{ id: "s1", branch: "content/a" }]),
-      getConflict,
-      autoResolveStatus,
+      syncChatStatus,
     });
+    const chats = useChatStore();
+    const loadChats = vi.spyOn(chats, "load").mockResolvedValue();
+    const setActive = vi.spyOn(chats, "setActive").mockImplementation(() => {});
 
     await store.loadConflicts("site");
 
-    expect(getConflict).not.toHaveBeenCalled();
-    expect(store.selectedConflictId).toBeNull();
-    expect(autoResolveStatus).toHaveBeenCalledWith("site", "s1");
+    expect(syncChatStatus).toHaveBeenCalledWith("site", "s1");
+    expect(loadChats).toHaveBeenCalledWith("site");
+    expect(setActive).toHaveBeenCalledWith("site", "c1");
     expect(store.syncSessionId).toBe("s1");
-    expect(store.syncStatus?.state).toBe("needs_input");
+    expect(store.selectedConflictId).toBeNull();
+    expect(store.currentConflict).toBeNull();
+
+    const missing = setupSync({
+      listConflicts: vi.fn(async () => [{ id: "s1", branch: "content/a" }]),
+      syncChatStatus: vi.fn(async () => {
+        throw new ApiError("ENOENT", "no sync in progress", 404);
+      }),
+    });
+    const missingChats = useChatStore();
+    const missingLoad = vi.spyOn(missingChats, "load").mockResolvedValue();
+    const missingActive = vi.spyOn(missingChats, "setActive");
+
+    await missing.loadConflicts("site");
+
+    expect(missingLoad).not.toHaveBeenCalled();
+    expect(missingActive).not.toHaveBeenCalled();
+    expect(missing.syncSessionId).toBeNull();
+    expect(missing.selectedConflictId).toBeNull();
   });
 
-  it("openAdvanced_opens_conflict_view", async () => {
+  it("combineAgain_starts_a_new_sync_chat", async () => {
+    const startSyncChat = vi.fn(async () => ({ chatId: "c2" }));
+    const store = setupSync({ startSyncChat });
+    useAgentProvidersStore().provider = "fake";
+    store.syncSessionId = "s1";
+    store.syncError = "Couldn't start combining. Please try again.";
+    const setActive = vi.spyOn(useChatStore(), "setActive").mockImplementation(() => {});
+
+    await store.combineAgain("site");
+
+    expect(startSyncChat).toHaveBeenCalledWith("site", "s1", "fake");
+    expect(setActive).toHaveBeenCalledWith("site", "c2");
+    expect(store.syncError).toBeNull();
+  });
+
+  it("pickMyself_opens_the_conflict_view", async () => {
     const session = { id: "s1", branch: "content/a", files: [], choices: {} };
     const getConflict = vi.fn(async () => session);
     const store = setupSync({ getConflict });
     store.syncSessionId = "s1";
-    store.syncStatus = status("failed");
+    store.syncError = "Couldn't start combining. Please try again.";
 
-    await store.openAdvanced("site");
+    await store.pickMyself("site");
 
     expect(getConflict).toHaveBeenCalledWith("site", "s1");
     expect(store.selectedConflictId).toBe("s1");
-    expect(store.syncSessionId).toBeNull();
-    expect(store.syncStatus).toBeNull();
-  });
-
-  it("answerSync, stopSync and retrySync call the daemon for the open session", async () => {
-    const answerAutoResolve = vi.fn(async () => ({ ok: true }));
-    const cancelAutoResolve = vi.fn(async () => ({ ok: true }));
-    const startAutoResolve = vi.fn(async () => ({ started: true }));
-    const store = setupSync({ answerAutoResolve, cancelAutoResolve, startAutoResolve });
-    useAgentProvidersStore().provider = "fake";
-    store.syncSessionId = "s1";
-
-    await store.answerSync("site", { q1: "Keep theirs" });
-    expect(answerAutoResolve).toHaveBeenCalledWith("site", "s1", { q1: "Keep theirs" });
-    await store.stopSync("site");
-    expect(cancelAutoResolve).toHaveBeenCalledWith("site", "s1");
-    await store.retrySync("site");
-    expect(startAutoResolve).toHaveBeenCalledWith("site", "s1", "fake");
-    store.closeSync();
-    expect(store.syncSessionId).toBeNull();
-    expect(store.syncStatus).toBeNull();
+    expect(store.currentConflict).toEqual(session);
   });
 });

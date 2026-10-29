@@ -22,7 +22,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "fs.change": { projectId: "string", path: "string", kind: "string" },
   "checkpoint.blocked": { projectId: "string", reason: "string" },
   "changes.updated": { projectId: "string" },
-  "changes.auto_resolve": { projectId: "string", sessionId: "string", state: "string" },
+  "sync.changed": { projectId: "string", conflictSessionId: "string", chatId: "string", phase: "string" },
   "preview.reload": { projectId: "string" },
   "preview.deps_installing": { projectId: "string" },
   "content.refresh": { projectId: "string" },

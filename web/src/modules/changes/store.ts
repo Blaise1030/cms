@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { toast } from "vue-sonner";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
+import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint, SyncChangedEvent } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -12,12 +12,10 @@ import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
-import { getLatest as syncAgain } from "./getLatest";
 
-const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
+const SYNC_UNAVAILABLE = "Your assistant isn't available.";
 const SYNC_START_FAILED = "Couldn't start combining. Please try again.";
 const SYNC_REQUEST_FAILED = "Something went wrong. Please try again.";
-const SYNC_DRAFT_MOVED = "Your draft changed while combining. Please sync again.";
 
 /** A switch held until the user confirms, because a chat turn is running. */
 interface PendingSwitch {
@@ -70,9 +68,10 @@ export const useChangesStore = defineStore("changes", () => {
   const candidate = ref<ConflictCandidate | null>(null);
   const conflictLoading = ref(false);
   const conflictError = ref<string | null>(null);
-  /** The conflict session the auto-resolve dialog shows; null when closed. */
+  /** The conflict session whose sync chat is open; null when there is none. */
   const syncSessionId = ref<string | null>(null);
-  const syncStatus = ref<AutoResolveStatus | null>(null);
+  /** A plain sentence about why starting or stopping a combine failed. */
+  const syncError = ref<string | null>(null);
   /** The share/publish to retry once the writer's assistant has combined a push collision. */
   const pendingPush = ref<PendingPush | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -161,7 +160,7 @@ export const useChangesStore = defineStore("changes", () => {
       currentConflict.value = null;
       candidate.value = null;
       syncSessionId.value = null;
-      syncStatus.value = null;
+      syncError.value = null;
     }
     projectId.value = id;
     loading.value = true;
@@ -296,73 +295,67 @@ export const useChangesStore = defineStore("changes", () => {
     // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
     await Promise.all([load(id), list(id).catch(() => undefined)]);
     const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
-    if (first) await startSync(id, result.conflictSessions![first.branch]!);
+    if (first) await startSyncChat(id, result.conflictSessions![first.branch]!);
   }
 
-  function syncFailed(sessionId: string, message: string) {
-    syncStatus.value = { sessionId, state: "failed", stage: "", questions: [], summary: null, error: message };
-  }
-
-  /** Let the user's AI assistant combine the conflict session in the background. */
-  async function startSync(id: string, sessionId: string) {
-    syncSessionId.value = sessionId;
-    syncStatus.value = { sessionId, state: "preparing", stage: "", questions: [], summary: null, error: null };
+  /**
+   * Open the chat that combines the conflict session with the latest site. The
+   * chat is the whole surface now: its transcript carries progress and questions.
+   */
+  async function startSyncChat(id: string, sessionId: string) {
     const provider = useAgentProvidersStore().provider;
     if (!provider) {
-      syncFailed(sessionId, SYNC_UNAVAILABLE);
+      syncError.value = SYNC_UNAVAILABLE;
+      toast.error(SYNC_UNAVAILABLE);
       return;
     }
+    syncError.value = null;
     try {
-      await daemon.api.startAutoResolve(id, sessionId, provider);
+      const { chatId } = await daemon.api.startSyncChat(id, sessionId, provider);
+      syncSessionId.value = sessionId;
+      const chats = useChatStore();
+      await chats.load(id);
+      chats.setActive(id, chatId);
+    } catch {
+      // The daemon's own copy talks about git, so only our plain sentence is shown.
+      syncError.value = SYNC_START_FAILED;
+      toast.error(SYNC_START_FAILED);
+    }
+  }
+
+  /** End the open sync chat, releasing the draft for manual choices. */
+  async function endSyncChat(id: string) {
+    const sessionId = syncSessionId.value;
+    const chatId = useChatStore().activeChatId(id);
+    if (!sessionId || !chatId) return;
+    syncError.value = null;
+    try {
+      await daemon.api.endSyncChat(id, sessionId, chatId);
+      syncSessionId.value = null;
+      await useChatStore().load(id);
     } catch (e) {
-      if (syncSessionId.value !== sessionId) return;
-      syncFailed(sessionId, e instanceof ApiError && e.status === 400 ? SYNC_UNAVAILABLE : SYNC_START_FAILED);
+      // Already ended elsewhere: there is nothing left to stop.
+      if (e instanceof ApiError && e.status === 404) {
+        syncSessionId.value = null;
+        return;
+      }
+      syncError.value = SYNC_REQUEST_FAILED;
+      toast.error(SYNC_REQUEST_FAILED);
     }
   }
 
-  /** A failed answer/stop shows on the open status; once done the job is gone (404), so ignore it.
-   *  Daemon text is never shown: it talks about git. */
-  function syncRequestFailed(sessionId: string) {
-    const current = syncStatus.value;
-    if (syncSessionId.value !== sessionId || !current || current.state === "done") return;
-    syncStatus.value = { ...current, error: SYNC_REQUEST_FAILED };
-  }
-
-  async function answerSync(id: string, answers: Record<string, string>) {
+  /** Leave the chat and pick each file by hand in the conflict view. */
+  async function pickMyself(id: string) {
     const sessionId = syncSessionId.value;
     if (!sessionId) return;
-    try {
-      await daemon.api.answerAutoResolve(id, sessionId, answers);
-    } catch {
-      syncRequestFailed(sessionId);
-    }
+    await openConflict(id, sessionId);
   }
 
-  async function stopSync(id: string) {
+  /** Ask the assistant to combine this draft again, opening a fresh chat. */
+  async function combineAgain(id: string) {
     const sessionId = syncSessionId.value;
     if (!sessionId) return;
-    try {
-      await daemon.api.cancelAutoResolve(id, sessionId);
-    } catch {
-      syncRequestFailed(sessionId);
-    }
-  }
-
-  /** A moved draft makes the old session's result useless: sync again for a fresh one. */
-  async function retrySync(id: string) {
-    if (!syncSessionId.value) return;
-    if (syncStatus.value?.error === SYNC_DRAFT_MOVED) {
-      closeSync();
-      await syncAgain(id);
-      return;
-    }
-    await startSync(id, syncSessionId.value);
-  }
-
-  function closeSync() {
-    syncSessionId.value = null;
-    syncStatus.value = null;
-    pendingPush.value = null;
+    await startSyncChat(id, sessionId);
   }
 
   /** Continue the share/publish that hit a collision, now that combining succeeded. */
@@ -383,19 +376,11 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  /** Leave the agent and pick each file by hand in the conflict view. */
-  async function openAdvanced(id: string) {
-    const sessionId = syncSessionId.value;
-    if (!sessionId) return;
-    await openConflict(id, sessionId);
-    closeSync();
-  }
-
-  async function onAutoResolve(id: string, event: AutoResolveStatus) {
-    if (event.sessionId !== syncSessionId.value) return;
-    const { sessionId, state, stage, questions, summary, error } = event;
-    syncStatus.value = { sessionId, state, stage, questions, summary, error };
-    if (state !== "done") return;
+  /** Follow the open sync chat; when it lands, refresh everything and finish a pending push. */
+  async function onSyncChanged(id: string, event: SyncChangedEvent) {
+    if (event.projectId !== id || event.conflictSessionId !== syncSessionId.value) return;
+    await useChatStore().load(id);
+    if (event.phase !== "combined") return;
     await refreshTreeAndPreview();
     await Promise.all([
       load(id),
@@ -445,13 +430,22 @@ export const useChangesStore = defineStore("changes", () => {
     currentConflict.value = null;
     candidate.value = null;
     if (!sessions.length) return;
-    const sessionId = sessions.find((s) => s.id === syncSessionId.value)?.id ?? sessions[0]!.id;
-    syncSessionId.value = sessionId;
-    try {
-      const current = await daemon.api.autoResolveStatus(id, sessionId);
-      if (syncSessionId.value === sessionId) syncStatus.value = current;
-    } catch {
-      if (syncSessionId.value === sessionId) syncFailed(sessionId, SYNC_REQUEST_FAILED);
+    // Only one combine can run per project; try the remembered session first, then the rest.
+    const ordered = sessions
+      .filter((s) => s.id === syncSessionId.value)
+      .concat(sessions.filter((s) => s.id !== syncSessionId.value));
+    for (const session of ordered) {
+      try {
+        const status = await daemon.api.syncChatStatus(id, session.id);
+        syncSessionId.value = session.id;
+        const chats = useChatStore();
+        await chats.load(id);
+        chats.setActive(id, status.chatId);
+        return;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) continue;
+        return;
+      }
     }
   }
 
@@ -561,7 +555,7 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       if (result.conflict) {
         pendingPush.value = { kind: "share", projectId: id, branch };
-        await startSync(id, result.conflict.sessionId);
+        await startSyncChat(id, result.conflict.sessionId);
         return null;
       }
       prUrl.value = result.prUrl;
@@ -655,7 +649,7 @@ export const useChangesStore = defineStore("changes", () => {
       projectId.value = id;
       if (result && "conflict" in result) {
         pendingPush.value = { kind: "publish", projectId: id, branch };
-        await startSync(id, result.conflict.sessionId);
+        await startSyncChat(id, result.conflict.sessionId);
         return "combining";
       }
       const pr = result;
@@ -708,7 +702,7 @@ export const useChangesStore = defineStore("changes", () => {
     conflictLoading,
     conflictError,
     syncSessionId,
-    syncStatus,
+    syncError,
     load,
     list,
     create,
@@ -723,13 +717,11 @@ export const useChangesStore = defineStore("changes", () => {
     chooseConflict,
     finishConflict,
     abandonConflict,
-    startSync,
-    answerSync,
-    stopSync,
-    retrySync,
-    closeSync,
-    openAdvanced,
-    onAutoResolve,
+    startSyncChat,
+    endSyncChat,
+    pickMyself,
+    combineAgain,
+    onSyncChanged,
     share,
     cleanup,
     markReady,

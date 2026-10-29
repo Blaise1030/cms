@@ -136,26 +136,6 @@ export interface ChangesUpdate {
   conflictErrors?: Record<string, string>;
 }
 
-/** A question the agent needs answered before it can finish resolving. */
-export interface AutoResolveQuestion {
-  id: string;
-  text: string;
-  options: string[];
-}
-
-/** `idle` when the session has no auto-resolve job. */
-export type AutoResolveState = "idle" | "preparing" | "resolving" | "needs_input" | "verifying" | "done" | "failed";
-
-/** Result of `GET /api/changes/conflicts/{id}/auto`. */
-export interface AutoResolveStatus {
-  sessionId: string;
-  state: AutoResolveState;
-  stage: string;
-  questions: AutoResolveQuestion[];
-  summary: string | null;
-  error: string | null;
-}
-
 export type ConflictChoice = "yours" | "latest" | "both";
 
 export interface ConflictFile {
@@ -270,6 +250,8 @@ export interface FsChangeEvent {
 export interface ChatSummary {
   id: string;
   provider: string;
+  /** Whether this chat is a conversation or a combine of a draft with the live site. */
+  kind: "chat" | "sync";
   model?: string | null;
   title?: string | null;
   /** Unix milliseconds. */
@@ -278,10 +260,28 @@ export interface ChatSummary {
   live: boolean;
   /** A prompt is in flight. */
   running: boolean;
+  /** The combine this sync chat is doing; absent or null for ordinary chats. */
+  sync?: SyncState | null;
 }
 
 /** Where a sync chat is; mirrors the backend `SyncPhase`. */
 export type SyncPhase = "working" | "checking" | "combined" | "ended" | "expired";
+
+/** The combine a sync chat is doing: its conflict session, the two sides, and its phase. */
+export interface SyncState {
+  conflictSessionId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  files: string[];
+  phase: SyncPhase;
+  /** Unix milliseconds. */
+  startedAt: number;
+  /** Unix milliseconds; present once the chat reached a terminal phase. */
+  endedAt?: number;
+  /** The one automatic repair after a failed build has been attempted. */
+  repairAttempted: boolean;
+}
 
 /** One line of a chat transcript, as `GET /api/chat/{project}/{chat}` returns it. */
 export type UiChunk =
@@ -358,8 +358,14 @@ export interface ContentRefreshEvent {
   projectId: string;
 }
 
-/** Progress of an agent auto-resolving a conflict session. */
-export type ChangesAutoResolveEvent = { type: "changes.auto_resolve"; projectId: string } & AutoResolveStatus;
+/** A sync chat was opened or moved to a new phase. */
+export interface SyncChangedEvent {
+  type: "sync.changed";
+  projectId: string;
+  conflictSessionId: string;
+  chatId: string;
+  phase: SyncPhase;
+}
 
 /** The daemon finished a Get latest that had skipped the current change (agent went idle). */
 export interface ChangesUpdatedEvent {
@@ -381,12 +387,12 @@ export type DaemonEvent =
   | FsChangeEvent
   | CheckpointBlockedEvent
   | ChangesUpdatedEvent
-  | ChangesAutoResolveEvent
   | PreviewReloadEvent
   | PreviewDepsInstallingEvent
   | ContentRefreshEvent
   | ChatTurnEvent
   | ChatPermissionEvent
+  | SyncChangedEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];
