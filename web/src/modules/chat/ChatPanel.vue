@@ -8,6 +8,7 @@ import { mapErrorResponse } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { ChatHistory as ChatHistoryData, UiChunk } from "@/core/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
@@ -28,7 +29,7 @@ import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { attachmentMessage } from "./attachments";
 import { createTranscript, type Transcript } from "./chunks";
-import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal } from "./parts";
+import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal, syncPhaseBadge } from "./parts";
 import { referenceLabel } from "./references";
 import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
@@ -592,13 +593,14 @@ defineExpose({ insert, insertReference, send, busy });
       <span class="min-w-0 flex-1 truncate px-1 text-sm">
         {{ activeSummary?.title || "New chat" }}
       </span>
-      <span
+      <Badge
         v-if="syncPhase"
+        :variant="syncPhaseBadge(syncPhase)"
         data-testid="sync-phase"
-        class="text-muted-foreground shrink-0 truncate text-xs"
+        class="shrink-0"
       >
         {{ PHASE_LABEL[syncPhase] }}
-      </span>
+      </Badge>
       <Button
         v-if="isSync && !syncTerminal"
         variant="ghost"

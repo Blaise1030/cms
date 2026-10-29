@@ -26,7 +26,17 @@ export const SYNC_ACTIONS = {
 export const syncIsTerminal = (phase: SyncPhase | null | undefined): boolean =>
   phase === "combined" || phase === "ended" || phase === "expired";
 
+/** The phase badge's tone: a landed combine is the one that stands out. */
+export const syncPhaseBadge = (phase: SyncPhase): "default" | "secondary" | "outline" =>
+  phase === "combined" ? "default" : syncIsTerminal(phase) ? "outline" : "secondary";
+
+/**
+ * An outcome line ends the combine; a stage note is progress inside one. The
+ * transcript calls out the former and leaves the latter as a quiet line — it
+ * shares `syncIsTerminal` so both surfaces agree on what "finished" means.
+ */
 export const syncPhaseData = (data: unknown) => data as SyncStatusData;
+export const syncPhaseOf = (data: unknown) => syncPhaseData(data).phase;
 
 /** The daemon's normalized tool input: `raw` is the agent's own arguments. */
 export interface ToolInput {

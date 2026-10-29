@@ -121,7 +121,33 @@ describe("ChatMessage", () => {
     const line = w.find("[data-testid='sync-status']");
     expect(line.text()).toBe("Reading your pages…");
     expect(line.classes()).toContain("text-xs");
+    expect(line.attributes("data-slot")).not.toBe("alert");
     expect(w.find("[data-testid='chat-steps']").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("calls out a finished combine", async () => {
+    const w = await render([
+      {
+        type: "data-sync-status",
+        data: { phase: "combined", text: "Done. Your changes and the latest site are combined." },
+      },
+    ]);
+    const alert = w.find("[data-testid='sync-status']");
+    expect(alert.attributes("data-slot")).toBe("alert");
+    expect(alert.text()).toBe("Done. Your changes and the latest site are combined.");
+    expect(alert.find("svg").exists()).toBe(true);
+    expect(alert.classes()).toContain("border");
+    w.unmount();
+  });
+
+  it("calls out a combine that stopped", async () => {
+    const w = await render([
+      { type: "data-sync-status", data: { phase: "ended", text: "You ended this combine. Nothing changed." } },
+    ]);
+    const alert = w.find("[data-testid='sync-status']");
+    expect(alert.attributes("data-slot")).toBe("alert");
+    expect(alert.text()).toBe("You ended this combine. Nothing changed.");
     w.unmount();
   });
 
