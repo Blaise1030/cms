@@ -1,4 +1,32 @@
 import type { DynamicToolUIPart, ReasoningUIPart, UIMessage } from "ai";
+import type { SyncPhase } from "@/core/types";
+
+/** One stage line a sync chat shows; the daemon writes `text` for the writer. */
+export interface SyncStatusData {
+  phase: SyncPhase;
+  text: string;
+}
+
+/** The only sync-chat wording the frontend owns; everything else comes from `sync_status`. */
+export const PHASE_LABEL: Record<SyncPhase, string> = {
+  working: "Combining…",
+  checking: "Checking the site still works…",
+  combined: "Combined",
+  ended: "Ended",
+  expired: "Ended",
+};
+
+export const SYNC_ACTIONS = {
+  end: "End sync",
+  pick: "Pick the changes myself",
+  again: "Combine again",
+} as const;
+
+/** A combine that has landed or stopped: its chat shows the final actions, not a composer. */
+export const syncIsTerminal = (phase: SyncPhase | null | undefined): boolean =>
+  phase === "combined" || phase === "ended" || phase === "expired";
+
+export const syncStatusData = (data: unknown) => data as SyncStatusData;
 
 /** The daemon's normalized tool input: `raw` is the agent's own arguments. */
 export interface ToolInput {

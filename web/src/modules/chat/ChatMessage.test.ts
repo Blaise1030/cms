@@ -114,6 +114,17 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("renders a sync stage line verbatim", async () => {
+    const w = await render([
+      { type: "data-sync-status", data: { phase: "working", text: "Reading your pages…" } },
+    ]);
+    const line = w.find("[data-testid='sync-status']");
+    expect(line.text()).toBe("Reading your pages…");
+    expect(line.classes()).toContain("text-xs");
+    expect(w.find("[data-testid='chat-steps']").exists()).toBe(false);
+    w.unmount();
+  });
+
   it("collapses a run of steps into one row, keeping the agent's reply outside it", async () => {
     const w = await render([
       { type: "step-start" },

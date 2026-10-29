@@ -22,11 +22,13 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
+import { useChangesStore } from "@/modules/changes/store";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { attachmentMessage } from "./attachments";
 import { createTranscript, type Transcript } from "./chunks";
+import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal } from "./parts";
 import { referenceLabel } from "./references";
 import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
@@ -43,6 +45,7 @@ const SUGGESTIONS = [
 
 const daemon = useDaemon();
 const store = useChatStore();
+const changes = useChangesStore();
 const agentProviders = useAgentProvidersStore();
 const projects = useProjectsStore();
 
@@ -163,20 +166,48 @@ const queued = computed(() => activeId.value ? (store.queued[props.projectId]?.[
 const queuePaused = computed(() => !!activeId.value && store.isQueuePaused(props.projectId, activeId.value));
 const drainingQueue = new Set<string>();
 const isSaved = (id: string) => chats.value.some((c) => c.id === id);
+/** The chat summary behind the open transcript: its kind and, for a sync, its phase. */
+const activeSummary = computed(() => chats.value.find((c) => c.id === activeId.value) ?? null);
+const isSync = computed(() => activeSummary.value?.kind === "sync");
+const syncPhase = computed(() => activeSummary.value?.sync?.phase ?? null);
+const syncTerminal = computed(() => syncIsTerminal(syncPhase.value));
+/** What the composer shows in place of the input while a sync checks the site. */
+const composerLocked = computed(() =>
+  isSync.value && syncPhase.value === "checking" ? PHASE_LABEL.checking : null,
+);
+const composerBlocked = computed(() => {
+  if (loadingChat.value) return "Loading chat";
+  if (composerLocked.value) return composerLocked.value;
+  if (isSync.value && syncTerminal.value) return "This combine has ended.";
+  return provider.value ? null : "No agent is available";
+});
 
 /** Chunks already rendered; the SSE replays the transcript, so its first frames are duplicates. */
 let renderedChunks = 0;
 let transcript: Transcript | null = null;
+/** Every chunk in the open transcript, so it can be rebuilt once the chat's kind is known. */
+let chunkLog: UiChunk[] = [];
 let stream: ChatStream | null = null;
 let streamChatId: string | null = null;
 
-/** Rebuild the transcript from a snapshot; streamed chunks then append to it. */
-function setTranscript(chunks: UiChunk[]) {
-  transcript = createTranscript();
-  for (const chunk of chunks) transcript.push(chunk);
-  renderedChunks = chunks.length;
+/** Rebuild the open transcript from its chunks, hiding agent steps for a sync chat. */
+function buildTranscript() {
+  transcript = createTranscript({ hideSteps: isSync.value });
+  for (const chunk of chunkLog) transcript.push(chunk);
+  renderedChunks = chunkLog.length;
   publishTranscript();
 }
+
+/** Rebuild the transcript from a snapshot; streamed chunks then append to it. */
+function setTranscript(chunks: UiChunk[]) {
+  chunkLog = chunks.slice();
+  buildTranscript();
+}
+
+// The chat list can land after the transcript, so the summary's kind may arrive late.
+watch(isSync, (sync, was) => {
+  if (sync && !was && transcript) buildTranscript();
+});
 
 /**
  * Hand Vue a new list with a new identity for the message that changed, so ChatMessage
@@ -206,7 +237,8 @@ function startStream(id: string, restart = false) {
     onReset: () => {
       // EventSource reconnected: the daemon replays the transcript from the first chunk.
       // Keep the last snapshot on screen until the replay's first frame replaces it.
-      transcript = createTranscript();
+      chunkLog = [];
+      transcript = createTranscript({ hideSteps: isSync.value });
       renderedChunks = 0;
       firstVisibleMessage.value = 0;
     },
@@ -219,7 +251,8 @@ function startStream(id: string, restart = false) {
 
 function applyChunk(id: string, chunk: UiChunk) {
   if (id !== activeId.value) return;
-  transcript ??= createTranscript();
+  transcript ??= createTranscript({ hideSteps: isSync.value });
+  chunkLog.push(chunk);
   transcript.push(chunk);
   publishTranscript();
   if (chunk.type === "turn_end") {
@@ -537,8 +570,24 @@ defineExpose({ insert, insertReference, send, busy });
         @remove="removeChat"
       />
       <span class="min-w-0 flex-1 truncate px-1 text-sm">
-        {{ chats.find((c) => c.id === activeId)?.title || "New chat" }}
+        {{ activeSummary?.title || "New chat" }}
       </span>
+      <span
+        v-if="syncPhase"
+        data-testid="sync-phase"
+        class="text-muted-foreground shrink-0 truncate text-xs"
+      >
+        {{ PHASE_LABEL[syncPhase] }}
+      </span>
+      <Button
+        v-if="isSync && !syncTerminal"
+        variant="ghost"
+        size="sm"
+        data-testid="sync-end"
+        @click="changes.endSyncChat(projectId)"
+      >
+        {{ SYNC_ACTIONS.end }}
+      </Button>
       <Button variant="ghost" size="icon-sm" aria-label="New chat" data-testid="chat-new" @click="startNew">
         <Plus />
       </Button>
@@ -651,7 +700,16 @@ defineExpose({ insert, insertReference, send, busy });
           </div>
         </CardContent>
       </Card>
+      <div v-if="isSync && syncTerminal" data-testid="sync-final" class="flex flex-col gap-2">
+        <Button variant="outline" size="sm" data-testid="sync-pick" @click="changes.pickMyself(projectId)">
+          {{ SYNC_ACTIONS.pick }}
+        </Button>
+        <Button variant="outline" size="sm" data-testid="sync-again" @click="changes.combineAgain(projectId)">
+          {{ SYNC_ACTIONS.again }}
+        </Button>
+      </div>
       <ChatComposer
+        v-else
         ref="composer"
         v-model="input"
         v-model:provider="provider"
@@ -660,7 +718,8 @@ defineExpose({ insert, insertReference, send, busy });
         :models="agentProviders.models"
         :provider-locked="chatProvider !== null"
         :streaming="streaming"
-        :blocked="loadingChat ? 'Loading chat' : provider ? null : 'No agent is available'"
+        :blocked="composerBlocked"
+        :locked="composerLocked"
         :attachments="attachments"
         :attaching="attaching"
         :references="references"

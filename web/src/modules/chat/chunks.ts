@@ -75,8 +75,14 @@ export interface Transcript {
   push(chunk: UiChunk): void;
 }
 
+export interface TranscriptOptions {
+  /** Drop agent steps (reasoning and tool calls), keeping text and stage lines. */
+  hideSteps?: boolean;
+}
+
 /** Incremental form of [`chunksToMessages`], so a streaming chat does not re-walk its history. */
-export function createTranscript(): Transcript {
+export function createTranscript(opts: TranscriptOptions = {}): Transcript {
+  const hideSteps = opts.hideSteps ?? false;
   const messages: UIMessage[] = [];
   /** Raw tool calls by id, so a later update can merge into its part. */
   const calls = new Map<string, ToolCall>();
@@ -109,6 +115,7 @@ export function createTranscript(): Transcript {
         break;
       }
       case "thought_delta": {
+        if (hideSteps) break;
         const message = assistantMessage();
         const last = message.parts.at(-1);
         if (last?.type === "reasoning") last.text += chunk.text;
@@ -116,6 +123,7 @@ export function createTranscript(): Transcript {
         break;
       }
       case "tool_call": {
+        if (hideSteps) break;
         const call = chunk.tool_call;
         const id =
           typeof call.toolCallId === "string" ? call.toolCallId : `tool-${++toolSeq}`;
@@ -124,6 +132,7 @@ export function createTranscript(): Transcript {
         break;
       }
       case "tool_call_update": {
+        if (hideSteps) break;
         const id = typeof chunk.tool_call.toolCallId === "string" ? chunk.tool_call.toolCallId : "";
         if (!id) break;
         const merged = { ...(calls.get(id) ?? {}), ...chunk.tool_call };
@@ -146,6 +155,12 @@ export function createTranscript(): Transcript {
         assistantMessage().parts.push({ type: "data-checkpoint", data } as Part);
         break;
       }
+      case "sync_status":
+        assistantMessage().parts.push({
+          type: "data-sync-status",
+          data: { phase: chunk.phase, text: chunk.text },
+        } as Part);
+        break;
       case "error":
         assistantMessage().parts.push({
           type: "data-agent-error",

@@ -111,6 +111,19 @@ describe("chunksToMessages", () => {
     ]);
   });
 
+  it("keeps a sync stage line as a data part, verbatim", () => {
+    const [, assistant] = chunksToMessages([
+      { type: "user_text", session_id: s, text: "go" },
+      { type: "sync_status", phase: "working", text: "Reading your pages…" },
+    ]);
+    expect(assistant!.parts).toEqual([
+      {
+        type: "data-sync-status",
+        data: { phase: "working", text: "Reading your pages…" },
+      },
+    ]);
+  });
+
   it("ignores plans, permissions, unknown updates, and turn ends", () => {
     const messages = chunksToMessages([
       { type: "user_text", session_id: s, text: "go" },
@@ -145,6 +158,46 @@ describe("createTranscript", () => {
     const transcript = createTranscript();
     for (const chunk of chunks) transcript.push(chunk);
     expect(transcript.messages).toEqual(chunksToMessages(chunks));
+  });
+
+  it("hides agent steps but keeps text and sync status when asked", () => {
+    const transcript = createTranscript({ hideSteps: true });
+    for (const chunk of [
+      { type: "user_text", session_id: s, text: "combine these" },
+      { type: "thought_delta", session_id: s, text: "Pondering" },
+      {
+        type: "tool_call",
+        session_id: s,
+        tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "a.md" }] },
+      },
+      {
+        type: "tool_call_update",
+        session_id: s,
+        tool_call: { toolCallId: "t1", status: "completed", content: "done" },
+      },
+      { type: "text_delta", session_id: s, text: "Done." },
+      { type: "sync_status", phase: "combined", text: "Done. Your changes are combined." },
+    ] satisfies UiChunk[]) {
+      transcript.push(chunk);
+    }
+    expect(transcript.messages.map((m) => m.parts)).toEqual([
+      [{ type: "text", text: "combine these" }],
+      [
+        { type: "text", text: "Done." },
+        {
+          type: "data-sync-status",
+          data: { phase: "combined", text: "Done. Your changes are combined." },
+        },
+      ],
+    ]);
+  });
+
+  it("keeps agent steps by default", () => {
+    const transcript = createTranscript();
+    transcript.push({ type: "thought_delta", session_id: s, text: "Pondering" });
+    expect(transcript.messages[0]!.parts).toEqual([
+      { type: "reasoning", text: "Pondering", state: "done" },
+    ]);
   });
 
   it("appends a delta to the open assistant message in place", () => {

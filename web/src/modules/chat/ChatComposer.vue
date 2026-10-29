@@ -30,6 +30,8 @@ const props = defineProps<{
   streaming: boolean;
   /** Why sending is unavailable right now, if it is. */
   blocked: string | null;
+  /** Why the input is replaced by a stage line (a sync chat while the site is checked). */
+  locked?: string | null;
   /** Files already uploaded for the next message. */
   attachments: ChatAttachment[];
   /** An upload is in flight. */
@@ -81,6 +83,7 @@ const dropping = ref(false);
 const canSend = computed(
   () =>
     !props.blocked &&
+    !props.locked &&
     !props.attaching &&
     (!!text.value.trim() || props.attachments.length > 0 || props.references.length > 0) &&
     !!provider.value,
@@ -194,7 +197,15 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
             <Spinner class="size-3.5" aria-hidden="true" /> Attaching…
           </span>
         </div>
+        <p
+          v-if="locked"
+          data-testid="chat-locked"
+          class="text-muted-foreground min-h-16 px-3 py-2 text-sm"
+        >
+          {{ locked }}
+        </p>
         <InputGroupTextarea
+          v-else
           ref="textarea"
           v-model="text"
           data-testid="chat-input"

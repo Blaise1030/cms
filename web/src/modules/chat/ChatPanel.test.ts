@@ -10,7 +10,9 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatPanel from "./ChatPanel.vue";
+import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
 import { useChatStore } from "./store";
+import { useChangesStore } from "@/modules/changes/store";
 
 enableAutoUnmount(afterEach);
 
@@ -18,6 +20,16 @@ const ORIGIN = "http://127.0.0.1:7800";
 
 type Call = { method: string; url: string; init: RequestInit };
 type Chunk = Record<string, unknown>;
+type WireSync = {
+  conflictSessionId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  files: string[];
+  phase: string;
+  startedAt: number;
+  repairAttempted: boolean;
+};
 type WireChat = {
   id: string;
   provider: string;
@@ -26,6 +38,8 @@ type WireChat = {
   updatedAt: number;
   live: boolean;
   running: boolean;
+  kind?: "chat" | "sync";
+  sync?: WireSync | null;
 };
 type History = { chunks: Chunk[]; provider: string; model: string | null; running: boolean; pendingPermissions?: string[] };
 
@@ -119,6 +133,8 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     return json({ model: body.modelId });
   }
   if (/^\/api\/chat\/p1\/[^/]+\/approve$/.test(path) && method === "POST") return new Response(null, { status: 204 });
+  if (/^\/api\/changes\/conflicts\/[^/]+\/sync\/[^/]+\/end$/.test(path) && method === "POST")
+    return new Response(null, { status: 204 });
   const message = path.match(/^\/api\/chat\/p1\/([^/]+)\/message$/);
   if (message && method === "POST") {
     if (messageGate) {
@@ -219,6 +235,30 @@ async function mountPanel() {
   const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
   await flushPromises();
   return w;
+}
+
+/** A sync chat summary as the daemon lists it, with the combine it is doing. */
+function syncChat(phase: string): WireChat {
+  return {
+    id: "c1",
+    provider: "cursor",
+    model: null,
+    title: "Combining About",
+    updatedAt: 1,
+    live: true,
+    running: false,
+    kind: "sync",
+    sync: {
+      conflictSessionId: "cs1",
+      branch: "content/page",
+      tip: "tip",
+      incoming: "incoming",
+      files: ["page.md"],
+      phase,
+      startedAt: 1,
+      repairAttempted: false,
+    },
+  };
 }
 
 async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
@@ -1013,6 +1053,103 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.find("[data-testid='chat-viewport']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-viewport']").classes()).toContain("scroll-fade-y");
     expect(w.find("[data-testid='chat-header']").classes()).not.toContain("border-b");
+  });
+
+  describe("sync chats", () => {
+    const openSync = async (phase: string, chunks: Chunk[] = []) => {
+      chats = [syncChat(phase)];
+      histories.c1 = { chunks, provider: "cursor", model: null, running: false };
+      useChatStore().setActive("p1", "c1");
+      return mountPanel();
+    };
+
+    it("renders stage lines without agent steps and offers End sync", async () => {
+      const w = await openSync("working", [
+        { type: "user_text", session_id: "s", text: "combine these" },
+        { type: "thought_delta", session_id: "s", text: "Pondering the pages" },
+        {
+          type: "tool_call",
+          session_id: "s",
+          tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "page.md" }] },
+        },
+        { type: "text_delta", session_id: "s", text: "I'll keep both changes." },
+        { type: "sync_status", phase: "working", text: "Reading your pages…" },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-status']").text()).toBe("Reading your pages…"),
+      );
+      expect(w.find("[data-testid='chat-steps']").exists()).toBe(false);
+      expect(w.text()).toContain("I'll keep both changes.");
+      expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.working);
+      expect(w.find("[data-testid='sync-end']").text()).toBe(SYNC_ACTIONS.end);
+      expect(w.find("[data-testid='chat-composer']").exists()).toBe(true);
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
+    });
+
+    it("locks the composer with the stage copy while checking", async () => {
+      const w = await openSync("checking", [
+        { type: "sync_status", phase: "checking", text: "Checking the site still works…" },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='chat-locked']").text()).toBe(PHASE_LABEL.checking),
+      );
+      expect(w.find("[data-testid='chat-input']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(true);
+    });
+
+    it("offers the two final actions instead of the composer once combined", async () => {
+      const w = await openSync("combined", [
+        { type: "sync_status", phase: "combined", text: "Done. Your changes and the latest site are combined." },
+      ]);
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-final']").exists()).toBe(true));
+      expect(w.find("[data-testid='chat-composer']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-pick']").text()).toBe(SYNC_ACTIONS.pick);
+      expect(w.find("[data-testid='sync-again']").text()).toBe(SYNC_ACTIONS.again);
+      expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined);
+    });
+
+    it.each(["ended", "expired"] as const)("labels a %s sync as Ended", async (phase) => {
+      const w = await openSync(phase);
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-phase']").text()).toBe("Ended"));
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(true);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
+    });
+
+    it("ends the combine from the header", async () => {
+      const w = await openSync("working");
+      useChangesStore().syncSessionId = "cs1";
+      await w.find("[data-testid='sync-end']").trigger("click");
+      await vi.waitFor(() =>
+        expect(
+          calls.some(
+            (c) =>
+              c.method === "POST"
+              && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync/c1/end`,
+          ),
+        ).toBe(true),
+      );
+    });
+
+    it("marks a combining chat in the history meta line", async () => {
+      const w = await openSync("working");
+      await w.find("[data-testid='chat-history-toggle']").trigger("click");
+      await vi.waitFor(() => {
+        const item = document.body.querySelector("[data-testid='chat-history-item']")!;
+        expect(item.textContent).toContain("· Combining");
+      });
+    });
+
+    it("keeps its copy free of implementation words", () => {
+      const forbidden = /branch|commit|merge|conflict|worktree|checkout|clone|\bgit\b|origin|main|markers|npm|<<<<<<</i;
+      const copy = [
+        ...Object.values(PHASE_LABEL),
+        SYNC_ACTIONS.end,
+        SYNC_ACTIONS.pick,
+        SYNC_ACTIONS.again,
+      ];
+      for (const text of copy) expect(text).not.toMatch(forbidden);
+    });
   });
 
   describe("element references", () => {

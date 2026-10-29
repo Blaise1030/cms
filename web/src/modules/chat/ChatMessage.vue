@@ -37,6 +37,7 @@ import {
   formatValue,
   groupSteps,
   stepsTitle,
+  syncStatusData,
   toolLabel,
   type AgentErrorData,
   type CheckpointData,
@@ -183,6 +184,14 @@ const agentError = (data: unknown) => data as AgentErrorData;
           :project-id="projectId"
           :checkpoint="checkpoint(group.part.data)"
         />
+
+        <p
+          v-else-if="group.part.type === 'data-sync-status'"
+          data-testid="sync-status"
+          class="text-muted-foreground text-xs"
+        >
+          {{ syncStatusData(group.part.data).text }}
+        </p>
 
         <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">
           <CircleAlert />

@@ -15,7 +15,7 @@ const stubs = {
   },
 };
 
-function mountComposer(autoApprove: boolean) {
+function mountComposer(autoApprove: boolean, locked: string | null = null) {
   return mount(ChatComposer, {
     props: {
       modelValue: "",
@@ -26,6 +26,7 @@ function mountComposer(autoApprove: boolean) {
       providerLocked: false,
       streaming: false,
       blocked: null,
+      locked,
       attachments: [],
       attaching: false,
       references: [],
@@ -34,6 +35,20 @@ function mountComposer(autoApprove: boolean) {
     global: { stubs },
   });
 }
+
+describe("ChatComposer lock", () => {
+  it("shows the reason in place of the input", () => {
+    const w = mountComposer(false, "Checking the site still works…");
+    expect(w.find("[data-testid='chat-locked']").text()).toBe("Checking the site still works…");
+    expect(w.find("[data-testid='chat-input']").exists()).toBe(false);
+  });
+
+  it("shows the input when nothing is locking it", () => {
+    const w = mountComposer(false);
+    expect(w.find("[data-testid='chat-input']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-locked']").exists()).toBe(false);
+  });
+});
 
 describe("ChatComposer approvals menu", () => {
   it("shows the current approval mode on the trigger", () => {
