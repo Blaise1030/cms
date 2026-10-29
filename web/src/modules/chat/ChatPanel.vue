@@ -171,6 +171,8 @@ const activeSummary = computed(() => chats.value.find((c) => c.id === activeId.v
 const isSync = computed(() => activeSummary.value?.kind === "sync");
 const syncPhase = computed(() => activeSummary.value?.sync?.phase ?? null);
 const syncTerminal = computed(() => syncIsTerminal(syncPhase.value));
+/** The combine this chat is doing; the chat summary is the source of truth for every action. */
+const activeSyncSessionId = computed(() => activeSummary.value?.sync?.conflictSessionId ?? undefined);
 /** What the composer shows in place of the input while a sync checks the site. */
 const composerLocked = computed(() =>
   isSync.value && syncPhase.value === "checking" ? PHASE_LABEL.checking : null,
@@ -178,7 +180,6 @@ const composerLocked = computed(() =>
 const composerBlocked = computed(() => {
   if (loadingChat.value) return "Loading chat";
   if (composerLocked.value) return composerLocked.value;
-  if (isSync.value && syncTerminal.value) return "This combine has ended.";
   return provider.value ? null : "No agent is available";
 });
 
@@ -584,7 +585,7 @@ defineExpose({ insert, insertReference, send, busy });
         variant="ghost"
         size="sm"
         data-testid="sync-end"
-        @click="changes.endSyncChat(projectId)"
+        @click="changes.endSyncChat(projectId, activeSyncSessionId, activeId ?? undefined)"
       >
         {{ SYNC_ACTIONS.end }}
       </Button>
@@ -701,10 +702,20 @@ defineExpose({ insert, insertReference, send, busy });
         </CardContent>
       </Card>
       <div v-if="isSync && syncTerminal" data-testid="sync-final" class="flex flex-col gap-2">
-        <Button variant="outline" size="sm" data-testid="sync-pick" @click="changes.pickMyself(projectId)">
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="sync-pick"
+          @click="changes.pickMyself(projectId, activeSyncSessionId)"
+        >
           {{ SYNC_ACTIONS.pick }}
         </Button>
-        <Button variant="outline" size="sm" data-testid="sync-again" @click="changes.combineAgain(projectId)">
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="sync-again"
+          @click="changes.combineAgain(projectId, activeSyncSessionId)"
+        >
           {{ SYNC_ACTIONS.again }}
         </Button>
       </div>

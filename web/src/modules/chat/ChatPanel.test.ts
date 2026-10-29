@@ -11,6 +11,7 @@ vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatPanel from "./ChatPanel.vue";
 import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
+import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
 
@@ -49,6 +50,8 @@ let histories: Record<string, History>;
 let seq: number;
 /** When set, chat history responses wait for it. */
 let historyGate: Promise<void> | null;
+/** When set, chat-list responses wait for it. */
+let chatsGate: Promise<void> | null;
 /** When set, the next message POST fails with it. */
 let messageFailure: Response | null;
 let messageGate: Promise<void> | null;
@@ -88,8 +91,10 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     });
   if (path === "/api/chat/p1/attachments" && method === "POST")
     return json({ path: "/state/p1/attachments/abc123.png" });
-  if (path === "/api/chat/p1" && method === "GET")
+  if (path === "/api/chat/p1" && method === "GET") {
+    if (chatsGate) await chatsGate;
     return json({ chats, running: chats.find((c) => c.running)?.id ?? null });
+  }
   if (path === "/api/chat/p1" && method === "POST") {
     if (createGate) {
       const gate = createGate;
@@ -135,6 +140,26 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   if (/^\/api\/chat\/p1\/[^/]+\/approve$/.test(path) && method === "POST") return new Response(null, { status: 204 });
   if (/^\/api\/changes\/conflicts\/[^/]+\/sync\/[^/]+\/end$/.test(path) && method === "POST")
     return new Response(null, { status: 204 });
+  const startSync = path.match(/^\/api\/changes\/conflicts\/([^/]+)\/sync$/);
+  if (startSync && method === "POST") {
+    const id = `c-new-${++seq}`;
+    chats.unshift({ ...syncChat("working"), id, title: "Combining again" });
+    histories[id] = { chunks: [], provider: "cursor", model: null, running: false };
+    return json({ chatId: id });
+  }
+  const conflict = path.match(/^\/api\/changes\/conflicts\/([^/?]+)(?:\?.*)?$/);
+  if (conflict && method === "GET")
+    return json({
+      id: conflict[1],
+      projectId: "p1",
+      branch: "content/page",
+      tip: "tip",
+      incoming: "incoming",
+      base: "base",
+      expiresAt: Date.now() + 60_000,
+      choices: {},
+      files: [],
+    });
   const message = path.match(/^\/api\/chat\/p1\/([^/]+)\/message$/);
   if (message && method === "POST") {
     if (messageGate) {
@@ -216,6 +241,7 @@ beforeEach(() => {
   histories = {};
   seq = 0;
   historyGate = null;
+  chatsGate = null;
   messageFailure = null;
   messageGate = null;
   createGate = null;
@@ -1116,9 +1142,10 @@ describe("ChatPanel", () => {
       expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
     });
 
-    it("ends the combine from the header", async () => {
+    it("ends the combine from the chat summary, without a remembered session", async () => {
       const w = await openSync("working");
-      useChangesStore().syncSessionId = "cs1";
+      const changes = useChangesStore();
+      expect(changes.syncSessionId).toBeNull();
       await w.find("[data-testid='sync-end']").trigger("click");
       await vi.waitFor(() =>
         expect(
@@ -1129,6 +1156,68 @@ describe("ChatPanel", () => {
           ),
         ).toBe(true),
       );
+      expect(changes.syncSessionId).toBeNull();
+    });
+
+    it("picks the changes by hand from the summary after a reload", async () => {
+      const w = await openSync("combined");
+      const changes = useChangesStore();
+      expect(changes.syncSessionId).toBeNull();
+      await w.find("[data-testid='sync-pick']").trigger("click");
+      await vi.waitFor(() => expect(changes.selectedConflictId).toBe("cs1"));
+      expect(changes.currentConflict?.id).toBe("cs1");
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "GET"
+            && c.url === `${ORIGIN}/api/changes/conflicts/cs1?project=p1`,
+        ),
+      ).toBe(true);
+    });
+
+    it("combines again with the summary's session after a reload", async () => {
+      const w = await openSync("combined");
+      expect(useChangesStore().syncSessionId).toBeNull();
+      await vi.waitFor(() => expect(useAgentProvidersStore().provider).toBe("cursor"));
+      await w.find("[data-testid='sync-again']").trigger("click");
+      await vi.waitFor(() => {
+        const post = calls.find(
+          (c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync`,
+        );
+        expect(post).toBeDefined();
+        expect(JSON.parse(String(post!.init.body))).toEqual({ project: "p1", provider: "cursor" });
+      });
+      await vi.waitFor(() => expect(useChatStore().activeChatId("p1")).not.toBe("c1"));
+    });
+
+    it("drops steps once a late chat summary marks the transcript as a sync", async () => {
+      let release!: () => void;
+      chatsGate = new Promise((r) => (release = r));
+      chats = [syncChat("working")];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [
+          { type: "user_text", session_id: "s", text: "combine these" },
+          { type: "thought_delta", session_id: "s", text: "Pondering the pages" },
+          {
+            type: "tool_call",
+            session_id: "s",
+            tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "page.md" }] },
+          },
+          { type: "text_delta", session_id: "s", text: "I'll keep both changes." },
+          { type: "sync_status", phase: "working", text: "Reading your pages…" },
+        ],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      // The history rendered before the chat list landed, so it still shows the step group.
+      expect(w.find("[data-testid='chat-steps']").exists()).toBe(true);
+      release();
+      await vi.waitFor(() => expect(w.find("[data-testid='chat-steps']").exists()).toBe(false));
+      expect(w.find("[data-testid='sync-status']").text()).toBe("Reading your pages…");
+      expect(w.text()).toContain("I'll keep both changes.");
     });
 
     it("marks a combining chat in the history meta line", async () => {

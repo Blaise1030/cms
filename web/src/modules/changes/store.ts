@@ -323,22 +323,28 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  /** End the open sync chat, releasing the draft for manual choices. */
-  async function endSyncChat(id: string) {
-    const sessionId = syncSessionId.value;
-    const chatId = useChatStore().activeChatId(id);
+  /**
+   * End a sync chat, releasing the draft for manual choices. The session and chat come
+   * from the chat's own summary when the caller has them; the remembered session is a
+   * fallback for callers that do not.
+   */
+  async function endSyncChat(
+    id: string,
+    sessionId = syncSessionId.value,
+    chatId = useChatStore().activeChatId(id),
+  ) {
     if (!sessionId || !chatId) return;
     syncError.value = null;
     // The writer cancelled the combine: a share/publish held for it must not fire later.
     pendingPush.value = null;
     try {
       await daemon.api.endSyncChat(id, sessionId, chatId);
-      syncSessionId.value = null;
+      if (syncSessionId.value === sessionId) syncSessionId.value = null;
       await useChatStore().load(id);
     } catch (e) {
       // Already ended elsewhere: there is nothing left to stop.
       if (e instanceof ApiError && e.status === 404) {
-        syncSessionId.value = null;
+        if (syncSessionId.value === sessionId) syncSessionId.value = null;
         return;
       }
       syncError.value = SYNC_REQUEST_FAILED;
@@ -347,15 +353,13 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   /** Leave the chat and pick each file by hand in the conflict view. */
-  async function pickMyself(id: string) {
-    const sessionId = syncSessionId.value;
+  async function pickMyself(id: string, sessionId = syncSessionId.value) {
     if (!sessionId) return;
     await openConflict(id, sessionId);
   }
 
   /** Ask the assistant to combine this draft again, opening a fresh chat. */
-  async function combineAgain(id: string) {
-    const sessionId = syncSessionId.value;
+  async function combineAgain(id: string, sessionId = syncSessionId.value) {
     if (!sessionId) return;
     await startSyncChat(id, sessionId);
   }
