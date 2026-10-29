@@ -314,6 +314,65 @@ pub async fn end(
     Ok(())
 }
 
+/// Reconciles sync chats left behind by a restart. The record and its worktree
+/// are on disk; the conflict session and the agent are not. A sync whose
+/// worktree still sits at the recorded draft tip mid-merge with the recorded
+/// incoming side keeps going; nothing else can be restored, so it ends cleanly.
+/// Never moves a branch, commits, aborts a merge, or checks anything out, and
+/// like [`sweep`] one project's or record's failure never stops the rest.
+pub async fn recover(state: &AppState) {
+    let dir = state_dir(state);
+    for project in state.projects.list().await {
+        for record in history::list(&dir, &project.id) {
+            // The record id names a directory under `sync/` that `end` deletes.
+            if !is_active(&record) || !transcript::valid_chat_id(&record.id) {
+                continue;
+            }
+            if worktree_matches(&record).await {
+                continue;
+            }
+            if let Err(e) = end(
+                state,
+                &project.id,
+                &record.id,
+                SyncPhase::Ended,
+                RECOVERY_FAILED,
+            )
+            .await
+            {
+                eprintln!("orso: cannot recover sync chat {}: {e}", record.id);
+            }
+        }
+    }
+}
+
+/// Whether the sync's worktree is still where [`start`] left it: at the
+/// recorded draft tip, mid-merge with the recorded incoming side. Any git
+/// failure means it cannot be restored.
+async fn worktree_matches(record: &SessionRecord) -> bool {
+    let (Some(site), Some(st)) = (record.cwd.as_deref(), record.sync.as_ref()) else {
+        return false;
+    };
+    if !site.is_dir() {
+        return false;
+    }
+    match conflicts::text(site, &["rev-parse", "HEAD"]).await {
+        Ok(head) if head == st.tip => {}
+        _ => return false,
+    }
+    match conflicts::git(
+        site,
+        &["rev-parse", "-q", "--verify", "MERGE_HEAD"],
+        &[],
+        None,
+    )
+    .await
+    {
+        Ok((0, merge_head, _)) => String::from_utf8_lossy(&merge_head).trim() == st.incoming,
+        _ => false,
+    }
+}
+
 /// Expires stale syncs and removes worktrees left behind by terminal ones.
 /// Best effort: one project's error never stops the sweep for the others.
 pub async fn sweep(state: &AppState) {

@@ -196,7 +196,14 @@ impl SyncSetup {
 
     /// The status lines the writer sees, in order.
     fn notes(&self, chat: &str) -> Vec<String> {
-        self.chunks(chat)
+        self.notes_in(&self.state, chat)
+    }
+
+    /// The status lines `state` reads for `chat`, live history or transcript.
+    fn notes_in(&self, state: &AppState, chat: &str) -> Vec<String> {
+        state
+            .chats
+            .history(&self.project, chat)
             .into_iter()
             .filter_map(|chunk| match chunk {
                 UiChunk::SyncStatus { text, .. } => Some(text),
@@ -246,6 +253,21 @@ impl SyncSetup {
             );
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
+    }
+
+    /// A second state over the same directory, the way a daemon restart builds
+    /// one: live chats and in-memory conflict sessions are gone.
+    fn fresh_state(&self) -> AppState {
+        AppState::with_scaffold_install(
+            Config {
+                port: 0,
+                projects_dir: self.projects.clone(),
+                no_auth: true,
+                hook_exe: Some(PathBuf::from(env!("CARGO_BIN_EXE_orso"))),
+                ..Default::default()
+            },
+            false,
+        )
     }
 
     /// Poll the record until the sync reaches `phase`.
@@ -638,6 +660,89 @@ async fn sweep_removes_orphan_worktrees() {
         "the record is untouched"
     );
     assert!(h.notes(chat).is_empty(), "no status line is appended");
+}
+
+/// A restart keeps a sync whose worktree still matches its record. The
+/// conflict session lived in memory, so boot must not require it.
+#[tokio::test]
+async fn recover_keeps_a_matching_worktree() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("leave.sh");
+    std::fs::write(&script, "exit 0\n").unwrap();
+    sync_provider("fake-leave-recover", &script);
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-leave-recover")
+        .await
+        .unwrap();
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+
+    let restarted = h.fresh_state();
+    sync_chat::recover(&restarted).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Working);
+    assert!(st.ended_at.is_none());
+    assert!(h.site(&chat).is_dir(), "a matching worktree survives boot");
+    let notes = h.notes_in(&restarted, &chat);
+    assert!(
+        notes
+            .iter()
+            .any(|note| note == "1 page still needs a decision."),
+        "the restarted state reads the same transcript: {notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|note| note == sync_chat::RECOVERY_FAILED),
+        "a matching sync is left alone: {notes:?}"
+    );
+    h.state.chats.shutdown().await;
+    restarted.chats.shutdown().await;
+}
+
+/// A worktree that lost its merge state cannot be restored: boot ends the sync
+/// with the plain line and removes the worktree, leaving the draft alone.
+#[tokio::test]
+async fn recover_ends_a_broken_sync() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("leave.sh");
+    std::fs::write(&script, "exit 0\n").unwrap();
+    sync_provider("fake-leave-broken", &script);
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-leave-broken")
+        .await
+        .unwrap();
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+    let site = h.site(&chat);
+    let tip = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap()
+        .tip;
+    // The worktree stays at the tip but is no longer mid-merge.
+    git(&site, &["reset", "-q", "--hard", "HEAD"]);
+
+    let restarted = h.fresh_state();
+    sync_chat::recover(&restarted).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(st.ended_at.is_some());
+    let notes = h.notes_in(&restarted, &chat);
+    assert!(
+        notes.iter().any(|note| note == sync_chat::RECOVERY_FAILED),
+        "{notes:?}"
+    );
+    assert!(!site.exists(), "the broken worktree is removed");
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    assert_plain(sync_chat::RECOVERY_FAILED);
+    h.state.chats.shutdown().await;
+    restarted.chats.shutdown().await;
 }
 
 /// An unfinished turn leaves the merge alone, so the writer gets one plain line
