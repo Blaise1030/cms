@@ -745,6 +745,138 @@ async fn recover_ends_a_broken_sync() {
     restarted.chats.shutdown().await;
 }
 
+/// A restart during verification or the build leaves no turn to finish the
+/// check. A matching worktree is not enough: `checking` ends cleanly too.
+#[tokio::test]
+async fn recover_ends_a_checking_sync() {
+    let h = SyncSetup::new().await;
+    let script = h._tmp.path().join("leave.sh");
+    std::fs::write(&script, "exit 0\n").unwrap();
+    sync_provider("fake-leave-checking", &script);
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-leave-checking")
+        .await
+        .unwrap();
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+    // The daemon stopped while `advance` had this sync in `checking`.
+    history::update(&h.state_dir(), &h.project, &chat, |record| {
+        if let Some(st) = record.sync.as_mut() {
+            st.phase = SyncPhase::Checking;
+        }
+    })
+    .unwrap();
+    let site = h.site(&chat);
+    let tip = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap()
+        .tip;
+    h.state.chats.shutdown().await;
+
+    let restarted = h.fresh_state();
+    sync_chat::recover(&restarted).await;
+
+    let st = history::get(&h.state_dir(), &h.project, &chat)
+        .unwrap()
+        .sync
+        .unwrap();
+    assert_eq!(st.phase, SyncPhase::Ended);
+    assert!(st.ended_at.is_some());
+    let notes = h.notes_in(&restarted, &chat);
+    assert!(
+        notes.iter().any(|note| note == sync_chat::RECOVERY_FAILED),
+        "{notes:?}"
+    );
+    assert!(!site.exists(), "the stale check's worktree is removed");
+    assert_eq!(git(&h.dir, &["rev-parse", "content/page"]), tip);
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "mine");
+    restarted.chats.shutdown().await;
+}
+
+/// The writer's first message after a restart starts the assistant in the sync's
+/// worktree, never in the project checkout it would then edit.
+#[tokio::test]
+async fn post_message_after_restart_uses_the_sync_worktree() {
+    let h = SyncSetup::new().await;
+    let seen = h._tmp.path().join("agent-cwd");
+    let script = h._tmp.path().join("cwd.sh");
+    std::fs::write(&script, format!("pwd > '{}'\n", seen.display())).unwrap();
+    sync_provider("fake-cwd", &script);
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-cwd")
+        .await
+        .unwrap();
+    h.wait_for_note(&chat, "1 page still needs a decision.")
+        .await;
+    let site = h.site(&chat);
+    let site_real = std::fs::canonicalize(&site).unwrap();
+    let seen_real = std::fs::canonicalize(std::fs::read_to_string(&seen).unwrap().trim()).unwrap();
+    assert_eq!(
+        seen_real, site_real,
+        "the fake agent reports its real working directory"
+    );
+    std::fs::remove_file(&seen).unwrap();
+    h.state.chats.shutdown().await;
+
+    let restarted = h.fresh_state();
+    let app = http::router(restarted.clone());
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/api/chat/{}/{chat}/message", h.project),
+        Some(json!({ "text": "hello" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let seen_cwd = std::fs::read_to_string(&seen).unwrap_or_default();
+        if !seen_cwd.trim().is_empty() {
+            let seen_cwd = std::fs::canonicalize(seen_cwd.trim()).unwrap();
+            assert_eq!(seen_cwd, site_real);
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the resumed agent never ran"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(restarted.chats.is_live(&h.project, &chat));
+    restarted.chats.shutdown().await;
+}
+
+/// A sync record without a worktree must never fall back to the project
+/// checkout; the writer gets the plain failure copy and no agent starts.
+#[tokio::test]
+async fn a_sync_chat_without_a_worktree_never_uses_the_project_checkout() {
+    let h = SyncSetup::new().await;
+    let chat = "noworktree";
+    history::insert(
+        &h.state_dir(),
+        &h.project,
+        sync_record(chat, history::now_ms(), SyncPhase::Working, None),
+    )
+    .unwrap();
+    let app = http::router(h.state.clone());
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("/api/chat/{}/{chat}/message", h.project),
+        Some(json!({ "text": "hello" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert_eq!(message, sync_chat::UNEXPECTED);
+    assert_plain(message);
+    assert!(
+        !h.state.chats.is_live(&h.project, chat),
+        "no assistant runs in the project checkout"
+    );
+    h.state.chats.shutdown().await;
+}
+
 /// An unfinished turn leaves the merge alone, so the writer gets one plain line
 /// and the chat stays open instead of landing markers.
 #[tokio::test]

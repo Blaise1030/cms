@@ -100,6 +100,21 @@ async fn project_cwd(state: &AppState, project: &str) -> Result<PathBuf, ApiErro
     super::project_dir(state, project).await
 }
 
+/// The working directory a chat's agent gets. A sync chat lives in its merge
+/// worktree; the project checkout is never a fallback, or the assistant would
+/// edit the writer's draft while `advance` verifies a different tree.
+fn agent_cwd(project_dir: PathBuf, record: &SessionRecord) -> Result<PathBuf, ApiError> {
+    if record.kind != RecordKind::Sync {
+        return Ok(project_dir);
+    }
+    record
+        .cwd
+        .as_deref()
+        .filter(|site| site.is_dir())
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| ApiError::conflict(crate::changes::sync_chat::UNEXPECTED))
+}
+
 fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
     Ok(acp_argv_for(state, id)?.is_some())
 }
@@ -322,13 +337,14 @@ pub async fn start_chat(
     State(state): State<AppState>,
     Path((project, chat)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    let cwd = project_cwd(&state, &project).await?;
+    let project_dir = project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
     let record = require_record(&state, &project, &chat)?;
     if state.chats.is_live(&project, &chat) {
         return Ok(StatusCode::NO_CONTENT);
     }
     super::checkpoints::require_change(&state, &project).await?;
+    let cwd = agent_cwd(project_dir, &record)?;
     ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -344,7 +360,7 @@ pub async fn post_message(
     Path((project, chat)): Path<(String, String)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let cwd = project_cwd(&state, &project).await?;
+    let project_dir = project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
     let req: MessageBody = parse_json(&body, "JSON body {text}")?;
     if req.text.trim().is_empty() {
@@ -366,6 +382,8 @@ pub async fn post_message(
         state.chats.set_auto_approve(&project, p.auto_approve);
     }
     if !state.chats.is_live(&project, &chat) {
+        // A resumed sync must keep editing its worktree, not the writer's draft.
+        let cwd = agent_cwd(project_dir, &record)?;
         ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     }
     state

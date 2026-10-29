@@ -315,11 +315,13 @@ pub async fn end(
 }
 
 /// Reconciles sync chats left behind by a restart. The record and its worktree
-/// are on disk; the conflict session and the agent are not. A sync whose
-/// worktree still sits at the recorded draft tip mid-merge with the recorded
-/// incoming side keeps going; nothing else can be restored, so it ends cleanly.
-/// Never moves a branch, commits, aborts a merge, or checks anything out, and
-/// like [`sweep`] one project's or record's failure never stops the rest.
+/// are on disk; the conflict session and the agent are not. A `working` sync
+/// whose worktree still sits at the recorded draft tip mid-merge with the
+/// recorded incoming side keeps going; nothing else can be restored — including
+/// a `checking` sync, whose killed build may have left unknown partial state —
+/// so it ends cleanly. Never moves a branch, commits, aborts a merge, or checks
+/// anything out, and like [`sweep`] one project's or record's failure never
+/// stops the rest.
 pub async fn recover(state: &AppState) {
     let dir = state_dir(state);
     for project in state.projects.list().await {
@@ -328,7 +330,14 @@ pub async fn recover(state: &AppState) {
             if !is_active(&record) || !transcript::valid_chat_id(&record.id) {
                 continue;
             }
-            if worktree_matches(&record).await {
+            // A matching worktree is not enough: a restart during verification
+            // or the build leaves a killed check with unknown partial state and
+            // no turn to finish it, so only `working` can resume.
+            let resumable = record
+                .sync
+                .as_ref()
+                .is_some_and(|st| st.phase == SyncPhase::Working);
+            if resumable && worktree_matches(&record).await {
                 continue;
             }
             if let Err(e) = end(
