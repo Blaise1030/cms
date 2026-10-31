@@ -56,7 +56,7 @@ already in use. No browser dependency.
   loopback, and the audit must not depend on the caller's session.
 - A dedicated `reqwest::Client` per run: `no_proxy()`, 5 s timeout, redirects limited to 3,
   and a custom redirect policy that rejects any origin other than `127.0.0.1:{port}`.
-  Responses are capped at 2 MiB; larger pages are recorded but not parsed.
+  Responses are read up to 2 MiB and parsed from that prefix.
 - Only `text/html` responses are parsed. Other internal URLs are skipped.
 
 ### Crawl
@@ -241,7 +241,8 @@ paths in the headline, or git vocabulary.
   nothing else changes.
 - **Nested/static routes**: `/x` and `/x/` collapse to one page; links with queries and
   fragments are fetched once.
-- **Large pages**: over 2 MiB, recorded in `pages` but not parsed; no element findings.
+- **Large pages**: responses are read up to 2 MiB; the prefix is parsed, so a truncated
+  page can still produce element findings.
 - **Dynamic routes** (blog posts, docs): discovered by crawling links, which is exactly
   what a reader sees. Not discovered if nothing links to them, which is also a finding a
   writer can act on later (sitemap work, out of scope).
@@ -259,7 +260,7 @@ paths in the headline, or git vocabulary.
   across pages, and the five-example cap on `detail`.
 - `crawl.rs`: base-prefix normalization, query/fragment stripping, asset and dev-internal
   skips, `/x` vs `/x/` dedupe, and the 50-page cap.
-- Integration (`src/seo/mod.rs` tests): spin an axum fixture server on a free loopback port
+- Integration (`tests/seo.rs`): spin an axum fixture server on a free loopback port
   with a good page, a 404 link, a missing description and a duplicate title; assert the
   report shape and ordering. A second test asserts `DEVSERVER_ERR` when the project's
   devserver is not ready.
