@@ -136,10 +136,11 @@
     @apply bg-background text-foreground;
   }
   /* macOS draws thick, track-lined scrollbars when the system is set to always show them. Keep
-     every scroller thin and track-free, and leave the thumb out while the chat auto-scrolls. */
+     every scroller thin and track-free, and show the thumb only while its scroller moves
+     (`lib/scrollbars.ts` marks it). The chat's auto-scroll hides even that. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 24%, transparent) transparent;
+    scrollbar-color: transparent transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
@@ -150,11 +151,14 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--foreground) 24%, transparent);
+    background-color: transparent;
     border-radius: 9999px;
   }
-  *::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  *[data-scrolling] {
+    scrollbar-color: color-mix(in oklab, var(--foreground) 28%, transparent) transparent;
+  }
+  *[data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 28%, transparent);
   }
   [data-autoscrolling] {
     scrollbar-color: transparent transparent;
