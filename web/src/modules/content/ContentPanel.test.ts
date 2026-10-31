@@ -140,6 +140,14 @@ it("shows the document's slug and title fields together", async () => {
  w.unmount();
 });
 
+it("leaves the slug to the schema when the collection declares one", async () => {
+ const fields = { type: "object", required: true, properties: { title: { type: "string", required: true }, slug: { type: "string", required: true } } };
+ const w = await setup({ listContentCollections: async () => [{ ...blog, fields }] }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect(w.find('[data-testid="content-slug-field"]').exists()).toBe(false);
+ expect(w.find('[data-testid="field-slug"]').exists()).toBe(true);
+ w.unmount();
+});
+
 it("restores the last collection's list when the tab reopens", async () => {
  const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
  await w.vm.$router.push("/other"); await w.vm.$router.push("/p/p/content"); await flushPromises();

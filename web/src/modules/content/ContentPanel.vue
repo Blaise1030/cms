@@ -90,7 +90,9 @@ const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${stor
 /** The URL slug is the entry's file name; it renames the document when it changes. */
 const slugDraft = ref("");
 const slugDirty = computed(() => !!store.entry && slugDraft.value.trim() !== store.entry.id);
-const canRenameEntry = computed(() => !!store.entry && removable(store.entry.collection));
+/** A collection that declares its own `slug` field uses that as the address; do not show two. */
+const schemaHasSlug = computed(() => !!store.descriptor?.properties?.slug);
+const canRenameEntry = computed(() => !!store.entry && removable(store.entry.collection) && !schemaHasSlug.value);
 watch(entryKey, () => { slugDraft.value = store.entry?.id ?? ""; }, { immediate: true });
 /** Save first (a rename is refused while a draft is open), then confirm the move with its impact. */
 async function commitSlug() {
@@ -222,8 +224,13 @@ async function newEntry(name: string) {
   try {
     if (await store.createEntryNow(name, currentBranch())) showInUrl();
   } catch {
-    // On main the notice offers Create Change; otherwise the store recorded why it failed.
-    if (!store.needsChange && store.creation?.error) toast.error(store.creation.error);
+    // On main the notice offers Create Change; otherwise name the fields that failed validation.
+    if (store.needsChange) return;
+    const message = store.creation?.error ?? "Couldn't create the entry.";
+    const issues = Object.entries(store.fieldErrors);
+    if (!issues.length) { toast.error(message); return; }
+    const detail = issues.map(([path, text]) => `${path.split(".").map(humanize).join(" › ")}: ${text}`).join("\n");
+    toast.error(message, { description: detail });
   }
 }
 /** Entry-relative image links shown in the rich editor are read from the project's files. */

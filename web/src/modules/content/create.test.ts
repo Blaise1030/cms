@@ -9,6 +9,8 @@ import { ApiError } from "@/core/api";
 import type { FieldDescriptor } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("vue-sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+import { toast } from "vue-sonner";
 import { useContentStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
 import { startingFields, today } from "./create";
@@ -34,6 +36,20 @@ it("starts entries from defaults, the title, today, and empty required values", 
     { type: "object", required: true, properties: { type: { type: "literal", required: true, values: ["hero"] }, heading: { type: "string", required: true }, count: { type: "number", required: true }, on: { type: "boolean", required: false } } },
   ] };
   expect(startingFields(section, "T", "2026-10-11")).toEqual({ fields: { type: "hero", heading: "", count: 0 } });
+});
+
+it("fills a schema slug field with the entry's own slug", () => {
+  const withSlug: FieldDescriptor = { type: "object", required: true, properties: {
+    title: { type: "string", required: true },
+    slug: { type: "string", required: true },
+    note: { type: "string", required: false },
+  } };
+  expect(startingFields(withSlug, "Untitled", "2026-10-31", "untitled")).toEqual({ fields: { title: "Untitled", slug: "untitled" } });
+  // A nested slug is not the document's address and stays empty.
+  const nested: FieldDescriptor = { type: "object", required: true, properties: {
+    seo: { type: "object", required: true, properties: { slug: { type: "string", required: true } } },
+  } };
+  expect(startingFields(nested, "T", "2026-10-31", "untitled")).toEqual({ fields: { seo: { slug: "" } } });
 });
 
 it("cannot start an entry whose required unsupported field has no default", () => {
@@ -119,6 +135,19 @@ it("retries once when the server still reports a duplicate slug", async () => {
   expect(createContentEntry).toHaveBeenNthCalledWith(1, expect.objectContaining({ slug: "untitled" }));
   expect(createContentEntry).toHaveBeenNthCalledWith(2, expect.objectContaining({ slug: "untitled-2" }));
   expect(useContentStore().entry?.id).toBe("untitled");
+});
+
+it("names the fields the collection rejected when a create fails validation", async () => {
+  const createContentEntry = vi.fn().mockRejectedValue(new ApiError("BADREQ", "Content does not match the collection schema", 422, {
+    reason: "invalid_schema",
+    details: [{ path: ["description"], message: "Required" }, { path: ["seo", "note"], message: "Too short" }],
+  }));
+  await setup({ createContentEntry });
+  await choose("blog");
+  el("content-new-entry")!.click(); await flushPromises();
+  expect(vi.mocked(toast.error)).toHaveBeenLastCalledWith("Content does not match the collection schema", {
+    description: "Description: Required\nSeo › Note: Too short",
+  });
 });
 
 it("records why an entry could not be created", async () => {

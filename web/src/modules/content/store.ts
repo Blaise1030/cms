@@ -381,7 +381,7 @@ export const useContentStore = defineStore("content", () => {
     const c = creation.value; const id = projectId.value;
     const collection = collections.value.find(x => x.name === c?.collection);
     if (!c || c.busy || !collection?.fields) return;
-    const start = startingFields(collection.fields, c.title.trim());
+    const start = startingFields(collection.fields, c.title.trim(), undefined, c.slug.trim());
     if ("reason" in start) { c.error = start.reason; return; }
     resumeAction = "create";
     c.busy = true; c.error = null; clearSaveState();
