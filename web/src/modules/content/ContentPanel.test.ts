@@ -124,6 +124,22 @@ it("labels the collection list and filters it as you type", async () => {
  w.unmount();
 });
 
+it("shows the document's slug and title fields together", async () => {
+ const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
+ const impact = { references: [], assets: [], proseLinks: [] };
+ const w = await setup({
+  listContentCollections: async () => [{ ...blog, fields }],
+  contentImpact: async () => impact,
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect((w.get('[data-testid="content-slug"]').element as HTMLInputElement).value).toBe("welcome");
+ expect(w.find('[data-testid="field-title"]').exists()).toBe(true);
+ await w.get('[data-testid="content-slug"]').setValue("welcome-again");
+ await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();
+ const rename = document.body.querySelector<HTMLInputElement>('[data-testid="content-rename-slug"]')!;
+ expect(rename.value).toBe("welcome-again");
+ w.unmount();
+});
+
 it("restores the last collection's list when the tab reopens", async () => {
  const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
  await w.vm.$router.push("/other"); await w.vm.$router.push("/p/p/content"); await flushPromises();

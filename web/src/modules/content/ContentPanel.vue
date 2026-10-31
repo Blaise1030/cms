@@ -10,6 +10,7 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInse
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDaemon } from "@/core/daemon";
@@ -86,6 +87,20 @@ const tab = ref<"fields" | "history">("fields");
 /** JSON entries edit their fields in the page, so their side panel only has History. */
 const sideTab = computed(() => (hasFieldsPanel.value ? tab.value : "history"));
 const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${store.entry.id}` : null));
+/** The URL slug is the entry's file name; it renames the document when it changes. */
+const slugDraft = ref("");
+const slugDirty = computed(() => !!store.entry && slugDraft.value.trim() !== store.entry.id);
+const canRenameEntry = computed(() => !!store.entry && removable(store.entry.collection));
+watch(entryKey, () => { slugDraft.value = store.entry?.id ?? ""; }, { immediate: true });
+/** Save first (a rename is refused while a draft is open), then confirm the move with its impact. */
+async function commitSlug() {
+  const entry = store.entry;
+  const next = slugDraft.value.trim();
+  if (!entry || !next || next === entry.id) { slugDraft.value = entry?.id ?? ""; return; }
+  try { if (store.dirty) await store.saveDraft(); } catch { return; }
+  store.startLifecycle("rename");
+  if (store.lifecycle) store.lifecycle.slug = next;
+}
 // History loads the first time its tab shows an entry; another entry drops the open version.
 watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
   if (key !== old?.[0]) history.close();
@@ -388,6 +403,14 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 <TabsTrigger value="history">History</TabsTrigger>
               </TabsList>
               <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
+                <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
+                  <Label for="content-slug" class="text-xs font-medium">Slug</Label>
+                  <div class="flex gap-1">
+                    <Input id="content-slug" v-model="slugDraft" data-testid="content-slug" class="h-8" @keydown.enter.prevent="commitSlug" />
+                    <Button v-if="slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving" @click="commitSlug">Rename</Button>
+                  </div>
+                  <p class="text-xs text-muted-foreground">The page's address. Renaming moves the file and updates links.</p>
+                </div>
                 <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
               </TabsContent>
               <TabsContent value="history">
