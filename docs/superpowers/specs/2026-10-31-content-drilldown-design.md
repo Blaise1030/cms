@@ -38,8 +38,9 @@ through the same three states.
 - Flat list, one row per editable collection: name and its kind icon. No
   nesting, no entry counts, no search box.
 - The open collection is highlighted.
-- Each row's "…" menu offers **New entry** when the collection accepts one; the
-  existing disabled reason appears as the menu hint.
+- Each row reveals a **+** button on hover or keyboard focus, starting **New
+  entry**. When the collection cannot take one, the button is disabled and its
+  title carries the existing reason; singletons show no button.
 - Unsupported collections stay hidden behind the existing warning toast.
 - Collapsible in the list state only. The editor state hides the sidebar
   entirely, so the editor owns the panel's full width.
@@ -121,7 +122,10 @@ the tree; the sidebar no longer needs entry data.
   ones stay hidden; a read-only collection's rows still open.
 - **Dirty draft**: the existing `canLeave()` guards still intercept collection
   changes, entry changes, and route updates, including the back link.
-- **Create**: the existing dialog; on success the URL moves to the new entry.
+- **Create**: the existing dialog, reachable from the list header and from a
+  collection row's **+** button; on success the URL moves to the new entry.
+  The list header button is labelled **New entry**; the reason it is disabled
+  reuses the existing `createBlocked()` copy.
 - **Rename/delete**: reachable from both the list row menu and the editor
   header; the lifecycle dialog is unchanged.
 - **Empty catalog**: the existing "needs the orso-astro integration" message
@@ -161,6 +165,7 @@ vocabulary app-wide is out of scope.
 | `content-panel` | The module root (unchanged) |
 | `content-collections` | The collection sidebar |
 | `content-collection` | A collection row, with `data-collection-name` |
+| `content-collection-new` | The row's **+** button |
 | `content-entry-list` | The list view |
 | `content-filter` | The list filter |
 | `content-entry` | An entry row, with `data-entry-id` (nested ids keep their slashes) |
