@@ -8,7 +8,6 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 
 const blog = { name: "blog", kind: "markdown", editable: true, reason: null, fields: { type: "object", required: true, properties: {

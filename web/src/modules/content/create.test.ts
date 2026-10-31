@@ -9,7 +9,6 @@ import { ApiError } from "@/core/api";
 import type { FieldDescriptor } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
 import { slugify, startingFields, today } from "./create";

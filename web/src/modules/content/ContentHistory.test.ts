@@ -7,7 +7,6 @@ import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 vi.mock("@/modules/checkpoints/DiffView.vue", () => ({ __esModule: true, default: { template: "<div data-testid='diff-view' />" } }));
 vi.mock("./MarkdownBodyEditor.vue", () => ({ __esModule: true, default: { props: ["body"], template: "<div data-testid='body-editor'>{{ body }}</div>" } }));
 import { REFRESH_DELAY_MS } from "./store";

@@ -9,7 +9,6 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import ImageDialog, { IMAGE_REGISTRY, escapeAlt, type PendingImage } from "./ImageDialog.vue";
 import MarkdownBodyEditor from "./MarkdownBodyEditor.vue";
 import { useContentStore } from "./store";
