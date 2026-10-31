@@ -245,7 +245,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
   <div class="h-full min-h-0" data-testid="content-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
-      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="24" :min-size="16" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
+      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="20" :min-size="12" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
