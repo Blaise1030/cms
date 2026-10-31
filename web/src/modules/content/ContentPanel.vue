@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Plus, Trash2 } from "@lucide/vue";
+import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Plus, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
@@ -10,6 +10,7 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInse
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
@@ -67,6 +68,12 @@ async function confirmLifecycle() { try { await store.confirmLifecycle(); showIn
 /** The branch the project is on, as the Changes picker knows it. */
 const currentBranch = () => changes.active?.branch ?? "main";
 const collectionsPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
+/** The sidebar's filter; it matches the name the writer reads, not the raw collection id. */
+const collectionQuery = ref("");
+const filteredCollections = computed(() => {
+  const q = collectionQuery.value.trim().toLowerCase();
+  return q ? validCollections.value.filter(c => humanize(c.name).toLowerCase().includes(q)) : validCollections.value;
+});
 const sidebarOpen = ref(true);
 const fieldsOpen = ref(true);
 function toggleSidebar() {
@@ -242,9 +249,16 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
-            <SidebarGroupContent class="min-h-0 flex-1">
-              <nav data-testid="content-collections" aria-label="Collections" class="flex flex-col gap-0.5">
-                <div v-for="c in validCollections" :key="c.name" class="group flex items-center gap-0.5">
+            <SidebarGroupContent class="flex min-h-0 flex-1 flex-col gap-2">
+              <p class="px-2 text-xs font-medium text-muted-foreground">Collections</p>
+              <InputGroup class="mx-1 h-8 w-auto">
+                <InputGroupAddon align="inline-start">
+                  <Search class="size-4 opacity-50" aria-hidden="true" />
+                </InputGroupAddon>
+                <InputGroupInput v-model="collectionQuery" data-testid="content-collection-filter" placeholder="Filter collections" aria-label="Filter collections" class="h-8" />
+              </InputGroup>
+              <nav data-testid="content-collections" aria-label="Collections" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto">
+                <div v-for="c in filteredCollections" :key="c.name" class="group flex items-center gap-0.5">
                   <button
                     type="button"
                     class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:bg-accent"
@@ -267,6 +281,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                     @click="newEntry(c.name)"
                   ><Plus class="size-4" /></Button>
                 </div>
+                <p v-if="!filteredCollections.length" class="px-2 py-1.5 text-xs text-muted-foreground" data-testid="content-collections-empty">No matches</p>
               </nav>
             </SidebarGroupContent>
           </SidebarGroup>

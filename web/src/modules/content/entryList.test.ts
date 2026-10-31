@@ -40,6 +40,13 @@ it("lists every entry with its slug as an addressable row", () => {
   expect(rows.map(r => r.attributes("data-entry-id"))).toEqual(["spring-launch", "welcome"]);
 });
 
+it("puts a search icon in the filter and matches the visible names", () => {
+  const w = mountList();
+  const group = w.get('[data-slot="input-group"]');
+  expect(group.find("svg.lucide-search").exists()).toBe(true);
+  expect(w.get('[data-testid="content-filter"]').attributes("placeholder")).toBe("Filter entries");
+});
+
 it("shows the collection name and the number of rows on screen", async () => {
   const w = mountList();
   expect(w.text()).toContain("Blog");

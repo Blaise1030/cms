@@ -112,6 +112,18 @@ it("offers create in an empty list and opens a read-only collection", async () =
  expect(readOnly.get('[data-testid="content-read-only"]').text()).toBe("Start the preview to edit content");
  readOnly.unmount();
 });
+it("labels the collection list and filters it as you type", async () => {
+ const help = { ...blog, name: "helpDocs" };
+ const w = await setup({ listContentCollections: async () => [blog, help] }); await flushPromises();
+ expect(w.text()).toContain("Collections");
+ expect(w.get('[data-slot="input-group"]').find("svg.lucide-search").exists()).toBe(true);
+ await w.get('[data-testid="content-collection-filter"]').setValue("help");
+ expect(w.findAll("[data-collection-name]").map(c => c.attributes("data-collection-name"))).toEqual(["helpDocs"]);
+ await w.get('[data-testid="content-collection-filter"]').setValue("zzz");
+ expect(w.get('[data-testid="content-collections-empty"]').text()).toBe("No matches");
+ w.unmount();
+});
+
 it("restores the last collection's list when the tab reopens", async () => {
  const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
  await w.vm.$router.push("/other"); await w.vm.$router.push("/p/p/content"); await flushPromises();

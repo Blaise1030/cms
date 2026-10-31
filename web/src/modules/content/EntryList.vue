@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { FileJson, FileText, MoreHorizontal, Plus } from "@lucide/vue";
+import { FileJson, FileText, MoreHorizontal, Plus, Search } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,7 +42,12 @@ watch(() => props.collection.name, () => { query.value = ""; });
         <span class="text-xs text-muted-foreground">{{ visible.length }} {{ visible.length === 1 ? "entry" : "entries" }}</span>
       </div>
       <div class="flex items-center gap-2">
-        <Input v-model="query" data-testid="content-filter" placeholder="Filter entries" class="h-8 max-w-64" />
+        <InputGroup class="h-8 max-w-64">
+          <InputGroupAddon align="inline-start">
+            <Search class="size-4 opacity-50" aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput v-model="query" data-testid="content-filter" placeholder="Filter entries" aria-label="Filter entries" class="h-8" />
+        </InputGroup>
         <Button
           type="button"
           size="sm"
