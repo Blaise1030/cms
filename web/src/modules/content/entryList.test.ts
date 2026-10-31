@@ -42,7 +42,7 @@ it("lists every entry with its slug as an addressable row", () => {
 
 it("shows the collection name and the number of rows on screen", async () => {
   const w = mountList();
-  expect(w.text()).toContain("blog");
+  expect(w.text()).toContain("Blog");
   expect(w.text()).toContain("2 entries");
   await w.get('[data-testid="content-filter"]').setValue("spring");
   expect(w.text()).toContain("1 entry");

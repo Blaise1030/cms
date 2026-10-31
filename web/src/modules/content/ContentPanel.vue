@@ -18,6 +18,7 @@ import { useChangesStore } from "@/modules/changes/store";
 import type { Change, ContentCollection } from "@/core/types";
 import EntryList from "./EntryList.vue";
 import { entryActions, type EntryAction } from "./entryList";
+import { humanize } from "./labels";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { diffDraft, sameValue } from "./draft";
 import { useContentHistoryStore } from "./history/store";
@@ -255,7 +256,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                     data-testid="content-collection"
                     :data-collection-name="c.name"
                     @click="openCollection(c)"
-                  >{{ c.name }}</button>
+                  >{{ humanize(c.name) }}</button>
                   <Button
                     v-if="!c.singleton"
                     type="button"
@@ -263,7 +264,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                     size="icon-sm"
                     class="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                     data-testid="content-collection-new"
-                    :aria-label="`New ${c.name} entry`"
+                    :aria-label="`New ${humanize(c.name)} entry`"
                     :title="createBlocked(c) ?? 'New entry'"
                     :disabled="!!createBlocked(c)"
                     @click="startCreate(c.name)"
@@ -319,7 +320,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </Button>
         <template v-if="store.entry">
           <div class="flex min-w-0 items-center gap-1 px-1">
-            <h2 class="truncate text-sm font-medium" data-testid="content-entry-title">{{ store.entry.id }}</h2>
+            <h2 class="truncate text-sm font-medium" data-testid="content-entry-title">{{ humanize(store.entry.id) }}</h2>
             <Button v-if="canRemove" type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="Rename" :title="store.dirty ? 'Save or discard your changes first' : 'Rename'" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')"><Pencil class="size-3.5" /></Button>
             <p class="hidden truncate text-xs text-muted-foreground @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
           </div>
@@ -462,7 +463,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         <DialogContent v-if="store.creation" data-testid="content-create-dialog">
           <form class="space-y-3" @submit.prevent="confirmCreate">
             <DialogHeader>
-              <DialogTitle>New {{ store.creation.collection }} entry</DialogTitle>
+              <DialogTitle>New {{ humanize(store.creation.collection) }} entry</DialogTitle>
               <DialogDescription>It starts from the collection's defaults; fill in the rest after it opens.</DialogDescription>
             </DialogHeader>
             <label class="block text-xs font-medium">Title

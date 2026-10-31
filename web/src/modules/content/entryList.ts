@@ -1,6 +1,7 @@
 import type { Component } from "vue";
 import { Copy, FileText, Link, Pencil, Trash2 } from "@lucide/vue";
 import type { ContentEntrySummary } from "@/core/types";
+import { humanize } from "./labels";
 
 /** One row of an entry's menu; `"separator"` draws a divider. */
 export type EntryAction = "separator" | {
@@ -32,9 +33,11 @@ export function filterEntries(entries: readonly ContentEntrySummary[], query: st
   return needle ? entries.filter(e => e.id.toLowerCase().includes(needle)) : entries.slice();
 }
 
-/** The same entries, ordered by slug; the list it was given is left alone. */
+/** The same entries, ordered by the name a writer reads; the list it was given is left alone. */
 export function sortEntries(entries: readonly ContentEntrySummary[]): ContentEntrySummary[] {
-  return entries.slice().sort((a, b) => a.id.localeCompare(b.id));
+  return entries
+    .slice()
+    .sort((a, b) => humanize(a.id).localeCompare(humanize(b.id), undefined, { sensitivity: "base" }));
 }
 
 /** The menu for one entry row: open and share always, path when known, rename and delete unless the collection is a singleton. */

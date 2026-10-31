@@ -31,10 +31,10 @@ it("lists collections, then entries, then opens the editor", async () => {
  expect(w.text()).toContain("Choose a collection.");
  await w.get('[data-collection-name="blog"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/blog");
- expect(w.get('[data-testid="content-entry-list"]').text()).toContain("blog");
+ expect(w.get('[data-testid="content-entry-list"]').text()).toContain("Blog");
  await w.get('[data-entry-id="welcome"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
- expect(w.get('[data-testid="content-entry-title"]').text()).toBe("welcome");
+ expect(w.get('[data-testid="content-entry-title"]').text()).toBe("Welcome");
  expect(w.find('[data-testid="content-collections"]').exists()).toBe(false);
  w.unmount();
 });
@@ -42,7 +42,7 @@ it("returns to the list from the editor", async () => {
  const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
  await w.get('[data-testid="content-back"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/blog");
- expect(w.get('[data-testid="content-entry-list"]').text()).toContain("welcome");
+ expect(w.get('[data-testid="content-entry-list"]').text()).toContain("Welcome");
  w.unmount();
 });
 it("opens the collection and entry named in the URL", async () => {
@@ -50,7 +50,7 @@ it("opens the collection and entry named in the URL", async () => {
  const w = await setup({ contentEntry }, "/p/p/content/blog/welcome"); await flushPromises();
  expect(contentEntry).toHaveBeenCalledWith("p", "blog", "welcome");
  expect(w.get('[data-testid="content-source"]').text()).toBe("Original");
- expect(w.get('[data-testid="content-entry-title"]').text()).toBe("welcome");
+ expect(w.get('[data-testid="content-entry-title"]').text()).toBe("Welcome");
  w.unmount();
 });
 it("opens a singleton's entry and returns to the collection index", async () => {
@@ -61,7 +61,7 @@ it("opens a singleton's entry and returns to the collection index", async () => 
   contentEntry: async () => site,
  }, "/p/p/content/site"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/site/site");
- expect(w.get('[data-testid="content-entry-title"]').text()).toBe("site");
+ expect(w.get('[data-testid="content-entry-title"]').text()).toBe("Site");
  await w.get('[data-testid="content-back"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content");
  w.unmount();
@@ -198,7 +198,7 @@ it("keeps supported collections listed while the preview is down and hides only 
   { name: "legacy", kind: "markdown", editable: false, supportedForEditing: false, reason: "Use orsoGlob() to make this collection editable" },
  ] }); await flushPromises();
  const names = w.findAll('[data-testid="content-collection"]').map(c => c.text());
- expect(names).toContain("blog"); expect(names).not.toContain("legacy");
+ expect(names).toContain("Blog"); expect(names).not.toContain("Legacy");
  w.unmount();
 });
 it("explains an empty catalog: the site needs the orso-astro integration", async () => {

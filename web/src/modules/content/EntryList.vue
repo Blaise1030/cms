@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ContentCollection, ContentEntrySummary } from "@/core/types";
 import { filterEntries, sortEntries, type EntryAction } from "./entryList";
+import { humanize } from "./labels";
 
 const props = defineProps<{
   collection: ContentCollection;
@@ -37,7 +38,7 @@ watch(() => props.collection.name, () => { query.value = ""; });
   <section data-testid="content-entry-list" class="flex h-full min-h-0 flex-col">
     <header class="flex shrink-0 flex-col gap-2 px-4 pt-4 pb-3">
       <div class="flex items-baseline gap-2">
-        <h2 class="truncate text-sm font-medium">{{ collection.name }}</h2>
+        <h2 class="truncate text-sm font-medium">{{ humanize(collection.name) }}</h2>
         <span class="text-xs text-muted-foreground">{{ visible.length }} {{ visible.length === 1 ? "entry" : "entries" }}</span>
       </div>
       <div class="flex items-center gap-2">
@@ -70,7 +71,7 @@ watch(() => props.collection.name, () => { query.value = ""; });
           @click="emit('open', r.entry.id)"
         >
           <component :is="KIND_ICON[r.entry.kind]" class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span class="truncate font-mono text-sm">{{ r.entry.id }}</span>
+          <span class="truncate text-sm">{{ humanize(r.entry.id) }}</span>
           <span class="ml-auto shrink-0 text-xs text-muted-foreground">{{ r.entry.kind }}</span>
         </button>
         <DropdownMenu v-if="r.menu.length">

@@ -70,7 +70,7 @@ async function setup(api: Record<string, unknown> = {}, collections: object[] = 
   return w;
 }
 async function choose(name: string) {
-  const button = [...document.body.querySelectorAll<HTMLElement>('[data-testid="content-collection"]')].find(b => b.textContent?.startsWith(name))!;
+  const button = document.body.querySelector<HTMLElement>(`[data-testid="content-collection"][data-collection-name="${name}"]`)!;
   button.click(); await flushPromises();
 }
 const create = () => h.daemon.api as unknown as { createContentEntry: ReturnType<typeof vi.fn>; listContentEntries: ReturnType<typeof vi.fn> };
