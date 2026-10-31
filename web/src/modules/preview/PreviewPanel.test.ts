@@ -59,6 +59,22 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("reopens the page the frame was on when the view reloads", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    // A cross-origin frame reports where the reader went (the injected bridge forwards it);
+    // the agent's checkpoint then reloads the preview, which must come back to that page.
+    usePreviewStore().setFramePath("site-1", "/blog/");
+    await flushPromises();
+    usePreviewStore().reload();
+    await flushPromises();
+    expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/");
+    w.unmount();
+  });
+
   it("keeps the preview tools enabled when framing the dev server directly", () => {
     localStorage.clear();
     hDaemon.daemon = createFakeDaemon({});

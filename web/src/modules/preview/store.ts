@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { useLocalStorage } from "@vueuse/core";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
-import { errorMessage } from "@orso/utils";
+import { errorMessage, readPref, writePref } from "@orso/utils";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import type { PickedElement } from "./elementPicker";
 import { crashPrompt, pageErrorPrompt, type PageError } from "./pageErrors";
@@ -28,6 +28,19 @@ export const usePreviewStore = defineStore("preview", () => {
   const dark = useLocalStorage("orso.preview.dark", false);
   /** Bumping this remounts the iframe. */
   const reloadNonce = ref(0);
+  /**
+   * The page each project's frame last showed. A cross-origin frame cannot be read, so this is
+   * what the reload reopens and what the address bar shows until the frame reports in.
+   */
+  const paths = ref<Record<string, string>>({});
+  const pathKey = (projectId: string) => `orso.preview.path.${projectId}`;
+  function framePathFor(projectId: string): string {
+    return paths.value[projectId] ?? readPref(pathKey(projectId)) ?? "/";
+  }
+  function setFramePath(projectId: string, path: string) {
+    paths.value = { ...paths.value, [projectId]: path };
+    writePref(pathKey(projectId), path);
+  }
   /** Live dev-server state per project, from `devserver.status` events. */
   const status = ref<Record<string, DevserverState>>({});
   const message = ref<Record<string, string | undefined>>({});
@@ -120,6 +133,8 @@ export const usePreviewStore = defineStore("preview", () => {
     rtl,
     dark,
     reloadNonce,
+    framePathFor,
+    setFramePath,
     status,
     message,
     restarting,

@@ -35,7 +35,7 @@ import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import { frameHref, framePath, readPref, writePref } from "@orso/utils";
+import { frameHref, framePath } from "@orso/utils";
 import { attachPicker, describeElement, relativeFile } from "./elementPicker";
 import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
@@ -116,8 +116,7 @@ const shell = ref<HTMLElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const history = useFrameHistory();
 /** The last path the frame showed, per project, so the preview reopens where the user left it. */
-const lastPathKey = (projectId: string) => `orso.preview.path.${projectId}`;
-const lastPath = ref(readPref(lastPathKey(props.projectId)) ?? "/");
+const lastPath = computed(() => store.framePathFor(props.projectId));
 /** What the address bar shows: the frame's page, or the restored one until the frame reports in. */
 const currentPath = computed(() =>
   history.entries.value.length ? history.current.value : lastPath.value,
@@ -131,7 +130,6 @@ watch(
   src,
   () => {
     history.reset();
-    lastPath.value = readPref(lastPathKey(props.projectId)) ?? "/";
     startHref.value = hrefFor(lastPath.value);
   },
 );
@@ -139,16 +137,16 @@ watch(
 watch(
   () => history.entries.value.length && history.current.value,
   (path) => {
-    if (path) writePref(lastPathKey(props.projectId), path);
+    if (path) store.setFramePath(props.projectId, path);
   },
 );
 
 watch(
   () => store.reloadNonce,
   () => {
-    if (history.entries.value.length) {
-      startHref.value = hrefFor(history.current.value);
-    }
+    // `currentPath` falls back to the last page the frame reported, which is the only source for
+    // a cross-origin frame; without it a reload would return the reader to the address it started at.
+    startHref.value = hrefFor(currentPath.value);
   },
 );
 
@@ -177,6 +175,11 @@ function postToFrame(op: string, extra: Record<string, unknown> = {}) {
 function onFrameMessage(e: MessageEvent) {
   if (!e.source || e.source !== frame.value?.contentWindow) return;
   if (!isBridgeMessage(e.data)) return;
+  if (e.data.op === "path") {
+    // A cross-origin frame only reveals its page this way; remember it so a reload reopens it.
+    store.setFramePath(props.projectId, framePath(e.data.url, base.value));
+    return;
+  }
   if (e.data.op === "cancel") {
     store.setPicking(false);
     return;
@@ -324,8 +327,7 @@ function navigate() {
   else {
     // A cross-origin (direct) frame hides its path: remember the one we asked for, so a
     // reload or a pick session reopens the same page.
-    lastPath.value = framePath(href, base.value);
-    writePref(lastPathKey(props.projectId), lastPath.value);
+    store.setFramePath(props.projectId, framePath(href, base.value));
     startHref.value = new URL(href, src.value).href;
   }
 }

@@ -227,4 +227,15 @@
       if (appearance) applyAppearance(appearance);
     });
   }
+
+  // A cross-origin frame hides its location from the app, so the app cannot keep the reader's
+  // page across a reload unless the page says where it is. Report on every navigation.
+  function reportPath() {
+    post("path", { url: location.href });
+  }
+  addEventListener("load", reportPath);
+  addEventListener("popstate", reportPath);
+  addEventListener("hashchange", reportPath);
+  document.addEventListener("astro:page-load", reportPath);
+  reportPath();
 })();

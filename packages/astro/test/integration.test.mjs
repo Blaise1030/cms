@@ -23,6 +23,9 @@ test("astro:config:setup injects the preview bridge during dev", () => {
   assert.equal(injected.length, 1);
   assert.equal(injected[0].stage, "head-inline");
   assert.match(injected[0].content, /orso:preview/);
+  // The frame is cross-origin, so the app learns the reader's page only from the bridge.
+  assert.match(injected[0].content, /post\("path"/);
+  assert.match(injected[0].content, /location\.href/);
 });
 
 test("astro:config:setup leaves builds alone", () => {
