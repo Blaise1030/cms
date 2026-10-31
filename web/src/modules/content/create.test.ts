@@ -111,20 +111,6 @@ it("walks past the untitled slugs the collection already has", async () => {
   expect(createContentEntry).toHaveBeenCalledWith(expect.objectContaining({ slug: "untitled-3" }));
 });
 
-it("creates in a collection the writer has not opened yet", async () => {
-  const notes = { ...blog, name: "notes" };
-  const createContentEntry = vi.fn(async () => ({ ...saved, collection: "notes", id: "untitled-2" }));
-  await setup({
-    createContentEntry,
-    listContentCollections: async () => [blog, notes],
-    listContentEntries: async (_project: string, name: string) => name === "notes" ? [{ ...saved, collection: "notes", id: "untitled" }] : [],
-  });
-  await choose("blog");
-  const plus = document.body.querySelector<HTMLElement>('[data-collection-name="notes"] + [data-testid="content-collection-new"]')!;
-  plus.click(); await flushPromises();
-  expect(createContentEntry).toHaveBeenCalledWith(expect.objectContaining({ collection: "notes", slug: "untitled-2" }));
-});
-
 it("retries once when the server still reports a duplicate slug", async () => {
   const createContentEntry = vi.fn()
     .mockRejectedValueOnce(new ApiError("CONFLICT", "already exists", 409, { reason: "duplicate_slug" }))

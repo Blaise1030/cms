@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Plus, Search, Trash2 } from "@lucide/vue";
+import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
@@ -267,7 +267,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
   <div class="h-full min-h-0" data-testid="content-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
-      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="20" :min-size="12" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
+      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
@@ -290,18 +290,6 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                     :data-collection-name="c.name"
                     @click="openCollection(c)"
                   >{{ humanize(c.name) }}</button>
-                  <Button
-                    v-if="!c.singleton"
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    class="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                    data-testid="content-collection-new"
-                    :aria-label="`New ${humanize(c.name)} entry`"
-                    :title="createBlocked(c) ?? 'New entry'"
-                    :disabled="!!createBlocked(c)"
-                    @click="newEntry(c.name)"
-                  ><Plus class="size-4" /></Button>
                 </div>
                 <p v-if="!filteredCollections.length" class="px-2 py-1.5 text-xs text-muted-foreground" data-testid="content-collections-empty">No matches</p>
               </nav>
