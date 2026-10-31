@@ -342,13 +342,37 @@ export const useContentStore = defineStore("content", () => {
     } finally { l.busy = false; }
   }
   const creation = ref<ContentCreation | null>(null);
-  /** Open the Create dialog for a multi-entry collection; an open draft must be left first. */
-  function startCreate(collection: string) {
-    if (!canLeave()) return;
-    clearSaveState();
-    creation.value = { collection, title: "", slug: "", busy: false, error: null };
+  /** The first `untitled` slug the collection has not taken. */
+  function untitledSlug(taken: readonly string[]): string {
+    if (!taken.includes("untitled")) return "untitled";
+    for (let n = 2; n < 1000; n++) if (!taken.includes(`untitled-${n}`)) return `untitled-${n}`;
+    return `untitled-${Date.now()}`;
   }
-  function cancelCreate() { if (creation.value?.busy) return; creation.value = null; clearSaveState(); }
+  /**
+   * Create an "Untitled" entry on `branch` and open it, so the writer names it in the editor
+   * instead of a dialog. A taken slug walks `untitled-2`, `untitled-3`, …; a duplicate the
+   * server still reports retries twice before failing. On main `needsChange` is recorded.
+   */
+  async function createEntryNow(collection: string, branch: string): Promise<ContentEntry | undefined> {
+    if (!canLeave()) return;
+    const id = projectId.value;
+    let taken = selectedCollection.value === collection ? entries.value.map(e => e.id) : [];
+    if (!taken.length) {
+      taken = await daemon.api.listContentEntries(id, collection).then(list => list.map(e => e.id)).catch(() => []);
+    }
+    creation.value = { collection, title: "Untitled", slug: untitledSlug(taken), busy: false, error: null };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await confirmCreate(branch);
+      } catch (err) {
+        const c = creation.value;
+        if (!c || attempt === 2 || !(err instanceof ApiError) || err.reason !== "duplicate_slug") throw err;
+        c.error = null;
+        taken = [...taken, c.slug];
+        c.slug = untitledSlug(taken);
+      }
+    }
+  }
   /**
    * Create the named entry with schema defaults on `branch`, then open it. On main this records
    * `needsChange` so Create Change can resume it. Throws after recording the failure.
@@ -408,5 +432,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, startCreate, cancelCreate, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, createEntryNow, confirmCreate };
 });

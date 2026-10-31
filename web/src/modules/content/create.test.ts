@@ -11,7 +11,7 @@ const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { useContentStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
-import { slugify, startingFields, today } from "./create";
+import { startingFields, today } from "./create";
 
 const blogFields: FieldDescriptor = { type: "object", required: true, properties: {
   title: { type: "string", required: true },
@@ -26,12 +26,6 @@ const hero = { name: "heroes", kind: "markdown", editable: true, reason: null, l
   image: { type: "image", required: true },
 } } };
 const saved = { collection: "blog", id: "spring-launch", path: "src/content/blog/en/spring-launch.md", kind: "markdown", source: "S", fields: { title: "Spring launch!" }, body: "", branch: "content/x", hash: "h1" };
-
-it("slugifies titles", () => {
-  expect(slugify("  Spring Launch: Notes & Ideas! ")).toBe("spring-launch-notes-ideas");
-  expect(slugify("Café déjà vu")).toBe("cafe-deja-vu");
-  expect(slugify("---")).toBe("");
-});
 
 it("starts entries from defaults, the title, today, and empty required values", () => {
   expect(startingFields(blogFields, "Hello", "2026-10-11")).toEqual({ fields: { title: "Hello", description: "", pubDate: "2026-10-11", tags: [] } });
@@ -51,9 +45,6 @@ it("cannot start an entry whose required unsupported field has no default", () =
 let w: VueWrapper | null = null;
 afterEach(() => { w?.unmount(); w = null; document.body.innerHTML = ""; });
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.body.querySelector(`[data-testid="${id}"]`) as T | null;
-async function type(id: string, value: string) {
-  const input = el<HTMLInputElement>(id)!; input.value = value; input.dispatchEvent(new Event("input")); await flushPromises();
-}
 async function setup(api: Record<string, unknown> = {}, collections: object[] = [blog, site, hero], branch: string | null = "content/x") {
   h.daemon = createFakeDaemon({
     listContentCollections: async () => collections,
@@ -73,33 +64,72 @@ async function choose(name: string) {
   const button = document.body.querySelector<HTMLElement>(`[data-testid="content-collection"][data-collection-name="${name}"]`)!;
   button.click(); await flushPromises();
 }
-const create = () => h.daemon.api as unknown as { createContentEntry: ReturnType<typeof vi.fn>; listContentEntries: ReturnType<typeof vi.fn> };
 
-it("creates an entry from a title and defaulted slug on the change, then opens it", async () => {
-  await setup();
+const untitled = { ...saved, id: "untitled", path: "src/content/blog/en/untitled.md", fields: { title: "Untitled" } };
+
+it("creates an Untitled entry and opens its editor", async () => {
+  const createContentEntry = vi.fn(async () => untitled);
+  const w = await setup({ createContentEntry });
   await choose("blog");
   el("content-new-entry")!.click(); await flushPromises();
-  await type("content-create-title", "Spring launch!");
-  expect(el<HTMLInputElement>("content-create-slug")!.value).toBe("spring-launch");
-  el("content-create-confirm")!.click(); await flushPromises();
-  expect(create().createContentEntry).toHaveBeenCalledWith({
-    project: "p", collection: "blog", slug: "spring-launch", branch: "content/x",
-    fields: { title: "Spring launch!", description: "", pubDate: today(), tags: [] }, body: "",
+  expect(createContentEntry).toHaveBeenCalledWith({
+    project: "p", collection: "blog", slug: "untitled", branch: "content/x",
+    fields: { title: "Untitled", description: "", pubDate: today(), tags: [] }, body: "",
   });
   const store = useContentStore();
-  expect(store.entry?.id).toBe("spring-launch");
+  expect(store.entry?.id).toBe("untitled");
   expect(store.creation).toBeNull();
-  expect(create().listContentEntries).toHaveBeenLastCalledWith("p", "blog");
   expect(el("content-create-dialog")).toBeNull();
+  expect(el("content-entry-title")!.textContent).toBe("Untitled");
+  expect(w.vm.$route.path).toBe("/p/p/content/blog/untitled");
 });
 
-it("keeps an edited slug when the title changes", async () => {
-  await setup();
+it("walks past the untitled slugs the collection already has", async () => {
+  const createContentEntry = vi.fn(async () => ({ ...untitled, id: "untitled-3" }));
+  await setup({
+    createContentEntry,
+    listContentEntries: async () => [{ ...saved, id: "untitled" }, { ...saved, id: "untitled-2" }],
+  });
   await choose("blog");
   el("content-new-entry")!.click(); await flushPromises();
-  await type("content-create-slug", "custom");
-  await type("content-create-title", "Something else");
-  expect(el<HTMLInputElement>("content-create-slug")!.value).toBe("custom");
+  expect(createContentEntry).toHaveBeenCalledWith(expect.objectContaining({ slug: "untitled-3" }));
+});
+
+it("creates in a collection the writer has not opened yet", async () => {
+  const notes = { ...blog, name: "notes" };
+  const createContentEntry = vi.fn(async () => ({ ...saved, collection: "notes", id: "untitled-2" }));
+  await setup({
+    createContentEntry,
+    listContentCollections: async () => [blog, notes],
+    listContentEntries: async (_project: string, name: string) => name === "notes" ? [{ ...saved, collection: "notes", id: "untitled" }] : [],
+  });
+  await choose("blog");
+  const plus = document.body.querySelector<HTMLElement>('[data-collection-name="notes"] + [data-testid="content-collection-new"]')!;
+  plus.click(); await flushPromises();
+  expect(createContentEntry).toHaveBeenCalledWith(expect.objectContaining({ collection: "notes", slug: "untitled-2" }));
+});
+
+it("retries once when the server still reports a duplicate slug", async () => {
+  const createContentEntry = vi.fn()
+    .mockRejectedValueOnce(new ApiError("CONFLICT", "already exists", 409, { reason: "duplicate_slug" }))
+    .mockResolvedValueOnce(untitled);
+  await setup({ createContentEntry });
+  await choose("blog");
+  el("content-new-entry")!.click(); await flushPromises();
+  expect(createContentEntry).toHaveBeenNthCalledWith(1, expect.objectContaining({ slug: "untitled" }));
+  expect(createContentEntry).toHaveBeenNthCalledWith(2, expect.objectContaining({ slug: "untitled-2" }));
+  expect(useContentStore().entry?.id).toBe("untitled");
+});
+
+it("records why an entry could not be created", async () => {
+  const createContentEntry = vi.fn().mockRejectedValue(new ApiError("BADREQ", "invalid slug", 400, { reason: "invalid_slug" }));
+  await setup({ createContentEntry });
+  await choose("blog");
+  el("content-new-entry")!.click(); await flushPromises();
+  const store = useContentStore();
+  expect(store.entry).toBeNull();
+  expect(store.needsChange).toBe(false);
+  expect(store.creation?.error).toContain("invalid slug");
 });
 
 it("offers no Create for the singleton and explains a blocked collection", async () => {
@@ -112,40 +142,18 @@ it("offers no Create for the singleton and explains a blocked collection", async
   expect(el<HTMLButtonElement>("content-new-entry")!.title).toContain("image");
 });
 
-it("shows duplicate and invalid slug errors and field errors in the dialog", async () => {
-  const createContentEntry = vi.fn()
-    .mockRejectedValueOnce(new ApiError("CONFLICT", "blog/spring-launch already exists", 409, { reason: "duplicate_slug" }))
-    .mockRejectedValueOnce(new ApiError("BADREQ", "invalid slug", 400, { reason: "invalid_slug" }))
-    .mockRejectedValueOnce(new ApiError("BADREQ", "invalid entry", 400, { reason: "invalid_schema", details: [{ path: ["description"], message: "Required" }] }));
-  await setup({ createContentEntry });
-  await choose("blog");
-  el("content-new-entry")!.click(); await flushPromises();
-  await type("content-create-title", "Spring launch");
-  el("content-create-confirm")!.click(); await flushPromises();
-  expect(el("content-create-error")!.textContent).toContain("already exists");
-  el("content-create-confirm")!.click(); await flushPromises();
-  expect(el("content-create-error")!.textContent).toContain("invalid slug");
-  el("content-create-confirm")!.click(); await flushPromises();
-  expect(el("content-create-field-errors")!.textContent).toContain("description: Required");
-  expect(useContentStore().entry).toBeNull();
-  expect(el<HTMLInputElement>("content-create-title")!.value).toBe("Spring launch");
-});
-
 it("on main offers Create Change and resumes the create on the new branch", async () => {
   const createContentEntry = vi.fn()
     .mockRejectedValueOnce(new ApiError("CHANGE_REQUIRED", "Start a change first", 409))
-    .mockResolvedValueOnce(saved);
+    .mockResolvedValueOnce(untitled);
   await setup({ createContentEntry }, [blog], null);
   await choose("blog");
   el("content-new-entry")!.click(); await flushPromises();
-  await type("content-create-title", "Spring launch!");
-  el("content-create-confirm")!.click(); await flushPromises();
-  expect(createContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "main" }));
+  expect(createContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "main", slug: "untitled" }));
   expect(el("content-needs-change")).not.toBeNull();
-  expect(el("content-create-dialog")).toBeNull();
   await useContentStore().resumeSave("content/spring-launch");
   await flushPromises();
-  expect(createContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "content/spring-launch", slug: "spring-launch" }));
-  expect(useContentStore().entry?.id).toBe("spring-launch");
+  expect(createContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "content/spring-launch", slug: "untitled" }));
+  expect(useContentStore().entry?.id).toBe("untitled");
   expect(el("content-needs-change")).toBeNull();
 });

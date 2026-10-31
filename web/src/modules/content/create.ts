@@ -1,18 +1,6 @@
 import type { FieldDescriptor } from "@/core/types";
 import { cloneValue } from "./draft";
 
-/** A URL-safe slug from a title: lowercase letters and digits joined by single hyphens. */
-export function slugify(title: string): string {
-  return title
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 100)
-    .replace(/-+$/, "");
-}
-
 /** Today as `YYYY-MM-DD` in local time. */
 export function today(now = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");

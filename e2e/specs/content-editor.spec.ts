@@ -11,7 +11,7 @@ const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGO4Y6OBFTEMLQkAb5lQAdZVdE8AAAAASUVORK5CYII=",
   "base64",
 );
-const SLUG = "spring-launch";
+const SLUG = "untitled";
 const TITLE = "Spring launch notes";
 const ALT = "Team at the spring launch";
 
@@ -100,10 +100,6 @@ test("content editor saves a blog article with an image on a change branch and p
   // create on the new change branch.
   await page.getByTestId("content-back").click();
   await page.getByTestId("content-new-entry").click();
-  await page.getByTestId("content-create-title").fill(TITLE);
-  await expect(page.getByTestId("content-create-slug")).toHaveValue("spring-launch-notes");
-  await page.getByTestId("content-create-slug").fill(SLUG);
-  await page.getByTestId("content-create-confirm").click();
   await expect(page.getByTestId("content-needs-change")).toBeVisible();
   await page.getByTestId("content-create-change").click();
   await createChangeInDialog(page, "New post: Spring launch");
@@ -111,6 +107,9 @@ test("content editor saves a blog article with an image on a change branch and p
   const branch = git(projectDir, ["branch", "--show-current"]);
   expect(branch).toBe("content/spring-launch");
   await expect(entryBinding(page, `src/content/blog/en/${SLUG}.md`, branch)).toBeAttached();
+  // A new entry opens straight in the editor as "Untitled"; the writer names it there.
+  await expect(page.getByTestId("field-title")).toHaveValue("Untitled");
+  await page.getByTestId("field-title").fill(TITLE);
   await expect(page.getByTestId("field-title")).toHaveValue(TITLE);
   // The date picker shows the pre-filled publish date, e.g. "Oct 15, 2026".
   await expect(page.getByTestId("field-pubDate")).toHaveText(/^\s*[A-Z][a-z]{2} \d{1,2}, \d{4}\s*$/);

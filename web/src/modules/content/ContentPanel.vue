@@ -11,7 +11,6 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
@@ -24,7 +23,7 @@ import { diffDraft, sameValue } from "./draft";
 import { useContentHistoryStore } from "./history/store";
 import VersionDiff from "./history/VersionDiff.vue";
 import VersionsList from "./history/VersionsList.vue";
-import { slugify, startingFields } from "./create";
+import { startingFields } from "./create";
 import { entryAssetPath } from "./markdown";
 import { useContentStore } from "./store";
 import { IMAGE_REGISTRY } from "./ImageDialog.vue";
@@ -196,17 +195,15 @@ function createBlocked(collection: ContentCollection): string | null {
   const start = startingFields(collection.fields, "");
   return "reason" in start ? start.reason : null;
 }
-const createOpen = computed({
-  get: () => !!store.creation && !store.needsChange,
-  set: open => { if (!open) store.cancelCreate(); },
-});
-/** The slug follows the title until the writer edits it. */
-const slugEdited = ref(false);
-function startCreate(name: string) { slugEdited.value = false; store.startCreate(name); }
-function setTitle(title: string) { const c = store.creation; if (!c) return; c.title = title; if (!slugEdited.value) c.slug = slugify(title); }
-function setSlug(slug: string) { const c = store.creation; if (!c) return; c.slug = slug; slugEdited.value = true; }
-const canCreate = computed(() => { const c = store.creation; return !!c && !c.busy && !!c.title.trim() && !!c.slug.trim(); });
-async function confirmCreate() { try { if (await store.confirmCreate(currentBranch())) showInUrl(); } catch { /* recorded on the store */ } }
+/** A new entry is created at once and opened: the writer names it in the editor. */
+async function newEntry(name: string) {
+  try {
+    if (await store.createEntryNow(name, currentBranch())) showInUrl();
+  } catch {
+    // On main the notice offers Create Change; otherwise the store recorded why it failed.
+    if (!store.needsChange && store.creation?.error) toast.error(store.creation.error);
+  }
+}
 /** Entry-relative image links shown in the rich editor are read from the project's files. */
 function resolveImage(src: string): string {
   const e = store.entry; const path = e ? entryAssetPath(e.path, src) : null;
@@ -267,7 +264,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                     :aria-label="`New ${humanize(c.name)} entry`"
                     :title="createBlocked(c) ?? 'New entry'"
                     :disabled="!!createBlocked(c)"
-                    @click="startCreate(c.name)"
+                    @click="newEntry(c.name)"
                   ><Plus class="size-4" /></Button>
                 </div>
               </nav>
@@ -299,7 +296,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
           :create-hint="createBlocked(activeCollection)"
           :actions="rowActions"
           @open="openEntry(activeCollection.name, $event)"
-          @create="startCreate(activeCollection.name)"
+          @create="newEntry(activeCollection.name)"
         />
         <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
           <FileText class="size-8 opacity-50" aria-hidden="true" />
@@ -459,30 +456,6 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </AlertDialogContent>
       </AlertDialog>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
-      <Dialog v-model:open="createOpen">
-        <DialogContent v-if="store.creation" data-testid="content-create-dialog">
-          <form class="space-y-3" @submit.prevent="confirmCreate">
-            <DialogHeader>
-              <DialogTitle>New {{ humanize(store.creation.collection) }} entry</DialogTitle>
-              <DialogDescription>It starts from the collection's defaults; fill in the rest after it opens.</DialogDescription>
-            </DialogHeader>
-            <label class="block text-xs font-medium">Title
-              <Input :model-value="store.creation.title" data-testid="content-create-title" class="mt-1" @update:model-value="setTitle(String($event))" />
-            </label>
-            <label class="block text-xs font-medium">Slug
-              <Input :model-value="store.creation.slug" data-testid="content-create-slug" class="mt-1" placeholder="my-entry" @update:model-value="setSlug(String($event))" />
-            </label>
-            <p v-if="store.creation.error" role="alert" class="text-sm text-destructive" data-testid="content-create-error">{{ store.creation.error }}</p>
-            <ul v-if="Object.keys(store.fieldErrors).length" class="text-xs text-destructive" data-testid="content-create-field-errors">
-              <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
-            </ul>
-            <DialogFooter>
-              <Button type="button" variant="outline" data-testid="content-create-cancel" @click="store.cancelCreate()">Cancel</Button>
-              <Button type="submit" data-testid="content-create-confirm" :disabled="!canCreate">{{ store.creation.busy ? "Creating…" : "Create" }}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
       </SidebarInset>
       </ResizablePanel>
       </ResizablePanelGroup>
