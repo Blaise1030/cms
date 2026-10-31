@@ -411,10 +411,10 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
               </TabsList>
               <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
                 <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
-                  <Label for="content-slug" class="text-xs font-medium">Slug</Label>
+                  <Label for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
                   <div class="flex gap-1">
-                    <Input id="content-slug" v-model="slugDraft" data-testid="content-slug" class="h-8" @keydown.enter.prevent="commitSlug" />
-                    <Button v-if="slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving" @click="commitSlug">Rename</Button>
+                    <Input id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
+                    <Button v-if="slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
                   </div>
                   <p class="text-xs text-muted-foreground">The page's address. Renaming moves the file and updates links.</p>
                 </div>

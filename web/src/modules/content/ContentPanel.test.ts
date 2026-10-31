@@ -132,6 +132,9 @@ it("shows the document's slug and title fields together", async () => {
   contentImpact: async () => impact,
  }, "/p/p/content/blog/welcome"); await flushPromises();
  expect((w.get('[data-testid="content-slug"]').element as HTMLInputElement).value).toBe("welcome");
+ expect(w.get('[data-testid="content-slug"]').attributes("required")).toBeDefined();
+ expect(w.get('[data-testid="content-slug"]').attributes("aria-required")).toBe("true");
+ expect(w.get('label[for="content-slug"]').text()).toBe("Slug*");
  expect(w.find('[data-testid="field-title"]').exists()).toBe(true);
  await w.get('[data-testid="content-slug"]').setValue("welcome-again");
  await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();
