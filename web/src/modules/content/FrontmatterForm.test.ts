@@ -36,6 +36,17 @@ function render(value: Record<string, unknown>) {
 }
 const value = () => ({ title: "Hi", pubDate: "2026-01-02", kind: "news", featured: true, order: 3, tags: ["a"], seo: { noindex: false }, section: { type: "hero", heading: "H" }, related: ["welcome"], coverImage: "src/assets/blog/x.png", custom: { a: 1 } });
 
+it("calls the document's own title the display title", () => {
+  const w = render({});
+  expect(w.get('label[for="field-title"]').text()).toContain("Display title");
+  // A title nested inside another object keeps its plain name.
+  const nested = mount(FrontmatterForm, {
+    props: { descriptor: { type: "object", required: true, properties: { title: str } }, label: "seo", path: ["seo"], modelValue: { title: "x" } },
+  });
+  expect(nested.get('label[for="field-seo.title"]').text()).toContain("Title");
+  expect(nested.get('label[for="field-seo.title"]').text()).not.toContain("Display");
+});
+
 it("shows a placeholder named after the field in empty text inputs", () => {
   const w = render({});
   expect(w.get('[data-testid="field-nick"]').attributes("placeholder")).toBe("Enter nick");
