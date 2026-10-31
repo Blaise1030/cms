@@ -113,8 +113,9 @@ export const useContentStore = defineStore("content", () => {
   /** The branch the project switched to, until a refresh has applied the switch to the open entry. */
   let switchedTo: string | null = null;
   function canLeave() {
-    if (!dirty.value) return true;
+    if (!dirty.value && !creating.value) return true;
     if (!window.confirm("Discard unsaved content changes?")) return false;
+    if (creating.value) { discardCreate(); return true; }
     if (entry.value) loadEntry(entry.value);
     return true;
   }
@@ -138,6 +139,7 @@ export const useContentStore = defineStore("content", () => {
    * stale entry is re-read by a refresh once it is clean.
    */
   function discard(): boolean {
+    if (creating.value) { discardCreate(); return true; }
     const e = entry.value; if (!e || !dirty.value) return true;
     const images = pendingImages.value.length;
     if (images && !window.confirm(`Discard your changes and ${images === 1 ? "the image" : `${images} images`} not saved yet?`)) return false;
@@ -238,7 +240,7 @@ export const useContentStore = defineStore("content", () => {
     if (!canLeave()) return;
     const version = ++selectionRequest; selectionPending = true;
     releaseImages();
-    selectedCollection.value = name; targetBranch = null; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
+    creation.value = null; selectedCollection.value = name; targetBranch = null; entry.value = null; lifecycle.value = null; draftSource.value = ""; draftFields.value = {}; draftBody.value = ""; entries.value = []; changedOnDisk.value = false; error.value = null; clearSaveState();
     try { const next = await daemon.api.listContentEntries(projectId.value, name); if (version === selectionRequest) entries.value = next; }
     catch(e) { if (version === selectionRequest) error.value = errorMessage(e); }
     finally { if (version === selectionRequest) selectionPending = false; }
@@ -258,6 +260,11 @@ export const useContentStore = defineStore("content", () => {
    * tokens). Throws after recording the failure so the draft and its pending images stay intact.
    */
   async function saveDraft(branch?: string): Promise<ContentEntry> {
+    if (creating.value) {
+      const created = await confirmCreate(branch ?? "main");
+      if (!created) throw new Error("The entry could not be created");
+      return created;
+    }
     const e = entry.value; const change = pending.value;
     if (!e) throw new Error("No entry is open");
     if (!change?.changed) return e;
@@ -348,30 +355,44 @@ export const useContentStore = defineStore("content", () => {
     for (let n = 2; n < 1000; n++) if (!taken.includes(`untitled-${n}`)) return `untitled-${n}`;
     return `untitled-${Date.now()}`;
   }
+  /** True while a new entry is being filled in; nothing exists on disk until it is saved. */
+  const creating = computed(() => !!creation.value);
   /**
-   * Create an "Untitled" entry on `branch` and open it, so the writer names it in the editor
-   * instead of a dialog. A taken slug walks `untitled-2`, `untitled-3`, …; a duplicate the
-   * server still reports retries twice before failing. On main `needsChange` is recorded.
+   * Open the editor for a new entry without writing anything: schema defaults fill the form,
+   * required fields are marked by the descriptor, and Save creates the file. A taken slug walks
+   * `untitled-2`, `untitled-3`, ….
    */
-  async function createEntryNow(collection: string, branch: string): Promise<ContentEntry | undefined> {
+  function startCreate(collection: string) {
     if (!canLeave()) return;
-    const id = projectId.value;
-    let taken = selectedCollection.value === collection ? entries.value.map(e => e.id) : [];
-    if (!taken.length) {
-      taken = await daemon.api.listContentEntries(id, collection).then(list => list.map(e => e.id)).catch(() => []);
-    }
-    creation.value = { collection, title: "Untitled", slug: untitledSlug(taken), busy: false, error: null };
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await confirmCreate(branch);
-      } catch (err) {
-        const c = creation.value;
-        if (!c || attempt === 2 || !(err instanceof ApiError) || err.reason !== "duplicate_slug") throw err;
-        c.error = null;
-        taken = [...taken, c.slug];
-        c.slug = untitledSlug(taken);
-      }
-    }
+    const c = collections.value.find(x => x.name === collection);
+    if (!c?.fields || !c.editable) return;
+    const slug = untitledSlug(entries.value.map(e => e.id));
+    const start = startingFields(c.fields, "Untitled", undefined, slug);
+    if ("reason" in start) return;
+    releaseImages();
+    clearSaveState();
+    creation.value = { collection, title: "Untitled", slug, busy: false, error: null };
+    draftSource.value = "";
+    draftFields.value = cloneValue(start.fields);
+    draftBody.value = "";
+    entry.value = { collection, id: slug, path: "", kind: c.kind, source: "", fields: cloneValue(start.fields), body: "", branch: "", hash: "" };
+    changedOnDisk.value = false;
+  }
+  /** Rename the not-yet-saved document; the header and the URL follow. */
+  function setCreateSlug(slug: string) {
+    const c = creation.value;
+    if (!c) return;
+    c.slug = slug;
+    if (entry.value) entry.value = { ...entry.value, id: slug };
+  }
+  /** Leave the editor without creating anything. */
+  function discardCreate() {
+    if (!creating.value) return;
+    releaseImages();
+    creation.value = null;
+    entry.value = null;
+    draftSource.value = ""; draftFields.value = {}; draftBody.value = "";
+    clearSaveState();
   }
   /**
    * Create the named entry with schema defaults on `branch`, then open it. On main this records
@@ -381,14 +402,13 @@ export const useContentStore = defineStore("content", () => {
     const c = creation.value; const id = projectId.value;
     const collection = collections.value.find(x => x.name === c?.collection);
     if (!c || c.busy || !collection?.fields) return;
-    const start = startingFields(collection.fields, c.title.trim(), undefined, c.slug.trim());
-    if ("reason" in start) { c.error = start.reason; return; }
     resumeAction = "create";
     c.busy = true; c.error = null; clearSaveState();
     try {
       const saved = await daemon.api.createContentEntry({
-        project: id, collection: c.collection, slug: c.slug.trim(), branch, fields: start.fields,
-        ...(collection.kind !== "json" ? { body: "" } : {}),
+        project: id, collection: c.collection, slug: c.slug.trim(), branch,
+        fields: cloneValue(draftFields.value),
+        ...(collection.kind !== "json" ? { body: draftBody.value } : {}),
       });
       resumeAction = "save";
       if (projectId.value !== id) return saved;
@@ -432,5 +452,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, createEntryNow, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, creating, startCreate, setCreateSlug, discardCreate, confirmCreate };
 });

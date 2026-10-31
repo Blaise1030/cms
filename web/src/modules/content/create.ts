@@ -26,6 +26,10 @@ function start(d: FieldDescriptor, key: string, title: string, date: string, slu
       const first = d.variants?.[0];
       return first ? start({ ...first, required: true }, key, title, date, slug) : { reason: `${key} has no variant to start from` };
     }
+    // A required reference or image starts empty: the form marks it and the writer fills it in,
+    // and nothing is written until they save.
+    case "reference":
+    case "image": return { value: "" };
     default:
       return { reason: `${key || "This entry"} is required and has no default, so it cannot be created here` };
   }

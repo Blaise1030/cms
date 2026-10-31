@@ -44,7 +44,12 @@ watch(() => props.projectId, id => void store.open(id), {immediate:true});
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 const showNewChange = ref(false);
-async function save() { try { await store.saveDraft(); } catch { /* recorded on the store; the draft stays */ } }
+async function save() {
+  try {
+    await store.saveDraft(store.creating ? currentBranch() : undefined);
+    showInUrl();
+  } catch { /* recorded on the store; the draft stays */ }
+}
 /** Put what the store shows into the URL, after an action (create, rename, delete) changed it. */
 function showInUrl() {
   const e = store.entry;
@@ -54,7 +59,7 @@ function showInUrl() {
 function removable(collection: string) {
   return !store.collections.find(x => x.name === collection)?.singleton;
 }
-const canRemove = computed(() => !!store.entry && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
+const canRemove = computed(() => !!store.entry && !store.creating && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -107,7 +112,7 @@ async function commitSlug() {
 watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
   if (key !== old?.[0]) history.close();
   const e = store.entry;
-  if (e && side === "history" && history.key !== key) void history.open(props.projectId, e.collection, e.id);
+  if (e && !store.creating && side === "history" && history.key !== key) void history.open(props.projectId, e.collection, e.id);
 }, { immediate: true });
 // Get latest and branch switches move the file without a checkpoint event.
 watch([entryKey, () => store.entry?.branch, () => store.entry?.hash], ([key], [oldKey]) => {
@@ -134,14 +139,17 @@ const wordCount = computed(() => {
   return text ? text.split(/\s+/).length : 0;
 });
 /** The open entry decides the surface; the URL is the only thing that opens one. */
-const editing = computed(() => !!props.entry);
+const editing = computed(() => !!props.entry || store.creating);
 /** The collection the URL names, when the sidebar is willing to show it. */
 const activeCollection = computed(() => validCollections.value.find(c => c.name === props.collection) ?? null);
 const singletonOf = (name: string) => store.collections.find(c => c.name === name)?.singleton ?? null;
 /** A singleton's back link returns to the collection index; a list's returns to its own list. */
 const backTo = computed(() => contentPath(props.projectId, props.collection && singletonOf(props.collection) ? undefined : props.collection));
 const backLabel = computed(() => props.collection && !singletonOf(props.collection) ? `Back to all ${props.collection}` : "Back to all content");
-function backToList() { void router.push(backTo.value); }
+function backToList() {
+  if (store.creating) { store.discardCreate(); return; }
+  void router.push(backTo.value);
+}
 /** Unsupported collections are left out of the tree and reported once in a toast; ones waiting for the preview stay listed. */
 const unsupported = (c: ContentCollection) => c.supportedForEditing === false;
 const validCollections = computed(() => store.collections.filter(c => !unsupported(c)));
@@ -219,20 +227,8 @@ function createBlocked(collection: ContentCollection): string | null {
   const start = startingFields(collection.fields, "");
   return "reason" in start ? start.reason : null;
 }
-/** A new entry is created at once and opened: the writer names it in the editor. */
-async function newEntry(name: string) {
-  try {
-    if (await store.createEntryNow(name, currentBranch())) showInUrl();
-  } catch {
-    // On main the notice offers Create Change; otherwise name the fields that failed validation.
-    if (store.needsChange) return;
-    const message = store.creation?.error ?? "Couldn't create the entry.";
-    const issues = Object.entries(store.fieldErrors);
-    if (!issues.length) { toast.error(message); return; }
-    const detail = issues.map(([path, text]) => `${path.split(".").map(humanize).join(" › ")}: ${text}`).join("\n");
-    toast.error(message, { description: detail });
-  }
-}
+/** A new entry opens as an unsaved draft; Save creates the file. */
+function newEntry(name: string) { store.startCreate(name); }
 /** Entry-relative image links shown in the rich editor are read from the project's files. */
 function resolveImage(src: string): string {
   const e = store.entry; const path = e ? entryAssetPath(e.path, src) : null;
@@ -401,10 +397,20 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
                   <Label for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
                   <div class="flex gap-1">
-                    <Input id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
-                    <Button v-if="slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
+                    <Input
+                      v-if="store.creating"
+                      id="content-slug"
+                      :model-value="store.creation?.slug"
+                      data-testid="content-slug"
+                      required
+                      aria-required="true"
+                      class="h-8"
+                      @update:model-value="store.setCreateSlug(String($event))"
+                    />
+                    <Input v-else id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
+                    <Button v-if="!store.creating && slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
                   </div>
-                  <p class="text-xs text-muted-foreground">The page's address. Renaming moves the file and updates links.</p>
+                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address. Renaming moves the file and updates links." }}</p>
                 </div>
                 <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
               </TabsContent>
@@ -427,12 +433,12 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       <div v-if="store.entry && store.descriptor" class="h-24" aria-hidden="true" />
       </div>
       <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0">
-        <div v-if="store.entry && store.descriptor && (store.dirty || store.saving)" role="status" class="absolute bottom-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2" :style="{ left: `${unsavedCentre}px` }" data-testid="content-unsaved">
+        <div v-if="store.creating || (store.entry && store.descriptor && (store.dirty || store.saving))" role="status" class="absolute bottom-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2" :style="{ left: `${unsavedCentre}px` }" data-testid="content-unsaved">
           <div class="flex w-full items-center gap-2 rounded-xl border bg-popover py-2 pr-2 pl-4 text-popover-foreground shadow-lg">
             <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
             <Button type="button" variant="ghost" size="sm" data-testid="content-discard" :disabled="store.saving" @click="store.discard()">Discard</Button>
-            <Button type="submit" size="sm" data-testid="content-save" :disabled="!store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined">{{ store.saving ? "Saving…" : "Save" }}</Button>
+            <Button type="submit" size="sm" data-testid="content-save" :disabled="store.creating ? !!store.readOnlyReason : !store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined">{{ store.saving ? "Saving…" : "Save" }}</Button>
           </div>
         </div>
       </Transition>
