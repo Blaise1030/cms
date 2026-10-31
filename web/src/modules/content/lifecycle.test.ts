@@ -38,7 +38,7 @@ async function setup(api: Record<string, unknown> = {}, collection: object = blo
   w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body }); mounted.push(w);
   await flushPromises();
   await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
-  await w.get('[data-testid="content-entry"]').trigger("click"); await flushPromises();
+  if (w.find('[data-testid="content-entry"]').exists()) await w.get('[data-testid="content-entry"]').trigger("click"); await flushPromises();
   return w;
 }
 beforeEach(() => { document.body.innerHTML = ""; });

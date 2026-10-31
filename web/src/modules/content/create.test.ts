@@ -79,7 +79,7 @@ const create = () => h.daemon.api as unknown as { createContentEntry: ReturnType
 it("creates an entry from a title and defaulted slug on the change, then opens it", async () => {
   await setup();
   await choose("blog");
-  el("content-create")!.click(); await flushPromises();
+  el("content-new-entry")!.click(); await flushPromises();
   await type("content-create-title", "Spring launch!");
   expect(el<HTMLInputElement>("content-create-slug")!.value).toBe("spring-launch");
   el("content-create-confirm")!.click(); await flushPromises();
@@ -97,7 +97,7 @@ it("creates an entry from a title and defaulted slug on the change, then opens i
 it("keeps an edited slug when the title changes", async () => {
   await setup();
   await choose("blog");
-  el("content-create")!.click(); await flushPromises();
+  el("content-new-entry")!.click(); await flushPromises();
   await type("content-create-slug", "custom");
   await type("content-create-title", "Something else");
   expect(el<HTMLInputElement>("content-create-slug")!.value).toBe("custom");
@@ -106,10 +106,11 @@ it("keeps an edited slug when the title changes", async () => {
 it("offers no Create for the singleton and explains a blocked collection", async () => {
   await setup();
   await choose("site");
-  expect(el("content-create")).toBeNull();
+  expect(el("content-new-entry")).toBeNull();
+  el("content-back")!.click(); await flushPromises();
   await choose("heroes");
-  expect(el<HTMLButtonElement>("content-create")!.disabled).toBe(true);
-  expect(el("content-create-reason")!.textContent).toContain("image");
+  expect(el<HTMLButtonElement>("content-new-entry")!.disabled).toBe(true);
+  expect(el<HTMLButtonElement>("content-new-entry")!.title).toContain("image");
 });
 
 it("shows duplicate and invalid slug errors and field errors in the dialog", async () => {
@@ -119,7 +120,7 @@ it("shows duplicate and invalid slug errors and field errors in the dialog", asy
     .mockRejectedValueOnce(new ApiError("BADREQ", "invalid entry", 400, { reason: "invalid_schema", details: [{ path: ["description"], message: "Required" }] }));
   await setup({ createContentEntry });
   await choose("blog");
-  el("content-create")!.click(); await flushPromises();
+  el("content-new-entry")!.click(); await flushPromises();
   await type("content-create-title", "Spring launch");
   el("content-create-confirm")!.click(); await flushPromises();
   expect(el("content-create-error")!.textContent).toContain("already exists");
@@ -137,7 +138,7 @@ it("on main offers Create Change and resumes the create on the new branch", asyn
     .mockResolvedValueOnce(saved);
   await setup({ createContentEntry }, [blog], null);
   await choose("blog");
-  el("content-create")!.click(); await flushPromises();
+  el("content-new-entry")!.click(); await flushPromises();
   await type("content-create-title", "Spring launch!");
   el("content-create-confirm")!.click(); await flushPromises();
   expect(createContentEntry).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "main" }));

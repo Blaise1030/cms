@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { Copy, FileText, Link, PanelLeft, PanelRight, Pencil, Plus, Trash2 } from "@lucide/vue";
+import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Plus, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
@@ -15,9 +15,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
-import type { Change, ContentCollection, ContentEntrySummary } from "@/core/types";
-import ContentTree from "./ContentTree.vue";
-import { entryTreePath, type TreeAction, type TreeTarget } from "./contentTree";
+import type { Change, ContentCollection } from "@/core/types";
+import EntryList from "./EntryList.vue";
+import { entryActions, type EntryAction } from "./entryList";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { diffDraft, sameValue } from "./draft";
 import { useContentHistoryStore } from "./history/store";
@@ -109,19 +109,15 @@ const wordCount = computed(() => {
   const text = store.draftBody.trim();
   return text ? text.split(/\s+/).length : 0;
 });
-/** Every collection's entries, for the tree. */
-const treeEntries = ref<Record<string, ContentEntrySummary[]>>({});
-const entryLoads = new Map<string, number>();
-watch(() => props.projectId, () => { treeEntries.value = {}; });
-async function loadEntries(name: string) {
-  const id = props.projectId;
-  const version = (entryLoads.get(name) ?? 0) + 1;
-  entryLoads.set(name, version);
-  try {
-    const next = await daemon.api.listContentEntries(id, name);
-    if (props.projectId === id && entryLoads.get(name) === version) treeEntries.value = { ...treeEntries.value, [name]: next };
-  } catch { /* the collection keeps the list it last showed */ }
-}
+/** The open entry decides the surface; the URL is the only thing that opens one. */
+const editing = computed(() => !!props.entry);
+/** The collection the URL names, when the sidebar is willing to show it. */
+const activeCollection = computed(() => validCollections.value.find(c => c.name === props.collection) ?? null);
+const singletonOf = (name: string) => store.collections.find(c => c.name === name)?.singleton ?? null;
+/** A singleton's back link returns to the collection index; a list's returns to its own list. */
+const backTo = computed(() => contentPath(props.projectId, props.collection && singletonOf(props.collection) ? undefined : props.collection));
+const backLabel = computed(() => props.collection && !singletonOf(props.collection) ? `Back to all ${props.collection}` : "Back to all content");
+function backToList() { void router.push(backTo.value); }
 /** Unsupported collections are left out of the tree and reported once in a toast; ones waiting for the preview stay listed. */
 const unsupported = (c: ContentCollection) => c.supportedForEditing === false;
 const validCollections = computed(() => store.collections.filter(c => !unsupported(c)));
@@ -136,17 +132,45 @@ watch(() => store.collections, collections => {
   }
   reportedInvalid = key;
 });
-watch(validCollections, collections => { for (const c of collections) void loadEntries(c.name); });
-const treeSelected = computed(() => (store.entry ? entryTreePath(store.entry.collection, store.entry.id) : null));
+/** A deep link to a singleton collection has no list to show: send it to its one entry. */
+watch(validCollections, collections => {
+  const name = props.collection;
+  if (!name || props.entry) return;
+  const singleton = collections.find(c => c.name === name)?.singleton;
+  if (singleton) void router.replace(contentPath(props.projectId, name, singleton));
+}, { immediate: true });
 function openEntry(collection: string, id: string) {
   void router.push(contentPath(props.projectId, collection, id));
 }
-/** The URL names the open collection and entry; without one, what was open earlier is put back in the URL. */
+/** Opening a collection skips the one-row list a singleton would have. */
+function openCollection(c: ContentCollection) {
+  void router.push(contentPath(props.projectId, c.name, c.singleton ?? undefined));
+}
+/** The row menu: the entry opens, shares, renames or deletes exactly as it did in the tree. */
+function rowActions(id: string): EntryAction[] {
+  const collection = props.collection ?? "";
+  const path = store.entries.find(e => e.id === id)?.path;
+  return entryActions({
+    singleton: !!singletonOf(collection),
+    path,
+    dirty: store.dirty,
+    handlers: {
+      open: () => openEntry(collection, id),
+      copyLink: () => void copy(new URL(contentPath(props.projectId, collection, id), location.origin).href, "Link"),
+      copyPath: () => { if (path) void copy(path, "File path"); },
+      rename: () => void lifecycleFor("rename", collection, id),
+      remove: () => void lifecycleFor("delete", collection, id),
+    },
+  });
+}
+/** The URL names the open collection and entry; without one, the last collection's list comes back. */
 async function follow(collection?: string, id?: string) {
   if (!collection) {
-    if (store.projectId === props.projectId && store.selectedCollection) showInUrl();
+    const remembered = store.selectedCollection;
+    if (store.projectId === props.projectId && remembered && !singletonOf(remembered)) void router.replace(contentPath(props.projectId, remembered));
     return;
   }
+  if (!id && singletonOf(collection)) { void router.replace(contentPath(props.projectId, collection, singletonOf(collection)!)); return; }
   if (store.selectedCollection !== collection || (!id && store.entry)) {
     await store.selectCollection(collection);
     if (store.selectedCollection !== collection) return;
@@ -154,10 +178,6 @@ async function follow(collection?: string, id?: string) {
   if (id && store.entry?.id !== id) await store.selectEntry(id);
 }
 watch(() => [props.collection, props.entry, props.projectId] as const, ([collection, id]) => void follow(collection, id), { immediate: true });
-watch(() => store.entries, () => {
-  const name = store.selectedCollection;
-  if (name) void loadEntries(name);
-});
 /** Opens the entry, then starts its rename or delete; leaving a draft is confirmed first. */
 async function lifecycleFor(action: "rename" | "delete", collection: string, id: string) {
   await router.push(contentPath(props.projectId, collection, id));
@@ -167,31 +187,6 @@ async function lifecycleFor(action: "rename" | "delete", collection: string, id:
 async function copy(text: string, what: string) {
   try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); }
   catch { toast.error(`Could not copy the ${what.toLowerCase()}`); }
-}
-function treeActions(target: TreeTarget): TreeAction[] {
-  const collection = store.collections.find(c => c.name === target.collection);
-  if (!collection) return [];
-  const name = collection.name;
-  if (!target.id) {
-    if (collection.singleton) return [];
-    const blocked = createBlocked(collection);
-    return [{ id: "create", label: "New entry", icon: Plus, disabled: !!blocked, hint: blocked, run: () => startCreate(name) }];
-  }
-  const id = target.id;
-  const path = treeEntries.value[name]?.find(e => e.id === id)?.path;
-  const pending = store.dirty ? "Save or discard your changes first" : null;
-  const actions: TreeAction[] = [
-    { id: "open", label: "Open", icon: FileText, run: () => openEntry(name, id) },
-    "separator",
-    { id: "copy-link", label: "Copy link", icon: Link, run: () => void copy(new URL(contentPath(props.projectId, name, id), location.origin).href, "Link") },
-  ];
-  if (path) actions.push({ id: "copy-path", label: "Copy file path", icon: Copy, run: () => void copy(path, "File path") });
-  if (removable(name)) actions.push(
-    "separator",
-    { id: "rename", label: "Rename…", icon: Pencil, disabled: !!pending, hint: pending, run: () => void lifecycleFor("rename", name, id) },
-    { id: "delete", label: "Delete", icon: Trash2, destructive: true, disabled: !!pending, hint: pending, run: () => void lifecycleFor("delete", name, id) },
-  );
-  return actions;
 }
 /** Create is offered for multi-entry collections; this is why it is disabled, or null when it is not. */
 function createBlocked(collection: ContentCollection): string | null {
@@ -245,29 +240,86 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
   <div class="h-full min-h-0" data-testid="content-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
-      <ResizablePanel id="content-collections" ref="collectionsPanel" :default-size="20" :min-size="14" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
+      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="24" :min-size="16" :max-size="42" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
-          <SidebarGroup class="min-h-0 flex-1 px-1">
+          <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
             <SidebarGroupContent class="min-h-0 flex-1">
-              <ContentTree :storage-key="`content:${projectId}`" :collections="validCollections" :entries="treeEntries" :selected="treeSelected" :actions="treeActions" @open="openEntry" />
+              <nav data-testid="content-collections" aria-label="Collections" class="flex flex-col gap-0.5">
+                <div v-for="c in validCollections" :key="c.name" class="group flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:bg-accent"
+                    :class="store.selectedCollection === c.name ? 'bg-accent text-accent-foreground' : ''"
+                    :aria-current="store.selectedCollection === c.name ? 'page' : undefined"
+                    data-testid="content-collection"
+                    :data-collection-name="c.name"
+                    @click="openCollection(c)"
+                  >{{ c.name }}</button>
+                  <Button
+                    v-if="!c.singleton"
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    class="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    data-testid="content-collection-new"
+                    :aria-label="`New ${c.name} entry`"
+                    :title="createBlocked(c) ?? 'New entry'"
+                    :disabled="!!createBlocked(c)"
+                    @click="startCreate(c.name)"
+                  ><Plus class="size-4" /></Button>
+                </div>
+              </nav>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
       </ResizablePanel>
-      <ResizableHandle with-handle class="bg-transparent" />
+      <ResizableHandle v-if="!editing" with-handle class="bg-transparent" />
       <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
-      <form ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
+      <div v-if="!editing" class="flex h-full min-h-0 flex-col">
+        <div class="flex h-11 shrink-0 items-center px-2">
+          <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
+            <PanelLeft class="size-4" />
+          </Button>
+        </div>
+        <p v-if="store.error" role="alert" class="px-4 pb-2 text-sm text-destructive">{{ store.error }}</p>
+        <section v-if="store.needsChange" role="alert" class="mx-4 mb-2 rounded-md border p-3 text-sm" data-testid="content-needs-change">
+          <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
+          <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
+        </section>
+        <EntryList
+          v-if="activeCollection"
+          class="min-h-0 flex-1"
+          :collection="activeCollection"
+          :entries="store.entries"
+          :loading="store.loading"
+          :create-hint="createBlocked(activeCollection)"
+          :actions="rowActions"
+          @open="openEntry(activeCollection.name, $event)"
+          @create="startCreate(activeCollection.name)"
+        />
+        <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
+          <FileText class="size-8 opacity-50" aria-hidden="true" />
+          <p class="font-medium text-foreground">No content collections</p>
+          <p class="max-w-md">Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.</p>
+        </div>
+        <p v-else-if="store.loading" class="px-4 text-sm text-muted-foreground">Loading content…</p>
+        <div v-else class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-choose-collection">
+          <FileText class="size-8 opacity-50" aria-hidden="true" />
+          <p>Choose a collection.</p>
+        </div>
+      </div>
+      <form v-else ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-        <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
-          <PanelLeft class="size-4" />
+        <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="backLabel" :title="backLabel" data-testid="content-back" @click="backToList">
+          <ChevronLeft class="size-4" />
         </Button>
         <template v-if="store.entry">
           <div class="flex min-w-0 items-center gap-1 px-1">
-            <h2 class="truncate text-sm font-medium">{{ store.entry.id }}</h2>
+            <h2 class="truncate text-sm font-medium" data-testid="content-entry-title">{{ store.entry.id }}</h2>
             <Button v-if="canRemove" type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="Rename" :title="store.dirty ? 'Save or discard your changes first' : 'Rename'" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')"><Pencil class="size-3.5" /></Button>
             <p class="hidden truncate text-xs text-muted-foreground @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
           </div>
@@ -341,15 +393,6 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         </div>
         <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
       </template>
-      <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
-        <FileText class="size-8 opacity-50" aria-hidden="true" />
-        <p class="font-medium text-foreground">No content collections</p>
-        <p class="max-w-md">Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.</p>
-      </div>
-      <div v-else-if="!store.loading" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground">
-        <FileText class="size-8 opacity-50" aria-hidden="true" />
-        <p>Select a collection and entry to read its content.</p>
-      </div>
       <div v-if="store.entry && store.descriptor" class="h-24" aria-hidden="true" />
       </div>
       <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0">
