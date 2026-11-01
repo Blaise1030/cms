@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, type Component } from "vue";
 import { toast } from "vue-sonner";
-import { ChevronDown, CircleCheck, ExternalLink, GitPullRequest, Globe } from "@lucide/vue";
+import { BadgeCheck, ChevronDown, CircleCheck, CircleDashed, CircleDot, CircleX, Clock, ExternalLink, GitPullRequest, Globe } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ChecksState } from "@/core/types";
+import type { ChecksState, PrState, PrStatus } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 import { prStatusLabel } from "./prStatus";
 import { useChangesStore } from "./store";
@@ -26,12 +26,26 @@ const previewHref = computed(() => {
   return url && /^https?:\/\/./i.test(url) ? url : null;
 });
 
-const DOT: Record<ChecksState, string> = {
-  none: "bg-muted-foreground/50",
-  pending: "bg-amber-500 animate-pulse",
-  passing: "bg-emerald-500",
-  failing: "bg-red-500",
+const CHECK_ICON: Record<Exclude<ChecksState, "none">, { icon: Component; class: string }> = {
+  pending: { icon: Clock, class: "text-amber-500 animate-pulse" },
+  passing: { icon: CircleCheck, class: "text-emerald-500" },
+  failing: { icon: CircleX, class: "text-red-500" },
 };
+
+const STATE_ICON: Record<PrState, { icon: Component; class: string }> = {
+  draft: { icon: CircleDashed, class: "text-muted-foreground" },
+  open: { icon: CircleDot, class: "text-sky-500" },
+  approved: { icon: BadgeCheck, class: "text-emerald-500" },
+  merged: { icon: CircleCheck, class: "text-emerald-500" },
+  closed: { icon: CircleX, class: "text-muted-foreground" },
+};
+
+/** A terminal PR shows its outcome; an active one shows its checks when it has any. */
+function statusIcon(s: Pick<PrStatus, "state" | "checks">) {
+  if (s.state === "merged" || s.state === "closed") return STATE_ICON[s.state];
+  return s.checks === "none" ? STATE_ICON[s.state] : CHECK_ICON[s.checks];
+}
+const icon = computed(() => (status.value ? statusIcon(status.value) : null));
 
 /**
  * Route a menu link out to the browser ourselves. Selecting an item closes the menu, which
@@ -64,10 +78,12 @@ async function onReady() {
       <Button :variant="variant" size="sm" class="h-7 gap-1.5 px-2.5 text-xs" data-testid="pr-menu">
         <GitPullRequest class="size-4 shrink-0" />
         {{ status ? `PR #${status.number}` : "Pull request" }}
-        <span
-          v-if="status && status.checks !== 'none'"
-          class="size-1.5 shrink-0 rounded-full"
-          :class="DOT[status.checks]"
+        <component
+          v-if="icon"
+          :is="icon.icon"
+          class="size-3.5 shrink-0"
+          :class="icon.class"
+          data-testid="pr-trigger-icon"
           aria-hidden="true"
         />
         <ChevronDown class="size-3.5 shrink-0 opacity-60" />
@@ -81,7 +97,14 @@ async function onReady() {
           :data-state="status.state"
           :data-checks="status.checks"
         >
-          <span class="size-1.5 shrink-0 rounded-full" :class="DOT[status.checks]" aria-hidden="true" />
+          <component
+            v-if="icon"
+            :is="icon.icon"
+            class="size-3.5 shrink-0"
+            :class="icon.class"
+            data-testid="pr-status-icon"
+            aria-hidden="true"
+          />
           {{ prStatusLabel(status) }}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

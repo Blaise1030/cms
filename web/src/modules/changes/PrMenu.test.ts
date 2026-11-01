@@ -64,6 +64,22 @@ describe("PrMenu", () => {
     expect(w.find("[data-testid='pr-status']").text()).toBe("Draft · Checks failing");
   });
 
+  it("shows a green check for a merged PR instead of its failing checks", () => {
+    const { w } = mountWith({ ...draft, state: "merged", checks: "failing" });
+    expect(w.find("[data-testid='pr-status']").text()).toBe("Merged");
+    const status = w.find("[data-testid='pr-status-icon']");
+    expect(status.exists()).toBe(true);
+    expect(status.classes()).toContain("text-emerald-500");
+    expect(status.classes()).not.toContain("text-red-500");
+    expect(w.find("[data-testid='pr-trigger-icon']").classes()).toContain("text-emerald-500");
+  });
+
+  it("shows a red cross for an open PR with failing checks", () => {
+    const { w } = mountWith({ ...draft, state: "open", checks: "failing" });
+    expect(w.find("[data-testid='pr-status']").text()).toBe("Open · Checks failing");
+    expect(w.find("[data-testid='pr-status-icon']").classes()).toContain("text-red-500");
+  });
+
   it("links the PR before its status has loaded", () => {
     const { w } = mountWith(null);
     expect(w.find("[data-testid='pr-menu']").text()).toContain("Pull request");
