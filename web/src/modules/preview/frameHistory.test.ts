@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { useFrameHistory } from "./frameHistory";
 
+describe("useFrameHistory target", () => {
+  it("names the entry one step away, or null at the ends", () => {
+    const h = useFrameHistory();
+    h.visit("/");
+    h.visit("/blog");
+    h.visit("/blog/post");
+    expect(h.target(-1)).toBe("/blog");
+    expect(h.target(1)).toBeNull();
+    h.back(); h.visit("/blog");
+    expect(h.target(-1)).toBe("/");
+    expect(h.target(1)).toBe("/blog/post");
+  });
+});
+
 describe("useFrameHistory", () => {
   it("pushes new pages and ignores reloads of the current one", () => {
     const h = useFrameHistory();

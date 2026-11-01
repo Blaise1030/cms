@@ -176,8 +176,11 @@ function onFrameMessage(e: MessageEvent) {
   if (!e.source || e.source !== frame.value?.contentWindow) return;
   if (!isBridgeMessage(e.data)) return;
   if (e.data.op === "path") {
-    // A cross-origin frame only reveals its page this way; remember it so a reload reopens it.
-    store.setFramePath(props.projectId, framePath(e.data.url, base.value));
+    // A cross-origin frame only reveals its page this way: it feeds the address bar and the
+    // reload target, and it is the only way the back/forward stack learns where the reader went.
+    const path = framePath(e.data.url, base.value);
+    store.setFramePath(props.projectId, path);
+    history.visit(path);
     return;
   }
   if (e.data.op === "cancel") {
@@ -310,13 +313,24 @@ onBeforeUnmount(() => {
   store.setPicking(false);
 });
 
-function goBack() {
-  if (history.back()) frameWindow()?.history.back();
+/**
+ * Step the frame back/forward. A same-origin frame is driven through its own session history; a
+ * cross-origin one hides that history, so the app navigates it to the path it recorded instead.
+ */
+function step(direction: "back" | "forward") {
+  const win = frameWindow();
+  if (win) {
+    if (direction === "back" ? history.back() : history.forward()) win.history[direction]();
+    return;
+  }
+  const path = history.target(direction === "back" ? -1 : 1);
+  if (!path) return;
+  if (direction === "back") history.back(); else history.forward();
+  startHref.value = hrefFor(path);
 }
 
-function goForward() {
-  if (history.forward()) frameWindow()?.history.forward();
-}
+function goBack() { step("back"); }
+function goForward() { step("forward"); }
 
 function navigate() {
   if (draft.value === null) return;
