@@ -88,6 +88,12 @@ it("runs a row menu action", async () => {
   expect(rename).toHaveBeenCalledOnce();
 });
 
+it("always shows the row menu and hides the kind label", () => {
+  const w = mountList();
+  expect(w.text()).not.toContain("markdown");
+  expect(w.get('[data-testid="content-entry-menu"]').classes()).not.toContain("opacity-0");
+});
+
 it("keeps the filter when the same collection reloads but clears it on a new collection", async () => {
   const w = mountList();
   await w.get('[data-testid="content-filter"]').setValue("spring");

@@ -67,7 +67,7 @@ watch(() => props.collection.name, () => { query.value = ""; });
       {{ query.trim() ? "No matches" : "No entries yet" }}
     </div>
     <ul v-else class="min-h-0 flex-1 overflow-auto px-2 pb-4">
-      <li v-for="r in rows" :key="r.entry.id" class="group flex items-center gap-1 rounded-md pr-1 hover:bg-accent/40">
+      <li v-for="r in rows" :key="r.entry.id" class="flex items-center gap-1 rounded-md pr-1 hover:bg-accent/40">
         <button
           type="button"
           class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none focus-visible:bg-accent"
@@ -77,7 +77,6 @@ watch(() => props.collection.name, () => { query.value = ""; });
         >
           <component :is="KIND_ICON[r.entry.kind]" class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span class="truncate text-sm">{{ humanize(r.entry.id) }}</span>
-          <span class="ml-auto shrink-0 text-xs text-muted-foreground">{{ r.entry.kind }}</span>
         </button>
         <DropdownMenu v-if="r.menu.length">
           <DropdownMenuTrigger as-child>
@@ -85,7 +84,7 @@ watch(() => props.collection.name, () => { query.value = ""; });
               type="button"
               variant="ghost"
               size="icon-sm"
-              class="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+              class="shrink-0 text-muted-foreground"
               data-testid="content-entry-menu"
               :aria-label="`Actions for ${r.entry.id}`"
             >
