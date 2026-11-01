@@ -5,6 +5,7 @@ import { contentRouter } from "@/test/contentRouter";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import { ApiError } from "@/core/api";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { REFRESH_DELAY_MS, useContentStore } from "./store";
@@ -124,14 +125,40 @@ it("labels the collection list and filters it as you type", async () => {
  w.unmount();
 });
 
-it("shows the document's slug as read-only and its title field", async () => {
+it("renames the document from its slug field", async () => {
  const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
- const w = await setup({ listContentCollections: async () => [{ ...blog, fields }] }, "/p/p/content/blog/welcome"); await flushPromises();
- expect(w.get('[data-testid="content-slug"]').text()).toBe("welcome");
- expect(w.get('[data-testid="content-slug"]').element.tagName).toBe("P");
- expect(w.find('[data-testid="content-slug-apply"]').exists()).toBe(false);
- expect(w.get('[data-testid="content-slug-field"]').text()).toContain("Slug");
+ const renamed = { ...welcome, id: "welcome-again", path: "src/content/blog/en/welcome-again.md", hash: "h2" };
+ const rename = vi.fn(async () => ({ entry: renamed, entries: [renamed] }));
+ const w = await setup({
+  listContentCollections: async () => [{ ...blog, fields }],
+  renameContentEntry: rename,
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect((w.get('[data-testid="content-slug"]').element as HTMLInputElement).value).toBe("welcome");
+ expect(w.get('label[for="content-slug"]').text()).toBe("Slug*");
  expect(w.find('[data-testid="field-title"]').exists()).toBe(true);
+ await w.get('[data-testid="content-slug"]').setValue("welcome-again");
+ await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();
+ expect(rename).toHaveBeenCalledWith({ project: "p", collection: "blog", id: "welcome", slug: "welcome-again", branch: "main", hash: "abc" });
+ expect(useContentStore().entry?.id).toBe("welcome-again");
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome-again");
+ w.unmount();
+});
+
+it("resumes a slug rename on the new change after Create Change", async () => {
+ const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
+ const onMain = new ApiError("CHANGE_REQUIRED", "Start a change first", 409);
+ const renamed = { ...welcome, id: "welcome-again", branch: "content/b", hash: "h2" };
+ const rename = vi.fn().mockRejectedValueOnce(onMain).mockResolvedValue({ entry: renamed, entries: [renamed] });
+ const w = await setup({
+  listContentCollections: async () => [{ ...blog, fields }],
+  renameContentEntry: rename,
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ await w.get('[data-testid="content-slug"]').setValue("welcome-again");
+ await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();
+ expect(useContentStore().needsChange).toBe(true);
+ await useContentStore().resumeSave("content/b"); await flushPromises();
+ expect(rename).toHaveBeenLastCalledWith(expect.objectContaining({ id: "welcome", slug: "welcome-again", branch: "content/b" }));
+ expect(useContentStore().entry?.id).toBe("welcome-again");
  w.unmount();
 });
 

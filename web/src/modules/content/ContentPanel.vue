@@ -92,9 +92,21 @@ const tab = ref<"fields" | "history">("fields");
 /** JSON entries edit their fields in the page, so their side panel only has History. */
 const sideTab = computed(() => (hasFieldsPanel.value ? tab.value : "history"));
 const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${store.entry.id}` : null));
-/** The URL slug is the entry's file name; it is fixed after creation. A collection that declares its own `slug` field uses that as the address, so do not show two. */
+/** The URL slug is the entry's file name; saving a new one renames the document. */
+const slugDraft = ref("");
+const slugDirty = computed(() => !!store.entry && slugDraft.value.trim() !== store.entry.id);
+/** A collection that declares its own `slug` field uses that as the address, so do not show two. */
 const schemaHasSlug = computed(() => !!store.descriptor?.properties?.slug);
-const showSlug = computed(() => !!store.entry && removable(store.entry.collection) && !schemaHasSlug.value);
+const canRenameEntry = computed(() => !!store.entry && removable(store.entry.collection) && !schemaHasSlug.value);
+watch(entryKey, () => { slugDraft.value = store.entry?.id ?? ""; }, { immediate: true });
+/** Rename from the slug field; a dirty draft is saved first, and Create Change resumes it. */
+async function commitSlug() {
+  const entry = store.entry;
+  const next = slugDraft.value.trim();
+  if (!entry || !next || next === entry.id) { slugDraft.value = entry?.id ?? ""; return; }
+  try { await store.renameEntry(next); showInUrl(); }
+  catch { /* recorded on the store; the draft stays */ }
+}
 // History loads the first time its tab shows an entry; another entry drops the open version.
 watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
   if (key !== old?.[0]) history.close();
@@ -379,21 +391,23 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 <TabsTrigger value="history">History</TabsTrigger>
               </TabsList>
               <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
-                <div v-if="showSlug" class="mb-4 space-y-1" data-testid="content-slug-field">
-                  <Label v-if="store.creating" for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
-                  <p v-else class="text-xs font-medium">Slug</p>
-                  <Input
-                    v-if="store.creating"
-                    id="content-slug"
-                    :model-value="store.creation?.slug"
-                    data-testid="content-slug"
-                    required
-                    aria-required="true"
-                    class="h-8"
-                    @update:model-value="store.setCreateSlug(String($event))"
-                  />
-                  <p v-else id="content-slug" data-testid="content-slug" class="text-sm">{{ store.entry.id }}</p>
-                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address." }}</p>
+                <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
+                  <Label for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
+                  <div class="flex gap-1">
+                    <Input
+                      v-if="store.creating"
+                      id="content-slug"
+                      :model-value="store.creation?.slug"
+                      data-testid="content-slug"
+                      required
+                      aria-required="true"
+                      class="h-8"
+                      @update:model-value="store.setCreateSlug(String($event))"
+                    />
+                    <Input v-else id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
+                    <Button v-if="!store.creating && slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
+                  </div>
+                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address. Renaming moves the file and updates links." }}</p>
                 </div>
                 <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
               </TabsContent>

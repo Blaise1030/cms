@@ -488,6 +488,9 @@ export interface ContentEntryCreate {
   project: string; collection: string; slug: string; branch: string;
   fields: Record<string, unknown>; body?: string;
 }
+export interface ContentEntryRename {
+  project: string; collection: string; id: string; slug: string; branch: string; hash: string;
+}
 export interface ContentEntryDelete { project: string; collection: string; id: string; branch: string; hash: string }
 /** A schema reference field in another entry that names the inspected entry. */
 export interface ContentReference { collection: string; id: string; path: string; field: string }

@@ -64,7 +64,9 @@ export const useContentStore = defineStore("content", () => {
     pendingImages.value = pendingImages.value.filter(i => !done.includes(i));
   }
   /** Which mutation a Create Change resumes. */
-  let resumeAction: "save" | "lifecycle" | "create" = "save";
+  let resumeAction: "save" | "rename" | "lifecycle" | "create" = "save";
+  /** The slug of a rename refused on main, kept so Create Change can retry it. */
+  let renameSlug: string | null = null;
   const openCollection = computed(() => collections.value.find(x => x.name === entry.value?.collection));
   /** The open entry's schema. A collection that is read only for now (preview not running) keeps it, so its draft stays a draft. */
   const descriptor = computed<FieldDescriptor | null>(() => {
@@ -310,6 +312,34 @@ export const useContentStore = defineStore("content", () => {
       } else saveError.value = err.message;
     } else saveError.value = errorMessage(err);
   }
+  /** Rename the open entry from its slug; a dirty draft is saved first and a refusal on main resumes after Create Change. */
+  async function renameEntry(slug: string, branch?: string) {
+    if (dirty.value) {
+      try { await saveDraft(); } catch { return; }
+    }
+    const e = entry.value;
+    const next = slug.trim();
+    if (!e || !next || next === e.id) return;
+    const saved = { id: projectId.value, entryId: e.id };
+    const target = { project: saved.id, collection: e.collection, id: e.id, slug: next, branch: branch ?? boundBranch(e), hash: e.hash };
+    renameSlug = next;
+    resumeAction = "rename";
+    clearSaveState();
+    saving.value = true;
+    try {
+      const res = await daemon.api.renameContentEntry(target);
+      if (projectId.value === saved.id) {
+        entries.value = res.entries;
+        selectedCollection.value = res.entry.collection;
+        loadEntry(res.entry);
+      }
+      renameSlug = null; resumeAction = "save";
+    } catch (err) {
+      recordFailure(err, branch);
+      if (!needsChange.value) renameSlug = null;
+      throw err;
+    } finally { saving.value = false; }
+  }
   /** Open the delete confirmation and load its dry-run impact. */
   async function startLifecycle() {
     const e = entry.value; if (!e || dirty.value) return;
@@ -417,12 +447,13 @@ export const useContentStore = defineStore("content", () => {
       throw err;
     } finally { c.busy = false; }
   }
-  /** After Create Change from main: retry the same save, delete, or create on the new branch. */
+  /** After Create Change from main: retry the same save, rename, delete, or create on the new branch. */
   async function resumeSave(branch: string): Promise<unknown> {
     needsChange.value = false;
     if (resumeAction === "create" && creation.value) return confirmCreate(branch);
     // The writer created this change for the open draft: it stays the target even if this try fails.
     if (entry.value) { targetBranch = branch; changedOnDisk.value = false; }
+    if (resumeAction === "rename" && renameSlug) return renameEntry(renameSlug, branch);
     return resumeAction === "lifecycle" && lifecycle.value ? confirmLifecycle(branch) : saveDraft(branch);
   }
   async function compare() {
@@ -446,5 +477,5 @@ export const useContentStore = defineStore("content", () => {
     daemon.onReconnected(scheduleRefresh),
   ];
   onScopeDispose(() => { suspend(); offs.forEach(off => off()); });
-  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, creating, startCreate, setCreateSlug, discardCreate, confirmCreate };
+  return { discard, suspend, referenceEntries, loadReferenceEntries, pendingImages, addImage, projectId, collections, entries, selectedCollection, entry, draftSource, draftFields, draftBody, richBody, setBody, restoreVersion, descriptor, readOnlyReason, saving, saveError, fieldErrors, conflict, needsChange, current, dirty, changedOnDisk, error, loading, open, refresh, refreshForBranch, selectCollection, selectEntry, canLeave, saveDraft, renameEntry, resumeSave, compare, reload, lifecycle, startLifecycle, cancelLifecycle, confirmLifecycle, creation, creating, startCreate, setCreateSlug, discardCreate, confirmCreate };
 });
