@@ -14,10 +14,10 @@ const IMAGE_TOKEN = "orso-image:";
 export interface ContentConflict { reason: "branch_changed" | "stale_content"; message: string; branch?: string }
 /** A new entry being named in the Create dialog. */
 export interface ContentCreation { collection: string; title: string; slug: string; busy: boolean; error: string | null }
-/** A rename or delete awaiting confirmation; `impact` is the daemon's dry run. */
+/** A delete awaiting confirmation; `impact` is the daemon's dry run. */
 export interface ContentLifecycle {
-  action: "rename" | "delete"; collection: string; id: string;
-  impact: ContentImpact | null; slug: string; busy: boolean; error: string | null;
+  collection: string; id: string;
+  impact: ContentImpact | null; busy: boolean; error: string | null;
 }
 
 /** File events within this window coalesce into one trailing refresh. */
@@ -187,7 +187,7 @@ export const useContentStore = defineStore("content", () => {
     const selectionVersion = selectionRequest;
     const name = selectedCollection.value;
     const openedEntry = entry.value;
-    // A rename/delete in flight replaces the entry itself; do not re-read the old id.
+    // A delete in flight replaces the entry itself; do not re-read the old id.
     const canRefreshEntry = !selectionPending && !lifecycle.value?.busy;
     loading.value = true; error.value = null;
     try {
@@ -310,19 +310,18 @@ export const useContentStore = defineStore("content", () => {
       } else saveError.value = err.message;
     } else saveError.value = errorMessage(err);
   }
-  /** Open the rename/delete confirmation and load its dry-run impact. */
-  async function startLifecycle(action: ContentLifecycle["action"]) {
-    // A rename rewrites owned paths on disk; a draft would carry the old ones back.
+  /** Open the delete confirmation and load its dry-run impact. */
+  async function startLifecycle() {
     const e = entry.value; if (!e || dirty.value) return;
-    const opened = { action, collection: e.collection, id: e.id, impact: null, slug: "", busy: false, error: null };
+    const opened = { collection: e.collection, id: e.id, impact: null, busy: false, error: null };
     lifecycle.value = opened;
     try {
       const impact = await daemon.api.contentImpact(projectId.value, e.collection, e.id);
-      if (lifecycle.value?.action === action && lifecycle.value.id === e.id) lifecycle.value.impact = impact;
+      if (lifecycle.value?.id === e.id) lifecycle.value.impact = impact;
     } catch (err) { if (lifecycle.value?.id === e.id) lifecycle.value.error = errorMessage(err); }
   }
   function cancelLifecycle() { lifecycle.value = null; }
-  /** Rename or delete the opened entry with its opened branch and hash. Throws after recording the failure. */
+  /** Delete the opened entry with its opened branch and hash. Throws after recording the failure. */
   async function confirmLifecycle(branch?: string) {
     const l = lifecycle.value; const e = entry.value;
     if (!l || !e || !l.impact || dirty.value) return;
@@ -332,14 +331,9 @@ export const useContentStore = defineStore("content", () => {
     l.busy = true; l.error = null; clearSaveState();
     const stillOpen = () => projectId.value === saved.id && entry.value?.id === saved.entryId;
     try {
-      if (l.action === "rename") {
-        const res = await daemon.api.renameContentEntry({ ...target, slug: l.slug.trim() });
-        if (stillOpen()) { entries.value = res.entries; loadEntry(res.entry); }
-      } else {
-        const res = await daemon.api.deleteContentEntry(target);
-        if (stillOpen()) {
-          entries.value = res.entries; closeEntry();
-        }
+      const res = await daemon.api.deleteContentEntry(target);
+      if (stillOpen()) {
+        entries.value = res.entries; closeEntry();
       }
       lifecycle.value = null; resumeAction = "save";
     } catch (err) {
@@ -423,7 +417,7 @@ export const useContentStore = defineStore("content", () => {
       throw err;
     } finally { c.busy = false; }
   }
-  /** After Create Change from main: retry the same save, rename/delete, or create on the new branch. */
+  /** After Create Change from main: retry the same save, delete, or create on the new branch. */
   async function resumeSave(branch: string): Promise<unknown> {
     needsChange.value = false;
     if (resumeAction === "create" && creation.value) return confirmCreate(branch);

@@ -1,5 +1,5 @@
 import type { Component } from "vue";
-import { Copy, FileText, Link, Pencil, Trash2 } from "@lucide/vue";
+import { Copy, FileText, Link, Trash2 } from "@lucide/vue";
 import type { ContentEntrySummary } from "@/core/types";
 import { humanize } from "./labels";
 
@@ -20,11 +20,10 @@ export interface EntryActionHandlers {
   open: () => void;
   copyLink: () => void;
   copyPath: () => void;
-  rename: () => void;
   remove: () => void;
 }
 
-/** Why a rename or delete is refused while the open entry has unsaved edits. */
+/** Why a delete is refused while the open entry has unsaved edits. */
 const PENDING = "Save or discard your changes first";
 
 /** Entries whose slug contains `query`, ignoring case; an empty query keeps every row. */
@@ -40,7 +39,7 @@ export function sortEntries(entries: readonly ContentEntrySummary[]): ContentEnt
     .sort((a, b) => humanize(a.id).localeCompare(humanize(b.id), undefined, { sensitivity: "base" }));
 }
 
-/** The menu for one entry row: open and share always, path when known, rename and delete unless the collection is a singleton. */
+/** The menu for one entry row: open and share always, path when known, delete unless the collection is a singleton. */
 export function entryActions(ctx: {
   singleton: boolean;
   path?: string;
@@ -57,7 +56,6 @@ export function entryActions(ctx: {
   if (path) actions.push({ id: "copy-path", label: "Copy file path", icon: Copy, run: handlers.copyPath });
   if (!singleton) actions.push(
     "separator",
-    { id: "rename", label: "Rename…", icon: Pencil, disabled: dirty, hint: blocked, run: handlers.rename },
     { id: "delete", label: "Delete", icon: Trash2, destructive: true, disabled: dirty, hint: blocked, run: handlers.remove },
   );
   return actions;

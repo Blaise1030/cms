@@ -3,15 +3,16 @@ import { expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import type { ContentCollection, ContentEntrySummary } from "@/core/types";
 import type { EntryAction } from "./entryList";
+import { entryActions } from "./entryList";
 import EntryList from "./EntryList.vue";
 
 const blog: ContentCollection = { name: "blog", kind: "markdown", loader: {}, editable: true, reason: null };
 const row = (id: string): ContentEntrySummary => ({ collection: "blog", id, path: `src/content/blog/${id}.md`, kind: "markdown" });
-const rename = vi.fn();
+const remove = vi.fn();
 const menu: EntryAction[] = [
   { id: "open", label: "Open", run: () => {} },
   "separator",
-  { id: "rename", label: "Rename…", run: rename },
+  { id: "delete", label: "Delete", run: remove },
 ];
 
 /** Render the menu inline (no portal, always open); items emit `select` on click. */
@@ -81,11 +82,22 @@ it("opens an entry when its row is clicked", async () => {
   expect(w.emitted("open")).toEqual([["welcome"]]);
 });
 
+it("offers open, share, and delete, but no rename", () => {
+  const actions = entryActions({
+    singleton: false,
+    path: "src/content/blog/welcome.md",
+    dirty: false,
+    handlers: { open: () => {}, copyLink: () => {}, copyPath: () => {}, remove: () => {} },
+  });
+  const ids = actions.filter(a => a !== "separator").map(a => a.id);
+  expect(ids).toEqual(["open", "copy-link", "copy-path", "delete"]);
+});
+
 it("runs a row menu action", async () => {
-  rename.mockClear();
+  remove.mockClear();
   const w = mountList();
-  await w.get('[data-testid="content-entry-rename"]').trigger("click");
-  expect(rename).toHaveBeenCalledOnce();
+  await w.get('[data-testid="content-entry-delete"]').trigger("click");
+  expect(remove).toHaveBeenCalledOnce();
 });
 
 it("always shows the row menu and hides the kind label", () => {

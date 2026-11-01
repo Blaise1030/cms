@@ -93,7 +93,6 @@ test("content editor saves a blog article with an image on a change branch and p
   await entryRow(page, "welcome").click();
   await expect(page.getByTestId("body-rich")).toBeVisible();
   await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
-  await expect(page.getByTestId("content-rename")).toBeEnabled();
   await expect(page.getByTestId("content-lifecycle-blocked")).toHaveCount(0);
 
   // Create the article from the list. On main that asks for a change first and then resumes the

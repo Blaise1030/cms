@@ -124,22 +124,14 @@ it("labels the collection list and filters it as you type", async () => {
  w.unmount();
 });
 
-it("shows the document's slug and title fields together", async () => {
+it("shows the document's slug as read-only and its title field", async () => {
  const fields = { type: "object", required: true, properties: { title: { type: "string", required: true } } };
- const impact = { references: [], assets: [], proseLinks: [] };
- const w = await setup({
-  listContentCollections: async () => [{ ...blog, fields }],
-  contentImpact: async () => impact,
- }, "/p/p/content/blog/welcome"); await flushPromises();
- expect((w.get('[data-testid="content-slug"]').element as HTMLInputElement).value).toBe("welcome");
- expect(w.get('[data-testid="content-slug"]').attributes("required")).toBeDefined();
- expect(w.get('[data-testid="content-slug"]').attributes("aria-required")).toBe("true");
- expect(w.get('label[for="content-slug"]').text()).toBe("Slug*");
+ const w = await setup({ listContentCollections: async () => [{ ...blog, fields }] }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect(w.get('[data-testid="content-slug"]').text()).toBe("welcome");
+ expect(w.get('[data-testid="content-slug"]').element.tagName).toBe("P");
+ expect(w.find('[data-testid="content-slug-apply"]').exists()).toBe(false);
+ expect(w.get('[data-testid="content-slug-field"]').text()).toContain("Slug");
  expect(w.find('[data-testid="field-title"]').exists()).toBe(true);
- await w.get('[data-testid="content-slug"]').setValue("welcome-again");
- await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();
- const rename = document.body.querySelector<HTMLInputElement>('[data-testid="content-rename-slug"]')!;
- expect(rename.value).toBe("welcome-again");
  w.unmount();
 });
 

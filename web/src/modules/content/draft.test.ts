@@ -176,7 +176,6 @@ it("opens and toggles a Blog body without dirtying the draft, then saves a body 
   await setMode("raw");
   await setMode("rich");
   expect(useContentStore().dirty).toBe(false);
-  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
   await typeBody("Intro\n\n* one\n* two\n");
   expect(useContentStore().dirty).toBe(true);
   await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises();

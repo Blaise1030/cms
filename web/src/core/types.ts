@@ -488,15 +488,12 @@ export interface ContentEntryCreate {
   project: string; collection: string; slug: string; branch: string;
   fields: Record<string, unknown>; body?: string;
 }
-export interface ContentEntryRename {
-  project: string; collection: string; id: string; slug: string; branch: string; hash: string;
-}
 export interface ContentEntryDelete { project: string; collection: string; id: string; branch: string; hash: string }
 /** A schema reference field in another entry that names the inspected entry. */
 export interface ContentReference { collection: string; id: string; path: string; field: string }
 /** A local Markdown link to the entry's public URL; reported, never rewritten. */
 export interface ContentProseLink { collection: string; id: string; path: string; url: string; line: number }
-/** Dry-run impact shown before a rename or delete is confirmed. */
+/** Dry-run impact shown before a delete is confirmed. */
 export interface ContentImpact { references: ContentReference[]; assets: string[]; proseLinks: ContentProseLink[] }
 export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
 export interface ContentEntry extends ContentEntrySummary {

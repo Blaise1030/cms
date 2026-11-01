@@ -10,7 +10,6 @@ import {
   type ContentEntryCreate,
   type ContentImageUpload,
   type SavedContentEntry,
-  type ContentEntryRename,
   type ContentEntryDelete,
   type ContentImpact,
   type ContentVersion,
@@ -219,8 +218,6 @@ export function createApi(
       `${cfg().origin}/api/file?project=${enc(project)}&path=${enc(path)}&raw=true`,
     contentImpact: (project: string, collection: string, id: string) =>
       json<ContentImpact>("POST", "/api/content/entry/impact", { body: { project, collection, id } }),
-    renameContentEntry: (body: ContentEntryRename) =>
-      json<{ entry: ContentEntry; entries: ContentEntrySummary[] }>("POST", "/api/content/entry/rename", { body }),
     deleteContentEntry: (body: ContentEntryDelete) =>
       json<{ entries: ContentEntrySummary[] }>("DELETE", "/api/content/entry", { body }),
     design: (project: string) => json<DesignDoc>("GET", "/api/design", { query: { project } }),

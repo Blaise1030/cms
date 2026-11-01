@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, FileText, PanelLeft, PanelRight, Pencil, Search, Trash2 } from "@lucide/vue";
+import { ChevronLeft, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
@@ -68,7 +68,7 @@ const lifecycleOpen = computed({
 const canConfirm = computed(() => {
   const l = store.lifecycle;
   if (!l?.impact || l.busy) return false;
-  return l.action === "rename" ? !!l.slug.trim() && l.slug.trim() !== l.id : !l.impact.references.length;
+  return !l.impact.references.length;
 });
 async function confirmLifecycle() { try { await store.confirmLifecycle(); showInUrl(); } catch { /* recorded on the store; the draft stays */ } }
 /** The branch the project is on, as the Changes picker knows it. */
@@ -92,22 +92,9 @@ const tab = ref<"fields" | "history">("fields");
 /** JSON entries edit their fields in the page, so their side panel only has History. */
 const sideTab = computed(() => (hasFieldsPanel.value ? tab.value : "history"));
 const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${store.entry.id}` : null));
-/** The URL slug is the entry's file name; it renames the document when it changes. */
-const slugDraft = ref("");
-const slugDirty = computed(() => !!store.entry && slugDraft.value.trim() !== store.entry.id);
-/** A collection that declares its own `slug` field uses that as the address; do not show two. */
+/** The URL slug is the entry's file name; it is fixed after creation. A collection that declares its own `slug` field uses that as the address, so do not show two. */
 const schemaHasSlug = computed(() => !!store.descriptor?.properties?.slug);
-const canRenameEntry = computed(() => !!store.entry && removable(store.entry.collection) && !schemaHasSlug.value);
-watch(entryKey, () => { slugDraft.value = store.entry?.id ?? ""; }, { immediate: true });
-/** Save first (a rename is refused while a draft is open), then confirm the move with its impact. */
-async function commitSlug() {
-  const entry = store.entry;
-  const next = slugDraft.value.trim();
-  if (!entry || !next || next === entry.id) { slugDraft.value = entry?.id ?? ""; return; }
-  try { if (store.dirty) await store.saveDraft(); } catch { return; }
-  store.startLifecycle("rename");
-  if (store.lifecycle) store.lifecycle.slug = next;
-}
+const showSlug = computed(() => !!store.entry && removable(store.entry.collection) && !schemaHasSlug.value);
 // History loads the first time its tab shows an entry; another entry drops the open version.
 watch(() => [entryKey.value, sideTab.value] as const, ([key, side], old) => {
   if (key !== old?.[0]) history.close();
@@ -178,7 +165,7 @@ function openEntry(collection: string, id: string) {
 function openCollection(c: ContentCollection) {
   void router.push(contentPath(props.projectId, c.name, c.singleton ?? undefined));
 }
-/** The row menu: the entry opens, shares, renames or deletes exactly as it did in the tree. */
+/** The row menu: the entry opens, shares, or deletes exactly as it did in the tree. */
 function rowActions(id: string): EntryAction[] {
   const collection = props.collection ?? "";
   const path = store.entries.find(e => e.id === id)?.path;
@@ -190,8 +177,7 @@ function rowActions(id: string): EntryAction[] {
       open: () => openEntry(collection, id),
       copyLink: () => void copy(new URL(contentPath(props.projectId, collection, id), location.origin).href, "Link"),
       copyPath: () => { if (path) void copy(path, "File path"); },
-      rename: () => void lifecycleFor("rename", collection, id),
-      remove: () => void lifecycleFor("delete", collection, id),
+      remove: () => void deleteFor(collection, id),
     },
   });
 }
@@ -210,11 +196,11 @@ async function follow(collection?: string, id?: string) {
   if (id && store.entry?.id !== id) await store.selectEntry(id);
 }
 watch(() => [props.collection, props.entry, props.projectId] as const, ([collection, id]) => void follow(collection, id), { immediate: true });
-/** Opens the entry, then starts its rename or delete; leaving a draft is confirmed first. */
-async function lifecycleFor(action: "rename" | "delete", collection: string, id: string) {
+/** Opens the entry, then starts its delete; leaving a draft is confirmed first. */
+async function deleteFor(collection: string, id: string) {
   await router.push(contentPath(props.projectId, collection, id));
   await follow(collection, id);
-  if (store.entry?.collection === collection && store.entry.id === id) void store.startLifecycle(action);
+  if (store.entry?.collection === collection && store.entry.id === id) void store.startLifecycle();
 }
 async function copy(text: string, what: string) {
   try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); }
@@ -339,13 +325,12 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         <template v-if="store.entry">
           <div class="flex min-w-0 items-center gap-1 px-1">
             <h2 class="truncate text-sm font-medium" data-testid="content-entry-title">{{ humanize(store.entry.id) }}</h2>
-            <Button v-if="canRemove" type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="Rename" :title="store.dirty ? 'Save or discard your changes first' : 'Rename'" data-testid="content-rename" :disabled="store.dirty" @click="store.startLifecycle('rename')"><Pencil class="size-3.5" /></Button>
             <p class="hidden truncate text-xs text-muted-foreground @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
           </div>
           <div class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="wordCount !== null" class="hidden px-2 text-xs text-muted-foreground @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
             <template v-if="canRemove">
-              <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle('delete')"><Trash2 class="size-4" /></Button>
+              <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
             </template>
             <Button v-if="hasFieldsPanel" type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen">
               <PanelRight class="size-4" />
@@ -394,23 +379,21 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 <TabsTrigger value="history">History</TabsTrigger>
               </TabsList>
               <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
-                <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
-                  <Label for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
-                  <div class="flex gap-1">
-                    <Input
-                      v-if="store.creating"
-                      id="content-slug"
-                      :model-value="store.creation?.slug"
-                      data-testid="content-slug"
-                      required
-                      aria-required="true"
-                      class="h-8"
-                      @update:model-value="store.setCreateSlug(String($event))"
-                    />
-                    <Input v-else id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
-                    <Button v-if="!store.creating && slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
-                  </div>
-                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address. Renaming moves the file and updates links." }}</p>
+                <div v-if="showSlug" class="mb-4 space-y-1" data-testid="content-slug-field">
+                  <Label v-if="store.creating" for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
+                  <p v-else class="text-xs font-medium">Slug</p>
+                  <Input
+                    v-if="store.creating"
+                    id="content-slug"
+                    :model-value="store.creation?.slug"
+                    data-testid="content-slug"
+                    required
+                    aria-required="true"
+                    class="h-8"
+                    @update:model-value="store.setCreateSlug(String($event))"
+                  />
+                  <p v-else id="content-slug" data-testid="content-slug" class="text-sm">{{ store.entry.id }}</p>
+                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address." }}</p>
                 </div>
                 <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
               </TabsContent>
@@ -446,17 +429,16 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         <AlertDialog v-model:open="lifecycleOpen">
           <AlertDialogContent v-if="store.lifecycle" data-testid="content-lifecycle">
             <AlertDialogHeader>
-              <AlertDialogTitle>{{ store.lifecycle.action === "rename" ? "Rename" : "Delete" }} {{ store.lifecycle.collection }}/{{ store.lifecycle.id }}?</AlertDialogTitle>
+              <AlertDialogTitle>Delete {{ store.lifecycle.collection }}/{{ store.lifecycle.id }}?</AlertDialogTitle>
               <AlertDialogDescription>
-                <template v-if="store.lifecycle.action === 'rename'">The entry file, its public URL, and its asset folder move to the new slug. References below are updated too.</template>
-                <template v-else>The entry and its asset folder are removed. History can restore them.</template>
+                The entry and its asset folder are removed. History can restore them.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <p v-if="!store.lifecycle.impact && !store.lifecycle.error" class="text-sm text-muted-foreground">Checking references…</p>
             <div v-if="store.lifecycle.impact" class="space-y-3 text-sm">
               <section>
                 <h3 class="font-medium">References</h3>
-                <p v-if="store.lifecycle.action === 'delete' && store.lifecycle.impact.references.length" class="text-destructive">Remove these references before deleting.</p>
+                <p v-if="store.lifecycle.impact.references.length" class="text-destructive">Remove these references before deleting.</p>
                 <ul><li v-for="r in store.lifecycle.impact.references" :key="r.path + r.field">{{ r.collection }}/{{ r.id }} · {{ r.field }}</li></ul>
                 <p v-if="!store.lifecycle.impact.references.length" class="text-muted-foreground">None</p>
               </section>
@@ -469,15 +451,12 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 <h3 class="font-medium">Links in text (review by hand)</h3>
                 <ul><li v-for="link in store.lifecycle.impact.proseLinks" :key="link.path + link.line">{{ link.path }}:{{ link.line }} → {{ link.url }}</li></ul>
               </section>
-              <label v-if="store.lifecycle.action === 'rename'" class="block text-xs font-medium">New slug
-                <Input v-model="store.lifecycle.slug" data-testid="content-rename-slug" class="mt-1" placeholder="new-slug" />
-              </label>
             </div>
             <p v-if="store.lifecycle.error" role="alert" class="text-sm text-destructive" data-testid="content-lifecycle-error">{{ store.lifecycle.error }}</p>
             <AlertDialogFooter>
               <AlertDialogCancel data-testid="content-lifecycle-cancel">Cancel</AlertDialogCancel>
-              <Button :variant="store.lifecycle.action === 'delete' ? 'destructive' : 'default'" :disabled="!canConfirm" data-testid="content-lifecycle-confirm" @click="confirmLifecycle">
-                {{ store.lifecycle.busy ? "Working…" : store.lifecycle.action === "rename" ? "Rename" : "Delete" }}
+              <Button variant="destructive" :disabled="!canConfirm" data-testid="content-lifecycle-confirm" @click="confirmLifecycle">
+                {{ store.lifecycle.busy ? "Working…" : "Delete" }}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
