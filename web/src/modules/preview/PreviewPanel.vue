@@ -555,7 +555,7 @@ function toggleFullscreen() {
       </TooltipProvider>
 
       <div class="relative flex min-h-0 flex-1 flex-col">
-      <div ref="viewport" class="bg-muted/30 flex min-h-0 flex-1 justify-center overflow-auto">
+      <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
         <div
           v-if="state === 'crashed'"
           class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
