@@ -882,14 +882,30 @@ pub async fn cleanup(
     let latest = if fetched { "origin/main" } else { "main" };
 
     if !merged_by_pr && !merged_into(dir, &tip, latest).await? {
+        // GitHub may be unavailable; the branch as pushed is the PR's head in practice, so a
+        // merged remote-tracking branch still proves the merge and names the real reason.
+        let pushed_head = rev_parse(dir, &format!("refs/remotes/origin/{branch}"))
+            .await
+            .ok()
+            .map(|sha| sha.trim().to_string())
+            .filter(|sha| !sha.is_empty());
+        let merged_on_remote = match pushed_head {
+            Some(head) => merged_into(dir, &head, latest).await.unwrap_or(false),
+            None => false,
+        };
+        let merged_before_tip = merged_on_remote
+            || match &pr {
+                PrMerge::Merged { head_sha } => pr_matches(dir, branch, head_sha).await,
+                _ => false,
+            };
+        if merged_before_tip {
+            return Err(ApiError::conflict(
+                "This change has edits made after its pull request was merged — \
+                 share them before cleaning up",
+            ));
+        }
         return Err(match pr {
             PrMerge::Unknown(e) => e,
-            PrMerge::Merged { head_sha } if pr_matches(dir, branch, &head_sha).await => {
-                ApiError::conflict(
-                    "This change has edits made after its pull request was merged — \
-                     share them before cleaning up",
-                )
-            }
             _ => ApiError::conflict(
                 "This change has not been merged yet — merge its pull request first",
             ),

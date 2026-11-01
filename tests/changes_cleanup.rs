@@ -260,6 +260,29 @@ async fn cleanup_refuses_edits_made_after_the_pr_merged() {
 }
 
 #[tokio::test]
+async fn cleanup_refuses_edits_made_after_the_merge_without_github() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let branch = shared_change(&work, "New post: Merged", "merged.md").await;
+    // The PR merged the branch; then the writer checkpointed more work locally, never pushed.
+    merge_on_remote(tmp.path(), &branch, false);
+    commit_file(&work, "later.md", "later\n");
+
+    // GitHub was not consulted (no session), so git alone must still recognise the merge from
+    // the remote-tracking branch and name the real reason.
+    let err = changes::cleanup(&work, &branch, PrMerge::NotMerged, &[])
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+    assert!(
+        err.message.contains("after its pull request was merged"),
+        "{}",
+        err.message
+    );
+    assert!(local_branch_exists(&work, &branch));
+}
+
+#[tokio::test]
 async fn cleanup_ignores_a_merged_pr_from_an_earlier_change_with_the_same_name() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
