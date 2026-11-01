@@ -17,15 +17,16 @@ const changes = useChangesStore();
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <div class="relative min-h-0 flex-1">
-      <!-- The preview stays mounted so switching tabs does not reload the iframe. -->
+      <!-- The preview stays mounted and laid out so switching tabs does not reload or re-measure it. -->
       <PreviewPanel
-        v-show="tab === 'preview'"
         class="absolute inset-0"
+        :class="tab === 'preview' ? undefined : 'invisible'"
+        :inert="tab !== 'preview'"
         :project-id="project.id"
         :devserver="project.devserver"
         :port="project.port"
       />
-      <div v-show="tab !== 'preview'" class="absolute inset-0">
+      <div v-show="tab !== 'preview'" class="bg-background absolute inset-0" data-testid="workspace-surface">
         <RouterView />
       </div>
       <ConflictView v-if="changes.selectedConflictId" :project-id="project.id" />
