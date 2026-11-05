@@ -112,6 +112,8 @@ describe("onboarding step 1: assistant", () => {
 
     const ids = ["opencode", "claude", "codex", "cursor"];
     for (const id of ids) expect(w.find(`[data-testid='onboarding-provider-${id}']`).exists()).toBe(true);
+    // The cards use the shadcn Item primitives, not hand-written rows.
+    expect(w.findAll("[data-testid^='onboarding-provider-'][data-slot='item']")).toHaveLength(4);
 
     expect(testId(w, "onboarding-provider-opencode").attributes("aria-checked")).toBe("true");
     for (const id of ["claude", "codex", "cursor"]) {

@@ -19,6 +19,15 @@ import {
   X,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { useDaemon } from "@/core/daemon";
@@ -406,159 +415,161 @@ function dotLabel(n: Step): string {
           </div>
 
           <div class="flex flex-col gap-4">
-            <div
-              class="bg-card divide-y overflow-hidden rounded-xl border"
-              role="radiogroup"
-              aria-label="Assistant"
-            >
-              <div v-for="row in cards" :key="row.id" class="flex flex-col">
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="selectedRow?.id === row.id"
-                  :data-testid="`onboarding-provider-${row.id}`"
-                  :data-selected="selectedRow?.id === row.id ? 'true' : undefined"
-                  :data-phase="row.phase"
-                  class="flex w-full items-center gap-3 px-4 py-3.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
-                  :class="
-                    selectedRow?.id === row.id
-                      ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
-                      : 'hover:bg-muted/50'
-                  "
-                  @click="select(row.id)"
-                >
-                  <span
-                    class="bg-background flex size-9 shrink-0 items-center justify-center rounded-lg border"
+            <div role="radiogroup" aria-label="Assistant">
+              <ItemGroup class="bg-card divide-y overflow-hidden rounded-xl border">
+                <div v-for="row in cards" :key="row.id" class="flex flex-col">
+                  <Item
+                    as="div"
+                    role="radio"
+                    tabindex="0"
+                    :aria-checked="selectedRow?.id === row.id"
+                    :data-testid="`onboarding-provider-${row.id}`"
+                    :data-selected="selectedRow?.id === row.id ? 'true' : undefined"
+                    :data-phase="row.phase"
+                    size="sm"
+                    class="w-full cursor-pointer items-center gap-3 py-3.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
+                    :class="
+                      selectedRow?.id === row.id
+                        ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
+                        : 'hover:bg-muted/50'
+                    "
+                    @click="select(row.id)"
+                    @keydown.enter.prevent="select(row.id)"
+                    @keydown.space.prevent="select(row.id)"
                   >
-                    <ProviderIcon :provider="row.id" class="size-5" />
-                  </span>
+                    <ItemMedia variant="icon" class="size-9 self-center rounded-lg bg-background">
+                      <ProviderIcon :provider="row.id" class="size-5" />
+                    </ItemMedia>
 
-                  <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span class="flex flex-wrap items-center gap-2">
-                      <span class="font-medium">{{ row.name }}</span>
-                      <span
-                        v-if="row.recommended"
-                        class="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[11px] font-medium"
-                      >
-                        Recommended
-                      </span>
-                    </span>
-                    <span class="text-muted-foreground text-sm">{{ row.description }}</span>
-
-                    <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                      <span
-                        v-if="row.status && row.phase !== 'downloading' && row.phase !== 'finishing'"
-                        class="inline-flex items-center gap-1"
-                        :class="
-                          row.tone === 'destructive'
-                            ? 'text-destructive'
-                            : row.tone === 'warning'
-                              ? 'text-amber-700 dark:text-amber-400'
-                              : row.tone === 'success'
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : 'text-muted-foreground'
-                        "
-                        :data-testid="`onboarding-status-${row.id}`"
-                      >
-                        <CircleCheck v-if="row.tone === 'success'" class="size-3.5" aria-hidden="true" />
-                        <CircleAlert v-else-if="row.tone === 'destructive'" class="size-3.5" aria-hidden="true" />
-                        {{ row.status }}
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'downloading'"
-                        class="text-muted-foreground tabular-nums"
-                        :data-testid="`onboarding-percent-${row.id}`"
-                      >
-                        {{ row.progress ?? 0 }}%
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'finishing'"
-                        class="text-muted-foreground inline-flex items-center gap-1"
-                      >
-                        <Spinner class="size-3" aria-hidden="true" /> Setting up…
-                      </span>
-                      <span
-                        v-if="
-                          (row.phase === 'ready' || row.phase === 'updateAvailable') && row.version
-                        "
-                        class="text-muted-foreground"
-                        :data-testid="`onboarding-version-${row.id}`"
-                      >
-                        Version {{ row.version }}<template v-if="sourceLabel(row.source)">
-                          · {{ sourceLabel(row.source) }}</template
+                    <ItemContent class="min-w-0 gap-0.5">
+                      <ItemTitle class="flex-wrap">
+                        {{ row.name }}
+                        <span
+                          v-if="row.recommended"
+                          class="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[11px] font-medium"
                         >
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'notDownloaded'"
-                        class="text-muted-foreground"
-                        :data-testid="`onboarding-size-${row.id}`"
-                      >
-                        {{ formatDownloadSize(row.provider.runtime?.downloadBytes) ?? "" }}
-                      </span>
-                    </span>
-                  </span>
+                          Recommended
+                        </span>
+                      </ItemTitle>
+                      <ItemDescription>{{ row.description }}</ItemDescription>
 
-                  <Check
-                    v-if="selectedRow?.id === row.id"
-                    class="size-5 shrink-0"
-                    aria-hidden="true"
-                    data-testid="onboarding-selected-check"
-                  />
-                </button>
+                      <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span
+                          v-if="row.status && row.phase !== 'downloading' && row.phase !== 'finishing'"
+                          class="inline-flex items-center gap-1"
+                          :class="
+                            row.tone === 'destructive'
+                              ? 'text-destructive'
+                              : row.tone === 'warning'
+                                ? 'text-amber-700 dark:text-amber-400'
+                                : row.tone === 'success'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : 'text-muted-foreground'
+                          "
+                          :data-testid="`onboarding-status-${row.id}`"
+                        >
+                          <CircleCheck v-if="row.tone === 'success'" class="size-3.5" aria-hidden="true" />
+                          <CircleAlert v-else-if="row.tone === 'destructive'" class="size-3.5" aria-hidden="true" />
+                          {{ row.status }}
+                        </span>
+                        <span
+                          v-else-if="row.phase === 'downloading'"
+                          class="text-muted-foreground tabular-nums"
+                          :data-testid="`onboarding-percent-${row.id}`"
+                        >
+                          {{ row.progress ?? 0 }}%
+                        </span>
+                        <span
+                          v-else-if="row.phase === 'finishing'"
+                          class="text-muted-foreground inline-flex items-center gap-1"
+                        >
+                          <Spinner class="size-3" aria-hidden="true" /> Setting up…
+                        </span>
+                        <span
+                          v-if="
+                            (row.phase === 'ready' || row.phase === 'updateAvailable') && row.version
+                          "
+                          class="text-muted-foreground"
+                          :data-testid="`onboarding-version-${row.id}`"
+                        >
+                          Version {{ row.version }}<template v-if="sourceLabel(row.source)">
+                            · {{ sourceLabel(row.source) }}</template
+                          >
+                        </span>
+                        <span
+                          v-else-if="row.phase === 'notDownloaded'"
+                          class="text-muted-foreground"
+                          :data-testid="`onboarding-size-${row.id}`"
+                        >
+                          {{ formatDownloadSize(row.provider.runtime?.downloadBytes) ?? "" }}
+                        </span>
+                      </div>
+                    </ItemContent>
 
-                <div
-                  v-if="selectedRow?.id === row.id && row.phase === 'downloading'"
-                  class="flex items-center gap-3 px-4 pb-4 sm:pl-16"
-                  :data-testid="`onboarding-progress-${row.id}`"
-                >
-                  <Progress
-                    :model-value="row.progress ?? 0"
-                    :aria-label="`Downloading ${row.name}: ${row.progress ?? 0}%`"
-                    class="max-w-64"
-                  />
-                  <span class="text-muted-foreground text-xs tabular-nums">
-                    {{ row.progress ?? 0 }}%
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    :data-testid="`onboarding-cancel-${row.id}`"
-                    @click="cancelSelected"
+                    <ItemActions class="self-center">
+                      <Check
+                        v-if="selectedRow?.id === row.id"
+                        class="size-5 shrink-0"
+                        aria-hidden="true"
+                        data-testid="onboarding-selected-check"
+                      />
+                    </ItemActions>
+                  </Item>
+
+                  <div
+                    v-if="selectedRow?.id === row.id && row.phase === 'downloading'"
+                    class="flex items-center gap-3 px-4 pb-4 sm:pl-16"
+                    :data-testid="`onboarding-progress-${row.id}`"
                   >
-                    <X aria-hidden="true" /> Cancel
-                  </Button>
-                </div>
+                    <Progress
+                      :model-value="row.progress ?? 0"
+                      :aria-label="`Downloading ${row.name}: ${row.progress ?? 0}%`"
+                      class="max-w-64"
+                    />
+                    <span class="text-muted-foreground text-xs tabular-nums">
+                      {{ row.progress ?? 0 }}%
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      :data-testid="`onboarding-cancel-${row.id}`"
+                      @click="cancelSelected"
+                    >
+                      <X aria-hidden="true" /> Cancel
+                    </Button>
+                  </div>
 
-                <div
-                  v-if="selectedRow?.id === row.id && row.phase === 'downloadError'"
-                  class="px-4 pb-4 text-sm sm:pl-16"
-                  :data-testid="`onboarding-error-${row.id}`"
-                >
-                  <p class="text-destructive">
-                    We couldn't download {{ row.name }}. Check your connection and try again.
-                  </p>
-                  <details v-if="row.message" class="mt-1">
-                    <summary class="text-muted-foreground cursor-pointer text-xs underline">
-                      Details
-                    </summary>
-                    <p class="text-muted-foreground mt-1 text-xs break-words">{{ row.message }}</p>
-                  </details>
-                </div>
+                  <div
+                    v-if="selectedRow?.id === row.id && row.phase === 'downloadError'"
+                    class="px-4 pb-4 text-sm sm:pl-16"
+                    :data-testid="`onboarding-error-${row.id}`"
+                  >
+                    <p class="text-destructive">
+                      We couldn't download {{ row.name }}. Check your connection and try again.
+                    </p>
+                    <details v-if="row.message" class="mt-1">
+                      <summary class="text-muted-foreground cursor-pointer text-xs underline">
+                        Details
+                      </summary>
+                      <p class="text-muted-foreground mt-1 text-xs break-words">{{ row.message }}</p>
+                    </details>
+                  </div>
 
-                <div
-                  v-if="selectedRow?.id === row.id && signInState"
-                  class="px-4 pb-4 sm:pl-16"
-                >
-                  <SignInPanel
-                    :provider-name="row.name"
-                    :state="signInState ?? NO_SIGN_IN"
-                    @submit-code="onSubmitCode(row.id, $event)"
-                    @cancel="onCancelSignIn(row.id)"
-                    @retry="onRetrySignIn(row.id)"
-                    @dismiss="onDismissSignIn(row.id)"
-                  />
+                  <div
+                    v-if="selectedRow?.id === row.id && signInState"
+                    class="px-4 pb-4 sm:pl-16"
+                  >
+                    <SignInPanel
+                      :provider-name="row.name"
+                      :state="signInState ?? NO_SIGN_IN"
+                      @submit-code="onSubmitCode(row.id, $event)"
+                      @cancel="onCancelSignIn(row.id)"
+                      @retry="onRetrySignIn(row.id)"
+                      @dismiss="onDismissSignIn(row.id)"
+                    />
+                  </div>
                 </div>
-              </div>
+              </ItemGroup>
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
@@ -610,31 +621,40 @@ function dotLabel(n: Step): string {
               </Button>
             </div>
 
-            <div v-if="existingRows.length" class="flex flex-col gap-2" role="radiogroup" aria-label="Existing assistants">
-              <button
-                v-for="row in existingRows"
-                :key="row.id"
-                type="button"
-                role="radio"
-                :aria-checked="selectedRow?.id === row.id"
-                :data-testid="`onboarding-existing-${row.id}`"
-                class="bg-card flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
-                :class="
-                  selectedRow?.id === row.id
-                    ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
-                    : 'hover:bg-muted/50'
-                "
-                @click="select(row.id)"
-              >
-                <span class="bg-background flex size-8 shrink-0 items-center justify-center rounded-md border">
-                  <ProviderIcon :provider="row.id" class="size-4" />
-                </span>
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm font-medium">{{ row.name }}</span>
-                  <span class="text-muted-foreground block text-xs">Already on your Mac</span>
-                </span>
-                <Check v-if="selectedRow?.id === row.id" class="size-4" aria-hidden="true" />
-              </button>
+            <div v-if="existingRows.length" role="radiogroup" aria-label="Existing assistants">
+              <ItemGroup class="gap-2">
+                <Item
+                  v-for="row in existingRows"
+                  :key="row.id"
+                  as="div"
+                  role="radio"
+                  tabindex="0"
+                  variant="outline"
+                  size="sm"
+                  :aria-checked="selectedRow?.id === row.id"
+                  :data-testid="`onboarding-existing-${row.id}`"
+                  class="bg-card cursor-pointer px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
+                  :class="
+                    selectedRow?.id === row.id
+                      ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
+                      : 'hover:bg-muted/50'
+                  "
+                  @click="select(row.id)"
+                  @keydown.enter.prevent="select(row.id)"
+                  @keydown.space.prevent="select(row.id)"
+                >
+                  <ItemMedia variant="icon" class="size-8 rounded-md bg-background">
+                    <ProviderIcon :provider="row.id" class="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{{ row.name }}</ItemTitle>
+                    <ItemDescription class="text-xs">Already on your Mac</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Check v-if="selectedRow?.id === row.id" class="size-4" aria-hidden="true" />
+                  </ItemActions>
+                </Item>
+              </ItemGroup>
             </div>
             <p v-else class="text-muted-foreground text-sm">
               If an assistant is already on your Mac, it will appear here. Select Recheck after
@@ -658,45 +678,43 @@ function dotLabel(n: Step): string {
             </p>
           </div>
 
-          <div class="bg-card rounded-xl border p-4 sm:p-5" data-testid="onboarding-site">
-            <div class="flex items-start gap-3">
-              <span
-                class="bg-background flex size-9 shrink-0 items-center justify-center rounded-lg border"
+          <Item variant="outline" class="bg-card items-start p-4 sm:p-5" data-testid="onboarding-site">
+            <ItemMedia variant="icon" class="size-9 self-start rounded-lg bg-background">
+              <Package class="size-5" aria-hidden="true" />
+            </ItemMedia>
+
+            <ItemContent class="gap-0.5">
+              <ItemTitle>
+                Site builder
+                <span
+                  v-if="site.phase === 'ready' || site.phase === 'updateAvailable'"
+                  class="text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                >
+                  Ready
+                </span>
+              </ItemTitle>
+              <ItemDescription>Lets orso build and preview your site.</ItemDescription>
+              <p
+                v-if="formatDownloadSize(site.provider.runtime?.downloadBytes)"
+                class="text-muted-foreground text-xs"
+                data-testid="onboarding-site-size"
               >
-                <Package class="size-5" aria-hidden="true" />
-              </span>
-
-              <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium">Site builder</span>
-                  <span
-                    v-if="site.phase === 'ready' || site.phase === 'updateAvailable'"
-                    class="text-xs font-medium text-emerald-700 dark:text-emerald-400"
-                  >
-                    Ready
-                  </span>
-                </div>
-                <p class="text-muted-foreground text-sm">Lets orso build and preview your site.</p>
-                <p
-                  v-if="formatDownloadSize(site.provider.runtime?.downloadBytes)"
-                  class="text-muted-foreground text-xs"
-                  data-testid="onboarding-site-size"
+                {{ formatDownloadSize(site.provider.runtime?.downloadBytes) }}
+              </p>
+              <p
+                v-if="
+                  (site.phase === 'ready' || site.phase === 'updateAvailable') && site.version
+                "
+                class="text-muted-foreground text-xs"
+                data-testid="onboarding-site-version"
+              >
+                Version {{ site.version }}<template v-if="sourceLabel(site.source)">
+                  · {{ sourceLabel(site.source) }}</template
                 >
-                  {{ formatDownloadSize(site.provider.runtime?.downloadBytes) }}
-                </p>
-                <p
-                  v-if="
-                    (site.phase === 'ready' || site.phase === 'updateAvailable') && site.version
-                  "
-                  class="text-muted-foreground text-xs"
-                  data-testid="onboarding-site-version"
-                >
-                  Version {{ site.version }}<template v-if="sourceLabel(site.source)">
-                    · {{ sourceLabel(site.source) }}</template
-                  >
-                </p>
-              </div>
+              </p>
+            </ItemContent>
 
+            <ItemActions class="self-start">
               <Button
                 v-if="sitePresent"
                 :variant="
@@ -716,7 +734,8 @@ function dotLabel(n: Step): string {
                 <RotateCcw v-else-if="site.phase === 'downloadError'" aria-hidden="true" />
                 {{ siteLabel }}
               </Button>
-            </div>
+            </ItemActions>
+          </Item>
 
             <div
               v-if="sitePresent && site.phase === 'downloading'"
@@ -744,11 +763,10 @@ function dotLabel(n: Step): string {
             <p v-if="!sitePresent" class="text-muted-foreground mt-3 text-sm">
               This version of orso doesn't need a separate download.
             </p>
-          </div>
         </section>
 
         <!-- 3. GitHub (optional) -->
-        <section v-else class="flex flex-col gap-8" data-testid="onboarding-step-github">
+        <section v-else-if="status" class="flex flex-col gap-8" data-testid="onboarding-step-github">
           <div class="flex flex-col gap-2">
             <h1 class="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
               Connect GitHub.
@@ -758,19 +776,19 @@ function dotLabel(n: Step): string {
             </p>
           </div>
 
-          <ul class="bg-card divide-y overflow-hidden rounded-xl border">
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-git">
-              <CircleCheck
-                v-if="status.git"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">Git</span>
-                <span class="text-muted-foreground">
-                  Keeps the history of every change to your sites.
-                </span>
+          <ItemGroup class="bg-card divide-y overflow-hidden rounded-xl border">
+            <Item class="items-start px-4 py-3.5" data-testid="onboarding-git">
+              <ItemMedia class="mt-0.5">
+                <CircleCheck
+                  v-if="status.git"
+                  class="size-4 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden="true"
+                />
+                <CircleAlert v-else class="text-muted-foreground size-4" aria-hidden="true" />
+              </ItemMedia>
+              <ItemContent class="gap-1">
+                <ItemTitle>Git</ItemTitle>
+                <ItemDescription>Keeps the history of every change to your sites.</ItemDescription>
                 <a
                   v-if="!status.git"
                   class="inline-flex items-center gap-1 self-start underline"
@@ -780,20 +798,24 @@ function dotLabel(n: Step): string {
                 >
                   Get Git <ExternalLink class="size-3" aria-hidden="true" />
                 </a>
-              </div>
-              <span class="text-muted-foreground text-xs">{{ status.git ? "Ready" : "Optional" }}</span>
-            </li>
+              </ItemContent>
+              <ItemActions class="text-muted-foreground text-xs">
+                {{ status.git ? "Ready" : "Optional" }}
+              </ItemActions>
+            </Item>
 
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-tools">
-              <CircleCheck
-                v-if="status.gh"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">GitHub tools</span>
-                <span class="text-muted-foreground">Connects your sites to GitHub.</span>
+            <Item class="items-start px-4 py-3.5" data-testid="onboarding-github-tools">
+              <ItemMedia class="mt-0.5">
+                <CircleCheck
+                  v-if="status.gh"
+                  class="size-4 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden="true"
+                />
+                <CircleAlert v-else class="text-muted-foreground size-4" aria-hidden="true" />
+              </ItemMedia>
+              <ItemContent class="gap-1">
+                <ItemTitle>GitHub tools</ItemTitle>
+                <ItemDescription>Connects your sites to GitHub.</ItemDescription>
                 <a
                   v-if="!status.gh"
                   class="inline-flex items-center gap-1 self-start underline"
@@ -803,28 +825,32 @@ function dotLabel(n: Step): string {
                 >
                   Get the GitHub tools <ExternalLink class="size-3" aria-hidden="true" />
                 </a>
-              </div>
-              <span class="text-muted-foreground text-xs">{{ status.gh ? "Ready" : "Optional" }}</span>
-            </li>
+              </ItemContent>
+              <ItemActions class="text-muted-foreground text-xs">
+                {{ status.gh ? "Ready" : "Optional" }}
+              </ItemActions>
+            </Item>
 
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-account">
-              <CircleCheck
-                v-if="githubSignedIn"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">GitHub account</span>
-                <span v-if="githubSignedIn" class="text-muted-foreground">
+            <Item class="items-start px-4 py-3.5" data-testid="onboarding-github-account">
+              <ItemMedia class="mt-0.5">
+                <CircleCheck
+                  v-if="githubSignedIn"
+                  class="size-4 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden="true"
+                />
+                <CircleAlert v-else class="text-muted-foreground size-4" aria-hidden="true" />
+              </ItemMedia>
+              <ItemContent class="gap-1">
+                <ItemTitle>GitHub account</ItemTitle>
+                <ItemDescription v-if="githubSignedIn">
                   <template v-if="gh.user">Signed in as {{ gh.user.login }}. </template>
                   <template v-else>You're signed in to GitHub. </template>
                   Share previews and publish when you are ready.
-                </span>
+                </ItemDescription>
                 <template v-else>
-                  <span class="text-muted-foreground">
+                  <ItemDescription>
                     Sign in so orso can open your sites and share your changes.
-                  </span>
+                  </ItemDescription>
                   <Button
                     v-if="status.gh && gh.deviceFlow"
                     size="sm"
@@ -835,19 +861,22 @@ function dotLabel(n: Step): string {
                   >
                     <LogIn aria-hidden="true" /> Sign in with GitHub
                   </Button>
-                  <span v-else-if="status.gh" class="text-muted-foreground text-xs">
+                  <p v-else-if="status.gh" class="text-muted-foreground text-xs">
                     Sign in with GitHub on this Mac, then select Recheck.
-                  </span>
-                  <span v-else class="text-muted-foreground text-xs">
+                  </p>
+                  <p v-else class="text-muted-foreground text-xs">
                     Install the GitHub tools first, then sign in.
-                  </span>
+                  </p>
                 </template>
                 <p v-if="gh.error" class="text-destructive text-xs" role="alert">
                   GitHub sign-in didn't finish. Please try again.
                 </p>
-              </div>
-            </li>
-          </ul>
+              </ItemContent>
+              <ItemActions class="text-muted-foreground text-xs">
+                {{ githubSignedIn ? "Ready" : "Optional" }}
+              </ItemActions>
+            </Item>
+          </ItemGroup>
 
           <div class="flex flex-wrap items-center justify-between gap-2">
             <Button
