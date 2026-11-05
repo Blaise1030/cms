@@ -327,7 +327,7 @@ function dotLabel(n: Step): string {
     class="bg-background text-foreground flex min-h-screen flex-col p-6 sm:p-8"
     data-testid="setup-check"
   >
-    <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col">
+    <div class="mx-auto flex w-full max-w-xl flex-1 flex-col">
       <header class="flex justify-end">
         <Button
           variant="ghost"
