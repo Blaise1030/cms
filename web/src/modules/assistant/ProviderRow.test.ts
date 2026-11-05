@@ -214,6 +214,13 @@ describe("ProviderRow details", () => {
     expect(w.get("[data-testid='assistant-action-opencode']").attributes("disabled")).toBeDefined();
   });
 
+  it("hides the dead Connect action on a connected settings row", () => {
+    const w = mount(ProviderRow, {
+      props: { row: deriveRow(provider("opencode")), hideConnectedAction: true },
+    });
+    expect(w.find("[data-testid='assistant-action-opencode']").exists()).toBe(false);
+  });
+
   it("never uses developer words", () => {
     const rows = [
       provider("opencode", {

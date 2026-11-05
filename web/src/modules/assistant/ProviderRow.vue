@@ -18,6 +18,8 @@ const props = defineProps<{
   row: AssistantRow;
   /** The host is doing something with this row (opening chat); don't fire twice. */
   busy?: boolean;
+  /** Settings has no chat to open, so a ready row does not need a Connect button. */
+  hideConnectedAction?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +49,13 @@ const statusBadge = computed(() => {
  */
 const actionLabel = computed(() =>
   props.row.signInRequired && props.row.action === "signIn" ? LABELS.connect : props.row.actionLabel,
+);
+
+/** In Settings a connected row has nothing to connect to; keep the status badge. */
+const showAction = computed(
+  () =>
+    props.row.action !== "none" &&
+    !(props.hideConnectedAction && props.row.chatReady && props.row.action === "connect"),
 );
 
 const actionVariant = computed<"default" | "outline">(() =>
@@ -126,7 +135,7 @@ const actionAria = computed(() => {
         </span>
 
         <Button
-          v-if="row.action !== 'none'"
+          v-if="showAction"
           size="sm"
           :variant="actionVariant"
           :disabled="busy"

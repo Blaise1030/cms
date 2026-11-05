@@ -11,8 +11,6 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { useGithubStore } from "@/modules/github/store";
-import AssistantDialog from "@/modules/assistant/AssistantDialog.vue";
-import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import ProjectsGrid from "./ProjectsGrid.vue";
 
 const p = (id: string, devserver: Project["devserver"]): Project => ({
@@ -35,6 +33,7 @@ function mountGrid({ user = null }: { user?: GithubUser | null } = {}) {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div />" } },
+      { path: "/settings", component: { template: "<div />" } },
       { path: "/p/:id/:tab?", component: { template: "<div />" } },
     ],
   });
@@ -56,7 +55,6 @@ async function chooseDelete(w: ReturnType<typeof mountGrid>, name: string) {
 
 beforeEach(() => {
   localStorage.clear();
-  assistantDialogOpen.value = false;
   api = {
     listProjects: vi.fn(async () => [p("a", "ready"), p("b", "crashed")]),
     createProject: vi.fn(async (name: string) => ({ ...p("new", "starting"), name })),
@@ -201,21 +199,17 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("opens assistant setup from the header", async () => {
+  it("opens app settings from the header assistant pill", async () => {
     const w = mountGrid();
     await flushPromises();
-    const dialog = mount(AssistantDialog, { attachTo: document.body });
-    try {
-      expect(document.body.textContent).not.toContain("Set up your assistant");
-      await w.get("[data-testid='open-assistant']").trigger("click");
-      await flushPromises();
-      expect(assistantDialogOpen.value).toBe(true);
-      const content = document.body.querySelector("[data-testid='assistant-dialog']");
-      expect(content?.textContent).toContain("Set up your assistant");
-    } finally {
-      dialog.unmount();
-      w.unmount();
-    }
+    const pill = w.get("[data-testid='open-assistant']");
+    expect(pill.text()).toContain("Assistant");
+    expect(pill.attributes("href")).toBe("/settings?tab=assistant");
+    await pill.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/settings");
+    expect(router.currentRoute.value.query.tab).toBe("assistant");
+    w.unmount();
   });
 
   it("keeps the header draggable only on desktop", async () => {

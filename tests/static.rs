@@ -109,6 +109,7 @@ fn public_shell_allowlist_is_explicit() {
     use orso::static_files::is_public_shell_request as public;
     assert!(public(&Method::GET, "/"));
     assert!(public(&Method::HEAD, "/p/some-project"));
+    assert!(public(&Method::GET, "/settings"));
     assert!(public(&Method::GET, "/assets/anything.js"));
     assert!(public(&Method::GET, "/icons/icon-192.png"));
     for p in [

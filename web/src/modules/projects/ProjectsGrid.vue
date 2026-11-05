@@ -25,14 +25,13 @@ import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
-import { openAssistantSetup } from "@/modules/assistant/dialog";
 import InviteDialog from "./InviteDialog.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
 import RepoBrowser from "./RepoBrowser.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
-import { projectPath } from "@/router";
+import { projectPath, settingsPath } from "@/router";
 
 const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
@@ -89,8 +88,10 @@ function open(project: Project) {
       data-testid="page-header"
     >
       <div class="flex items-center gap-2" data-testid="account-slot">
-        <Button variant="outline" size="sm" data-testid="open-assistant" @click="openAssistantSetup">
-          <BotMessageSquare /> Assistant
+        <Button variant="outline" size="sm" as-child>
+          <RouterLink :to="settingsPath('assistant')" data-testid="open-assistant">
+            <BotMessageSquare /> Assistant
+          </RouterLink>
         </Button>
         <GithubAccount />
       </div>

@@ -13,6 +13,7 @@ async function setup(start: string) {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: empty },
+      { path: "/settings", component: empty },
       { path: "/p/:id", component: Page, props: true, children: [
         { path: "preview", name: "project-preview", component: empty },
         { path: "content/:rest(.*)?", name: "project-content", component: empty },
@@ -47,6 +48,17 @@ it("renders Settings as the last tab, linking to the project's settings", async 
   expect(tabs.at(-1)!.attributes("data-testid")).toBe("workspace-tab-settings");
   expect(tabs.at(-1)!.attributes("href")).toBe("/p/my%20site/settings");
   expect(tabs.at(-1)!.attributes("aria-label")).toBe("Settings");
+});
+
+it("links to app settings from the rail footer, apart from the project tabs", async () => {
+  const { w, router } = await setup("/p/my%20site/preview");
+  const link = w.get('[data-testid="project-rail-app-settings"]');
+  expect(link.attributes("href")).toBe("/settings");
+  expect(link.attributes("aria-label")).toBe("App settings");
+  expect(w.findAll('[data-testid^="workspace-tab-"]')).toHaveLength(6);
+  await link.trigger("click");
+  await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/settings");
 });
 
 it("keeps its buttons below the macOS traffic lights and drags the window from above them", async () => {

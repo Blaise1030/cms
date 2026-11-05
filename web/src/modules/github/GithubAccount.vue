@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from "vue";
-import { LogIn, LogOut } from "@lucide/vue";
+import { RouterLink } from "vue-router";
+import { LogIn, LogOut, Settings } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,6 +67,9 @@ async function signOut() {
           </DropdownMenuItem>
         </template>
         <DropdownMenuItem v-else @select="signOut"><LogOut /> Sign out</DropdownMenuItem>
+        <DropdownMenuItem as-child data-testid="github-settings">
+          <RouterLink to="/settings"><Settings /> Settings</RouterLink>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
     <Button v-else-if="gh.deviceFlow && rail" variant="ghost" size="icon" class="size-9" title="Sign in with GitHub" aria-label="Sign in with GitHub" data-testid="github-sign-in" @click="gh.signIn()">
