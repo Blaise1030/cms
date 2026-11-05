@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it } from "vitest";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import ChatComposer from "./ChatComposer.vue";
+
+enableAutoUnmount(afterEach);
 
 /** Render the menu inline; items emit `select` on click, as the real one does. */
 const stubs = {
@@ -36,6 +38,8 @@ function mountComposer(autoApprove: boolean, locked: string | null = null) {
   });
 }
 
+const setupItem = () => document.body.querySelector<HTMLElement>("[data-testid='chat-agent-setup']");
+
 describe("ChatComposer lock", () => {
   it("shows the reason in place of the input", () => {
     const w = mountComposer(false, "Checking the site still works…");
@@ -68,5 +72,30 @@ describe("ChatComposer approvals menu", () => {
   it("marks the mode in force", () => {
     expect(mountComposer(true).find("[data-testid='chat-approval-auto'] svg").exists()).toBe(true);
     expect(mountComposer(true).find("[data-testid='chat-approval-ask'] svg").exists()).toBe(false);
+  });
+});
+
+describe("ChatComposer assistant setup", () => {
+  it("ends the assistant list with a setup action and emits it", async () => {
+    const w = mountComposer(false);
+    await w.find("[data-testid='chat-agent']").trigger("click");
+    await flushPromises();
+    const item = setupItem();
+    expect(item?.textContent).toContain("Set up another assistant…");
+    item!.click();
+    await flushPromises();
+    expect(w.emitted("setup")).toHaveLength(1);
+    expect(w.find("[data-testid='chat-agent']").attributes("data-provider")).toBe("cursor");
+  });
+
+  it("uses assistant wording, never developer jargon", () => {
+    const w = mountComposer(false);
+    const input = w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
+    expect(input.attributes("placeholder")).toBe("Ask your assistant to change your site");
+    expect(w.find("[data-testid='chat-agent']").attributes("aria-label")).toBe("Assistant and model");
+    const text = w.text().toLowerCase();
+    for (const word of ["agent", "cli", "acp", "sdk", "npx", "path"]) {
+      expect(text).not.toContain(word);
+    }
   });
 });

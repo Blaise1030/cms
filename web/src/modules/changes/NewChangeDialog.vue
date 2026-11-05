@@ -22,12 +22,12 @@ const props = withDefaults(
     projectId: string;
     heading?: string;
     description?: string;
-    /** Ask the agent to start the change instead of creating it here (no `created` event). */
+    /** Ask the assistant to start the change instead of creating it here (no `created` event). */
     viaAgent?: boolean;
   }>(),
   {
     heading: "New change",
-    description: "Creates a branch from the latest main. Agent checkpoints will commit to it.",
+    description: "Creates a branch from the latest main. Your assistant's saves are committed to it.",
     viaAgent: false,
   },
 );

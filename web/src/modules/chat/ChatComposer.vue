@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
@@ -22,7 +22,7 @@ export type ChatReference = { label: string; full: string };
 
 const props = defineProps<{
   providers: string[];
-  /** Each agent's models; missing or empty offers Default only. */
+  /** Each assistant's models; missing or empty offers Default only. */
   models: Record<string, { id: string; name: string }[]>;
   /** The chat already has messages: its provider can't change. */
   providerLocked: boolean;
@@ -38,7 +38,7 @@ const props = defineProps<{
   attaching: boolean;
   /** Elements picked from the preview for the next message. */
   references: ChatReference[];
-  /** Run the agent's tools without asking. */
+  /** Run the assistant's tools without asking. */
   autoApprove: boolean;
 }>();
 const emit = defineEmits<{
@@ -48,14 +48,16 @@ const emit = defineEmits<{
   removeAttachment: [index: number];
   removeReference: [index: number];
   setAutoApprove: [on: boolean];
+  /** The user wants to set up another assistant; the caller opens its setup. */
+  setup: [];
 }>();
 const text = defineModel<string>({ required: true });
 const provider = defineModel<string | null>("provider", { required: true });
-/** `null` keeps the agent's own default. */
+/** `null` keeps the assistant's own default. */
 const model = defineModel<string | null>("model", { required: true });
 
 const labels: Record<string, string> = { cursor: "Cursor", claude: "Claude", codex: "Codex", opencode: "OpenCode" };
-/** List items are `{provider}:{model}`, with this standing for the agent's own default. */
+/** List items are `{provider}:{model}`, with this standing for the assistant's own default. */
 const DEFAULT_MODEL = "default";
 const pickerOpen = ref(false);
 const labelOf = (p: string) => labels[p] ?? p;
@@ -63,7 +65,7 @@ const shownProviders = computed(() => (props.providerLocked && provider.value ? 
 const choices = (p: string) => [{ id: DEFAULT_MODEL, name: "Default" }, ...(props.models[p] ?? [])];
 const selected = computed(() => (provider.value ? `${provider.value}:${model.value ?? DEFAULT_MODEL}` : ""));
 const pickerLabel = computed(() => {
-  if (!provider.value) return "Agent";
+  if (!provider.value) return "Assistant";
   return props.models[provider.value]?.find((m) => m.id === model.value)?.name ?? labelOf(provider.value);
 });
 
@@ -75,6 +77,12 @@ function pick(value: unknown) {
   provider.value = value.slice(0, at);
   model.value = id === DEFAULT_MODEL ? null : id;
   pickerOpen.value = false;
+}
+
+/** The setup row is an action, not a pick: close the list and let the caller open setup. */
+function setupAnother() {
+  pickerOpen.value = false;
+  emit("setup");
 }
 const textarea = ref<{ $el: HTMLTextAreaElement } | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -153,7 +161,7 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
         class="bg-background/80 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border border-dashed text-sm"
         data-testid="chat-drop-overlay"
       >
-        Drop files for the agent
+        Drop files for your assistant
       </div>
       <InputGroup>
         <div v-if="attachments.length || attaching || references.length" class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5">
@@ -209,7 +217,7 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
           ref="textarea"
           v-model="text"
           data-testid="chat-input"
-          placeholder="Ask the agent to change your site"
+          placeholder="Ask your assistant to change your site"
           class="max-h-48 min-h-16"
           @keydown="onKeydown"
           @paste="onPaste"
@@ -242,7 +250,7 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                   type="button"
                   data-testid="chat-agent"
                   :data-provider="provider ?? undefined"
-                  aria-label="Agent and model"
+                  aria-label="Assistant and model"
                   class="bg-card hover:bg-accent btn-raised-soft dark:bg-input/30 dark:hover:bg-input/50 focus-visible:ring-ring/50 flex h-7 max-w-56 min-w-0 items-center gap-1.5 rounded-md border border-transparent py-0 pr-1.5 pl-2 text-xs whitespace-nowrap outline-none focus-visible:ring-3"
                 >
                   <ProviderIcon v-if="provider" :provider="provider" class="size-3.5 text-current" />
@@ -252,7 +260,7 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
               </PopoverTrigger>
               <PopoverContent align="start" class="w-72 p-0">
                 <Command :model-value="selected" @update:model-value="pick">
-                  <CommandInput placeholder="Search agents and models" data-testid="chat-agent-search" />
+                  <CommandInput placeholder="Search assistants and models" data-testid="chat-agent-search" />
                   <CommandList class="max-h-80 p-1">
                     <CommandEmpty>No models found</CommandEmpty>
                     <CommandGroup
@@ -276,6 +284,16 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                         <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
                       </CommandItem>
                     </CommandGroup>
+                    <CommandGroup class="p-0">
+                      <CommandItem
+                        value="setup-assistant"
+                        data-testid="chat-agent-setup"
+                        @select="setupAnother"
+                      >
+                        <Settings2 class="size-3.5 text-current" aria-hidden="true" />
+                        <span class="min-w-0 flex-1 truncate">Set up another assistant…</span>
+                      </CommandItem>
+                    </CommandGroup>
                   </CommandList>
                 </Command>
               </PopoverContent>
@@ -287,7 +305,7 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                   data-testid="chat-auto-approve"
                   :data-approve="autoApprove ? 'auto' : 'ask'"
                   :aria-label="`Tool approvals: ${autoApprove ? 'Auto-approve' : 'Ask each time'}`"
-                  title="Choose whether the agent asks before running tools"
+                  title="Choose whether your assistant asks before running tools"
                   class="bg-card hover:bg-accent btn-raised-soft dark:bg-input/30 dark:hover:bg-input/50 focus-visible:ring-ring/50 flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent py-0 pr-1.5 pl-2 text-xs whitespace-nowrap outline-none focus-visible:ring-3"
                 >
                   <ShieldCheck v-if="autoApprove" class="size-3.5" aria-hidden="true" />

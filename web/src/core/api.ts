@@ -40,6 +40,10 @@ import {
   type GithubStatus,
   type Health,
   type Project,
+  type ProviderSignInState,
+  type ProviderVerifyResult,
+  type RuntimeStatus,
+  type SetupSnapshot,
   type SetupStatus,
   type Tree,
 } from "./types";
@@ -248,6 +252,27 @@ export function createApi(
       json<Project>("POST", "/api/github/clone", { body: name ? { repo, name } : { repo } }),
     githubStatus: () => json<GithubStatus>("GET", "/api/github/status"),
     setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
+    /** The assistant + site-builder download snapshot. */
+    setupRuntimes: () => json<SetupSnapshot>("GET", "/api/setup/runtimes"),
+    downloadRuntime: (id: string) =>
+      json<RuntimeStatus>("POST", `/api/setup/runtimes/${enc(id)}/download`),
+    cancelRuntime: (id: string) =>
+      json<RuntimeStatus>("POST", `/api/setup/runtimes/${enc(id)}/cancel`),
+    retryRuntime: (id: string) =>
+      json<RuntimeStatus>("POST", `/api/setup/runtimes/${enc(id)}/retry`),
+    /** A temp-session handshake with the assistant, without opening a chat. */
+    verifyProvider: (id: string) =>
+      json<ProviderVerifyResult>("POST", `/api/setup/providers/${enc(id)}/verify`),
+    signInProvider: (id: string) =>
+      json<ProviderSignInState>("POST", `/api/setup/providers/${enc(id)}/sign-in`),
+    submitProviderSignInCode: (id: string, code: string) =>
+      json<ProviderSignInState>("POST", `/api/setup/providers/${enc(id)}/sign-in/code`, {
+        body: { code },
+      }),
+    cancelProviderSignIn: (id: string) =>
+      json<ProviderSignInState>("POST", `/api/setup/providers/${enc(id)}/cancel`),
+    signOutProvider: (id: string) =>
+      json<{ signedOut: true }>("POST", `/api/setup/providers/${enc(id)}/sign-out`),
     githubDeviceStart: () => json<DeviceStart>("POST", "/api/github/device"),
     githubDevicePoll: () => json<DevicePoll>("POST", "/api/github/device/poll"),
     githubSignOut: () => json<{ signedOut: true }>("POST", "/api/github/signout"),

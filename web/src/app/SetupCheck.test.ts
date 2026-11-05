@@ -4,21 +4,29 @@ import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { NetworkError } from "@/core/api";
-import type { SetupStatus } from "@/core/types";
+import type { SetupProvider, SetupStatus } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
 import SetupCheck from "./SetupCheck.vue";
 
+const provider = (id: string, name: string, over: Partial<SetupProvider> = {}): SetupProvider => ({
+  id,
+  name,
+  available: true,
+  chatReady: true,
+  ...over,
+});
+
 const allMissing: SetupStatus = {
   git: false,
   gh: false,
   githubSignedIn: false,
   providers: [
-    { id: "cursor", name: "Cursor CLI", available: false },
-    { id: "claude", name: "Claude Code", available: false },
-    { id: "codex", name: "Codex", available: false },
+    provider("cursor", "Cursor", { available: false, chatReady: false }),
+    provider("claude", "Claude", { available: false, chatReady: false }),
+    provider("codex", "Codex", { available: false, chatReady: false }),
   ],
   projectsDir: "/Users/ada/orso-projects",
 };
@@ -28,13 +36,21 @@ const ready: SetupStatus = {
   git: true,
   gh: true,
   githubSignedIn: true,
-  providers: allMissing.providers.map((p) => ({ ...p, available: p.id === "claude" })),
+  providers: allMissing.providers.map((p) => ({
+    ...p,
+    available: true,
+    chatReady: p.id === "claude",
+  })),
 };
 
 const signedOut = { configured: true, deviceFlow: true, source: null, user: null };
 
 function mountWith(setupStatus: () => Promise<SetupStatus>) {
-  const api = { setupStatus: vi.fn(setupStatus), githubStatus: vi.fn(async () => signedOut) };
+  const api = {
+    setupStatus: vi.fn(setupStatus),
+    setupRuntimes: vi.fn(async () => ({ providers: [] })),
+    githubStatus: vi.fn(async () => signedOut),
+  };
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
   return { w: mount(SetupCheck, { attachTo: document.body }), api };
@@ -45,39 +61,62 @@ const row = (w: ReturnType<typeof mount>, item: string) => w.find(`[data-testid=
 enableAutoUnmount(afterEach);
 
 describe("SetupCheck", () => {
-  it("asks for git, the GitHub CLI and an agent when everything is missing", async () => {
+  it("asks for git, the GitHub CLI and an assistant when everything is missing", async () => {
     const { w } = mountWith(async () => allMissing);
     await flushPromises();
-    for (const item of ["git", "gh", "agent"]) {
+    for (const item of ["git", "gh"]) {
       expect(row(w, item).text()).toContain("Action needed");
       expect(row(w, item).find("a[target='_blank'][rel='noopener noreferrer']").exists()).toBe(true);
     }
     expect(row(w, "github").text()).toContain("Action needed");
-    expect(w.findAll("[data-testid='setup-agent'] a").map((a) => a.text())).toEqual(
-      expect.arrayContaining(["Cursor CLI", "Claude Code", "Codex"]),
-    );
+    const assistant = row(w, "assistant");
+    expect(assistant.text()).toContain("Action needed");
+    // The assistant is downloaded in place, not linked out to vendor pages.
+    expect(assistant.find("[data-testid='assistant-setup']").exists()).toBe(true);
+    expect(assistant.find("a[target='_blank']").exists()).toBe(false);
     expect(w.text()).toContain("/Users/ada/orso-projects");
   });
 
   it("shows every item ready", async () => {
     const { w } = mountWith(async () => ready);
     await flushPromises();
-    for (const item of ["git", "gh", "github", "agent"]) {
+    for (const item of ["git", "gh", "github", "assistant"]) {
       expect(row(w, item).text()).toContain("Ready");
       expect(row(w, item).text()).not.toContain("Action needed");
     }
-    expect(row(w, "agent").text()).toContain("Claude Code");
+    expect(row(w, "assistant").text()).toContain("Claude");
+    expect(row(w, "assistant").find("[data-testid='assistant-setup']").exists()).toBe(false);
   });
 
-  it("rechecks on request", async () => {
+  it("reads assistant readiness from chatReady, not available", async () => {
+    const installedOnly = mountWith(async () => ({
+      ...ready,
+      providers: [provider("claude", "Claude", { available: true, chatReady: false })],
+    }));
+    await flushPromises();
+    expect(row(installedOnly.w, "assistant").text()).toContain("Action needed");
+    installedOnly.w.unmount();
+
+    const readyButUnavailable = mountWith(async () => ({
+      ...ready,
+      providers: [provider("opencode", "OpenCode", { available: false, chatReady: true })],
+    }));
+    await flushPromises();
+    expect(row(readyButUnavailable.w, "assistant").text()).toContain("Ready");
+    readyButUnavailable.w.unmount();
+  });
+
+  it("rechecks the setup status and the assistant snapshot on request", async () => {
     let next = allMissing;
     const { w, api } = mountWith(async () => next);
     await flushPromises();
     next = ready;
     await w.find("[data-testid='setup-recheck']").trigger("click");
     await flushPromises();
-    expect(api.setupStatus).toHaveBeenCalledTimes(2);
+    expect(api.setupStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(api.setupRuntimes.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(row(w, "git").text()).toContain("Ready");
+    expect(row(w, "assistant").text()).toContain("Ready");
   });
 
   it("shows a friendly message, not the raw error, when the check fails", async () => {

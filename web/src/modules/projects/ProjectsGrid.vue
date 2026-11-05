@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, Trash2, UserPlus } from "@lucide/vue";
+import { EllipsisVertical, BotMessageSquare, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -25,6 +25,7 @@ import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
+import { openAssistantSetup } from "@/modules/assistant/dialog";
 import InviteDialog from "./InviteDialog.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
 import RepoBrowser from "./RepoBrowser.vue";
@@ -87,7 +88,12 @@ function open(project: Project) {
       :data-tauri-drag-region="macDesktop ? '' : undefined"
       data-testid="page-header"
     >
-      <div data-testid="account-slot"><GithubAccount /></div>
+      <div class="flex items-center gap-2" data-testid="account-slot">
+        <Button variant="outline" size="sm" data-testid="open-assistant" @click="openAssistantSetup">
+          <BotMessageSquare /> Assistant
+        </Button>
+        <GithubAccount />
+      </div>
     </div>
     <div class="relative min-h-0 flex-1 overflow-y-auto" data-testid="projects-scroll">
       <div class="mx-auto flex w-full max-w-2xl flex-col gap-8 px-10 pt-16 pb-16">
@@ -96,7 +102,7 @@ function open(project: Project) {
             <PawMark class="text-muted-foreground size-7 shrink-0" data-testid="home-logo" />
             <div class="min-w-0 leading-tight">
               <h1 class="text-lg font-semibold tracking-tight">orso</h1>
-              <p class="text-muted-foreground text-sm">Build and edit your sites with an AI agent</p>
+              <p class="text-muted-foreground text-sm">Build and edit your sites with your assistant</p>
             </div>
           </header>
           <section class="flex flex-col gap-3">

@@ -1,0 +1,176 @@
+<script setup lang="ts">
+// One assistant (or the site builder) in the setup list. The state machine and
+// all copy come from `rows.ts`; this component only paints the row and reports
+// the one action the user picked. It never talks to the daemon itself, so the
+// same row works inside SetupCheck and inside a dialog.
+import { computed } from "vue";
+import { CircleAlert, Download, LogIn, RefreshCw, RotateCcw, X } from "@lucide/vue";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
+import { LABELS, type AssistantRow, type RowAction } from "./rows";
+import { formatDownloadSize, sourceLabel, toneBadge } from "./presentation";
+
+const props = defineProps<{
+  /** A row built by `rows.ts` (`deriveRow` / `buildRows` / `siteBuilderRow`). */
+  row: AssistantRow;
+  /** The host is doing something with this row (opening chat); don't fire twice. */
+  busy?: boolean;
+}>();
+
+const emit = defineEmits<{
+  action: [action: RowAction];
+}>();
+
+const downloading = computed(() => props.row.phase === "downloading");
+/** A ready copy shows its version and where it came from; an update does too. */
+const showVersion = computed(
+  () => props.row.phase === "ready" || props.row.phase === "updateAvailable",
+);
+const size = computed(() =>
+  props.row.phase === "ready" ? null : formatDownloadSize(props.row.provider.runtime?.downloadBytes),
+);
+const source = computed(() => (showVersion.value ? sourceLabel(props.row.source) : null));
+const percent = computed(() => props.row.progress ?? 0);
+
+const statusBadge = computed(() => {
+  if (!props.row.status || downloading.value || props.row.phase === "finishing") return null;
+  return toneBadge(props.row.tone);
+});
+
+/**
+ * The plan's row machine labels the signed-out row "Connect" (it opens the
+ * sign-in flow), while a connected assistant that can add more models keeps the
+ * optional "Sign in" button. `rows.ts` stores the flow, so translate the label.
+ */
+const actionLabel = computed(() =>
+  props.row.signInRequired && props.row.action === "signIn" ? LABELS.connect : props.row.actionLabel,
+);
+
+const actionVariant = computed<"default" | "outline">(() =>
+  props.row.action === "cancel" || props.row.action === "retry" ? "outline" : "default",
+);
+
+const actionAria = computed(() => {
+  switch (props.row.action) {
+    case "download":
+      return `Download ${props.row.name}`;
+    case "cancel":
+      return `Cancel downloading ${props.row.name}`;
+    case "retry":
+      return `Retry downloading ${props.row.name}`;
+    case "update":
+      return `Update ${props.row.name}`;
+    case "connect":
+      return `Connect to ${props.row.name}`;
+    case "signIn":
+      return props.row.signInRequired
+        ? `Connect ${props.row.name}`
+        : `Sign in to ${props.row.name} for more models`;
+    default:
+      return undefined;
+  }
+});
+</script>
+
+<template>
+  <li
+    class="flex flex-col gap-2 py-3"
+    :data-testid="`assistant-row-${row.id}`"
+    :data-phase="row.phase"
+    :data-tone="row.tone"
+    :data-action="row.action"
+  >
+    <div class="flex items-start gap-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium">{{ row.name }}</span>
+          <Badge v-if="row.recommended" variant="secondary" data-testid="assistant-recommended">
+            Recommended
+          </Badge>
+        </div>
+        <p v-if="row.description" class="text-muted-foreground text-sm">{{ row.description }}</p>
+        <p
+          v-if="size"
+          class="text-muted-foreground text-xs"
+          :data-testid="`assistant-size-${row.id}`"
+        >
+          {{ size }}
+        </p>
+        <p
+          v-if="showVersion && row.version"
+          class="text-muted-foreground text-xs"
+          :data-testid="`assistant-version-${row.id}`"
+        >
+          Version {{ row.version }}<template v-if="source"> · {{ source }}</template>
+        </p>
+      </div>
+
+      <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <Badge
+          v-if="statusBadge"
+          :variant="statusBadge.variant"
+          :class="statusBadge.class"
+          :data-testid="`assistant-status-${row.id}`"
+        >
+          {{ row.status }}
+        </Badge>
+        <span
+          v-else-if="row.phase === 'finishing'"
+          class="text-muted-foreground inline-flex items-center gap-1.5 text-sm"
+          :data-testid="`assistant-status-${row.id}`"
+        >
+          <Spinner class="size-3.5" aria-hidden="true" /> {{ row.status }}
+        </span>
+
+        <Button
+          v-if="row.action !== 'none'"
+          size="sm"
+          :variant="actionVariant"
+          :disabled="busy"
+          :aria-label="actionAria"
+          :data-testid="`assistant-action-${row.id}`"
+          @click="emit('action', row.action)"
+        >
+          <Spinner v-if="busy && row.action === 'connect'" class="size-3.5" aria-hidden="true" />
+          <Download v-else-if="row.action === 'download'" aria-hidden="true" />
+          <RefreshCw v-else-if="row.action === 'update'" aria-hidden="true" />
+          <X v-else-if="row.action === 'cancel'" aria-hidden="true" />
+          <RotateCcw v-else-if="row.action === 'retry'" aria-hidden="true" />
+          <LogIn v-else-if="row.action === 'signIn' || row.action === 'connect'" aria-hidden="true" />
+          {{ actionLabel }}
+        </Button>
+      </div>
+    </div>
+
+    <div
+      v-if="downloading"
+      class="flex items-center gap-2"
+      :data-testid="`assistant-progress-${row.id}`"
+    >
+      <Progress
+        :model-value="percent"
+        :aria-label="`Downloading ${row.name}: ${row.status}`"
+        class="max-w-48"
+      />
+      <span class="text-muted-foreground text-xs tabular-nums">{{ row.status }}</span>
+    </div>
+
+    <Alert
+      v-if="row.phase === 'downloadError'"
+      variant="destructive"
+      :data-testid="`assistant-error-${row.id}`"
+    >
+      <CircleAlert aria-hidden="true" />
+      <AlertDescription>
+        <p>We couldn't download {{ row.name }}. Check your connection and try again.</p>
+        <details v-if="row.message" class="mt-1">
+          <summary class="cursor-pointer text-xs underline">Details</summary>
+          <p class="mt-1 text-xs break-words">{{ row.message }}</p>
+        </details>
+      </AlertDescription>
+    </Alert>
+  </li>
+</template>
