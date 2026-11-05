@@ -304,6 +304,14 @@ watch(
   },
 );
 
+// A completed provider sign-in changes chat readiness, which the daemon owns.
+watch(
+  () => Object.values(assistant.signIns).map((state) => state?.state ?? "").join("|"),
+  (now, before) => {
+    if (now !== before && now.includes("connected")) void assistant.load();
+  },
+);
+
 onMounted(() => {
   rememberStep("replace");
   window.addEventListener("popstate", onPopState);

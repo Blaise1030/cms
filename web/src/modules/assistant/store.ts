@@ -292,6 +292,17 @@ export const useAssistantStore = defineStore("assistant", () => {
     }
   }
 
+  /** Daemon-authoritative readiness (adapters, sign-in) needs a status refresh. */
+  const refreshTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function scheduleRefresh(delay = 750) {
+    const timer = setTimeout(() => {
+      refreshTimers.delete(timer);
+      void load();
+    }, delay);
+    refreshTimers.add(timer);
+  }
+
   /** Merge one live download event; fields the event omits keep their snapshot value. */
   function applyRuntimeEvent(event: SetupRuntimeEvent) {
     if (event.runtime !== "node" && !providers.value.some((p) => p.id === event.runtime)) return;
@@ -301,6 +312,14 @@ export const useAssistantStore = defineStore("assistant", () => {
     if (event.progress !== undefined) patch.progress = event.progress;
     if (event.message !== undefined) patch.message = event.message;
     patchRuntime(event.runtime, patch);
+
+    if (event.runtime !== "node" && event.phase === "ready") {
+      // OpenCode runs free models, so its runtime is enough to chat. The
+      // others may still be installing their adapter: ask the daemon again.
+      const provider = providers.value.find((p) => p.id === event.runtime);
+      if (provider?.freeModels) patchProvider(event.runtime, { chatReady: true, reason: null });
+      scheduleRefresh(provider?.freeModels ? 250 : 1_500);
+    }
   }
 
   const offs = [
@@ -308,7 +327,11 @@ export const useAssistantStore = defineStore("assistant", () => {
     daemon.onReconnected(() => void load()),
     daemon.on("events.lagged", () => void load()),
   ];
-  onScopeDispose(() => offs.forEach((off) => off()));
+  onScopeDispose(() => {
+    offs.forEach((off) => off());
+    for (const timer of refreshTimers) clearTimeout(timer);
+    refreshTimers.clear();
+  });
 
   return {
     snapshot,

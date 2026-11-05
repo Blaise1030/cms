@@ -28,6 +28,7 @@ pub const RUNTIME_EVENT: &str = "setup.runtime";
 
 /// How long a failed attempt keeps its status before a retry is allowed.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(30);
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_HEADROOM: u64 = 256 * 1024 * 1024;
 const DEFAULT_CLEANUP_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -371,6 +372,11 @@ impl RuntimeManager {
     }
 
     /// Download and install `id`. Only one attempt per runtime is allowed.
+    ///
+    /// The install runs in its own task: a browser that closes the POST, an HMR
+    /// reload, or a daemon shutdown request must not strand the runtime in
+    /// `finishing`. The caller still waits for the result when its request is
+    /// alive; when it is not, the task finishes the install and updates status.
     pub async fn download(&self, id: RuntimeId) -> Result<RuntimeSnapshot> {
         let spec = self.spec(id)?;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -399,29 +405,56 @@ impl RuntimeManager {
         }
         self.emit(id);
 
-        let result = self.install_spec(&spec, cancel, generation).await;
-        let (phase, reply) = match &result {
-            Ok(manifest) => (
-                RuntimePhase::ready(manifest.version.clone(), RuntimeSource::Managed),
-                Ok(()),
-            ),
-            Err(RuntimeError::Canceled) => (
-                match previous_version.clone() {
-                    Some(version) => RuntimePhase::ready(version, RuntimeSource::Managed),
-                    None => RuntimePhase::not_downloaded(),
-                },
-                Err(RuntimeError::Canceled),
-            ),
-            Err(error) => (
-                RuntimePhase::download_error(previous_version.clone(), error.to_string()),
-                Err(error_clone(error)),
-            ),
+        let manager = self.clone();
+        let (done, wait) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let result = match tokio::time::timeout(
+                INSTALL_TIMEOUT,
+                manager.install_spec(&spec, cancel, generation),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(RuntimeError::Http(
+                    "setting up took too long; try again".into(),
+                )),
+            };
+            manager.finish_download(id, generation, previous_version, &result);
+            let _ = done.send(result.map(|_| ()));
+        });
+        // The task owns the install. A dropped request only drops this wait.
+        match wait.await {
+            Ok(Ok(())) => self.snapshot(id),
+            Ok(Err(error)) => Err(error),
+            // The task vanished without a result; the slot is the best answer.
+            Err(_) => self.snapshot(id),
+        }
+    }
+
+    /// Apply the task's result to the slot. Runs in the install task, so it
+    /// survives the HTTP request that started it.
+    fn finish_download(
+        &self,
+        id: RuntimeId,
+        generation: u64,
+        previous_version: Option<String>,
+        result: &Result<InstallManifest>,
+    ) {
+        let phase = match result {
+            Ok(manifest) => RuntimePhase::ready(manifest.version.clone(), RuntimeSource::Managed),
+            Err(RuntimeError::Canceled) => match previous_version {
+                Some(version) => RuntimePhase::ready(version, RuntimeSource::Managed),
+                None => RuntimePhase::not_downloaded(),
+            },
+            Err(error) => {
+                // A timeout or a cancelled task can leave a partial staging
+                // tree; the next attempt starts clean. The download partial is
+                // kept for resume.
+                let _ = std::fs::remove_dir_all(self.staging_path(id));
+                RuntimePhase::download_error(previous_version, error.to_string())
+            }
         };
-        {
-            let mut slots = self
-                .slots
-                .lock()
-                .map_err(|error| RuntimeError::Lock(error.to_string()))?;
+        if let Ok(mut slots) = self.slots.lock() {
             if let Some(slot) = slots.get_mut(&id) {
                 if slot.generation == generation {
                     slot.active = false;
@@ -431,10 +464,6 @@ impl RuntimeManager {
             }
         }
         self.emit(id);
-        match reply {
-            Ok(()) => self.snapshot(id),
-            Err(error) => Err(error),
-        }
     }
 
     /// Abort an in-flight download. The install task removes its partial and
@@ -770,44 +799,6 @@ impl RuntimeManager {
     fn ensure_dirs(&self) -> Result<()> {
         std::fs::create_dir_all(self.store.join(".downloads"))?;
         Ok(())
-    }
-}
-
-fn error_clone(error: &RuntimeError) -> RuntimeError {
-    match error {
-        RuntimeError::Busy(id) => RuntimeError::Busy(*id),
-        RuntimeError::Canceled => RuntimeError::Canceled,
-        RuntimeError::NotFound(message) => RuntimeError::NotFound(message.clone()),
-        RuntimeError::UnsupportedTarget(target) => RuntimeError::UnsupportedTarget(*target),
-        RuntimeError::InvalidLock(message) => RuntimeError::InvalidLock(message.clone()),
-        RuntimeError::InvalidManifest(message) => RuntimeError::InvalidManifest(message.clone()),
-        RuntimeError::Io(error) => {
-            RuntimeError::Io(std::io::Error::new(error.kind(), error.to_string()))
-        }
-        RuntimeError::Http(message) => RuntimeError::Http(message.clone()),
-        RuntimeError::HashMismatch { expected, actual } => RuntimeError::HashMismatch {
-            expected: expected.clone(),
-            actual: actual.clone(),
-        },
-        RuntimeError::SizeMismatch { expected, actual } => RuntimeError::SizeMismatch {
-            expected: *expected,
-            actual: *actual,
-        },
-        RuntimeError::DiskFull {
-            required,
-            available,
-        } => RuntimeError::DiskFull {
-            required: *required,
-            available: *available,
-        },
-        RuntimeError::Archive(message) => RuntimeError::Archive(message.clone()),
-        RuntimeError::VersionMismatch { expected, actual } => RuntimeError::VersionMismatch {
-            expected: expected.clone(),
-            actual: actual.clone(),
-        },
-        RuntimeError::Adapter(message) => RuntimeError::Adapter(message.clone()),
-        RuntimeError::NotExecutable(path) => RuntimeError::NotExecutable(path.clone()),
-        RuntimeError::Lock(message) => RuntimeError::Lock(message.clone()),
     }
 }
 
@@ -1254,6 +1245,57 @@ mod tests {
 
         let retry = manager.retry(RuntimeId::OpenCode).await.unwrap();
         assert_eq!(retry.phase.kind, RuntimePhaseKind::Ready);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_dropped_download_request_still_finishes() {
+        let version = "2.2.5";
+        let bytes = archive(version);
+        let (url, server) = serve(Stub {
+            bytes: Arc::new(bytes.clone()),
+            slow: false,
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let manager = manager(dir.path(), lock(version, &bytes, sha(&bytes)), url);
+        let mut events = manager.subscribe();
+        let task = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.download(RuntimeId::OpenCode).await }
+        });
+        // Let the download begin, then drop the request future as a browser
+        // reload or a closed tab would.
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if event.phase.kind == RuntimePhaseKind::Downloading {
+                break;
+            }
+        }
+        task.abort();
+
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(10), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if event.phase.kind == RuntimePhaseKind::Ready {
+                break;
+            }
+        }
+        assert_eq!(
+            manager.phase(RuntimeId::OpenCode).unwrap().kind,
+            RuntimePhaseKind::Ready
+        );
+        assert!(dir
+            .path()
+            .join("opencode")
+            .join(version)
+            .join("bin/opencode")
+            .is_file());
         server.abort();
     }
 
