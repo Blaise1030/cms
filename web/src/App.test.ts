@@ -104,7 +104,7 @@ describe("App setup gate", () => {
   it("remembers the dismissal and opens the shell", async () => {
     const { w } = mountWith({ ...complete, gh: false });
     await flushPromises();
-    await w.find("[data-testid='setup-continue']").trigger("click");
+    await w.find("[data-testid='onboarding-skip']").trigger("click");
     await flushPromises();
     expect(w.find("[data-testid='shell']").exists()).toBe(true);
     expect(localStorage.length).toBe(1);
