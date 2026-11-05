@@ -216,6 +216,9 @@ struct ApiPullHead {
 struct ApiMerge {
     #[serde(default)]
     merged: bool,
+    /// The commit the merge produced on the base branch (the one that gets deployed).
+    #[serde(default)]
+    sha: Option<String>,
 }
 
 /// Where a pull request stands, as shown in the preview browser bar.
@@ -238,6 +241,17 @@ pub enum ChecksState {
     Pending,
     Passing,
     Failing,
+}
+
+/// Whether the deploy that runs on a published commit has shipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployState {
+    /// No deploy check on the commit (yet): a site without CI, or a run GitHub hasn't queued.
+    Unknown,
+    Building,
+    Live,
+    Failed,
 }
 
 /// `GET /api/changes/{branch}/status` payload for a branch with a pull request.
@@ -276,6 +290,9 @@ pub struct PublishResult {
     pub number: u64,
     pub url: String,
     pub state: PrState,
+    /// The commit the merge produced on the base branch; the deploy that ships the change
+    /// runs on it. `None` when GitHub's answer didn't include one.
+    pub merge_sha: Option<String>,
 }
 
 /// The parts of a pull request that decide its [`PrState`] (besides reviews).
@@ -305,6 +322,8 @@ struct ApiCheckRuns {
 
 #[derive(Deserialize)]
 struct ApiCheckRun {
+    #[serde(default)]
+    name: String,
     status: String,
     #[serde(default)]
     conclusion: Option<String>,
@@ -393,6 +412,39 @@ fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
     } else {
         ChecksState::Passing
     }
+}
+
+/// A check run that deploys: GitHub Pages names its own "pages build and deployment", and
+/// deploy workflows are named for it ("deploy", "Deploy Cloudflare Workers", …).
+fn is_deploy_check(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["deploy", "pages", "publish", "release"]
+        .iter()
+        .any(|word| name.contains(word))
+}
+
+/// [`DeployState`] from a commit's check runs. A failing deploy wins over one still running;
+/// checks that aren't deploys (tests, lint) are ignored, so their failures never read as a
+/// failed deploy. No deploy check at all stays [`DeployState::Unknown`].
+fn deploy_state_of(runs: &[ApiCheckRun]) -> DeployState {
+    let deploys: Vec<&ApiCheckRun> = runs.iter().filter(|r| is_deploy_check(&r.name)).collect();
+    if deploys.is_empty() {
+        return DeployState::Unknown;
+    }
+    let failed = deploys.iter().any(|r| {
+        r.status == "completed"
+            && !matches!(
+                r.conclusion.as_deref(),
+                Some("success" | "neutral" | "skipped")
+            )
+    });
+    if failed {
+        return DeployState::Failed;
+    }
+    if deploys.iter().any(|r| r.status != "completed") {
+        return DeployState::Building;
+    }
+    DeployState::Live
 }
 
 impl From<ApiPull> for PullRequest {
@@ -1215,14 +1267,18 @@ impl GithubAuth {
         if !status.is_success() {
             return Err(publish_refused(status));
         }
-        let merged = serde_json::from_slice::<ApiMerge>(&body).is_ok_and(|m| m.merged);
-        if !merged {
+        let merged = serde_json::from_slice::<ApiMerge>(&body).unwrap_or(ApiMerge {
+            merged: false,
+            sha: None,
+        });
+        if !merged.merged {
             return Err(publish_failed());
         }
         Ok(PublishResult {
             number: pull.number,
             url: pull.html_url,
             state: PrState::Merged,
+            merge_sha: merged.sha,
         })
     }
 
@@ -1352,6 +1408,20 @@ impl GithubAuth {
             }
         }
         Ok(None)
+    }
+
+    /// Whether the deploy that runs on `sha` (a publish's merge commit) has shipped, from
+    /// that commit's check runs. Never an error: a site or token GitHub can't describe stays
+    /// [`DeployState::Unknown`] rather than making a publish look failed.
+    pub async fn deploy_state(&self, repo: &str, sha: &str) -> DeployState {
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        match self
+            .get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+            .await
+        {
+            Ok(runs) => deploy_state_of(&runs),
+            Err(_) => DeployState::Unknown,
+        }
     }
 
     /// [`Self::pr_ref`] of each branch, looked up concurrently. Best effort: an error, or a
@@ -2548,7 +2618,12 @@ esac"#,
     }
 
     fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
+        named("test", status, conclusion)
+    }
+
+    fn named(name: &str, status: &str, conclusion: Option<&str>) -> ApiCheckRun {
         ApiCheckRun {
+            name: name.into(),
             status: status.into(),
             conclusion: conclusion.map(Into::into),
         }
@@ -2579,6 +2654,60 @@ esac"#,
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn deploy_is_live_only_when_its_check_succeeds() {
+        assert_eq!(
+            deploy_state_of(&[
+                named("deploy", "completed", Some("success")),
+                named("test", "completed", Some("failure")),
+            ]),
+            DeployState::Live,
+            "an unrelated failing check is not a failed deploy"
+        );
+        assert_eq!(
+            deploy_state_of(&[named(
+                "pages build and deployment",
+                "completed",
+                Some("success")
+            )]),
+            DeployState::Live
+        );
+    }
+
+    #[test]
+    fn deploy_is_building_while_its_check_runs() {
+        for status in ["queued", "in_progress", "waiting", "requested"] {
+            assert_eq!(
+                deploy_state_of(&[named("deploy", status, None)]),
+                DeployState::Building,
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn deploy_fails_when_its_check_fails_even_beside_a_running_one() {
+        for bad in ["failure", "timed_out", "cancelled", "action_required"] {
+            assert_eq!(
+                deploy_state_of(&[
+                    named("deploy", "completed", Some(bad)),
+                    named("deploy preview", "in_progress", None),
+                ]),
+                DeployState::Failed,
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn deploy_is_unknown_without_a_deploy_check() {
+        assert_eq!(deploy_state_of(&[]), DeployState::Unknown);
+        assert_eq!(
+            deploy_state_of(&[named("test", "completed", Some("success"))]),
+            DeployState::Unknown
+        );
     }
 
     fn status_auth(base: String, tag: &str) -> GithubAuth {
@@ -2642,6 +2771,79 @@ esac"#,
             Some("https://two.pages.dev")
         );
         assert_eq!(auth.preview_url("acme/site", "other").await.unwrap(), None);
+        stop();
+    }
+
+    #[test]
+    fn deploy_state_serializes_as_a_plain_word() {
+        assert_eq!(
+            serde_json::to_value(DeployState::Live).unwrap(),
+            serde_json::json!("live")
+        );
+        assert_eq!(
+            serde_json::to_value(DeployState::Unknown).unwrap(),
+            serde_json::json!("unknown")
+        );
+    }
+
+    #[tokio::test]
+    async fn deploy_state_reads_the_merge_commits_check_runs() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/commits/{sha}/check-runs",
+            get(|AxPath(sha): AxPath<String>| async move {
+                Json(match sha.as_str() {
+                    "live" => serde_json::json!({ "check_runs": [
+                        { "name": "test", "status": "completed", "conclusion": "failure" },
+                        { "name": "deploy", "status": "completed", "conclusion": "success" },
+                    ]}),
+                    "building" => serde_json::json!({ "check_runs": [
+                        { "name": "deploy", "status": "in_progress", "conclusion": null },
+                    ]}),
+                    _ => serde_json::json!({ "check_runs": [] }),
+                })
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploy-state");
+        assert_eq!(
+            auth.deploy_state("acme/site", "live").await,
+            DeployState::Live
+        );
+        assert_eq!(
+            auth.deploy_state("acme/site", "building").await,
+            DeployState::Building
+        );
+        assert_eq!(
+            auth.deploy_state("acme/site", "none").await,
+            DeployState::Unknown
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn deploy_state_is_unknown_when_github_cannot_be_read() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/commits/{sha}/check-runs",
+            get(|| async {
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "message": "boom" })),
+                )
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploy-broken");
+        assert_eq!(
+            auth.deploy_state("acme/site", "abc").await,
+            DeployState::Unknown
+        );
         stop();
     }
 
@@ -3564,6 +3766,7 @@ esac"#,
                 number: 4,
                 url: "https://github.com/acme/site/pull/4".into(),
                 state: PrState::Merged,
+                merge_sha: Some("def".into()),
             }
         );
         // The merge is a PUT on the PR found by head, with an explicit merge method.

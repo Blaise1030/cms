@@ -49,13 +49,13 @@ describe("PublishButton", () => {
     expect(wrapper.find('[data-testid="publish-change"]').exists()).toBe(false);
   });
 
-  it("publishes the active change on click and toasts that it is live", async () => {
+  it("publishes the active change without claiming it is live yet", async () => {
     const { store, wrapper } = mountWith();
     const publish = vi.spyOn(store, "publish").mockResolvedValue("published");
     await wrapper.get('[data-testid="publish-change"]').trigger("click");
     await flushPromises();
     expect(publish).toHaveBeenCalledWith("site", "content/lw");
-    expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
+    expect(h.toastSuccess).not.toHaveBeenCalled();
     expect(h.toastError).not.toHaveBeenCalled();
   });
 

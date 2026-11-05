@@ -21,7 +21,7 @@ use crate::changes::{self, PrMerge};
 use crate::chat::history::{self, SyncPhase};
 use crate::conflict_preview::{PreviewState, Source};
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
+use crate::github::{pr_body, pr_title, BranchProtection, DeployState, PrRef, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -696,6 +696,43 @@ pub async fn status(
         _ => None,
     };
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// Query of `GET /api/projects/{id}/deploy`.
+#[derive(Deserialize)]
+pub struct DeployQuery {
+    /// The commit the publish merged; the deploy that ships it runs on this.
+    pub sha: String,
+}
+
+/// `GET /api/projects/{id}/deploy?sha=` → `{ state }`. Whether the deploy of `sha` has
+/// shipped: `building`, `live`, `failed`, or `unknown`. `unknown` for a project without a
+/// GitHub repo, and never an error for a GitHub that can't be read — a publish must not look
+/// failed because its deploy status couldn't be checked.
+pub async fn deploy(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<DeployQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    if !is_full_sha(&q.sha) {
+        return Err(ApiError::badreq("expected a full commit sha"));
+    }
+    let project = state
+        .projects
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+    let deployed = match project.repo {
+        Some(repo) => state.github.deploy_state(&repo, &q.sha).await,
+        None => DeployState::Unknown,
+    };
+    Ok(Json(json!({ "state": deployed })))
+}
+
+/// GitHub commit shas are 40 hex characters; anything else can't name a deploy.
+fn is_full_sha(sha: &str) -> bool {
+    sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// `GET /api/changes/sync?project=` → `{ needed }`. False when Get latest would do nothing:

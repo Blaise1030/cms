@@ -104,6 +104,20 @@ export interface PrStatus {
   upToDate: boolean;
 }
 
+/** Whether the deploy a publish set off has shipped. */
+export type DeployState = "unknown" | "building" | "live" | "failed";
+
+/** `state` of `GET /api/projects/{id}/deploy`. */
+export interface DeployStatus {
+  state: DeployState;
+}
+
+/** A merged pull request, with the commit whose deploy ships the change. */
+export interface PublishedPr extends PrStatus {
+  /** The merge commit on the site's main line; absent when GitHub didn't report one. */
+  mergeSha?: string | null;
+}
+
 /** Push needed newer commits from this change's remote copy combined in first. */
 export interface PendingCombine {
   branch: string;
@@ -191,7 +205,7 @@ export interface SharedChange {
 }
 
 /** Result of `POST /api/changes/{branch}/publish`: the merged PR, or a combine to finish. */
-export type PublishResult = PrStatus | null | { conflict: PendingCombine };
+export type PublishResult = PublishedPr | null | { conflict: PendingCombine };
 
 export interface TreeEntry {
   name: string;

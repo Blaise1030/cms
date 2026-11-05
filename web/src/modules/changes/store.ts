@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { toast } from "vue-sonner";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint, SyncChangedEvent } from "@/core/types";
+import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, DeployState, PrStatus, ProtectionHint, SyncChangedEvent } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -35,6 +35,19 @@ interface PendingPush {
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
 
+/** How often a publish's deploy is re-read while it's still running. */
+export const DEPLOY_POLL_MS = 5_000;
+
+/** Stop watching a deploy after this long; it may still land, so say only that. */
+export const DEPLOY_TIMEOUT_MS = 10 * 60_000;
+
+const DEPLOY_WAITING = "Published. Waiting for the site to update…";
+const DEPLOY_FAILED = "Published, but the site didn't update. Ask an owner to check it.";
+const DEPLOY_SLOW = "Published. The site is taking longer than usual to update.";
+const DEPLOY_UNVERIFIED = "Published. The site should update shortly.";
+/** One toast for the deploy being watched, so a later publish updates it instead of stacking. */
+const DEPLOY_TOAST_ID = "orso-deploy";
+
 export const useChangesStore = defineStore("changes", () => {
   const daemon = useDaemon();
 
@@ -60,6 +73,8 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /** The deploy a publish set off; null when none is being watched. */
+  const deploy = ref<DeployState | null>(null);
   /** Whether Get latest would change anything; null while unknown (the button stays enabled). */
   const syncNeeded = ref<boolean | null>(null);
   const conflictSessions = ref<ConflictSession[]>([]);
@@ -78,6 +93,9 @@ export const useChangesStore = defineStore("changes", () => {
   /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
    *  applies its result nor schedules a poll, so at most one timer ever exists. */
   let statusRun = 0;
+  let deployTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped by every stop/start: a poll that finds it changed is stale and stays quiet. */
+  let deployRun = 0;
 
   function stopStatusPolling() {
     statusRun++;
@@ -129,6 +147,47 @@ export const useChangesStore = defineStore("changes", () => {
     } catch {
       if (projectId.value === id) syncNeeded.value = null;
     }
+  }
+
+  /** Cancel any deploy watch in flight; a late answer from it stays quiet. */
+  function stopDeployTracking() {
+    deployRun++;
+    if (deployTimer !== null) clearTimeout(deployTimer);
+    deployTimer = null;
+    deploy.value = null;
+  }
+
+  /**
+   * Watch the deploy a publish set off, until it ships, fails, or takes too long. Its toast
+   * is the only place the app claims "It's live": the merge itself proves nothing, since the
+   * site is rebuilt after it. A publish that starts while one is being watched replaces it.
+   */
+  function trackDeploy(id: string, sha: string) {
+    stopDeployTracking();
+    const run = deployRun;
+    const started = Date.now();
+    deploy.value = "building";
+    toast.loading(DEPLOY_WAITING, { id: DEPLOY_TOAST_ID });
+
+    const poll = async () => {
+      const status = await daemon.api.deployStatus(id, sha).catch(() => null);
+      if (run !== deployRun) return;
+      const state: DeployState = status?.state ?? "unknown";
+      if (state === "live" || state === "failed") {
+        deploy.value = state;
+        if (state === "live") toast.success("It's live.", { id: DEPLOY_TOAST_ID });
+        else toast.error(DEPLOY_FAILED, { id: DEPLOY_TOAST_ID });
+        return;
+      }
+      if (Date.now() - started >= DEPLOY_TIMEOUT_MS) {
+        deploy.value = "unknown";
+        toast.info(DEPLOY_SLOW, { id: DEPLOY_TOAST_ID });
+        return;
+      }
+      deploy.value = state;
+      deployTimer = setTimeout(() => void poll(), DEPLOY_POLL_MS);
+    };
+    deployTimer = setTimeout(() => void poll(), DEPLOY_POLL_MS);
   }
 
   /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
@@ -377,9 +436,7 @@ export const useChangesStore = defineStore("changes", () => {
     pendingPush.value = null;
     try {
       if (pending.kind === "publish") {
-        if ((await publish(id, pending.branch)) === "published") {
-          toast.success("It's live.");
-        }
+        await publish(id, pending.branch);
       } else {
         await share(id, pending.branch);
       }
@@ -676,6 +733,9 @@ export const useChangesStore = defineStore("changes", () => {
       // The drafts menu drops the published change; the change itself stays until Clean up.
       await list(id).catch(() => undefined);
       void refreshSync();
+      // The merge is done; the site is rebuilt after it. Claim "live" only once it shipped.
+      if (pr?.mergeSha) trackDeploy(id, pr.mergeSha);
+      else toast.info(DEPLOY_UNVERIFIED);
       return "published";
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
@@ -706,6 +766,7 @@ export const useChangesStore = defineStore("changes", () => {
     pendingSwitch,
     needsSignIn,
     status,
+    deploy,
     syncNeeded,
     conflictSessions,
     selectedConflictId,
@@ -741,6 +802,7 @@ export const useChangesStore = defineStore("changes", () => {
     publish,
     refreshStatus,
     stopStatusPolling,
+    stopDeployTracking,
     dismissProtectionHint,
   };
 });
