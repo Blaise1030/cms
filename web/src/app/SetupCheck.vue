@@ -5,7 +5,7 @@
 //
 // Copy rules: never show "agent", "CLI", "ACP", "SDK", "npx", "PATH" or
 // "runtime" to the user. Keep the product words: assistant, site, download.
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Check,
   CircleAlert,
@@ -66,6 +66,32 @@ const EMPTY_RUNTIME: RuntimeStatus = {
 
 const step = ref<Step>(1);
 const selectedId = ref("opencode");
+
+/** The browser History state key, so Back steps through the wizard instead of leaving it. */
+const HISTORY_STEP = "orsoOnboardingStep";
+
+function stepFrom(value: unknown): Step | null {
+  return value === 1 || value === 2 || value === 3 ? value : null;
+}
+
+function rememberStep(mode: "push" | "replace" = "replace") {
+  if (typeof window === "undefined") return;
+  const current = window.history.state;
+  const state = {
+    ...(current && typeof current === "object" ? current : {}),
+    [HISTORY_STEP]: step.value,
+  };
+  if (mode === "push") window.history.pushState(state, "");
+  else window.history.replaceState(state, "");
+}
+
+function onPopState(event: PopStateEvent) {
+  const next =
+    event.state && typeof event.state === "object"
+      ? stepFrom((event.state as Record<string, unknown>)[HISTORY_STEP])
+      : null;
+  if (next) step.value = next;
+}
 const status = ref<SetupStatus | null>(props.initial ?? null);
 const checking = ref(false);
 const failed = ref(false);
@@ -270,6 +296,8 @@ watch(
 );
 
 onMounted(() => {
+  rememberStep("replace");
+  window.addEventListener("popstate", onPopState);
   if (!status.value) {
     void recheck();
   } else if (!assistant.snapshot) {
@@ -280,6 +308,10 @@ onMounted(() => {
   gh.load().catch(() => {
     // Without GitHub status the account row keeps the manual sign-in hint.
   });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("popstate", onPopState);
 });
 
 const nextLabel = computed(() => {
@@ -304,14 +336,19 @@ function next() {
   }
   if (nextDisabled.value) return;
   step.value = (step.value + 1) as Step;
+  rememberStep("push");
 }
 
 function back() {
-  if (step.value > 1) step.value = (step.value - 1) as Step;
+  if (step.value === 1) return;
+  step.value = (step.value - 1) as Step;
+  rememberStep("replace");
 }
 
 function goToStep(n: Step) {
-  if (n < step.value) step.value = n;
+  if (n >= step.value) return;
+  step.value = n;
+  rememberStep("replace");
 }
 
 function dotLabel(n: Step): string {
@@ -863,8 +900,8 @@ function dotLabel(n: Step): string {
 
         <div class="flex items-center justify-end gap-2">
           <Button
+            v-if="step > 1"
             variant="ghost"
-            :disabled="step === 1"
             data-testid="onboarding-back"
             @click="back"
           >

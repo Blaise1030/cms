@@ -425,7 +425,26 @@ describe("onboarding step 3: GitHub", () => {
     await testId(w, "onboarding-back").trigger("click");
     await flushPromises();
     expect(w.find("[data-testid='onboarding-step-assistant']").exists()).toBe(true);
-    expect(testId(w, "onboarding-back").attributes("disabled")).toBeDefined();
+    // Step 1 has no previous screen, so the dead button is not rendered.
+    expect(w.find("[data-testid='onboarding-back']").exists()).toBe(false);
+  });
+
+  it("follows the browser back button to the previous step", async () => {
+    const w = mountCheck();
+    await flushPromises();
+    await toGithub(w);
+
+    window.dispatchEvent(
+      new PopStateEvent("popstate", { state: { orsoOnboardingStep: 2 } }),
+    );
+    await flushPromises();
+    expect(w.find("[data-testid='onboarding-step-site']").exists()).toBe(true);
+
+    window.dispatchEvent(
+      new PopStateEvent("popstate", { state: { orsoOnboardingStep: 1 } }),
+    );
+    await flushPromises();
+    expect(w.find("[data-testid='onboarding-step-assistant']").exists()).toBe(true);
   });
 
   it("lets a completed dot jump back", async () => {
