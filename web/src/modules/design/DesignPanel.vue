@@ -30,7 +30,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="design-panel">
     <section v-if="store.invalid" role="alert" class="m-4 rounded-md border border-destructive p-3 text-sm" data-testid="design-invalid">
-      <p>DESIGN.md has invalid frontmatter. Ask the agent to fix it.</p>
+      <p>DESIGN.md has invalid frontmatter. Ask your assistant to fix it.</p>
       <p class="mt-1 text-xs text-muted-foreground">{{ store.invalid }}</p>
       <pre v-if="store.invalidSource" class="mt-2 max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap" data-testid="design-invalid-source">{{ store.invalidSource }}</pre>
     </section>

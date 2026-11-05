@@ -10,6 +10,8 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatPanel from "./ChatPanel.vue";
+import ChatMessage from "./ChatMessage.vue";
+import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
 import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
@@ -56,6 +58,9 @@ let chatsGate: Promise<void> | null;
 let messageFailure: Response | null;
 let messageGate: Promise<void> | null;
 let createGate: Promise<void> | null;
+/** Assistant setup responses; null keeps the legacy /api/chat/providers path. */
+let setupStatus: unknown | null;
+let setupRuntimes: unknown | null;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -73,6 +78,8 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   const method = (init.method ?? "GET").toUpperCase();
   calls.push({ method, url, init });
   const path = url.replace(ORIGIN, "");
+  if (path === "/api/setup/status" && setupStatus) return json(setupStatus);
+  if (path === "/api/setup/runtimes" && setupRuntimes) return json(setupRuntimes);
   if (path === "/api/chat/providers")
     return json({
       providers: ["cursor", "claude", "codex", "opencode", "shell"].map((id) => ({
@@ -245,6 +252,9 @@ beforeEach(() => {
   messageFailure = null;
   messageGate = null;
   createGate = null;
+  setupStatus = null;
+  setupRuntimes = null;
+  assistantDialogOpen.value = false;
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("fetch", vi.fn(fetchMock));
@@ -285,6 +295,33 @@ function syncChat(phase: string): WireChat {
       repairAttempted: false,
     },
   };
+}
+
+/** A ready runtime as the setup endpoints report it. */
+function readyRuntime(version = "1.0.0") {
+  return { phase: "ready", version, source: "managed", progress: null, message: null };
+}
+
+/** `GET /api/setup/status` + `/runtimes` for a set of assistant readiness values. */
+function setupWith(providers: { id: string; chatReady: boolean; signedIn?: boolean | null }[]) {
+  const full = providers.map((p) => ({
+    name: p.id,
+    available: true,
+    runtime: readyRuntime(),
+    installed: true,
+    signedIn: p.signedIn ?? null,
+    freeModels: p.id === "opencode",
+    reason: null,
+    ...p,
+  }));
+  setupStatus = {
+    git: true,
+    gh: true,
+    githubSignedIn: true,
+    projectsDir: "/projects",
+    providers: full,
+  };
+  setupRuntimes = { node: null, providers: full };
 }
 
 async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
@@ -414,7 +451,7 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.text()).toContain("Hello there"));
     expect(w.text()).toContain("Worked through 2 steps");
     expect(w.text()).toContain("Saved 1 file");
-    expect(w.text()).not.toContain("Agent is working");
+    expect(w.text()).not.toContain("Working on it…");
   });
 
   it("uploads a picked image and sends its saved path with the message", async () => {
@@ -481,6 +518,123 @@ describe("ChatPanel", () => {
     await picker.choose("codex:codex-smart");
     expect(picker.provider()).toBe("codex");
     expect(picker.label()).toBe("Smart");
+  });
+
+  describe("assistant readiness", () => {
+    it("offers only assistants that can chat, in recommendation order", async () => {
+      setupWith([
+        { id: "cursor", chatReady: false, signedIn: true },
+        { id: "claude", chatReady: true, signedIn: true },
+        { id: "opencode", chatReady: true, signedIn: null },
+      ]);
+      const w = await mountPanel();
+      const picker = agentPicker(w);
+      expect(picker.provider()).toBe("opencode");
+      await picker.open();
+      expect(picker.groups()).toEqual(["opencode", "claude"]);
+      await picker.choose("claude:default");
+      expect(picker.provider()).toBe("claude");
+    });
+
+    it("keeps the open chat's assistant even when it needs attention", async () => {
+      setupWith([
+        { id: "cursor", chatReady: false, signedIn: false },
+        { id: "opencode", chatReady: true, signedIn: null },
+      ]);
+      chats = [{ id: "c1", provider: "cursor", model: null, title: "Old chat", updatedAt: 1, live: true, running: false }];
+      histories.c1 = { provider: "cursor", model: null, running: false, chunks: [] };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      const picker = agentPicker(w);
+      expect(picker.provider()).toBe("cursor");
+      await picker.open();
+      expect(picker.groups()).toEqual(["cursor"]);
+    });
+
+    it("blocks the composer and offers setup when no assistant can chat", async () => {
+      setupWith([{ id: "cursor", chatReady: false, signedIn: false }]);
+      const w = await mountPanel();
+      const card = w.find("[data-testid='chat-no-assistant']");
+      expect(card.text()).toContain("Set up your assistant");
+      expect(card.text()).not.toContain("No agent is available");
+      expect(w.find("[data-testid='chat-send']").attributes("aria-label")).toBe(
+        "Set up your assistant to start chatting",
+      );
+      await w.find("[data-testid='chat-setup']").trigger("click");
+      expect(assistantDialogOpen.value).toBe(true);
+    });
+
+    it("opens setup from the picker's last item", async () => {
+      const w = await mountPanel();
+      const picker = agentPicker(w);
+      await picker.open();
+      const item = [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-agent-setup']")].at(-1)!;
+      expect(item.textContent).toContain("Set up another assistant…");
+      item.click();
+      await flushPromises();
+      expect(assistantDialogOpen.value).toBe(true);
+    });
+
+    it("maps a missing-binary send failure to a Set up action", async () => {
+      messageFailure = json(
+        { error: { code: "UNKNOWN", message: "spawn cursor ENOENT" } },
+        500,
+      );
+      const w = await mountPanel();
+      await send(w, "hi");
+      await vi.waitFor(() => expect(w.find("[data-testid='chat-error']").exists()).toBe(true));
+      expect(w.find("[data-testid='chat-error']").text()).toBe("spawn cursor ENOENT");
+      expect(w.find("[data-testid='chat-error-action']").text()).toBe("Set up");
+      await w.find("[data-testid='chat-error-action']").trigger("click");
+      expect(assistantDialogOpen.value).toBe(true);
+    });
+
+    it("retries the last send from a failed assistant card", async () => {
+      chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false }];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [
+          { type: "user_text", session_id: "s", text: "make it pop" },
+          { type: "error", message: "the turn crashed" },
+        ],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      const retry = w.find("[data-testid='assistant-error-retry']");
+      expect(retry.text()).toBe("Try again");
+      await retry.trigger("click");
+      await vi.waitFor(() => expect(messagePosts()).toHaveLength(1));
+      expect(textOf(messagePosts()[0]!)).toBe("make it pop");
+    });
+
+    it("starts sign-in and opens setup from a login card action", async () => {
+      chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false }];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [{ type: "user_text", session_id: "s", text: "hi" }],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      w.findComponent(ChatMessage).vm.$emit("assistantAction", { action: "signIn", provider: "cursor" });
+      await flushPromises();
+      expect(assistantDialogOpen.value).toBe(true);
+      await vi.waitFor(() =>
+        expect(
+          calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/setup/providers/cursor/sign-in`),
+        ).toBe(true),
+      );
+    });
+
+    it("uses assistant wording on the empty state", async () => {
+      const w = await mountPanel();
+      expect(w.text()).toContain("Your assistant edits your site");
+      expect(w.text()).not.toContain("The agent edits");
+      expect(w.text()).not.toContain("No agent is available");
+    });
   });
 
   it("sends the model picked for a new chat and updates an existing chat's model", async () => {
@@ -1037,7 +1191,7 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-working']").exists()).toBe(false);
     await send(w, "hi");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(true));
-    expect(w.find("[data-testid='chat-working']").text()).toBe("Agent is working…");
+    expect(w.find("[data-testid='chat-working']").text()).toBe("Working on it…");
     expect(w.find("[data-testid='chat-messages']").classes()).toContain("pb-10");
     const id = useChatStore().activeChatId("p1")!;
     finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);

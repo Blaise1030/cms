@@ -28,6 +28,7 @@ const SHAPES: Record<DaemonEventType, Shape> = {
   "content.refresh": { projectId: "string" },
   "chat.turn": { projectId: "string", chatId: "string" },
   "chat.permission": { projectId: "string", chatId: "string" },
+  "setup.runtime": { runtime: "string", phase: "string" },
   "events.lagged": { missed: "number" },
 };
 

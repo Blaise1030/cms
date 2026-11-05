@@ -8,6 +8,7 @@ import { CommandDialog, CommandGroup, CommandItem, CommandList } from "@/compone
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
+import { openAssistantSetup } from "@/modules/assistant/dialog";
 import { filterGroups, type PaletteGroup, type PaletteItem } from "./palette/filter";
 import { usePaletteGroups } from "./palette/usePaletteGroups";
 
@@ -25,6 +26,9 @@ const { projectId, groups, load } = usePaletteGroups({
   },
   showNewChange() {
     showNewChange.value = true;
+  },
+  showAssistant() {
+    openAssistantSetup();
   },
 });
 
@@ -120,6 +124,6 @@ function onInputKeydown(e: KeyboardEvent) {
     v-model:open="showNewChange"
     :project-id="projectId"
     via-agent
-    description="The agent starts it from the latest version of the site."
+    description="The assistant starts it from the latest version of the site."
   />
 </template>

@@ -204,7 +204,7 @@ async function restore() {
           </p>
           <p v-else-if="store.error" class="text-destructive text-sm" role="alert">{{ store.error }}</p>
           <p v-else-if="list.length === 0" class="text-muted-foreground text-sm">
-            No checkpoints yet. One is saved after each agent turn that changes files.
+            No checkpoints yet. One is saved after each assistant turn that changes files.
           </p>
           <!-- Newest first; the current checkpoint is the active step. Non-linear so every step
                stays clickable (linear steppers disable steps past the next one). -->

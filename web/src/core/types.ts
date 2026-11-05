@@ -375,6 +375,19 @@ export interface ChangesUpdatedEvent {
   error?: string;
 }
 
+/** An assistant (or the site builder) moved through its download lifecycle. */
+export interface SetupRuntimeEvent {
+  type: "setup.runtime";
+  /** `node`, or a provider id such as `opencode`. */
+  runtime: string;
+  phase: RuntimePhase;
+  version?: string | null;
+  source?: RuntimeSource | null;
+  /** 0–100 while downloading; null otherwise. */
+  progress?: number | null;
+  message?: string | null;
+}
+
 /** Emitted when this client's subscription fell behind and events were dropped. */
 export interface EventsLaggedEvent {
   type: "events.lagged";
@@ -393,6 +406,7 @@ export type DaemonEvent =
   | ChatTurnEvent
   | ChatPermissionEvent
   | SyncChangedEvent
+  | SetupRuntimeEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];
@@ -423,13 +437,80 @@ export interface GithubStatus {
   user: GithubUser | null;
 }
 
+/** Download lifecycle of an assistant (or the site builder), mirroring the daemon. */
+export type RuntimePhase =
+  | "notDownloaded"
+  | "downloading"
+  | "finishing"
+  | "ready"
+  | "downloadError"
+  | "updateAvailable";
+
+/** Where a ready copy came from: downloaded by orso, or already on the machine. */
+export type RuntimeSource = "managed" | "system";
+
+export interface RuntimeStatus {
+  phase: RuntimePhase;
+  version: string | null;
+  source: RuntimeSource | null;
+  /** 0–100 while downloading; null otherwise. */
+  progress: number | null;
+  /** A plain-language detail (error, "Setting up…"); null when there is none. */
+  message: string | null;
+  downloadBytes?: number;
+  installedBytes?: number;
+}
+
+/** One assistant as `GET /api/setup/status` (and `/runtimes`) reports it. */
+export interface SetupProvider {
+  id: string;
+  name: string;
+  /** A runnable copy exists. Older daemons only report this; newer ones also send `runtime`. */
+  available?: boolean;
+  runtime?: RuntimeStatus;
+  installed?: boolean;
+  /** `true`, `false`, or `null` when the daemon could not tell. Never guessed. */
+  signedIn?: boolean | null;
+  /** Chat can start now: the download is ready and a model is reachable. */
+  chatReady?: boolean;
+  /** Works without an account (OpenCode). */
+  freeModels?: boolean;
+  /** Why chat is not ready, in plain language. */
+  reason?: string | null;
+}
+
 /** `GET /api/setup/status`: which prerequisites this machine has. */
 export interface SetupStatus {
   git: boolean;
   gh: boolean;
   githubSignedIn: boolean;
-  providers: { id: string; name: string; available: boolean }[];
+  /** The site builder's download state. */
+  node?: RuntimeStatus;
+  providers: SetupProvider[];
   projectsDir: string;
+}
+
+/** `GET /api/setup/runtimes`: the assistant and site-builder download snapshot. */
+export interface SetupSnapshot {
+  node?: RuntimeStatus;
+  providers: SetupProvider[];
+}
+
+/** `POST /api/setup/providers/{id}/sign-in` (and code/cancel) responses. */
+export interface ProviderSignInState {
+  state: "browser" | "code" | "connected" | "cancelled" | "failed";
+  /** Where to finish signing in, when the flow needs a browser. */
+  url?: string;
+  /** The flow asked for a pasted code. */
+  needsCode?: boolean;
+  /** Plain-language detail for waiting states and failures. */
+  message?: string;
+}
+
+/** `POST /api/setup/providers/{id}/verify`: a temp-session handshake succeeded. */
+export interface ProviderVerifyResult {
+  chatReady: boolean;
+  reason?: string | null;
 }
 
 export interface DeviceStart {

@@ -569,7 +569,7 @@ function toggleFullscreen() {
             </Button>
             <Button variant="outline" data-testid="fix-crash" @click="store.fixCrash(projectId)">
               <Sparkles />
-              Fix with agent
+              Fix this with your assistant
             </Button>
           </div>
         </div>
@@ -643,7 +643,7 @@ function toggleFullscreen() {
         </div>
         <Button size="sm" data-testid="fix-page-error" @click="fixPageError">
           <Sparkles />
-          Fix with agent
+          Fix this with your assistant
         </Button>
         <Button variant="ghost" size="icon-sm" aria-label="Dismiss error" @click="pageError = null">
           <X />

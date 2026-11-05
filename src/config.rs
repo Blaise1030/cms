@@ -69,6 +69,13 @@ pub struct Config {
     /// Directories the setup check searches for git, gh and the agent CLIs, `PATH`-style.
     /// `None` = the daemon's own `PATH`.
     pub search_path: Option<OsString>,
+    /// Where managed Node and assistant builds are installed.
+    /// `ORSO_RUNTIME_DIR` overrides the default.
+    pub runtime_dir: PathBuf,
+    /// Point runtime downloads at a mirror or a test stub server.
+    pub runtime_base_url: Option<String>,
+    /// Lock file to install from instead of the one embedded in the daemon (tests).
+    pub runtime_lock: Option<PathBuf>,
 }
 
 /// Tests build configs with `..Default::default()`, so the default must never run the
@@ -89,6 +96,9 @@ impl Default for Config {
             ui_url: None,
             hook_exe: None,
             search_path: None,
+            runtime_dir: default_runtime_dir(),
+            runtime_base_url: std::env::var("ORSO_RUNTIME_BASE").ok(),
+            runtime_lock: None,
         }
     }
 }
@@ -119,6 +129,24 @@ impl Config {
             Some(token.unwrap_or_else(random_token))
         }
     }
+}
+
+/// Where managed runtimes live. `ORSO_RUNTIME_DIR` wins; otherwise the per-user
+/// application data directory (`~/Library/Application Support/orso/runtimes` on macOS).
+pub fn default_runtime_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("ORSO_RUNTIME_DIR").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if cfg!(target_os = "macos") {
+        return home.join("Library/Application Support/orso/runtimes");
+    }
+    if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(data).join("orso/runtimes");
+    }
+    home.join(".local/share/orso/runtimes")
 }
 
 /// Longest accepted explicit token.

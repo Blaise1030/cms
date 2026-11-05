@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "runtimes": {
+    "node": {
+      "version": "26.13.0",
+      "artifacts": {
+        "darwin-arm64": {
+          "asset": "node-v26.13.0-darwin-arm64.tar.gz",
+          "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.gz",
+          "assetSha256": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6",
+          "downloadBytes": 58334661,
+          "installedBytes": 221464747,
+          "executable": "bin/node",
+          "root": "node-v26.13.0-darwin-arm64",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        },
+        "darwin-x64": {
+          "asset": "node-v26.13.0-darwin-x64.tar.gz",
+          "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-x64.tar.gz",
+          "assetSha256": "525c9b29bb0263d687de60a4cec0e2a6db876a8eb032369e5795eca71e7c358e",
+          "downloadBytes": 59802926,
+          "installedBytes": 224202363,
+          "executable": "bin/node",
+          "root": "node-v26.13.0-darwin-x64",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        }
+      }
+    },
+    "opencode": {
+      "version": "2.2.5",
+      "registry": "https://registry.npmjs.org",
+      "artifacts": {
+        "darwin-arm64": {
+          "package": "@opencode/cli-darwin-arm64",
+          "asset": "cli-darwin-arm64-2.2.5.tgz",
+          "url": "https://registry.npmjs.org/@opencode/cli-darwin-arm64/-/cli-darwin-arm64-2.2.5.tgz",
+          "assetSha256": "dfd827de3281b4c3ca2b0bfc8f4beb103fa660c419d148a1a515c4344f9e9c02",
+          "binarySha256": "abe4d88594bffb12b364375b8a6732d2d1f7a977195ed1a35c5c76f8e89c9e0e",
+          "downloadBytes": 105814595,
+          "installedBytes": 226703249,
+          "executable": "bin/opencode",
+          "root": "package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        },
+        "darwin-x64": {
+          "package": "@opencode/cli-darwin-x64",
+          "asset": "cli-darwin-x64-2.2.5.tgz",
+          "url": "https://registry.npmjs.org/@opencode/cli-darwin-x64/-/cli-darwin-x64-2.2.5.tgz",
+          "assetSha256": "304f4666e7e37eac338de258f763b7f5b8987ab1bde2341dc1a613a8205c0010",
+          "binarySha256": "5e0cf9c94ee0fd4a4635807534e9ca4bf51ffe1c83260ada3510bf60e7333173",
+          "downloadBytes": 111044366,
+          "installedBytes": 240617549,
+          "executable": "bin/opencode",
+          "root": "package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        }
+      }
+    },
+    "claude": {
+      "version": "2.1.318",
+      "sdkVersion": "0.3.318",
+      "registry": "https://registry.npmjs.org",
+      "artifacts": {
+        "darwin-arm64": {
+          "package": "@anthropic-ai/claude-agent-sdk-darwin-arm64",
+          "asset": "claude-agent-sdk-darwin-arm64-0.3.318.tgz",
+          "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-arm64/-/claude-agent-sdk-darwin-arm64-0.3.318.tgz",
+          "assetSha256": "81392f0170b3b47ce1b84e52d1ac516b630174c07814ea101be0c799c1a46c25",
+          "binarySha256": "677a2ea7bf576cedd20e191d973914ed8a41796f53a63b1923381ddc4d5b5e7d",
+          "downloadBytes": 145803517,
+          "installedBytes": 319599048,
+          "executable": "bin/claude",
+          "root": "package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        },
+        "darwin-x64": {
+          "package": "@anthropic-ai/claude-agent-sdk-darwin-x64",
+          "asset": "claude-agent-sdk-darwin-x64-0.3.318.tgz",
+          "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-x64/-/claude-agent-sdk-darwin-x64-0.3.318.tgz",
+          "assetSha256": "ad750ab0468117f537707fbb9527aef2b583a9b6642b846cd4dd7f76c3b6d11a",
+          "binarySha256": "ee9c8577a528aa8efa478bf552b17efa40bb58aa4981d2913c13d383a4d409a4",
+          "downloadBytes": 152174933,
+          "installedBytes": 334273120,
+          "executable": "bin/claude",
+          "root": "package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        }
+      }
+    },
+    "codex": {
+      "version": "0.166.0",
+      "tag": "rust-v0.166.0",
+      "repository": "https://github.com/openai/codex",
+      "artifacts": {
+        "darwin-arm64": {
+          "asset": "codex-package-aarch64-apple-darwin.tar.gz",
+          "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-aarch64-apple-darwin.tar.gz",
+          "assetSha256": "55a440cb579f970abe7c79ab181e54b0ea4c419be99f333bbd868eebac9c21f0",
+          "downloadBytes": 165951869,
+          "installedBytes": 426693484,
+          "executable": "bin/codex",
+          "stripComponents": 0,
+          "format": "tar.gz"
+        },
+        "darwin-x64": {
+          "asset": "codex-package-x86_64-apple-darwin.tar.gz",
+          "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-x86_64-apple-darwin.tar.gz",
+          "assetSha256": "1cb65690230be5982c654ba2655e3a3b594dce9c55b780e78bfdfeff829d7ad9",
+          "downloadBytes": 180076524,
+          "installedBytes": 456981032,
+          "executable": "bin/codex",
+          "stripComponents": 0,
+          "format": "tar.gz"
+        }
+      }
+    },
+    "cursor": {
+      "version": "2026.11.05-86047df",
+      "distribution": "https://downloads.cursor.com/lab",
+      "artifacts": {
+        "darwin-arm64": {
+          "asset": "agent-cli-package.tar.gz",
+          "url": "https://downloads.cursor.com/lab/2026.11.05-86047df/darwin/arm64/agent-cli-package.tar.gz",
+          "assetSha256": "67847e47e3ebd32b64c3fb4e6f36d475f1971b76e033b0ed6c9e01a3c1b440d7",
+          "downloadBytes": 174484846,
+          "installedBytes": 615754115,
+          "executable": "cursor-agent",
+          "executables": [
+            "cursor-agent",
+            "node"
+          ],
+          "files": {
+            "cursor-agent": "2ccc9a8e167797641448b5e5c936f006ba137a2555f117f38c5eb76a5238a233",
+            "index.js": "932a6744cb9cd5e06b9ef292a1dc58bc17e69f8a4f72c21e7cb572fa0561d15b",
+            "node": "06eb3f5762c2b6890e99d03f931bf01d9b20fd341dec1a8c1ef5c1809e66102b"
+          },
+          "root": "dist-package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        },
+        "darwin-x64": {
+          "asset": "agent-cli-package.tar.gz",
+          "url": "https://downloads.cursor.com/lab/2026.11.05-86047df/darwin/x64/agent-cli-package.tar.gz",
+          "assetSha256": "75f345ce7638ff136e5cd09c45c3b2de4e73e5f590b50655e01e826c02bd7cfa",
+          "downloadBytes": 182110953,
+          "installedBytes": 629056106,
+          "executable": "cursor-agent",
+          "executables": [
+            "cursor-agent",
+            "node"
+          ],
+          "files": {
+            "cursor-agent": "2ccc9a8e167797641448b5e5c936f006ba137a2555f117f38c5eb76a5238a233",
+            "index.js": "9938f1291a206959f221915646792eb08732fb07794863b8eb5a218bf0992073",
+            "node": "4a1cb2b18065f49938d650eceedf4557a4b5561ab941ab66cb4ab3f4b38c8232"
+          },
+          "root": "dist-package",
+          "stripComponents": 1,
+          "format": "tar.gz"
+        }
+      }
+    }
+  },
+  "acp": {
+    "claude": {
+      "package": "@agentclientprotocol/claude-agent-acp",
+      "version": "0.100.0"
+    },
+    "codex": {
+      "package": "@agentclientprotocol/codex-acp",
+      "version": "2.5.0"
+    }
+  }
+}

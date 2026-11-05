@@ -16,6 +16,12 @@ certificate, notarizes and staples it, and uploads:
 goes out without a signed app. The job's first step fails if any secret below is
 empty: unsigned or un-notarized builds are never shipped.
 
+The installer stays small: assistant tools (Node, OpenCode, Claude, Codex, Cursor) are
+downloaded and verified in-app on first use into
+`~/Library/Application Support/orso/runtimes`. See
+[docs/agent-runtimes.md](agent-runtimes.md) for the lock file, update policy and store
+layout. Runtime downloads are not bundled in the DMG.
+
 ## Local desktop development
 
 For the title-bar-less shell with web HMR (separate from `just dev`, which is browser-only):

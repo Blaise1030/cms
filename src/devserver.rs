@@ -155,6 +155,8 @@ pub struct DevServerOptions {
     /// Daemon listen port; exposed to Astro as `ORSO_PROXY_PORT` so Vite HMR
     /// connects through the preview proxy instead of the raw Astro port.
     pub proxy_port: u16,
+    /// `PATH` for npm: managed Node first, then the login shell and daemon paths.
+    pub path: Option<std::ffi::OsString>,
 }
 
 impl DevServerOptions {
@@ -176,7 +178,14 @@ impl DevServerOptions {
             backoff_base: BACKOFF_BASE,
             stable_after: STABLE_AFTER,
             proxy_port,
+            path: None,
         }
+    }
+
+    /// Use this `PATH` for the dev server's package manager.
+    pub fn with_path(mut self, path: std::ffi::OsString) -> Self {
+        self.path = Some(path).filter(|path| !path.is_empty());
+        self
     }
 }
 
@@ -193,6 +202,8 @@ struct Shared {
     projects: Arc<ProjectRegistry>,
     events: EventBus,
     opts: DevServerOptions,
+    /// `PATH` for the package manager; refreshed when managed Node finishes installing.
+    path: std::sync::Mutex<Option<std::ffi::OsString>>,
     /// Why each `crashed` project stopped (output tail); cleared on any other state.
     crash_messages: std::sync::Mutex<HashMap<String, String>>,
 }
@@ -211,16 +222,28 @@ pub struct DevServerManager {
 
 impl DevServerManager {
     pub fn new(projects: Arc<ProjectRegistry>, events: EventBus, opts: DevServerOptions) -> Self {
+        let path = std::sync::Mutex::new(opts.path.clone());
         Self {
             shared: Arc::new(Shared {
                 projects,
                 events,
                 opts,
+                path,
                 crash_messages: Default::default(),
             }),
             running: Mutex::new(HashMap::new()),
             content_tokens: Default::default(),
         }
+    }
+
+    /// Replace the package-manager `PATH` (after a managed Node download finishes).
+    pub fn set_path(&self, path: std::ffi::OsString) {
+        *self
+            .shared
+            .path
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            Some(path).filter(|path| !path.is_empty());
     }
 
     /// The token the project's current dev server was started with.
@@ -435,7 +458,14 @@ async fn supervise(
                         shared
                             .events
                             .emit("preview.deps_installing", json!({ "projectId": id }));
-                        match crate::projects::install(&project.dir).await {
+                        let path = shared
+                            .path
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .clone();
+                        match crate::projects::install_with_path(&project.dir, path.as_deref())
+                            .await
+                        {
                             Ok(()) => {
                                 run_once(
                                     &shared,
@@ -605,6 +635,11 @@ async fn run_once(
         port,
         public_base: format!("/preview/{id}/"),
     };
+    let path = shared
+        .path
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
     let mut cmd = match &shared.opts.launcher {
         Launcher::Configured => match settings {
             Some(settings) => configured_command(settings, &spec),
@@ -627,6 +662,9 @@ async fn run_once(
     // the project dir.
     if !matches!(shared.opts.launcher, Launcher::Configured) {
         cmd.current_dir(&dir);
+    }
+    if let Some(path) = &path {
+        cmd.env("PATH", path);
     }
     launch_env(&mut cmd, &spec, token, shared.opts.proxy_port);
     cmd.stdin(Stdio::null())

@@ -72,7 +72,13 @@ Signing, notarization, updater keys, and cutting a release:
 ### Agent providers
 
 The agent panel's chat runs a coding CLI through the daemon. Built-in providers: Cursor CLI
-(`cursor-agent`), Claude (`claude`), and Codex (`codex`). Override in
+(`cursor-agent`), Claude (`claude`), Codex (`codex`), and OpenCode. OpenCode is the recommended
+first assistant: it runs free models with no account and is downloaded from the setup screen.
+
+orso installs and pins its own copies of Node, the provider CLIs, and the Claude/Codex ACP
+adapters. Downloads are verified, staged, and kept under
+`~/Library/Application Support/orso/runtimes`; a CLI you installed yourself is used as a
+fallback. See [docs/agent-runtimes.md](docs/agent-runtimes.md). Override providers in
 `~/.config/orso/agents.json`, or pass `--agents-config`.
 
 ### Build and test

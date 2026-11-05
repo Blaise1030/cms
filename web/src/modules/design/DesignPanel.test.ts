@@ -118,7 +118,7 @@ describe("DesignPanel", () => {
     const details = [{ path: ["source"], message: "---\n: [\n---\nbody\n" }];
     const { w } = await setup({ design: vi.fn(async () => { throw new ApiError("BADREQ", "bad yaml at line 2", 400, { reason: "invalid_design", details }); }) });
     const msg = button(w, "design-invalid");
-    expect(msg.text()).toContain("DESIGN.md has invalid frontmatter. Ask the agent to fix it.");
+    expect(msg.text()).toContain("DESIGN.md has invalid frontmatter. Ask your assistant to fix it.");
     expect(msg.text()).toContain("bad yaml at line 2");
     const source = w.get('[data-testid="design-invalid-source"]');
     expect(source.element.tagName).toBe("PRE");

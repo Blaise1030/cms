@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDaemon } from "@/core/daemon";
 import type { SetupStatus } from "@/core/types";
+import AssistantSetup from "@/modules/assistant/AssistantSetup.vue";
+import { useAssistantStore } from "@/modules/assistant/store";
 import DeviceCodeDialog from "@/modules/github/DeviceCodeDialog.vue";
 import { useGithubStore } from "@/modules/github/store";
 
@@ -15,22 +17,18 @@ const emit = defineEmits<{ continue: [] }>();
 
 const daemon = useDaemon();
 const gh = useGithubStore();
+const assistant = useAssistantStore();
 
 const status = ref<SetupStatus | null>(props.initial ?? null);
 const checking = ref(false);
 const failed = ref(false);
 
-const AGENT_PAGES: Record<string, string> = {
-  cursor: "https://cursor.com/cli",
-  claude: "https://www.anthropic.com/claude-code",
-  codex: "https://developers.openai.com/codex/cli",
-  opencode: "https://opencode.ai",
-};
-
+/** Git, the GitHub CLI and the GitHub account stay system tools; the assistant is downloaded here. */
 async function recheck() {
   checking.value = true;
   try {
-    status.value = await daemon.api.setupStatus();
+    const [next] = await Promise.all([daemon.api.setupStatus(), assistant.load()]);
+    status.value = next;
     failed.value = false;
   } catch {
     failed.value = true;
@@ -39,7 +37,9 @@ async function recheck() {
   }
 }
 
-const readyAgents = computed(() => status.value?.providers.filter((p) => p.available) ?? []);
+/** At least one assistant can start a chat right now, not merely be on the machine. */
+const readyAssistants = computed(() => assistant.chatReadyProviders);
+const assistantReady = computed(() => readyAssistants.value.length > 0);
 
 const rows = computed(() => {
   const s = status.value;
@@ -48,12 +48,6 @@ const rows = computed(() => {
     { key: "git", title: "Git", ready: s.git, readyText: "Git is installed. It keeps the history of every change to your sites." },
     { key: "gh", title: "GitHub CLI", ready: s.gh, readyText: "The GitHub CLI is installed." },
     { key: "github", title: "GitHub account", ready: s.githubSignedIn, readyText: "You're signed in to GitHub." },
-    {
-      key: "agent",
-      title: "AI assistant",
-      ready: readyAgents.value.length > 0,
-      readyText: `${readyAgents.value.map((p) => p.name).join(", ")} ready to edit your sites.`,
-    },
   ];
 });
 
@@ -130,20 +124,27 @@ onMounted(() => {
                   Return and follow the steps. Then select Recheck.
                 </p>
               </template>
-              <template v-else>
-                <p class="text-muted-foreground">Install one of these AI assistants. It makes the edits you ask for.</p>
-                <ul class="flex flex-wrap gap-x-4 gap-y-1">
-                  <li v-for="p in status.providers" :key="p.id">
-                    <a v-if="AGENT_PAGES[p.id]" class="inline-flex items-center gap-1 underline" :href="AGENT_PAGES[p.id]" target="_blank" rel="noopener noreferrer">
-                      {{ p.name }} <ExternalLink class="size-3" />
-                    </a>
-                    <span v-else>{{ p.name }}</span>
-                  </li>
-                </ul>
-              </template>
             </div>
           </li>
         </ul>
+
+        <section v-if="status" class="flex flex-col gap-3" data-testid="setup-assistant">
+          <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="font-medium">Assistant</span>
+            <Badge :variant="assistantReady ? 'secondary' : 'outline'">
+              {{ assistantReady ? "Ready" : "Action needed" }}
+            </Badge>
+          </div>
+          <p v-if="assistantReady" class="text-muted-foreground text-sm">
+            {{ readyAssistants.map((p) => p.name).join(", ") }} ready to edit your sites.
+          </p>
+          <AssistantSetup
+            v-if="!assistantReady || (assistant.node != null && assistant.siteBuilder.phase !== 'ready')"
+            :autoload="!assistant.snapshot"
+            @connect="emit('continue')"
+          />
+        </section>
+
         <p v-if="status" class="text-muted-foreground text-xs">
           Your sites are saved in <code class="text-foreground break-all">{{ status.projectsDir }}</code>.
         </p>

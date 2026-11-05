@@ -162,7 +162,7 @@ function onNewChange() {
     v-model:open="showNewChange"
     :project-id="projectId"
     via-agent
-    description="The agent starts it from the latest version of the site."
+    description="The assistant starts it from the latest version of the site."
   />
 
   <ConfirmSwitchDialog />

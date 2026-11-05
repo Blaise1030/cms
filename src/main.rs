@@ -52,6 +52,9 @@ enum Command {
         /// Base URL to print in the ready link (e.g. the Vite dev server in `just dev`).
         #[arg(long, env = "ORSO_UI_URL")]
         ui_url: Option<String>,
+        /// Directory for managed Node and assistant builds (default: app support dir).
+        #[arg(long, env = "ORSO_RUNTIME_DIR")]
+        runtime_dir: Option<PathBuf>,
     },
     /// App state for the agent in a orso chat (prints JSON).
     Ctl {
@@ -87,6 +90,7 @@ async fn main() -> ExitCode {
         github_web_url,
         github_git_url,
         ui_url,
+        runtime_dir,
     } = command
     else {
         return match command {
@@ -119,6 +123,9 @@ async fn main() -> ExitCode {
         ui_url,
         hook_exe: None,
         search_path: None,
+        runtime_dir: runtime_dir.unwrap_or_else(orso::config::default_runtime_dir),
+        runtime_base_url: std::env::var("ORSO_RUNTIME_BASE").ok(),
+        runtime_lock: None,
     };
     match orso::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

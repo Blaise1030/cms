@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/message-scroller";
 import { Spinner } from "@/components/ui/spinner";
 import { useProjectsStore } from "@/modules/projects/store";
+import { useAssistantStore } from "@/modules/assistant/store";
+import { openAssistantSetup } from "@/modules/assistant/dialog";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChangesStore } from "@/modules/changes/store";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
@@ -31,12 +33,13 @@ import { attachmentMessage } from "./attachments";
 import { createTranscript, type Transcript } from "./chunks";
 import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal, syncPhaseBadge } from "./parts";
 import { referenceLabel } from "./references";
+import { spawnRecovery, type RecoveryAction } from "./recovery";
 import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
 
-/** Agent CLIs this UI can drive over ACP. */
+/** Assistants this UI can drive. */
 const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
 const SUGGESTIONS = [
   "Write a new blog post about our latest update",
@@ -48,6 +51,7 @@ const daemon = useDaemon();
 const store = useChatStore();
 const changes = useChangesStore();
 const agentProviders = useAgentProvidersStore();
+const assistant = useAssistantStore();
 const projects = useProjectsStore();
 
 type PermissionChunk = Extract<UiChunk, { type: "permission" }>;
@@ -133,15 +137,25 @@ async function attach(files: File[]) {
   }
 }
 
-const providers = computed(() => agentProviders.providers.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id)));
+const providers = computed(() => {
+  // Once the assistant snapshot is known it is the only source of truth: a
+  // provider is offered only when chat can start with it now.
+  const ids = (assistant.snapshot
+    ? assistant.chatReadyProviders.map((p) => p.id)
+    : agentProviders.providers.map((p) => p.id)
+  ).filter((id) => CHAT_PROVIDERS.includes(id));
+  // An open chat keeps its assistant so its transcript, model and send target
+  // still resolve even if it needs a sign-in or an update right now.
+  if (chatProvider.value && !ids.includes(chatProvider.value)) ids.push(chatProvider.value);
+  return ids;
+});
 const provider = computed({
-  get: () =>
-    chatProvider.value ??
-    chosen.value ??
-    (agentProviders.provider && providers.value.includes(agentProviders.provider)
-      ? agentProviders.provider
-      : providers.value[0]) ??
-    null,
+  get: () => {
+    if (chatProvider.value) return chatProvider.value;
+    const pick = chosen.value ?? agentProviders.provider;
+    if (pick && providers.value.includes(pick)) return pick;
+    return providers.value[0] ?? null;
+  },
   set: (id) => (chosen.value = id),
 });
 const models = computed(() => (provider.value ? (agentProviders.models[provider.value] ?? []) : []));
@@ -189,8 +203,13 @@ const composerLocked = computed(() =>
 const composerBlocked = computed(() => {
   if (loadingChat.value) return "Loading chat";
   if (composerLocked.value) return composerLocked.value;
-  return provider.value ? null : "No agent is available";
+  return provider.value ? null : "Set up your assistant to start chatting";
 });
+
+/** The action a failed pre-stream send can offer, matching the transcript's cards. */
+const errorRecovery = computed<RecoveryAction | null>(() => spawnRecovery(errorText.value));
+/** The last prompt actually sent, so a failed turn can be tried again. */
+const lastPrompt = ref<string | null>(null);
 
 /** Chunks already rendered; the SSE replays the transcript, so its first frames are duplicates. */
 let renderedChunks = 0;
@@ -390,8 +409,34 @@ watch(
       });
     });
     if (!agentProviders.providers.length) void agentProviders.loadProviders();
+    if (!assistant.snapshot) void assistant.load();
   },
   { immediate: true },
+);
+
+/**
+ * A download or sign-in just finished: re-read readiness so the picker gains
+ * the assistant without a reload. Progress events do not trigger this.
+ */
+watch(
+  () => assistant.providers
+    .map((p) => `${p.id}:${p.runtime?.phase ?? (p.available ? "ready" : "notDownloaded")}`)
+    .join("|"),
+  (now, before) => {
+    if (!before || now === before) return;
+    const previous = new Map(before.split("|").map((entry) => entry.split(":") as [string, string]));
+    const finished = now.split("|").some((entry) => {
+      const [id, phase] = entry.split(":") as [string, string];
+      return phase === "ready" && previous.has(id) && previous.get(id) !== "ready";
+    });
+    if (finished) void assistant.load();
+  },
+);
+watch(
+  () => Object.values(assistant.signIns).map((state) => state?.state ?? "").join("|"),
+  (now, before) => {
+    if (before && now !== before && now.includes("connected")) void assistant.load();
+  },
 );
 
 const offs = [
@@ -415,6 +460,7 @@ async function sendNow(text: string): Promise<boolean> {
   const trimmed = text.trim();
   if (!trimmed) return false;
   let id = activeId.value ?? store.newChat(props.projectId);
+  lastPrompt.value = trimmed;
   sendingChats.value[id] = true;
   store.markChatSending(props.projectId, id);
   if (id === activeId.value) errorText.value = null;
@@ -426,10 +472,9 @@ async function sendNow(text: string): Promise<boolean> {
     // Wait for the active chat (or draft) to finish opening: a saved chat must not
     // be mistaken for a draft just because the list is still loading.
     const opened = await open(id);
-    if (!requestedProvider) await agentProviders.loadProviders();
-    const providerId = requestedProvider ?? agentProviders.providers
-      .map(p => p.id).find(p => CHAT_PROVIDERS.includes(p));
-    if (!providerId) throw new Error("No agent is available");
+    if (!assistant.snapshot && !agentProviders.providers.length) await agentProviders.loadProviders();
+    const providerId = requestedProvider ?? providers.value[0] ?? null;
+    if (!providerId) throw new Error("Set up your assistant to start chatting");
     if (!isSaved(id) && !opened?.provider && existingProvider === null) {
       const draftId = id;
       const created = await daemon.api.createChat(props.projectId, providerId, requestedModel);
@@ -526,7 +571,7 @@ async function stop() {
   try {
     await daemon.api.stopChat(props.projectId, id);
   } catch (e) {
-    toast.error(`Couldn't stop the agent: ${errorMessage(e)}`);
+    toast.error(`Couldn't stop your assistant: ${errorMessage(e)}`);
   }
 }
 
@@ -551,6 +596,57 @@ function sendQueued(id: string) {
 function insert(text: string) {
   input.value = input.value ? `${input.value} ${text}` : text;
   composer.value?.focus();
+}
+
+/** Open the one assistant setup dialog; sign-in and download live there. */
+function openSetup() {
+  openAssistantSetup();
+}
+
+/** The last thing the user asked, from this session or the rendered transcript. */
+function lastUserText(): string | null {
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    const message = messages.value[i]!;
+    if (message.role !== "user") continue;
+    const text = message.parts
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n")
+      .trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function retryLast() {
+  errorText.value = null;
+  const id = activeId.value;
+  if (id) store.setQueuePaused(props.projectId, id, false);
+  const text = lastPrompt.value ?? lastUserText();
+  if (!text || busy.value) {
+    composer.value?.focus();
+    return;
+  }
+  void send(text);
+}
+
+/** Start the provider's sign-in and put its steps in front of the user. */
+function startSignIn(id?: string | null) {
+  const target =
+    id || provider.value || assistant.chatReadyProviders[0]?.id || assistant.recommended?.id || "";
+  if (target) void assistant.signIn(target);
+  openAssistantSetup();
+}
+
+function handleAssistantAction(action: "setup" | "signIn" | "retry", providerId: string) {
+  if (action === "setup") openAssistantSetup();
+  else if (action === "signIn") startSignIn(providerId);
+  else retryLast();
+}
+
+/** A send failed before the turn started: offer the same recovery as a card. */
+function recoverError() {
+  if (errorRecovery.value === "signIn") startSignIn(provider.value);
+  else if (errorRecovery.value === "setup") openAssistantSetup();
 }
 
 /** Carry a picked element into the next message as a badge. */
@@ -628,7 +724,7 @@ defineExpose({ insert, insertReference, send, busy });
       <EmptyHeader>
         <EmptyMedia variant="icon"><MessageSquare /></EmptyMedia>
         <EmptyTitle>What should we change?</EmptyTitle>
-        <EmptyDescription>The agent edits your site and saves a checkpoint after each turn.</EmptyDescription>
+        <EmptyDescription>Your assistant edits your site and saves a checkpoint after each turn.</EmptyDescription>
       </EmptyHeader>
       <EmptyContent class="flex flex-col gap-2">
         <Button
@@ -653,7 +749,12 @@ defineExpose({ insert, insertReference, send, busy });
             :class="['flex flex-col gap-4 p-3', streaming && 'pb-10']"
           >
             <MessageScrollerItem v-for="m in visibleMessages" :key="m.id" :message-id="m.id">
-              <ChatMessage :project-id="projectId" :message="m" />
+              <ChatMessage
+                :project-id="projectId"
+                :message="m"
+                :provider="provider"
+                @assistant-action="handleAssistantAction($event.action, $event.provider)"
+              />
             </MessageScrollerItem>
           </MessageScrollerContent>
         </MessageScrollerViewport>
@@ -675,12 +776,23 @@ defineExpose({ insert, insertReference, send, busy });
           data-testid="chat-working"
         >
           <Spinner class="size-4" aria-hidden="true" />
-          <span class="shimmer motion-reduce:shimmer-none">Agent is working…</span>
+          <span class="shimmer motion-reduce:shimmer-none">Working on it…</span>
         </div>
       </Transition>
       <Alert v-if="errorText" variant="destructive">
         <CircleAlert />
-        <AlertDescription data-testid="chat-error">{{ errorText }}</AlertDescription>
+        <AlertDescription class="flex flex-col items-start gap-2">
+          <span data-testid="chat-error">{{ errorText }}</span>
+          <Button
+            v-if="errorRecovery"
+            size="sm"
+            variant="outline"
+            data-testid="chat-error-action"
+            @click="recoverError"
+          >
+            {{ errorRecovery === "signIn" ? "Sign in" : "Set up" }}
+          </Button>
+        </AlertDescription>
       </Alert>
       <div
         v-for="perm in permissions"
@@ -740,6 +852,17 @@ defineExpose({ insert, insertReference, send, busy });
           {{ SYNC_ACTIONS.again }}
         </Button>
       </div>
+      <div
+        v-if="!provider && !loadingChat && assistant.snapshot && !isSync"
+        data-testid="chat-no-assistant"
+        class="flex flex-col items-start gap-2 rounded-lg border p-3 text-sm"
+        role="status"
+      >
+        <p class="text-muted-foreground">
+          Your assistant isn’t set up yet. Set one up to start chatting.
+        </p>
+        <Button size="sm" data-testid="chat-setup" @click="openSetup">Set up your assistant</Button>
+      </div>
       <ChatComposer
         v-if="!syncTerminal"
         ref="composer"
@@ -762,6 +885,7 @@ defineExpose({ insert, insertReference, send, busy });
         @remove-attachment="attachments.splice($event, 1)"
         @remove-reference="references.splice($event, 1)"
         @set-auto-approve="setAutoApprove"
+        @setup="openSetup"
       />
     </div>
   </div>

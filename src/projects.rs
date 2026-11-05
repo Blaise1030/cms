@@ -135,9 +135,12 @@ pub struct ProjectRegistry {
     /// Run `npm install` during `create`. Tests turn this off via
     /// [`crate::state::AppState::with_scaffold_install`]; the daemon always runs it.
     install: bool,
-    /// Set when the on-disk registry could not be read or quarantined. Mutations are
+    /// The registry could not be read or quarantined. Mutations are
     /// refused so we never overwrite a registry we could not preserve.
     init_error: Option<String>,
+    /// `PATH` for install commands: managed Node first, then the user's own.
+    /// A mutex so a Node download that finishes after daemon start is picked up.
+    install_path: std::sync::Mutex<Option<std::ffi::OsString>>,
     inner: Mutex<Inner>,
 }
 
@@ -198,11 +201,34 @@ impl ProjectRegistry {
             projects_dir,
             install,
             init_error,
+            install_path: std::sync::Mutex::new(None),
             inner: Mutex::new(Inner {
                 projects,
                 ..Inner::default()
             }),
         }
+    }
+
+    /// Set the `PATH` used by `npm install` and other scaffold commands.
+    pub fn with_install_path(self, path: std::ffi::OsString) -> Self {
+        self.set_install_path(path);
+        self
+    }
+
+    /// Replace the install `PATH` (after a managed Node download finishes).
+    pub fn set_install_path(&self, path: std::ffi::OsString) {
+        *self
+            .install_path
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            Some(path).filter(|path| !path.is_empty());
+    }
+
+    fn install_path(&self) -> Option<std::ffi::OsString> {
+        self.install_path
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
     }
 
     /// `Some` if the persisted registry could not be loaded safely (see [`Self::open`]).
@@ -566,7 +592,8 @@ impl ProjectRegistry {
                     .await
                     .map_err(|e| ApiError::io(format!("template copy task failed: {e}")))??;
                 if self.install {
-                    install(dir).await?;
+                    let path = self.install_path();
+                    install_with_path(dir, path.as_deref()).await?;
                 }
                 git(dir, &["init", "-b", "main"]).await?;
                 crate::git::set_identity(dir, identity).await?;
@@ -593,7 +620,10 @@ impl ProjectRegistry {
                         .exists()
                 {
                     match crate::settings::load(dir) {
-                        Ok(_) => install(dir).await?,
+                        Ok(_) => {
+                            let path = self.install_path();
+                            install_with_path(dir, path.as_deref()).await?
+                        }
                         Err(e) => eprintln!(
                             "orso: skipping install for {}: {}",
                             dir.display(),
@@ -733,17 +763,30 @@ fn allocate_port(inner: &Inner) -> Result<u16, ApiError> {
 }
 
 /// Run the configured install command in the configured install dir.
+#[allow(dead_code)]
 pub(crate) async fn install(project: &Path) -> Result<(), ApiError> {
+    install_with_path(project, None).await
+}
+
+/// [`install`] with a `PATH` that puts managed Node (and its `npm`) first, so an
+/// app opened from the Finder can still install packages.
+pub(crate) async fn install_with_path(
+    project: &Path,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<(), ApiError> {
     let settings = crate::settings::load(project)
         .map_err(|e| ApiError::badreq(crate::settings::describe(&e)))?;
     let command = settings.install.clone();
-    let child = Command::new("sh")
+    let mut child = Command::new("sh");
+    child
         .args(["-c", &command])
         .current_dir(settings.install_path(project))
         .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .output();
-    let out = tokio::time::timeout(INSTALL_TIMEOUT, child)
+        .kill_on_drop(true);
+    if let Some(path) = path {
+        child.env("PATH", path);
+    }
+    let out = tokio::time::timeout(INSTALL_TIMEOUT, child.output())
         .await
         .map_err(|_| ApiError::io(format!("{command} timed out")))?
         .map_err(|e| ApiError::io(format!("failed to run {command}: {e}")))?;
