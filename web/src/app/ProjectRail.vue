@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { Code, Cog, FileText, History, House, MonitorPlay, Palette, Settings } from "@lucide/vue";
+import { Code, Cog, FileText, History, House, MonitorPlay, Palette, Settings, Sparkles } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "preview", label: "Preview", icon: MonitorPlay },
   { id: "content", label: "Content", icon: FileText },
   { id: "design", label: "Design", icon: Palette },
+  { id: "skills", label: "Skills", icon: Sparkles },
   { id: "code", label: "Code", icon: Code },
   { id: "history", label: "History", icon: History },
   { id: "settings", label: "Settings", icon: Settings },

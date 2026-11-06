@@ -7,9 +7,10 @@ import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
 import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
+import SkillsPanel from "@/modules/skills/SkillsPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
+export type ProjectTab = "preview" | "content" | "design" | "skills" | "code" | "history" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
 export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
@@ -50,6 +51,12 @@ export const routes: RouteRecordRaw[] = [
         path: "design",
         name: "project-design",
         component: DesignPanel,
+        props: (r) => ({ projectId: r.params.id as string }),
+      },
+      {
+        path: "skills",
+        name: "project-skills",
+        component: SkillsPanel,
         props: (r) => ({ projectId: r.params.id as string }),
       },
       {
@@ -106,6 +113,7 @@ export function historyPath(id: string, sha?: string | null) {
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
   if (name === "project-content") return "content";
   if (name === "project-design") return "design";
+  if (name === "project-skills") return "skills";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
   if (name === "project-settings") return "settings";

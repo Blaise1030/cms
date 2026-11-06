@@ -55,7 +55,7 @@ it("links to app settings from the rail footer, apart from the project tabs", as
   const link = w.get('[data-testid="project-rail-app-settings"]');
   expect(link.attributes("href")).toBe("/settings");
   expect(link.attributes("aria-label")).toBe("App settings");
-  expect(w.findAll('[data-testid^="workspace-tab-"]')).toHaveLength(6);
+  expect(w.findAll('[data-testid^="workspace-tab-"]')).toHaveLength(7);
   await link.trigger("click");
   await flushPromises();
   expect(router.currentRoute.value.path).toBe("/settings");

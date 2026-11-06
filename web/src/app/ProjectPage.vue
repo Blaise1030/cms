@@ -32,7 +32,7 @@ const project = computed(() => projects.projects.find((p) => p.id === props.id) 
 const chatRequested = ref(false);
 const showChat = computed(() => {
   const tab = projectTabFromRoute(route.name);
-  return chatRequested.value || tab === "preview" || tab === "content" || tab === "design" || tab === "code";
+  return chatRequested.value || tab === "preview" || tab === "content" || tab === "design" || tab === "skills" || tab === "code";
 });
 
 watch(

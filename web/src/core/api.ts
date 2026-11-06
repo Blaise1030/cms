@@ -17,6 +17,13 @@ import {
   type DesignDoc,
   type DesignTokens,
   type SettingsDoc,
+  type SkillScope,
+  type SkillMeta,
+  type SkillDoc,
+  type SkillsList,
+  type SkillsSettings,
+  type SaveSkillRequest,
+  type InstallSkillRequest,
   type FileVersion,
   type Change,
   type ChangesUpdate,
@@ -235,6 +242,19 @@ export function createApi(
     /** Omit `hash` to create the file; the daemon refuses a stale hash with 409 and invalid fields with 400. */
     saveSettings: (body: { project: string; branch: string; hash?: string; settings: Record<string, unknown> }) =>
       json<SettingsDoc>("PUT", "/api/settings", { body }),
+    skills: (project: string) => json<SkillsList>("GET", "/api/skills", { query: { project } }),
+    skill: (project: string, id: string, scope: SkillScope) =>
+      json<SkillDoc>("GET", `/api/skills/${enc(id)}`, { query: { project, scope } }),
+    /** Replace an installed skill's front matter and body; project saves need `project` + `branch`. */
+    saveSkill: (id: string, body: SaveSkillRequest) =>
+      json<SkillDoc>("PUT", `/api/skills/${enc(id)}`, { body }),
+    installSkill: (body: InstallSkillRequest) =>
+      json<SkillMeta>("POST", "/api/skills/install", { body }),
+    uninstallSkill: (id: string, query: { project?: string; scope: SkillScope; branch?: string }) =>
+      empty("DELETE", `/api/skills/${enc(id)}`, { query }),
+    skillsSettings: () => json<SkillsSettings>("GET", "/api/skills/settings"),
+    saveSkillsSettings: (body: { globalPath: string }) =>
+      json<SkillsSettings>("PUT", "/api/skills/settings", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>

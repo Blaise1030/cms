@@ -48,6 +48,7 @@ describe("router", () => {
     expect(projectTabFromRoute("project-code")).toBe("code");
     expect(projectTabFromRoute("project-history")).toBe("history");
     expect(projectTabFromRoute("project-design")).toBe("design");
+    expect(projectTabFromRoute("project-skills")).toBe("skills");
     expect(projectTabFromRoute("project-settings")).toBe("settings");
     expect(projectTabFromRoute("home")).toBe("preview");
   });
@@ -57,6 +58,13 @@ describe("router", () => {
     expect(r.name).toBe("project-design");
     expect(r.params.id).toBe("x");
     expect(projectPath("x", "design")).toBe("/p/x/design");
+  });
+
+  it("resolves the skills tab", () => {
+    const r = router().resolve("/p/x/skills");
+    expect(r.name).toBe("project-skills");
+    expect(r.params.id).toBe("x");
+    expect(projectPath("x", "skills")).toBe("/p/x/skills");
   });
 
   it("resolves the project settings tab", () => {
