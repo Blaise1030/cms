@@ -118,7 +118,7 @@ describe("SkillsPanel", () => {
   it("a failed list load surfaces the error above the empty state", async () => {
     const { w } = await setup({ skills: vi.fn().mockRejectedValue(new Error("boom")) });
     expect(w.get('[data-testid="skills-error"]').text()).toBe("boom");
-    expect(w.get('[data-testid="skills-empty"]').exists()).toBe(true);
+    expect(w.find('[data-testid="skills-empty"]').exists()).toBe(true);
     w.unmount();
   });
 
@@ -126,10 +126,10 @@ describe("SkillsPanel", () => {
     const { w } = await setup();
     await button(w, "skills-sidebar-row").trigger("click");
     await flushPromises();
-    expect(w.get('[data-testid="skills-editor"]').exists()).toBe(true);
+    expect(w.find('[data-testid="skills-editor"]').exists()).toBe(true);
     expect(w.get('[data-testid="body-text"]').text()).toBe("# SEO");
-    expect(button(w, "skills-name").element.value).toBe("SEO");
-    expect(button(w, "skills-description").element.value).toBe("SEO guidance");
+    expect(w.get<HTMLInputElement>('[data-testid="skills-name"]').element.value).toBe("SEO");
+    expect(w.get<HTMLInputElement>('[data-testid="skills-description"]').element.value).toBe("SEO guidance");
     expect(w.get('[data-testid="skills-path"]').text()).toContain(".orso/skills/seo/SKILL.md");
     w.unmount();
   });
@@ -171,7 +171,7 @@ describe("SkillsPanel", () => {
   it("with skills but no selection shows the choose prompt", async () => {
     const { w } = await setup();
     expect(w.get('[data-testid="skills-no-selection"]').text()).toContain("Select a skill or install one");
-    expect(w.get('[data-testid="skills-install"]').exists()).toBe(true);
+    expect(w.find('[data-testid="skills-install"]').exists()).toBe(true);
     w.unmount();
   });
 

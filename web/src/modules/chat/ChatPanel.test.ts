@@ -467,7 +467,7 @@ describe("ChatPanel", () => {
     });
     await flushPromises();
     expect(w.find("[data-testid='chat-page-context']").text()).toContain("Content · posts/hello");
-    await send(w, "edit this");
+    await send(w as Awaited<ReturnType<typeof mountPanel>>, "edit this");
     expect(rawTextOf(messagePosts()[0]!)).toBe(
       `edit this\n${formatPageContext({ tab: "content", fields: { collection: "posts", entry: "hello" } })}`,
     );
@@ -490,7 +490,7 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-page-context']").text()).toContain("Content · posts/hello");
     expect(w.find("[data-testid='chat-page-context-remove']").exists()).toBe(true);
 
-    await send(w, "keep going");
+    await send(w as Awaited<ReturnType<typeof mountPanel>>, "keep going");
     expect(rawTextOf(messagePosts()[0]!)).toBe(
       `keep going\n${formatPageContext({ tab: "content", fields: { collection: "posts", entry: "hello" } })}`,
     );

@@ -57,7 +57,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
 <template>
   <div class="h-full min-h-0" data-testid="skills-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
-      <Sidebar data-testid="skills-sidebar" collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
+      <Sidebar data-testid="skills-sidebar" collapsible="none" class="h-full min-h-0 w-64 min-w-0 shrink-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup v-for="group in groups" :key="group.scope" class="min-h-0 py-2">
             <SidebarGroupLabel>{{ group.label }}</SidebarGroupLabel>

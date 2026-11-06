@@ -19,6 +19,7 @@ const TAB_LABEL: Record<ProjectTab, string> = {
   preview: "Preview",
   content: "Content",
   design: "Design",
+  skills: "Skills",
   code: "Code",
   history: "History",
   settings: "Settings",
