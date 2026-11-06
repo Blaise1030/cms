@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Check, ChevronsUpDown, GitBranch, Plus } from "@lucide/vue";
+import { Check, ChevronsUpDown, GitBranch, Plus, Search } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
 import ConfirmSwitchDialog from "./ConfirmSwitchDialog.vue";
@@ -95,13 +95,19 @@ function onNewChange() {
       @close-auto-focus.prevent
     >
       <div class="p-2">
-        <Input
-          v-model="query"
-          placeholder="Search changes…"
-          class="h-8"
-          data-testid="changes-search"
-          @keydown.stop
-        />
+        <InputGroup class="h-8">
+          <InputGroupAddon align="inline-start">
+            <Search class="size-4 opacity-50" aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            v-model="query"
+            placeholder="Search changes…"
+            aria-label="Search changes"
+            class="h-8"
+            data-testid="changes-search"
+            @keydown.stop
+          />
+        </InputGroup>
       </div>
       <DropdownMenuSeparator class="my-0" />
       <div class="max-h-64 overflow-y-auto p-1">

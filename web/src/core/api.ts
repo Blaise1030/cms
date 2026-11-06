@@ -20,12 +20,16 @@ import {
   type FileVersion,
   type Change,
   type ChangesUpdate,
-  type AutoResolveStatus,
   type ConflictCandidate,
   type ConflictChoice,
   type ConflictSession,
   type ConflictPreviews,
   type SharedChange,
+  type SyncPhase,
+  type PendingCombine,
+  type PublishResult,
+  type PublishedPr,
+  type DeployStatus,
   type PrStatus,
   type Checkpoint,
   type ErrorCode,
@@ -303,6 +307,9 @@ export function createApi(
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
+    /** Whether Get latest would change anything (remote `main`, or a draft behind it). */
+    changesSyncNeeded: async (project: string): Promise<boolean> =>
+      (await json<{ needed: boolean }>("GET", "/api/changes/sync", { query: { project } })).needed,
     listConflicts: async (project: string): Promise<ConflictSession[]> =>
       (await json<{ sessions: ConflictSession[] }>("GET", "/api/changes/conflicts", { query: { project } })).sessions,
     getConflict: (project: string, id: string) =>
@@ -315,14 +322,16 @@ export function createApi(
       json<{ commit: string }>("POST", `/api/changes/conflicts/${enc(id)}/finish`, { body: { project } }),
     abandonConflict: (project: string, id: string) =>
       json<{ abandoned: true }>("POST", `/api/changes/conflicts/${enc(id)}/abandon`, { body: { project } }),
-    startAutoResolve: (project: string, sessionId: string, provider: string) =>
-      json<{ started: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto`, { body: { project, provider } }),
-    autoResolveStatus: (project: string, sessionId: string) =>
-      json<AutoResolveStatus>("GET", `/api/changes/conflicts/${enc(sessionId)}/auto`, { query: { project } }),
-    answerAutoResolve: (project: string, sessionId: string, answers: Record<string, string>) =>
-      json<{ ok: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto/answers`, { body: { project, answers } }),
-    cancelAutoResolve: (project: string, sessionId: string) =>
-      json<{ ok: true }>("POST", `/api/changes/conflicts/${enc(sessionId)}/auto/cancel`, { body: { project } }),
+    /** Open the chat that combines this draft with the latest site. */
+    startSyncChat: (project: string, sessionId: string, provider: string) =>
+      json<{ chatId: string }>("POST", `/api/changes/conflicts/${enc(sessionId)}/sync`, { body: { project, provider } }),
+    /** The live sync for this conflict session; 404 when there is none. */
+    syncChatStatus: (project: string, sessionId: string) =>
+      json<{ chatId: string; phase: SyncPhase }>("GET", `/api/changes/conflicts/${enc(sessionId)}/sync`, {
+        query: { project },
+      }),
+    endSyncChat: (project: string, sessionId: string, chatId: string) =>
+      empty("POST", `/api/changes/conflicts/${enc(sessionId)}/sync/${enc(chatId)}/end`, { body: { project } }),
     shareChange: (project: string, branch: string) =>
       json<SharedChange>("POST", `/api/changes/${enc(branch)}/share`, {
         body: { project },
@@ -349,13 +358,17 @@ export function createApi(
       ).pr,
 
     /** Publish a change: push it, open + ready its PR if needed, then merge it on GitHub.
-     *  Returns the merged PR's status; the local change stays until it is cleaned up. */
-    publishChange: async (project: string, branch: string): Promise<PrStatus | null> =>
-      (
-        await json<{ pr: PrStatus | null }>("POST", `/api/changes/${enc(branch)}/publish`, {
-          body: { project },
-        })
-      ).pr,
+     *  A colliding remote copy comes back as a combine to finish first. */
+    publishChange: async (project: string, branch: string): Promise<PublishResult> => {
+      const { pr, conflict } = await json<{ pr: PublishedPr | null; conflict?: PendingCombine }>(
+        "POST", `/api/changes/${enc(branch)}/publish`, { body: { project } },
+      );
+      return conflict ? { conflict } : pr;
+    },
+
+    /** Whether the deploy of a published change's merge commit has shipped. */
+    deployStatus: (project: string, sha: string): Promise<DeployStatus> =>
+      json<DeployStatus>("GET", `/api/projects/${enc(project)}/deploy`, { query: { sha } }),
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))

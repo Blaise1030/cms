@@ -1,4 +1,42 @@
 import type { DynamicToolUIPart, ReasoningUIPart, UIMessage } from "ai";
+import type { SyncPhase } from "@/core/types";
+
+/** One stage line a sync chat shows; the daemon writes `text` for the writer. */
+export interface SyncStatusData {
+  phase: SyncPhase;
+  text: string;
+}
+
+/** The only sync-chat wording the frontend owns; everything else comes from `sync_status`. */
+export const PHASE_LABEL: Record<SyncPhase, string> = {
+  working: "Combining…",
+  checking: "Checking the site still works…",
+  combined: "Combined",
+  ended: "Ended",
+  expired: "Ended",
+};
+
+export const SYNC_ACTIONS = {
+  end: "End sync",
+  pick: "Pick the changes myself",
+  again: "Combine again",
+} as const;
+
+/** A combine that has landed or stopped: its chat shows the final actions, not a composer. */
+export const syncIsTerminal = (phase: SyncPhase | null | undefined): boolean =>
+  phase === "combined" || phase === "ended" || phase === "expired";
+
+/** The phase badge's tone: active and landed combines read as quiet; a stopped one is quieter still. */
+export const syncPhaseBadge = (phase: SyncPhase): "secondary" | "outline" =>
+  phase === "ended" || phase === "expired" ? "outline" : "secondary";
+
+/**
+ * An outcome line ends the combine; a stage note is progress inside one. The
+ * transcript calls out the former and leaves the latter as a quiet line — it
+ * shares `syncIsTerminal` so both surfaces agree on what "finished" means.
+ */
+export const syncPhaseData = (data: unknown) => data as SyncStatusData;
+export const syncPhaseOf = (data: unknown) => syncPhaseData(data).phase;
 
 /** The daemon's normalized tool input: `raw` is the agent's own arguments. */
 export interface ToolInput {

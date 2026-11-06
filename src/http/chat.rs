@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::chat::chunk::{sse_frame, UiChunk};
-use crate::chat::history::{self, SessionRecord};
+use crate::chat::history::{self, RecordKind, SessionRecord, SyncPhase};
 use crate::chat::manager::ChatError;
 use crate::chat::models;
 use crate::chat::transcript;
@@ -34,7 +34,7 @@ use crate::state::AppState;
 
 const TITLE_MAX: usize = 72;
 
-fn state_dir(state: &AppState) -> PathBuf {
+pub(crate) fn state_dir(state: &AppState) -> PathBuf {
     state.config.projects_dir.join(STATE_DIR)
 }
 
@@ -66,6 +66,8 @@ fn summary(state: &AppState, project: &str, record: &SessionRecord) -> Value {
         "model": record.model,
         "title": record.title,
         "updatedAt": record.updated_at,
+        "kind": record.kind,
+        "sync": record.sync,
         "live": state.chats.is_live(project, &record.id),
         "running": state.chats.is_running(project, &record.id),
     })
@@ -98,6 +100,21 @@ async fn project_cwd(state: &AppState, project: &str) -> Result<PathBuf, ApiErro
     super::project_dir(state, project).await
 }
 
+/// The working directory a chat's agent gets. A sync chat lives in its merge
+/// worktree; the project checkout is never a fallback, or the assistant would
+/// edit the writer's draft while `advance` verifies a different tree.
+fn agent_cwd(project_dir: PathBuf, record: &SessionRecord) -> Result<PathBuf, ApiError> {
+    if record.kind != RecordKind::Sync {
+        return Ok(project_dir);
+    }
+    record
+        .cwd
+        .as_deref()
+        .filter(|site| site.is_dir())
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| ApiError::conflict(crate::changes::sync_chat::UNEXPECTED))
+}
+
 fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
     Ok(acp_argv_for(state, id)?.is_some())
 }
@@ -105,7 +122,10 @@ fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
 /// ACP argv for `provider_id`: the test/env override first, then the provider
 /// registry (`agents.json` or the built-in defaults). `None` when the provider
 /// has no ACP command.
-fn acp_argv_for(state: &AppState, provider_id: &str) -> Result<Option<Vec<String>>, ApiError> {
+pub(crate) fn acp_argv_for(
+    state: &AppState,
+    provider_id: &str,
+) -> Result<Option<Vec<String>>, ApiError> {
     if let Some(argv) = providers::acp_argv(provider_id) {
         return Ok(Some(argv));
     }
@@ -117,7 +137,7 @@ fn acp_argv_for(state: &AppState, provider_id: &str) -> Result<Option<Vec<String
 }
 
 /// Spawn the chat's ACP process with `session/new` (not a terminal `AgentSession`).
-async fn ensure_agent(
+pub(crate) async fn ensure_agent(
     state: &AppState,
     project: &str,
     chat: &str,
@@ -196,7 +216,7 @@ struct CreateBody {
     model: Option<String>,
 }
 
-/// `GET /api/chat/{project}` → `{ chats: [{ id, provider, model, title, updatedAt, live }] }`.
+/// `GET /api/chat/{project}` → `{ chats: [{ id, provider, model, title, updatedAt, kind, sync, live, running }] }`.
 pub async fn list_chats(
     State(state): State<AppState>,
     Path(project): Path<String>,
@@ -242,6 +262,9 @@ pub async fn create_chat(
         title: None,
         created_at: now,
         updated_at: now,
+        kind: RecordKind::Chat,
+        cwd: None,
+        sync: None,
     };
     history::insert(&state_dir(&state), &project, record.clone())?;
     Ok((
@@ -274,6 +297,25 @@ pub async fn delete_chat(
 ) -> Result<Json<Value>, ApiError> {
     project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
+    // A running sync must not lose its record while its worktree is still on
+    // disk: end it first so the normal ending cleans both up.
+    let active_sync = history::get(&state_dir(&state), &project, &chat).is_some_and(|record| {
+        record.kind == RecordKind::Sync
+            && record
+                .sync
+                .as_ref()
+                .is_some_and(|st| !st.phase.is_terminal())
+    });
+    if active_sync {
+        crate::changes::sync_chat::end(
+            &state,
+            &project,
+            &chat,
+            SyncPhase::Ended,
+            crate::changes::sync_chat::ENDED,
+        )
+        .await?;
+    }
     if !history::remove(&state_dir(&state), &project, &chat)? {
         return Err(ApiError::enoent(format!("no such chat: {chat}")));
     }
@@ -295,13 +337,14 @@ pub async fn start_chat(
     State(state): State<AppState>,
     Path((project, chat)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    let cwd = project_cwd(&state, &project).await?;
+    let project_dir = project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
     let record = require_record(&state, &project, &chat)?;
     if state.chats.is_live(&project, &chat) {
         return Ok(StatusCode::NO_CONTENT);
     }
     super::checkpoints::require_change(&state, &project).await?;
+    let cwd = agent_cwd(project_dir, &record)?;
     ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -317,18 +360,30 @@ pub async fn post_message(
     Path((project, chat)): Path<(String, String)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    let cwd = project_cwd(&state, &project).await?;
+    let project_dir = project_cwd(&state, &project).await?;
     require_chat_id(&chat)?;
     let req: MessageBody = parse_json(&body, "JSON body {text}")?;
     if req.text.trim().is_empty() {
         return Err(ApiError::badreq("text is required"));
     }
     let record = require_record(&state, &project, &chat)?;
+    // `checking` covers verification and the build; a message must not race it
+    // or land the draft twice, so the composer is locked for that phase only.
+    if record.kind == RecordKind::Sync
+        && record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase == SyncPhase::Checking)
+    {
+        return Err(ApiError::conflict("Checking the site still works."));
+    }
     super::checkpoints::require_change(&state, &project).await?;
     if let Some(p) = state.projects.get(&project).await {
         state.chats.set_auto_approve(&project, p.auto_approve);
     }
     if !state.chats.is_live(&project, &chat) {
+        // A resumed sync must keep editing its worktree, not the writer's draft.
+        let cwd = agent_cwd(project_dir, &record)?;
         ensure_agent(&state, &project, &chat, &cwd, &record).await?;
     }
     state
@@ -337,6 +392,9 @@ pub async fn post_message(
         .await
         .map_err(chat_error)?;
     touch(&state, &project, &chat, Some(&req.text));
+    if record.kind == RecordKind::Sync {
+        crate::changes::sync_chat::watch_turn(&state, &project, &chat);
+    }
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -457,6 +515,21 @@ struct StreamState {
     seen: usize,
 }
 
+/// Whether a chat with no live subscription is already final: its record is
+/// gone, or it is a sync that reached a terminal phase. Such a stream must end
+/// rather than poll forever; the final status chunk was broadcast before the
+/// agent was forgotten. A `working`/`checking` sync (a restart, or an agent that
+/// starts on the next message) is not final and keeps waiting.
+fn stream_is_final(state: &AppState, project: &str, chat: &str) -> bool {
+    match history::get(&state_dir(state), project, chat) {
+        None => true,
+        Some(record) => record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.phase.is_terminal()),
+    }
+}
+
 /// `GET /api/chat/{project}/{chat}/stream` — replay, then live chunks, until the client leaves.
 pub async fn stream_chat(
     State(state): State<AppState>,
@@ -495,6 +568,11 @@ pub async fn stream_chat(
                     | Err(broadcast::error::RecvError::Closed) => return None,
                 },
                 None => {
+                    // Nothing is live: wait for an agent to start, unless this
+                    // chat can never produce another chunk.
+                    if stream_is_final(&state.st, &state.project, &state.chat) {
+                        return None;
+                    }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     if let Some(sub) = state.st.chats.subscribe(&state.project, &state.chat) {
                         state.replay = sub.replay.into_iter().skip(state.seen).collect();

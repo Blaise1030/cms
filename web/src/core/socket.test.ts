@@ -39,6 +39,7 @@ describe("decodeEvent", () => {
       { type: "fs.change", projectId: "p", path: "a.md", kind: "modify" },
       { type: "checkpoint.blocked", projectId: "p", reason: "main" },
       { type: "chat.turn", projectId: "p", chatId: "c1" },
+      { type: "sync.changed", projectId: "p", conflictSessionId: "s1", chatId: "c1", phase: "working" },
       { type: "preview.reload", projectId: "p" },
       { type: "content.refresh", projectId: "p" },
       { type: "events.lagged", missed: 3 },

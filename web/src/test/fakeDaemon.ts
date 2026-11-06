@@ -11,6 +11,7 @@ export function createFakeDaemon(api: Record<string, unknown> = {}) {
       previewUrl: (id: string) => `http://127.0.0.1:7800/preview/${id}/`,
       attachmentUrl: (project: string, name: string) =>
         `http://127.0.0.1:7800/api/chat/${project}/attachments/${name}`,
+      changesSyncNeeded: async () => true,
       ...api,
     },
     config: ref({ origin: "http://127.0.0.1:7800" }),

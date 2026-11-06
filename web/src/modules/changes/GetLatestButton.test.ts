@@ -55,4 +55,22 @@ describe("GetLatestButton", () => {
     await flushPromises();
     expect(w.find("[data-testid='get-latest']").attributes("disabled")).toBeUndefined();
   });
+
+  it("is disabled when there is nothing to sync", async () => {
+    const { w } = mountButton();
+    const store = useChangesStore();
+    store.syncNeeded = false;
+    await flushPromises();
+    const button = w.find("[data-testid='get-latest']");
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toBe("Already up to date");
+  });
+
+  it("stays enabled while the sync state is unknown", async () => {
+    const { w } = mountButton();
+    const store = useChangesStore();
+    store.syncNeeded = null;
+    await flushPromises();
+    expect(w.find("[data-testid='get-latest']").attributes("disabled")).toBeUndefined();
+  });
 });

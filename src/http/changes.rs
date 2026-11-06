@@ -4,8 +4,6 @@
 //! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`,
 //! `POST /api/changes/{branch}/publish`.
 
-use std::collections::BTreeMap;
-
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, State};
@@ -15,15 +13,15 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::chat::state_dir;
 use super::{project_dir, query_or_badreq};
-use crate::changes::auto_resolve::JobContext;
 use crate::changes::conflicts::{self, Choice};
+use crate::changes::sync_chat;
 use crate::changes::{self, PrMerge};
+use crate::chat::history::{self, SyncPhase};
 use crate::conflict_preview::{PreviewState, Source};
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
-use crate::projects::STATE_DIR;
-use crate::providers;
+use crate::github::{pr_body, pr_title, BranchProtection, DeployState, PrRef, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -228,14 +226,18 @@ pub async fn share(
         .get(&req.project)
         .await
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
-    let repo = project.repo.ok_or_else(|| {
+    let repo = project.repo.clone().ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
-    let dir = project.dir;
-    let change = changes::get(&dir, &branch).await?;
-    let env = state.github.git_env().await?;
-    changes::push(&dir, &branch, &env).await?;
-
+    let change = changes::get(&project.dir, &branch).await?;
+    if let Some(conflict) = push_after_combining(&state, &project, &branch).await? {
+        return Ok(Json(json!({
+            "branch": change.branch,
+            "title": change.title,
+            "prUrl": null,
+            "conflict": { "branch": branch, "sessionId": conflict.id },
+        })));
+    }
     let pr = match state.github.find_pr(&repo, &branch).await? {
         Some(existing) => existing,
         None => {
@@ -513,127 +515,94 @@ pub async fn finish_conflict(
     Ok(Json(json!({ "commit": commit })))
 }
 
-/// Manual choices, finishing and abandoning would race the agent's job on the same session.
+/// Manual choices, finishing and abandoning would race the live combine on the
+/// same session.
 async fn not_combining(state: &AppState, id: &str) -> Result<(), ApiError> {
-    if state.auto_resolve.is_running(id).await {
+    if sync_chat::active_for_session(state, id).is_some() {
         return Err(ApiError::conflict("Combining is in progress."));
     }
     Ok(())
 }
 
 #[derive(Deserialize)]
-struct AutoRequest {
+struct SyncRequest {
     project: String,
     provider: String,
 }
 
-/// `POST /api/changes/conflicts/{id}/auto` `{ project, provider }` → `{ started: true }`.
-/// Hands the conflict to a headless agent; progress via `GET …/auto` and `changes.auto_resolve`.
-pub async fn start_auto(
+/// `POST /api/changes/conflicts/{id}/sync` `{ project, provider }` → `{ chatId }`.
+/// Opens the chat that combines this change with the latest site.
+pub async fn start_sync(
     State(state): State<AppState>,
     Path(id): Path<String>,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    let req: AutoRequest = serde_json::from_slice(&body).map_err(|e| {
+    let req: SyncRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!(
             "expected JSON body {{\"project\": string, \"provider\": string}}: {e}"
         ))
     })?;
-    let session = project_session(&state, &req.project, &id).await?;
-    let provider = providers::load(state.config.agents_config.as_deref())?
-        .into_iter()
-        .find(|p| p.id == req.provider)
-        .ok_or_else(|| ApiError::badreq(format!("unknown provider: {}", req.provider)))?;
-    state
-        .auto_resolve
-        .start(JobContext {
-            project_id: req.project,
-            project_dir: session.dir,
-            session_id: id,
-            provider,
-            author: state.github.identity().await,
-            state_dir: state.config.projects_dir.join(STATE_DIR),
-            events: state.events.clone(),
-            sessions: state.conflicts.clone(),
-            previews: state.conflict_previews.clone(),
-        })
-        .await?;
-    Ok(Json(json!({ "started": true })))
+    let chat = sync_chat::start(&state, &req.project, &id, &req.provider).await?;
+    Ok(Json(json!({ "chatId": chat })))
 }
 
-/// The session is gone once a job succeeds or the session expires, so a job started by
-/// `project` also proves ownership. `idle_ok` lets a session with neither through.
-async fn job_owner(
-    state: &AppState,
-    project: &str,
-    id: &str,
-    idle_ok: bool,
-) -> Result<(), ApiError> {
-    project_dir(state, project).await?;
-    if state.conflicts.get(id).await.is_ok() {
-        return project_session(state, project, id).await.map(drop);
-    }
-    match state.auto_resolve.project_of(id).await {
-        Some(owner) if owner == project => Ok(()),
-        None if idle_ok => Ok(()),
-        _ => Err(ApiError::enoent("conflict session not found")),
-    }
+#[derive(Deserialize)]
+struct EndSyncRequest {
+    project: String,
 }
 
-/// `GET /api/changes/conflicts/{id}/auto?project=` → the job's status, `idle` when none.
-pub async fn auto_status(
+/// `POST /api/changes/conflicts/{id}/sync/{chat}/end` `{ project }` → 204.
+/// Only the project owning the chat may end it, and only for the session it
+/// records; a chat id from another project or session is not found.
+pub async fn end_sync(
+    State(state): State<AppState>,
+    Path((id, chat)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    let req: EndSyncRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
+    })?;
+    project_dir(&state, &req.project).await?;
+    let owned = history::get(&state_dir(&state), &req.project, &chat).is_some_and(|record| {
+        record
+            .sync
+            .as_ref()
+            .is_some_and(|st| st.conflict_session_id == id)
+    });
+    if !owned {
+        return Err(ApiError::enoent("no sync in progress"));
+    }
+    sync_chat::end(
+        &state,
+        &req.project,
+        &chat,
+        SyncPhase::Ended,
+        sync_chat::ENDED,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /api/changes/conflicts/{id}/sync?project=` → `{ chatId, phase }` for the
+/// live sync of this session. 404 when this project has none; another project's
+/// live sync is never disclosed.
+pub async fn sync_status(
     State(state): State<AppState>,
     Path(id): Path<String>,
     q: Result<Query<ProjectQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let q = query_or_badreq(q)?;
-    job_owner(&state, &q.project, &id, true).await?;
-    Ok(Json(match state.auto_resolve.status(&id).await {
-        Some(status) => serde_json::to_value(status).map_err(|e| ApiError::io(e.to_string()))?,
-        None => json!({
-            "sessionId": id,
-            "state": "idle",
-            "stage": "",
-            "questions": [],
-            "summary": null,
-            "error": null,
-        }),
-    }))
-}
-
-#[derive(Deserialize)]
-struct AnswersRequest {
-    project: String,
-    answers: BTreeMap<String, String>,
-}
-
-/// `POST /api/changes/conflicts/{id}/auto/answers` `{ project, answers: { qid: text } }`.
-pub async fn answer_auto(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    body: Bytes,
-) -> Result<Json<Value>, ApiError> {
-    let req: AnswersRequest = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!(
-            "expected JSON body {{\"project\": string, \"answers\": object}}: {e}"
-        ))
-    })?;
-    job_owner(&state, &req.project, &id, false).await?;
-    state.auto_resolve.answer(&id, req.answers).await?;
-    Ok(Json(json!({ "ok": true })))
-}
-
-/// `POST /api/changes/conflicts/{id}/auto/cancel` `{ project }`.
-pub async fn cancel_auto(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    body: Bytes,
-) -> Result<Json<Value>, ApiError> {
-    let req: UpdateRequest = serde_json::from_slice(&body)
-        .map_err(|e| ApiError::badreq(format!("invalid project: {e}")))?;
-    job_owner(&state, &req.project, &id, false).await?;
-    state.auto_resolve.cancel(&id).await?;
-    Ok(Json(json!({ "ok": true })))
+    project_dir(&state, &q.project).await?;
+    let record = sync_chat::active_for_session(&state, &id)
+        .filter(|record| history::get(&state_dir(&state), &q.project, &record.id).is_some())
+        .ok_or_else(|| ApiError::enoent("no sync in progress"))?;
+    let phase = record
+        .sync
+        .as_ref()
+        .map(|st| st.phase)
+        .ok_or_else(|| ApiError::enoent("no sync in progress"))?;
+    let phase = serde_json::to_value(phase).map_err(|e| ApiError::io(e.to_string()))?;
+    Ok(Json(json!({ "chatId": record.id, "phase": phase })))
 }
 
 pub async fn abandon_conflict(
@@ -717,13 +686,77 @@ pub async fn status(
     let Some(repo) = project.repo else {
         return Ok(Json(json!({ "pr": null })));
     };
-    let pr = state.github.pr_status(&repo, &branch).await?;
+    let mut pr = state.github.pr_status(&repo, &branch).await?;
+    if let Some(pr) = pr.as_mut() {
+        pr.up_to_date = changes::tip_is(&project.dir, &branch, &pr.head_sha).await;
+    }
     // A PR for other commits belongs to an earlier change that had this name.
     let pr = match pr {
         Some(pr) if changes::pr_matches(&project.dir, &branch, &pr.head_sha).await => Some(pr),
         _ => None,
     };
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// Query of `GET /api/projects/{id}/deploy`.
+#[derive(Deserialize)]
+pub struct DeployQuery {
+    /// The commit the publish merged; the deploy that ships it runs on this.
+    pub sha: String,
+}
+
+/// `GET /api/projects/{id}/deploy?sha=` → `{ state }`. Whether the deploy of `sha` has
+/// shipped: `building`, `live`, `failed`, or `unknown`. `unknown` for a project without a
+/// GitHub repo, and never an error for a GitHub that can't be read — a publish must not look
+/// failed because its deploy status couldn't be checked.
+pub async fn deploy(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<DeployQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    if !is_full_sha(&q.sha) {
+        return Err(ApiError::badreq("expected a full commit sha"));
+    }
+    let project = state
+        .projects
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+    let deployed = match project.repo {
+        Some(repo) => state.github.deploy_state(&repo, &q.sha).await,
+        None => DeployState::Unknown,
+    };
+    Ok(Json(json!({ "state": deployed })))
+}
+
+/// GitHub commit shas are 40 hex characters; anything else can't name a deploy.
+fn is_full_sha(sha: &str) -> bool {
+    sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// `GET /api/changes/sync?project=` → `{ needed }`. False when Get latest would do nothing:
+/// GitHub's `main` is already contained in local `main`, and every draft contains it.
+/// Unreadable or unreachable GitHub reports true, so the Sync button is never wrongly disabled.
+pub async fn sync(
+    State(state): State<AppState>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    let remote_main = match project.repo.as_deref() {
+        Some(repo) => match state.github.main_head(repo).await {
+            Ok(sha) => Some(sha),
+            Err(_) => return Ok(Json(json!({ "needed": true }))),
+        },
+        None => None,
+    };
+    let needed = changes::needs_latest(&project.dir, remote_main.as_deref()).await;
+    Ok(Json(json!({ "needed": needed })))
 }
 
 /// `POST /api/changes/{branch}/ready` `{ project }` → `{ pr: { number, url, state, checks,
@@ -747,7 +780,8 @@ pub async fn ready(
     let repo = project.repo.ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
-    let pr = state.github.mark_ready_for_review(&repo, &branch).await?;
+    let mut pr = state.github.mark_ready_for_review(&repo, &branch).await?;
+    pr.up_to_date = changes::tip_is(&project.dir, &branch, &pr.head_sha).await;
     Ok(Json(json!({ "pr": pr })))
 }
 
@@ -771,14 +805,19 @@ pub async fn publish(
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
     // Only this project's own changes: never another (e.g. a teammate's) branch's PR.
     let change = changes::get(&project.dir, &branch).await?;
-    let repo = project.repo.ok_or_else(|| {
+    let repo = project.repo.clone().ok_or_else(|| {
         ApiError::badreq("this project has no GitHub remote — open a repository first")
     })?;
     // Publish the change's latest commits, not an older shared copy.
-    let env = state.github.git_env().await?;
-    changes::push(&project.dir, &branch, &env)
+    if let Some(conflict) = push_after_combining(&state, &project, &branch)
         .await
-        .map_err(|e| publish_step_error(e, true))?;
+        .map_err(|e| publish_step_error(e, true))?
+    {
+        return Ok(Json(json!({
+            "pr": null,
+            "conflict": { "branch": branch, "sessionId": conflict.id },
+        })));
+    }
     let shared = match state
         .github
         .find_pr(&repo, &branch)
@@ -810,6 +849,36 @@ pub async fn publish(
         .await
         .map_err(|e| publish_step_error(e, false))?;
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// Push a change after combining newer commits from its remote copy. A collision opens a
+/// conflict session for the writer's assistant instead of failing the push.
+async fn push_after_combining(
+    state: &AppState,
+    project: &crate::projects::Project,
+    branch: &str,
+) -> Result<Option<changes::conflict_sessions::ConflictSession>, ApiError> {
+    let env = state.github.git_env().await?;
+    // Serialise with Get latest and other pushes on the same repo.
+    let _guard = state.conflict_updates.lock().await;
+    if !state.conflicts.list(&project.id).await.is_empty() {
+        return Err(ApiError::conflict(
+            "Couldn't publish. Finish the open combine first.",
+        ));
+    }
+    let author = state.github.identity().await;
+    match changes::integrate_remote(&project.dir, branch, &env, &author).await? {
+        changes::Integration::Ready => {
+            changes::push(&project.dir, branch, &env).await?;
+            Ok(None)
+        }
+        changes::Integration::Conflict { incoming } => Ok(Some(
+            state
+                .conflicts
+                .start(&project.dir, &project.id, branch, &incoming)
+                .await?,
+        )),
+    }
 }
 
 /// Writer-plain copy for a failed publish step: git/GitHub details never reach the

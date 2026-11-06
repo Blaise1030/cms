@@ -35,10 +35,11 @@ import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import { frameHref, framePath, readPref, writePref } from "@orso/utils";
-import { attachPicker, describeElement } from "./elementPicker";
+import { frameHref, framePath } from "@orso/utils";
+import { attachPicker, describeElement, relativeFile } from "./elementPicker";
 import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
+import { BRIDGE_TYPE, isBridgeMessage } from "./frameBridge";
 import { DESKTOP_MIN_WIDTH, frameFit } from "./frameFit";
 import { useFrameHistory } from "./frameHistory";
 import { type PageError, watchPageErrors } from "./pageErrors";
@@ -60,7 +61,19 @@ watch(
 const state = computed<DevserverState>(
   () => store.status[props.projectId] ?? props.devserver ?? "starting",
 );
-const src = computed(() => daemon.api.previewUrl(props.projectId));
+/**
+ * In a Vite dev build the UI and the framed preview share an origin, so the project's
+ * root-absolute dev URLs (`/src/…`, `/@vite/client`, …) would hit the UI's own dev server
+ * and islands never hydrate. Framing the project's dev server directly avoids that. The
+ * frame is then cross-origin, so picking and appearance go through the small bridge the
+ * orso Astro integration injects into every dev page (see `packages/astro/src/bridge.js`).
+ */
+const directFrame = computed(() => import.meta.env.DEV && (props.port ?? 0) > 0);
+const src = computed(() =>
+  directFrame.value
+    ? `http://127.0.0.1:${props.port}/preview/${encodeURIComponent(props.projectId)}/`
+    : daemon.api.previewUrl(props.projectId),
+);
 const base = computed(() => new URL(src.value, window.location.href).pathname);
 // A cross-site daemon cannot authenticate the framed preview (SameSite=Lax `wb_session`); see
 // `previewUrl` in core/api.ts. Explain instead of showing a wall of 401s; the user may override
@@ -103,8 +116,7 @@ const shell = ref<HTMLElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const history = useFrameHistory();
 /** The last path the frame showed, per project, so the preview reopens where the user left it. */
-const lastPathKey = (projectId: string) => `orso.preview.path.${projectId}`;
-const lastPath = ref(readPref(lastPathKey(props.projectId)) ?? "/");
+const lastPath = computed(() => store.framePathFor(props.projectId));
 /** What the address bar shows: the frame's page, or the restored one until the frame reports in. */
 const currentPath = computed(() =>
   history.entries.value.length ? history.current.value : lastPath.value,
@@ -118,7 +130,6 @@ watch(
   src,
   () => {
     history.reset();
-    lastPath.value = readPref(lastPathKey(props.projectId)) ?? "/";
     startHref.value = hrefFor(lastPath.value);
   },
 );
@@ -126,16 +137,16 @@ watch(
 watch(
   () => history.entries.value.length && history.current.value,
   (path) => {
-    if (path) writePref(lastPathKey(props.projectId), path);
+    if (path) store.setFramePath(props.projectId, path);
   },
 );
 
 watch(
   () => store.reloadNonce,
   () => {
-    if (history.entries.value.length) {
-      startHref.value = hrefFor(history.current.value);
-    }
+    // `currentPath` falls back to the last page the frame reported, which is the only source for
+    // a cross-origin frame; without it a reload would return the reader to the address it started at.
+    startHref.value = hrefFor(currentPath.value);
   },
 );
 
@@ -149,9 +160,51 @@ function frameWindow(): Window | null {
   }
 }
 
+// --- Direct-frame bridge -------------------------------------------------------------------------
+
+/** The dev-server origin the bridge runs on; null while framing the proxied preview. */
+const bridgeOrigin = computed(() => (directFrame.value ? new URL(src.value).origin : null));
+
+/** Drive the direct frame's page over `postMessage` (the proxied frame is driven via its DOM). */
+function postToFrame(op: string, extra: Record<string, unknown> = {}) {
+  const origin = bridgeOrigin.value;
+  if (!origin) return;
+  frame.value?.contentWindow?.postMessage({ type: BRIDGE_TYPE, op, ...extra }, origin);
+}
+
+function onFrameMessage(e: MessageEvent) {
+  if (!e.source || e.source !== frame.value?.contentWindow) return;
+  if (!isBridgeMessage(e.data)) return;
+  if (e.data.op === "path") {
+    // A cross-origin frame only reveals its page this way: it feeds the address bar and the
+    // reload target, and it is the only way the back/forward stack learns where the reader went.
+    const path = framePath(e.data.url, base.value);
+    store.setFramePath(props.projectId, path);
+    history.visit(path);
+    return;
+  }
+  if (e.data.op === "cancel") {
+    store.setPicking(false);
+    return;
+  }
+  const element = { ...e.data.element };
+  const file = element.file;
+  store.pick(file ? { ...element, file: relativeFile(file, props.projectId) } : element);
+}
+
+useEventListener(window, "message", onFrameMessage);
+
+/** Esc leaves picking wherever the focus is; the page handles its own copy inside the frame. */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && store.picking) store.setPicking(false);
+}
+
+useEventListener(window, "keydown", onKeydown);
+
 function onLoad() {
   const win = frameWindow();
   syncPicker();
+  syncAppearance();
   watchErrors(win);
   if (!win) return;
   const sync = () => history.visit(framePath(win.location.href, base.value));
@@ -160,7 +213,6 @@ function onLoad() {
   win.addEventListener("popstate", sync);
   win.addEventListener("hashchange", sync);
   win.document.addEventListener("astro:page-load", sync);
-  syncAppearance();
   // Astro's router copies the next page's `<html>` attributes over ours.
   win.document.addEventListener("astro:after-swap", () => syncAppearance(true));
 }
@@ -198,6 +250,10 @@ function fixPageError() {
 // --- RTL / dark mode -----------------------------------------------------------------------------
 
 function syncAppearance(fresh = false) {
+  if (directFrame.value) {
+    postToFrame("appearance", { rtl: store.rtl, dark: store.dark });
+    return;
+  }
   const doc = frameWindow()?.document;
   if (doc) applyFrameAppearance(doc, { rtl: store.rtl, dark: store.dark }, fresh);
 }
@@ -212,6 +268,11 @@ let detachPicker: (() => void) | null = null;
 function syncPicker() {
   detachPicker?.();
   detachPicker = null;
+  if (directFrame.value) {
+    // The page owns the overlay; ask it to start or stop.
+    postToFrame(store.picking ? "pick:start" : "pick:stop");
+    return;
+  }
   if (!store.picking) return;
   const win = frameWindow();
   // Cross-origin or not yet loaded: nothing to pick from.
@@ -252,13 +313,24 @@ onBeforeUnmount(() => {
   store.setPicking(false);
 });
 
-function goBack() {
-  if (history.back()) frameWindow()?.history.back();
+/**
+ * Step the frame back/forward. A same-origin frame is driven through its own session history; a
+ * cross-origin one hides that history, so the app navigates it to the path it recorded instead.
+ */
+function step(direction: "back" | "forward") {
+  const win = frameWindow();
+  if (win) {
+    if (direction === "back" ? history.back() : history.forward()) win.history[direction]();
+    return;
+  }
+  const path = history.target(direction === "back" ? -1 : 1);
+  if (!path) return;
+  if (direction === "back") history.back(); else history.forward();
+  startHref.value = hrefFor(path);
 }
 
-function goForward() {
-  if (history.forward()) frameWindow()?.history.forward();
-}
+function goBack() { step("back"); }
+function goForward() { step("forward"); }
 
 function navigate() {
   if (draft.value === null) return;
@@ -266,7 +338,12 @@ function navigate() {
   draft.value = null;
   const win = frameWindow();
   if (win) win.location.assign(href);
-  else if (frame.value) frame.value.src = new URL(href, src.value).href;
+  else {
+    // A cross-origin (direct) frame hides its path: remember the one we asked for, so a
+    // reload or a pick session reopens the same page.
+    store.setFramePath(props.projectId, framePath(href, base.value));
+    startHref.value = new URL(href, src.value).href;
+  }
 }
 
 /**
@@ -478,7 +555,7 @@ function toggleFullscreen() {
       </TooltipProvider>
 
       <div class="relative flex min-h-0 flex-1 flex-col">
-      <div ref="viewport" class="bg-muted/30 flex min-h-0 flex-1 justify-center overflow-auto">
+      <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
         <div
           v-if="state === 'crashed'"
           class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
@@ -521,7 +598,8 @@ function toggleFullscreen() {
         <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
         <div
           v-else
-          class="h-full shrink-0 overflow-hidden"
+          class="relative h-full shrink-0 overflow-hidden"
+          data-testid="preview-canvas"
           :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
         >
           <iframe
@@ -539,6 +617,13 @@ function toggleFullscreen() {
             }"
             data-testid="preview-frame"
             @load="onLoad"
+          />
+          <!-- A device-sized frame has no visible edge against the panel; outline it. -->
+          <div
+            v-if="store.device !== 'desktop'"
+            class="border-border pointer-events-none absolute inset-0 border"
+            data-testid="preview-boundary"
+            aria-hidden="true"
           />
         </div>
       </div>

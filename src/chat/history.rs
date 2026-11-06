@@ -17,6 +17,49 @@ const MAX_RECORDS: usize = 50;
 /// Serializes read-modify-write of every history file.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
+/// What a record describes: an ordinary chat, or the chat that resolves a sync
+/// conflict. Old records predate this field and read as [`RecordKind::Chat`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordKind {
+    #[default]
+    Chat,
+    Sync,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPhase {
+    Working,
+    Checking,
+    Combined,
+    Ended,
+    Expired,
+}
+
+impl SyncPhase {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Combined | Self::Ended | Self::Expired)
+    }
+}
+
+/// Where a sync chat is: the conflict it fixes, the two sides, and its phase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncState {
+    pub conflict_session_id: String,
+    pub branch: String,
+    pub tip: String,
+    pub incoming: String,
+    pub files: Vec<String>,
+    pub phase: SyncPhase,
+    pub started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<u64>,
+    #[serde(default)]
+    pub repair_attempted: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
@@ -33,6 +76,14 @@ pub struct SessionRecord {
     pub created_at: u64,
     /// Unix milliseconds of the last start, resume or turn end.
     pub updated_at: u64,
+    /// Absent on records written before sync chats; such records are chats.
+    #[serde(default)]
+    pub kind: RecordKind,
+    /// The sync worktree the chat runs in; absent for ordinary chats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<SyncState>,
 }
 
 pub fn now_ms() -> u64 {
@@ -137,7 +188,89 @@ mod tests {
             title: None,
             created_at: updated_at,
             updated_at,
+            kind: RecordKind::Chat,
+            cwd: None,
+            sync: None,
         }
+    }
+
+    #[test]
+    fn old_records_default_to_chat() {
+        let json = r#"{"id":"a","provider":"claude","createdAt":1,"updatedAt":2}"#;
+        let r: SessionRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(r.kind, RecordKind::Chat);
+        assert!(r.cwd.is_none() && r.sync.is_none());
+    }
+
+    #[test]
+    fn sync_fields_round_trip() {
+        let r = SessionRecord {
+            id: "s1".into(),
+            provider: "fake".into(),
+            model: None,
+            agent_session_id: None,
+            title: Some("Combining About".into()),
+            created_at: 1,
+            updated_at: 2,
+            kind: RecordKind::Sync,
+            cwd: Some("/tmp/wb".into()),
+            sync: Some(SyncState {
+                conflict_session_id: "c1".into(),
+                branch: "content/page".into(),
+                tip: "a".into(),
+                incoming: "b".into(),
+                files: vec!["page.md".into()],
+                phase: SyncPhase::Working,
+                started_at: 1,
+                ended_at: None,
+                repair_attempted: false,
+            }),
+        };
+        let back: SessionRecord =
+            serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn sync_state_wire_shape() {
+        let state = SyncState {
+            conflict_session_id: "c1".into(),
+            branch: "content/page".into(),
+            tip: "a".into(),
+            incoming: "b".into(),
+            files: vec!["page.md".into()],
+            phase: SyncPhase::Working,
+            started_at: 1,
+            ended_at: Some(2),
+            repair_attempted: true,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"conflictSessionId\":\"c1\""), "{json}");
+        assert!(json.contains("\"startedAt\":1"), "{json}");
+        assert!(json.contains("\"endedAt\":2"), "{json}");
+        assert!(json.contains("\"phase\":\"working\""), "{json}");
+        assert!(json.contains("\"repairAttempted\":true"), "{json}");
+        let record = SessionRecord {
+            id: "s1".into(),
+            provider: "fake".into(),
+            model: None,
+            agent_session_id: None,
+            title: None,
+            created_at: 1,
+            updated_at: 2,
+            kind: RecordKind::Sync,
+            cwd: None,
+            sync: None,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains("\"kind\":\"sync\""), "{json}");
+        assert!(
+            !json.contains("\"cwd\":") && !json.contains("\"sync\":"),
+            "{json}"
+        );
+        assert!(!SyncPhase::Working.is_terminal());
+        assert!(SyncPhase::Combined.is_terminal() && SyncPhase::Ended.is_terminal());
+        assert!(SyncPhase::Expired.is_terminal() && !SyncPhase::Checking.is_terminal());
     }
 
     #[test]

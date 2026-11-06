@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -79,6 +79,9 @@ struct LiveChat {
     hook_token: String,
     /// A prompt is in flight (a turn is running).
     running: AtomicBool,
+    /// Bumped for every prompt dispatched. A watchdog armed for one turn can
+    /// tell that a newer turn has started, so it never stops that newer turn.
+    generation: AtomicU64,
     tx: broadcast::Sender<UiChunk>,
     history: Mutex<Vec<UiChunk>>,
     models: Mutex<Option<ModelConfig>>,
@@ -409,6 +412,7 @@ impl ChatManager {
             acp_session_id: created.session_id,
             hook_token,
             running: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
             tx: broadcast::channel(BROADCAST_CAPACITY).0,
             history: Mutex::new(transcript::load(&self.inner.state_dir, project_id, chat_id)),
             models: Mutex::new(created.models),
@@ -581,14 +585,17 @@ impl ChatManager {
         }
     }
 
-    /// Records `text` as the user's chunk and runs it as an ACP prompt.
-    /// The turn's chunks arrive through the event pump.
-    fn dispatch(&self, live: &Arc<LiveChat>, text: &str) {
+    /// Records `shown` (or `text`) as the user's chunk and runs `text` as an
+    /// ACP prompt. The turn's chunks arrive through the event pump.
+    fn dispatch(&self, live: &Arc<LiveChat>, text: &str, shown: Option<&str>, record_user: bool) {
+        live.generation.fetch_add(1, Ordering::SeqCst);
         live.running.store(true, Ordering::SeqCst);
-        live.record(UiChunk::UserText {
-            session_id: live.acp_session_id.clone(),
-            text: text.to_string(),
-        });
+        if record_user {
+            live.record(UiChunk::UserText {
+                session_id: live.acp_session_id.clone(),
+                text: shown.unwrap_or(text).to_string(),
+            });
+        }
         if live.cancel.load(Ordering::SeqCst) {
             let session_id = live.acp_session_id.clone();
             live.record(UiChunk::TurnEnd {
@@ -675,7 +682,39 @@ impl ChatManager {
         // A stop latches the chat until the user sends again.
         live.cancel.store(false, Ordering::SeqCst);
         live.client.clear_cancelled();
-        self.dispatch(&live, text);
+        self.dispatch(&live, text, None, true);
+        Ok(())
+    }
+
+    /// [`send_message`], but the transcript records `shown` instead of `prompt`.
+    /// A sync chat sends the agent its full instructions and shows the writer
+    /// only the plain-language intro.
+    pub async fn send_message_displayed(
+        &self,
+        project_id: &str,
+        chat_id: &str,
+        prompt: &str,
+        shown: &str,
+    ) -> ChatResult<()> {
+        let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
+        live.cancel.store(false, Ordering::SeqCst);
+        live.client.clear_cancelled();
+        self.dispatch(&live, prompt, Some(shown), true);
+        Ok(())
+    }
+
+    /// [`send_message`] with no user chunk at all: the prompt is the daemon's,
+    /// so the writer must never see it in the transcript.
+    pub async fn send_message_hidden(
+        &self,
+        project_id: &str,
+        chat_id: &str,
+        prompt: &str,
+    ) -> ChatResult<()> {
+        let live = self.live(project_id, chat_id).ok_or(ChatError::NotLive)?;
+        live.cancel.store(false, Ordering::SeqCst);
+        live.client.clear_cancelled();
+        self.dispatch(&live, prompt, None, false);
         Ok(())
     }
 
@@ -857,6 +896,13 @@ impl ChatManager {
     pub fn is_running(&self, project_id: &str, chat_id: &str) -> bool {
         self.live(project_id, chat_id)
             .is_some_and(|live| live.running.load(Ordering::SeqCst))
+    }
+
+    /// How many prompts this chat has dispatched. A caller that arms a timer for
+    /// one turn rereads this to see whether a newer turn has since started.
+    pub fn generation(&self, project_id: &str, chat_id: &str) -> Option<u64> {
+        self.live(project_id, chat_id)
+            .map(|live| live.generation.load(Ordering::SeqCst))
     }
 
     /// A prompt is in flight in any chat of this project. Unlike [`Self::any_live`],
@@ -1407,7 +1453,7 @@ mod tests {
         let mut events = chats.inner.events.subscribe();
         let live = chats.live("proj", "chat-1").unwrap();
         live.cancel.store(true, Ordering::SeqCst);
-        chats.dispatch(&live, "nope");
+        chats.dispatch(&live, "nope", None, true);
         assert_eq!(
             reasons.lock().unwrap().as_slice(),
             [("chat-1".to_string(), "cancelled".to_string())]
@@ -1422,6 +1468,48 @@ mod tests {
             }
         }
         assert!(saw, "cancel latch did not emit chat.turn");
+        chats.shutdown().await;
+    }
+
+    /// A sync chat runs the writer's intro as the prompt: the transcript shows
+    /// only the intro, while the agent receives the full instructions.
+    #[tokio::test]
+    async fn displayed_message_records_shown_text_only() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        chats
+            .send_message_displayed(
+                "proj",
+                "chat-1",
+                "SECRET INSTRUCTIONS",
+                "You and a teammate both changed About.",
+            )
+            .await
+            .unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(|c| matches!(c, UiChunk::TurnEnd { .. }))
+        })
+        .await;
+        let users: Vec<_> = history
+            .iter()
+            .filter_map(|c| match c {
+                UiChunk::UserText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(users, vec!["You and a teammate both changed About."]);
+        assert!(
+            history
+                .iter()
+                .any(|c| matches!(c, UiChunk::TextDelta { text, .. }
+                if text.contains("fake reply: SECRET INSTRUCTIONS"))),
+            "the agent did not receive the prompt: {history:?}"
+        );
         chats.shutdown().await;
     }
 }

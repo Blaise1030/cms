@@ -135,6 +135,27 @@ describe("createApi", () => {
     );
   });
 
+  it("builds sync chat routes", async () => {
+    const fetchMock = vi.fn<FetchLike>(async () => json({}));
+    const a = api(fetchMock, "tok");
+    fetchMock.mockResolvedValueOnce(json({ chatId: "c1" }));
+    await expect(a.startSyncChat("my proj", "s1", "claude")).resolves.toEqual({ chatId: "c1" });
+    fetchMock.mockResolvedValueOnce(json({ chatId: "c1", phase: "working" }));
+    await expect(a.syncChatStatus("my proj", "s1")).resolves.toEqual({ chatId: "c1", phase: "working" });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(a.endSyncChat("my proj", "s1", "c1")).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([url, init]) => `${init!.method} ${url}`)).toEqual([
+      "POST http://127.0.0.1:7800/api/changes/conflicts/s1/sync",
+      "GET http://127.0.0.1:7800/api/changes/conflicts/s1/sync?project=my+proj",
+      "POST http://127.0.0.1:7800/api/changes/conflicts/s1/sync/c1/end",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      project: "my proj",
+      provider: "claude",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({ project: "my proj" });
+  });
+
   it("accepts the empty 202 body from sending a chat message", async () => {
     const fetchMock = vi.fn<FetchLike>(async () => new Response(null, { status: 202 }));
     await expect(api(fetchMock).sendChatMessage("p", "c1", "hello")).resolves.toBeUndefined();

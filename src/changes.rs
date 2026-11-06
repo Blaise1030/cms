@@ -8,9 +8,9 @@ use tokio::process::Command;
 use crate::error::ApiError;
 use crate::projects;
 
-pub mod auto_resolve;
 pub mod conflict_sessions;
 pub mod conflicts;
+pub mod sync_chat;
 
 /// An open change branch plus its display title.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -199,6 +199,89 @@ pub async fn require_change(dir: &Path, github_repo: Option<&str>) -> Result<(),
         ));
     }
     Ok(())
+}
+
+/// What a change branch needs before it can be pushed over its remote copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Integration {
+    /// Nothing newer on the remote, or its commits were combined cleanly.
+    Ready,
+    /// The remote has commits that collide with the change's own; resolve before pushing.
+    Conflict { incoming: String },
+}
+
+/// Bring a change branch up to date with its remote copy before pushing, so a shared change
+/// never needs a force-push. Remote commits are merged in (never replayed): a clean merge
+/// commits with `author`, a collision is reported with the remote tip for a conflict session.
+pub async fn integrate_remote(
+    dir: &Path,
+    branch: &str,
+    env: &[(String, String)],
+    author: &crate::git::Identity,
+) -> Result<Integration, ApiError> {
+    if !branch.starts_with("content/") {
+        return Err(ApiError::badreq("not a change branch"));
+    }
+    if !branch_exists(dir, branch).await? {
+        return Err(ApiError::enoent(format!("no such branch: {branch}")));
+    }
+    if !has_remote(dir, "origin").await? {
+        return Ok(Integration::Ready);
+    }
+    let lock = crate::git::lock_for(dir);
+    let _guard = lock.lock().await;
+    let local = rev_parse(dir, &format!("refs/heads/{branch}")).await?;
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let fetched = run_env(
+        dir,
+        &[
+            "fetch",
+            "origin",
+            &format!("+refs/heads/{branch}:{remote_ref}"),
+        ],
+        env,
+    )
+    .await;
+    if let Err(error) = fetched {
+        // No such branch on the remote yet (the first push creates it); a stale tracking ref
+        // means the fetch itself failed, so report that instead of pushing blindly.
+        if rev_parse(dir, &remote_ref).await.is_err() {
+            return Ok(Integration::Ready);
+        }
+        return Err(error);
+    }
+    let remote = rev_parse(dir, &remote_ref).await?;
+    if remote == local || is_ancestor(dir, &remote, &local).await {
+        return Ok(Integration::Ready);
+    }
+    if is_ancestor(dir, &local, &remote).await {
+        advance_change(dir, branch, &local, &remote).await?;
+        return Ok(Integration::Ready);
+    }
+    let Some(tree) = merge_tree(dir, &local, &remote).await? else {
+        return Ok(Integration::Conflict { incoming: remote });
+    };
+    let commit = conflicts::merge_commit(
+        dir,
+        &tree,
+        &local,
+        &remote,
+        author,
+        &format!("Merge origin/{branch}"),
+    )
+    .await?;
+    advance_change(dir, branch, &local, &commit).await?;
+    Ok(Integration::Ready)
+}
+
+/// Move `refs/heads/{branch}` to `target` (a descendant of `old`), updating the working tree
+/// when it is checked out. Uncommitted edits and untracked files in the way are refused.
+async fn advance_change(dir: &Path, branch: &str, old: &str, target: &str) -> Result<(), ApiError> {
+    if current_branch(dir).await? == branch {
+        ensure_clean(dir, "updating this change from GitHub").await?;
+        ensure_no_untracked_in_the_way(dir, target).await?;
+    }
+    conflicts::advance_branch(dir, branch, old, target).await
 }
 
 /// Push `branch` to `origin` (authenticated via `env` from [`crate::github::GithubAuth::git_env`]).
@@ -715,6 +798,38 @@ pub async fn pr_matches(dir: &Path, branch: &str, head_sha: &str) -> bool {
     !head_sha.is_empty() && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
 }
 
+/// Whether `branch`'s tip is exactly `sha` (there is nothing local to push).
+pub async fn tip_is(dir: &Path, branch: &str, sha: &str) -> bool {
+    !sha.is_empty()
+        && rev_parse(dir, &format!("refs/heads/{branch}"))
+            .await
+            .is_ok_and(|tip| tip == sha)
+}
+
+/// Whether Get latest would change anything: GitHub's `main` has commits local `main` lacks,
+/// or a change branch does not contain local `main` yet. `remote_main` is GitHub's tip; `None`
+/// for a project without a remote (only the branch check applies). Unreadable state counts as
+/// "yes", so a sync button is never wrongly disabled.
+pub async fn needs_latest(dir: &Path, remote_main: Option<&str>) -> bool {
+    let Ok(main) = rev_parse(dir, "refs/heads/main").await else {
+        return true;
+    };
+    if let Some(remote) = remote_main {
+        if remote != main && !is_ancestor(dir, remote, &main).await {
+            return true;
+        }
+    }
+    let Ok(branches) = change_branches(dir).await else {
+        return true;
+    };
+    for branch in branches {
+        if !is_ancestor(dir, &main, &branch).await {
+            return true;
+        }
+    }
+    false
+}
+
 async fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
     run(dir, &["merge-base", "--is-ancestor", ancestor, descendant])
         .await
@@ -767,14 +882,30 @@ pub async fn cleanup(
     let latest = if fetched { "origin/main" } else { "main" };
 
     if !merged_by_pr && !merged_into(dir, &tip, latest).await? {
+        // GitHub may be unavailable; the branch as pushed is the PR's head in practice, so a
+        // merged remote-tracking branch still proves the merge and names the real reason.
+        let pushed_head = rev_parse(dir, &format!("refs/remotes/origin/{branch}"))
+            .await
+            .ok()
+            .map(|sha| sha.trim().to_string())
+            .filter(|sha| !sha.is_empty());
+        let merged_on_remote = match pushed_head {
+            Some(head) => merged_into(dir, &head, latest).await.unwrap_or(false),
+            None => false,
+        };
+        let merged_before_tip = merged_on_remote
+            || match &pr {
+                PrMerge::Merged { head_sha } => pr_matches(dir, branch, head_sha).await,
+                _ => false,
+            };
+        if merged_before_tip {
+            return Err(ApiError::conflict(
+                "This change has edits made after its pull request was merged — \
+                 share them before cleaning up",
+            ));
+        }
         return Err(match pr {
             PrMerge::Unknown(e) => e,
-            PrMerge::Merged { head_sha } if pr_matches(dir, branch, &head_sha).await => {
-                ApiError::conflict(
-                    "This change has edits made after its pull request was merged — \
-                     share them before cleaning up",
-                )
-            }
             _ => ApiError::conflict(
                 "This change has not been merged yet — merge its pull request first",
             ),

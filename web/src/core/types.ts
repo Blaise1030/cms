@@ -96,6 +96,32 @@ export interface PrStatus {
   checks: ChecksState;
   /** Deployed preview of the PR head, once the template's workflow published it. */
   previewUrl: string | null;
+  /** GitHub can merge the PR as it stands; null while GitHub is still working it out. */
+  mergeable: boolean | null;
+  /** GitHub's finer-grained merge state (`clean`, `dirty`, `blocked`, `behind`, …). */
+  mergeableState: string | null;
+  /** The local branch tip is the PR head: there is nothing new to push. */
+  upToDate: boolean;
+}
+
+/** Whether the deploy a publish set off has shipped. */
+export type DeployState = "unknown" | "building" | "live" | "failed";
+
+/** `state` of `GET /api/projects/{id}/deploy`. */
+export interface DeployStatus {
+  state: DeployState;
+}
+
+/** A merged pull request, with the commit whose deploy ships the change. */
+export interface PublishedPr extends PrStatus {
+  /** The merge commit on the site's main line; absent when GitHub didn't report one. */
+  mergeSha?: string | null;
+}
+
+/** Push needed newer commits from this change's remote copy combined in first. */
+export interface PendingCombine {
+  branch: string;
+  sessionId: string;
 }
 
 /** Shown after sharing when the repo's `main` has no branch protection. */
@@ -122,26 +148,6 @@ export interface ChangesUpdate {
   conflictSessions?: Record<string, string>;
   /** Conflicts the visual resolver cannot safely open. */
   conflictErrors?: Record<string, string>;
-}
-
-/** A question the agent needs answered before it can finish resolving. */
-export interface AutoResolveQuestion {
-  id: string;
-  text: string;
-  options: string[];
-}
-
-/** `idle` when the session has no auto-resolve job. */
-export type AutoResolveState = "idle" | "preparing" | "resolving" | "needs_input" | "verifying" | "done" | "failed";
-
-/** Result of `GET /api/changes/conflicts/{id}/auto`. */
-export interface AutoResolveStatus {
-  sessionId: string;
-  state: AutoResolveState;
-  stage: string;
-  questions: AutoResolveQuestion[];
-  summary: string | null;
-  error: string | null;
 }
 
 export type ConflictChoice = "yours" | "latest" | "both";
@@ -190,10 +196,16 @@ export interface ConflictPreviews {
 export interface SharedChange {
   branch: string;
   title: string;
-  prUrl: string;
+  /** Null when the push needs combining with newer commits from the remote copy. */
+  prUrl: string | null;
+  /** Set instead of `prUrl` when someone else moved this change first. */
+  conflict?: PendingCombine;
   /** Null when `main` is protected, unknown (no admin rights) or the hint was dismissed. */
   protectionHint?: ProtectionHint | null;
 }
+
+/** Result of `POST /api/changes/{branch}/publish`: the merged PR, or a combine to finish. */
+export type PublishResult = PublishedPr | null | { conflict: PendingCombine };
 
 export interface TreeEntry {
   name: string;
@@ -252,6 +264,8 @@ export interface FsChangeEvent {
 export interface ChatSummary {
   id: string;
   provider: string;
+  /** Whether this chat is a conversation or a combine of a draft with the live site. */
+  kind: "chat" | "sync";
   model?: string | null;
   title?: string | null;
   /** Unix milliseconds. */
@@ -260,6 +274,27 @@ export interface ChatSummary {
   live: boolean;
   /** A prompt is in flight. */
   running: boolean;
+  /** The combine this sync chat is doing; absent or null for ordinary chats. */
+  sync?: SyncState | null;
+}
+
+/** Where a sync chat is; mirrors the backend `SyncPhase`. */
+export type SyncPhase = "working" | "checking" | "combined" | "ended" | "expired";
+
+/** The combine a sync chat is doing: its conflict session, the two sides, and its phase. */
+export interface SyncState {
+  conflictSessionId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  files: string[];
+  phase: SyncPhase;
+  /** Unix milliseconds. */
+  startedAt: number;
+  /** Unix milliseconds; present once the chat reached a terminal phase. */
+  endedAt?: number;
+  /** The one automatic repair after a failed build has been attempted. */
+  repairAttempted: boolean;
 }
 
 /** One line of a chat transcript, as `GET /api/chat/{project}/{chat}` returns it. */
@@ -286,7 +321,8 @@ export type UiChunk =
       summary?: string | null;
       files: string[];
       blocked?: string | null;
-    };
+    }
+  | { type: "sync_status"; phase: SyncPhase; text: string };
 
 /** `GET /api/chat/{project}/{chat}`. */
 export interface ChatHistory {
@@ -336,8 +372,14 @@ export interface ContentRefreshEvent {
   projectId: string;
 }
 
-/** Progress of an agent auto-resolving a conflict session. */
-export type ChangesAutoResolveEvent = { type: "changes.auto_resolve"; projectId: string } & AutoResolveStatus;
+/** A sync chat was opened or moved to a new phase. */
+export interface SyncChangedEvent {
+  type: "sync.changed";
+  projectId: string;
+  conflictSessionId: string;
+  chatId: string;
+  phase: SyncPhase;
+}
 
 /** The daemon finished a Get latest that had skipped the current change (agent went idle). */
 export interface ChangesUpdatedEvent {
@@ -359,12 +401,12 @@ export type DaemonEvent =
   | FsChangeEvent
   | CheckpointBlockedEvent
   | ChangesUpdatedEvent
-  | ChangesAutoResolveEvent
   | PreviewReloadEvent
   | PreviewDepsInstallingEvent
   | ContentRefreshEvent
   | ChatTurnEvent
   | ChatPermissionEvent
+  | SyncChangedEvent
   | EventsLaggedEvent;
 
 export type DaemonEventType = DaemonEvent["type"];
@@ -468,7 +510,7 @@ export interface ContentEntryDelete { project: string; collection: string; id: s
 export interface ContentReference { collection: string; id: string; path: string; field: string }
 /** A local Markdown link to the entry's public URL; reported, never rewritten. */
 export interface ContentProseLink { collection: string; id: string; path: string; url: string; line: number }
-/** Dry-run impact shown before a rename or delete is confirmed. */
+/** Dry-run impact shown before a delete is confirmed. */
 export interface ContentImpact { references: ContentReference[]; assets: string[]; proseLinks: ContentProseLink[] }
 export interface ContentEntrySummary { collection: string; id: string; path: string; kind: "json" | "markdown" | "mdx" }
 export interface ContentEntry extends ContentEntrySummary {

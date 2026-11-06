@@ -70,9 +70,8 @@ const offUpdated = daemon.on("changes.updated", (e) => {
   report(e.result);
   void changes.applyUpdate(props.id, e.result).catch(() => undefined);
 });
-const offAutoResolve = daemon.on("changes.auto_resolve", (e) => {
-  if (e.projectId !== props.id) return;
-  void changes.onAutoResolve(props.id, e).catch(() => undefined);
+const offSync = daemon.on("sync.changed", (e) => {
+  void changes.onSyncChanged(props.id, e).catch(() => undefined);
 });
 const offTurn = daemon.on("chat.turn", (e) => {
   if (e.projectId !== props.id) return;
@@ -81,7 +80,7 @@ const offTurn = daemon.on("chat.turn", (e) => {
 onBeforeUnmount(() => {
   offBlocked();
   offUpdated();
-  offAutoResolve();
+  offSync();
   offTurn();
   changes.stopStatusPolling();
 });

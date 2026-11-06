@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { toast } from "vue-sonner";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { AutoResolveStatus, Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, PrStatus, ProtectionHint } from "@/core/types";
+import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, DeployState, PrStatus, ProtectionHint, SyncChangedEvent } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
@@ -12,12 +12,10 @@ import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
-import { getLatest as syncAgain } from "./getLatest";
 
-const SYNC_UNAVAILABLE = "Your AI assistant isn't available.";
+const SYNC_UNAVAILABLE = "Your assistant isn't available.";
 const SYNC_START_FAILED = "Couldn't start combining. Please try again.";
 const SYNC_REQUEST_FAILED = "Something went wrong. Please try again.";
-const SYNC_DRAFT_MOVED = "Your draft changed while combining. Please sync again.";
 
 /** A switch held until the user confirms, because a chat turn is running. */
 interface PendingSwitch {
@@ -27,8 +25,28 @@ interface PendingSwitch {
   toTitle: string;
 }
 
+/** A share/publish that hit a colliding remote copy, retried once combining succeeds. */
+interface PendingPush {
+  kind: "share" | "publish";
+  projectId: string;
+  branch: string;
+}
+
 /** How often the active change's PR status is re-read while it has a PR. */
 export const STATUS_POLL_MS = 20_000;
+
+/** How often a publish's deploy is re-read while it's still running. */
+export const DEPLOY_POLL_MS = 5_000;
+
+/** Stop watching a deploy after this long; it may still land, so say only that. */
+export const DEPLOY_TIMEOUT_MS = 10 * 60_000;
+
+const DEPLOY_WAITING = "Published. Waiting for the site to update…";
+const DEPLOY_FAILED = "Published, but the site didn't update. Ask an owner to check it.";
+const DEPLOY_SLOW = "Published. The site is taking longer than usual to update.";
+const DEPLOY_UNVERIFIED = "Published. The site should update shortly.";
+/** One toast for the deploy being watched, so a later publish updates it instead of stacking. */
+const DEPLOY_TOAST_ID = "orso-deploy";
 
 export const useChangesStore = defineStore("changes", () => {
   const daemon = useDaemon();
@@ -55,19 +73,29 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /** The deploy a publish set off; null when none is being watched. */
+  const deploy = ref<DeployState | null>(null);
+  /** Whether Get latest would change anything; null while unknown (the button stays enabled). */
+  const syncNeeded = ref<boolean | null>(null);
   const conflictSessions = ref<ConflictSession[]>([]);
   const selectedConflictId = ref<string | null>(null);
   const currentConflict = ref<ConflictSession | null>(null);
   const candidate = ref<ConflictCandidate | null>(null);
   const conflictLoading = ref(false);
   const conflictError = ref<string | null>(null);
-  /** The conflict session the auto-resolve dialog shows; null when closed. */
+  /** The conflict session whose sync chat is open; null when there is none. */
   const syncSessionId = ref<string | null>(null);
-  const syncStatus = ref<AutoResolveStatus | null>(null);
+  /** A plain sentence about why starting or stopping a combine failed. */
+  const syncError = ref<string | null>(null);
+  /** The share/publish to retry once the writer's assistant has combined a push collision. */
+  const pendingPush = ref<PendingPush | null>(null);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped by every stop/refresh: a refresh that finds it changed is stale and neither
    *  applies its result nor schedules a poll, so at most one timer ever exists. */
   let statusRun = 0;
+  let deployTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped by every stop/start: a poll that finds it changed is stale and stays quiet. */
+  let deployRun = 0;
 
   function stopStatusPolling() {
     statusRun++;
@@ -96,9 +124,70 @@ export const useChangesStore = defineStore("changes", () => {
     } catch {
       if (run !== statusRun) return;
     }
+    await refreshSync();
+    if (run !== statusRun) return;
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
     }
+  }
+
+  /**
+   * Re-read whether Get latest would change anything. A failure leaves it unknown, so the
+   * button stays enabled rather than being wrongly disabled.
+   */
+  async function refreshSync() {
+    const id = projectId.value;
+    if (!id) {
+      syncNeeded.value = null;
+      return;
+    }
+    try {
+      const needed = await daemon.api.changesSyncNeeded(id);
+      if (projectId.value === id) syncNeeded.value = needed;
+    } catch {
+      if (projectId.value === id) syncNeeded.value = null;
+    }
+  }
+
+  /** Cancel any deploy watch in flight; a late answer from it stays quiet. */
+  function stopDeployTracking() {
+    deployRun++;
+    if (deployTimer !== null) clearTimeout(deployTimer);
+    deployTimer = null;
+    deploy.value = null;
+  }
+
+  /**
+   * Watch the deploy a publish set off, until it ships, fails, or takes too long. Its toast
+   * is the only place the app claims "It's live": the merge itself proves nothing, since the
+   * site is rebuilt after it. A publish that starts while one is being watched replaces it.
+   */
+  function trackDeploy(id: string, sha: string) {
+    stopDeployTracking();
+    const run = deployRun;
+    const started = Date.now();
+    deploy.value = "building";
+    toast.loading(DEPLOY_WAITING, { id: DEPLOY_TOAST_ID });
+
+    const poll = async () => {
+      const status = await daemon.api.deployStatus(id, sha).catch(() => null);
+      if (run !== deployRun) return;
+      const state: DeployState = status?.state ?? "unknown";
+      if (state === "live" || state === "failed") {
+        deploy.value = state;
+        if (state === "live") toast.success("It's live.", { id: DEPLOY_TOAST_ID });
+        else toast.error(DEPLOY_FAILED, { id: DEPLOY_TOAST_ID });
+        return;
+      }
+      if (Date.now() - started >= DEPLOY_TIMEOUT_MS) {
+        deploy.value = "unknown";
+        toast.info(DEPLOY_SLOW, { id: DEPLOY_TOAST_ID });
+        return;
+      }
+      deploy.value = state;
+      deployTimer = setTimeout(() => void poll(), DEPLOY_POLL_MS);
+    };
+    deployTimer = setTimeout(() => void poll(), DEPLOY_POLL_MS);
   }
 
   /** Refresh every view after the working tree moved; `branch` when the project switched to it. */
@@ -120,6 +209,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = null;
       prUrl.value = null;
       status.value = null;
+      syncNeeded.value = null;
       protectionHint.value = null;
       items.value = [];
       error.value = null;
@@ -129,7 +219,7 @@ export const useChangesStore = defineStore("changes", () => {
       currentConflict.value = null;
       candidate.value = null;
       syncSessionId.value = null;
-      syncStatus.value = null;
+      syncError.value = null;
     }
     projectId.value = id;
     loading.value = true;
@@ -153,7 +243,9 @@ export const useChangesStore = defineStore("changes", () => {
     } finally {
       if (projectId.value === id) loading.value = false;
     }
-    if (projectId.value === id && active.value) await refreshStatus();
+    if (projectId.value !== id) return;
+    if (active.value) await refreshStatus();
+    else await refreshSync();
   }
 
   async function list(id: string) {
@@ -262,87 +354,102 @@ export const useChangesStore = defineStore("changes", () => {
     // Branch tips (and so "last edited") moved; a failed list refresh is not an update failure.
     await Promise.all([load(id), list(id).catch(() => undefined)]);
     const first = result.conflicts.find((c) => result.conflictSessions?.[c.branch]);
-    if (first) await startSync(id, result.conflictSessions![first.branch]!);
+    if (first) await startSyncChat(id, result.conflictSessions![first.branch]!);
   }
 
-  function syncFailed(sessionId: string, message: string) {
-    syncStatus.value = { sessionId, state: "failed", stage: "", questions: [], summary: null, error: message };
-  }
-
-  /** Let the user's AI assistant combine the conflict session in the background. */
-  async function startSync(id: string, sessionId: string) {
-    syncSessionId.value = sessionId;
-    syncStatus.value = { sessionId, state: "preparing", stage: "", questions: [], summary: null, error: null };
+  /**
+   * Open the chat that combines the conflict session with the latest site. The
+   * chat is the whole surface now: its transcript carries progress and questions.
+   */
+  async function startSyncChat(id: string, sessionId: string) {
     const provider = useAgentProvidersStore().provider;
     if (!provider) {
-      syncFailed(sessionId, SYNC_UNAVAILABLE);
+      syncError.value = SYNC_UNAVAILABLE;
+      toast.error(SYNC_UNAVAILABLE);
       return;
     }
+    syncError.value = null;
     try {
-      await daemon.api.startAutoResolve(id, sessionId, provider);
+      const { chatId } = await daemon.api.startSyncChat(id, sessionId, provider);
+      syncSessionId.value = sessionId;
+      const chats = useChatStore();
+      await chats.load(id);
+      chats.setActive(id, chatId);
+    } catch {
+      // The daemon's own copy talks about git, so only our plain sentence is shown.
+      syncError.value = SYNC_START_FAILED;
+      toast.error(SYNC_START_FAILED);
+    }
+  }
+
+  /**
+   * End a sync chat, releasing the draft for manual choices. The session and chat come
+   * from the chat's own summary when the caller has them; the remembered session is a
+   * fallback for callers that do not.
+   */
+  async function endSyncChat(
+    id: string,
+    sessionId = syncSessionId.value,
+    chatId = useChatStore().activeChatId(id),
+  ) {
+    if (!sessionId || !chatId) return;
+    syncError.value = null;
+    // The writer cancelled the combine: a share/publish held for it must not fire later.
+    pendingPush.value = null;
+    try {
+      await daemon.api.endSyncChat(id, sessionId, chatId);
+      if (syncSessionId.value === sessionId) syncSessionId.value = null;
+      await useChatStore().load(id);
     } catch (e) {
-      if (syncSessionId.value !== sessionId) return;
-      syncFailed(sessionId, e instanceof ApiError && e.status === 400 ? SYNC_UNAVAILABLE : SYNC_START_FAILED);
+      // Already ended elsewhere: there is nothing left to stop.
+      if (e instanceof ApiError && e.status === 404) {
+        if (syncSessionId.value === sessionId) syncSessionId.value = null;
+        return;
+      }
+      syncError.value = SYNC_REQUEST_FAILED;
+      toast.error(SYNC_REQUEST_FAILED);
     }
   }
 
-  /** A failed answer/stop shows on the open status; once done the job is gone (404), so ignore it.
-   *  Daemon text is never shown: it talks about git. */
-  function syncRequestFailed(sessionId: string) {
-    const current = syncStatus.value;
-    if (syncSessionId.value !== sessionId || !current || current.state === "done") return;
-    syncStatus.value = { ...current, error: SYNC_REQUEST_FAILED };
-  }
-
-  async function answerSync(id: string, answers: Record<string, string>) {
-    const sessionId = syncSessionId.value;
+  /** Leave the chat and pick each file by hand in the conflict view. */
+  async function pickMyself(id: string, sessionId = syncSessionId.value) {
     if (!sessionId) return;
     try {
-      await daemon.api.answerAutoResolve(id, sessionId, answers);
+      await openConflict(id, sessionId);
     } catch {
-      syncRequestFailed(sessionId);
+      // The session may be gone (a combine can finish, or another tab ended it).
+      // Never reject: the click gets one plain line instead of an unhandled error.
+      toast.error(SYNC_REQUEST_FAILED);
     }
   }
 
-  async function stopSync(id: string) {
-    const sessionId = syncSessionId.value;
+  /** Ask the assistant to combine this draft again, opening a fresh chat. */
+  async function combineAgain(id: string, sessionId = syncSessionId.value) {
     if (!sessionId) return;
+    await startSyncChat(id, sessionId);
+  }
+
+  /** Continue the share/publish that hit a collision, now that combining succeeded. */
+  async function retryPendingPush(id: string) {
+    const pending = pendingPush.value;
+    if (!pending || pending.projectId !== id) return;
+    pendingPush.value = null;
     try {
-      await daemon.api.cancelAutoResolve(id, sessionId);
-    } catch {
-      syncRequestFailed(sessionId);
+      if (pending.kind === "publish") {
+        await publish(id, pending.branch);
+      } else {
+        await share(id, pending.branch);
+      }
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }
 
-  /** A moved draft makes the old session's result useless: sync again for a fresh one. */
-  async function retrySync(id: string) {
-    if (!syncSessionId.value) return;
-    if (syncStatus.value?.error === SYNC_DRAFT_MOVED) {
-      closeSync();
-      await syncAgain(id);
-      return;
-    }
-    await startSync(id, syncSessionId.value);
-  }
-
-  function closeSync() {
-    syncSessionId.value = null;
-    syncStatus.value = null;
-  }
-
-  /** Leave the agent and pick each file by hand in the conflict view. */
-  async function openAdvanced(id: string) {
-    const sessionId = syncSessionId.value;
-    if (!sessionId) return;
-    await openConflict(id, sessionId);
-    closeSync();
-  }
-
-  async function onAutoResolve(id: string, event: AutoResolveStatus) {
-    if (event.sessionId !== syncSessionId.value) return;
-    const { sessionId, state, stage, questions, summary, error } = event;
-    syncStatus.value = { sessionId, state, stage, questions, summary, error };
-    if (state !== "done") return;
+  /** Follow the open sync chat; when it lands, refresh everything and finish a pending push. */
+  async function onSyncChanged(id: string, event: SyncChangedEvent) {
+    if (event.projectId !== id || event.conflictSessionId !== syncSessionId.value) return;
+    await useChatStore().load(id);
+    if (event.phase !== "combined") return;
     await refreshTreeAndPreview();
     await Promise.all([
       load(id),
@@ -352,6 +459,7 @@ export const useChangesStore = defineStore("changes", () => {
         () => undefined,
       ),
     ]);
+    await retryPendingPush(id);
   }
 
   /** Re-read the active change (the agent may have started or switched one); refresh every
@@ -391,13 +499,22 @@ export const useChangesStore = defineStore("changes", () => {
     currentConflict.value = null;
     candidate.value = null;
     if (!sessions.length) return;
-    const sessionId = sessions.find((s) => s.id === syncSessionId.value)?.id ?? sessions[0]!.id;
-    syncSessionId.value = sessionId;
-    try {
-      const current = await daemon.api.autoResolveStatus(id, sessionId);
-      if (syncSessionId.value === sessionId) syncStatus.value = current;
-    } catch {
-      if (syncSessionId.value === sessionId) syncFailed(sessionId, SYNC_REQUEST_FAILED);
+    // Only one combine can run per project; try the remembered session first, then the rest.
+    const ordered = sessions
+      .filter((s) => s.id === syncSessionId.value)
+      .concat(sessions.filter((s) => s.id !== syncSessionId.value));
+    for (const session of ordered) {
+      try {
+        const status = await daemon.api.syncChatStatus(id, session.id);
+        syncSessionId.value = session.id;
+        const chats = useChatStore();
+        await chats.load(id);
+        chats.setActive(id, status.chatId);
+        return;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) continue;
+        return;
+      }
     }
   }
 
@@ -485,6 +602,7 @@ export const useChangesStore = defineStore("changes", () => {
         status.value = null;
       }
       await refreshTreeAndPreview("main");
+      void refreshSync();
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);
@@ -496,7 +614,7 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function share(id: string, branch: string): Promise<string> {
+  async function share(id: string, branch: string): Promise<string | null> {
     sharing.value = true;
     error.value = null;
     needsSignIn.value = false;
@@ -504,12 +622,18 @@ export const useChangesStore = defineStore("changes", () => {
     try {
       const result = await daemon.api.shareChange(id, branch);
       projectId.value = id;
+      if (result.conflict) {
+        pendingPush.value = { kind: "share", projectId: id, branch };
+        await startSyncChat(id, result.conflict.sessionId);
+        return null;
+      }
       prUrl.value = result.prUrl;
       protectionHint.value = result.protectionHint ?? null;
       if (active.value?.branch === branch) {
-        active.value = { ...active.value, title: result.title, prUrl: result.prUrl };
+        active.value = { ...active.value, title: result.title, prUrl: result.prUrl ?? undefined };
         await refreshStatus();
       }
+      void refreshSync();
       return result.prUrl;
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
@@ -582,13 +706,22 @@ export const useChangesStore = defineStore("changes", () => {
    * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
    * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
    * after the usual interval.
+   *
+   * Returns `combining` when someone else moved the change first: the combine dialog opens and
+   * publishing retries automatically once it succeeds.
    */
-  async function publish(id: string, branch: string): Promise<void> {
+  async function publish(id: string, branch: string): Promise<"published" | "combining"> {
     publishing.value = true;
     needsSignIn.value = false;
     try {
-      const pr = await daemon.api.publishChange(id, branch);
+      const result = await daemon.api.publishChange(id, branch);
       projectId.value = id;
+      if (result && "conflict" in result) {
+        pendingPush.value = { kind: "publish", projectId: id, branch };
+        await startSyncChat(id, result.conflict.sessionId);
+        return "combining";
+      }
+      const pr = result;
       if (active.value?.branch === branch) {
         stopStatusPolling();
         status.value = pr;
@@ -599,6 +732,11 @@ export const useChangesStore = defineStore("changes", () => {
       }
       // The drafts menu drops the published change; the change itself stays until Clean up.
       await list(id).catch(() => undefined);
+      void refreshSync();
+      // The merge is done; the site is rebuilt after it. Claim "live" only once it shipped.
+      if (pr?.mergeSha) trackDeploy(id, pr.mergeSha);
+      else toast.info(DEPLOY_UNVERIFIED);
+      return "published";
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
         needsSignIn.value = true;
@@ -628,6 +766,8 @@ export const useChangesStore = defineStore("changes", () => {
     pendingSwitch,
     needsSignIn,
     status,
+    deploy,
+    syncNeeded,
     conflictSessions,
     selectedConflictId,
     currentConflict,
@@ -635,7 +775,8 @@ export const useChangesStore = defineStore("changes", () => {
     conflictLoading,
     conflictError,
     syncSessionId,
-    syncStatus,
+    syncError,
+    pendingPush,
     load,
     list,
     create,
@@ -650,19 +791,18 @@ export const useChangesStore = defineStore("changes", () => {
     chooseConflict,
     finishConflict,
     abandonConflict,
-    startSync,
-    answerSync,
-    stopSync,
-    retrySync,
-    closeSync,
-    openAdvanced,
-    onAutoResolve,
+    startSyncChat,
+    endSyncChat,
+    pickMyself,
+    combineAgain,
+    onSyncChanged,
     share,
     cleanup,
     markReady,
     publish,
     refreshStatus,
     stopStatusPolling,
+    stopDeployTracking,
     dismissProtectionHint,
   };
 });

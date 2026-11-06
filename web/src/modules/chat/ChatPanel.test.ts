@@ -10,7 +10,10 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatPanel from "./ChatPanel.vue";
+import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
+import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
+import { useChangesStore } from "@/modules/changes/store";
 
 enableAutoUnmount(afterEach);
 
@@ -18,6 +21,16 @@ const ORIGIN = "http://127.0.0.1:7800";
 
 type Call = { method: string; url: string; init: RequestInit };
 type Chunk = Record<string, unknown>;
+type WireSync = {
+  conflictSessionId: string;
+  branch: string;
+  tip: string;
+  incoming: string;
+  files: string[];
+  phase: string;
+  startedAt: number;
+  repairAttempted: boolean;
+};
 type WireChat = {
   id: string;
   provider: string;
@@ -26,6 +39,8 @@ type WireChat = {
   updatedAt: number;
   live: boolean;
   running: boolean;
+  kind?: "chat" | "sync";
+  sync?: WireSync | null;
 };
 type History = { chunks: Chunk[]; provider: string; model: string | null; running: boolean; pendingPermissions?: string[] };
 
@@ -35,6 +50,8 @@ let histories: Record<string, History>;
 let seq: number;
 /** When set, chat history responses wait for it. */
 let historyGate: Promise<void> | null;
+/** When set, chat-list responses wait for it. */
+let chatsGate: Promise<void> | null;
 /** When set, the next message POST fails with it. */
 let messageFailure: Response | null;
 let messageGate: Promise<void> | null;
@@ -74,8 +91,10 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     });
   if (path === "/api/chat/p1/attachments" && method === "POST")
     return json({ path: "/state/p1/attachments/abc123.png" });
-  if (path === "/api/chat/p1" && method === "GET")
+  if (path === "/api/chat/p1" && method === "GET") {
+    if (chatsGate) await chatsGate;
     return json({ chats, running: chats.find((c) => c.running)?.id ?? null });
+  }
   if (path === "/api/chat/p1" && method === "POST") {
     if (createGate) {
       const gate = createGate;
@@ -119,6 +138,28 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     return json({ model: body.modelId });
   }
   if (/^\/api\/chat\/p1\/[^/]+\/approve$/.test(path) && method === "POST") return new Response(null, { status: 204 });
+  if (/^\/api\/changes\/conflicts\/[^/]+\/sync\/[^/]+\/end$/.test(path) && method === "POST")
+    return new Response(null, { status: 204 });
+  const startSync = path.match(/^\/api\/changes\/conflicts\/([^/]+)\/sync$/);
+  if (startSync && method === "POST") {
+    const id = `c-new-${++seq}`;
+    chats.unshift({ ...syncChat("working"), id, title: "Combining again" });
+    histories[id] = { chunks: [], provider: "cursor", model: null, running: false };
+    return json({ chatId: id });
+  }
+  const conflict = path.match(/^\/api\/changes\/conflicts\/([^/?]+)(?:\?.*)?$/);
+  if (conflict && method === "GET")
+    return json({
+      id: conflict[1],
+      projectId: "p1",
+      branch: "content/page",
+      tip: "tip",
+      incoming: "incoming",
+      base: "base",
+      expiresAt: Date.now() + 60_000,
+      choices: {},
+      files: [],
+    });
   const message = path.match(/^\/api\/chat\/p1\/([^/]+)\/message$/);
   if (message && method === "POST") {
     if (messageGate) {
@@ -150,8 +191,46 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
   return json({ error: { code: "UNKNOWN", message: `unrouted ${method} ${path}` } }, 500);
 }
 
-const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));
-const createPosts = () =>
+/** Stand-in for the browser's `EventSource`, driven by the tests. */
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  onopen: ((ev: unknown) => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  closed = false;
+  readonly url: string;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  open() {
+    this.onopen?.({});
+  }
+
+  frame(chunk: Chunk) {
+    this.onmessage?.({ data: JSON.stringify(chunk) });
+  }
+
+  static forChat(id: string) {
+    return FakeEventSource.instances.filter((s) => s.url.includes(`/api/chat/p1/${id}/stream`));
+  }
+}
+
+async function streamFor(id: string) {
+  return vi.waitFor(() => {
+    const src = FakeEventSource.forChat(id).at(-1);
+    expect(src).toBeDefined();
+    return src!;
+  });
+}
+
+const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));const createPosts = () =>
   calls.filter((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1`);
 const textOf = (call: Call) => JSON.parse(String(call.init.body)).text as string;
 
@@ -162,9 +241,12 @@ beforeEach(() => {
   histories = {};
   seq = 0;
   historyGate = null;
+  chatsGate = null;
   messageFailure = null;
   messageGate = null;
   createGate = null;
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("fetch", vi.fn(fetchMock));
   const api = createApi({ origin: ORIGIN, token: "tok" }, (i, init) => fetchMock(i, init));
   h.daemon = createFakeDaemon(api);
@@ -179,6 +261,30 @@ async function mountPanel() {
   const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
   await flushPromises();
   return w;
+}
+
+/** A sync chat summary as the daemon lists it, with the combine it is doing. */
+function syncChat(phase: string): WireChat {
+  return {
+    id: "c1",
+    provider: "cursor",
+    model: null,
+    title: "Combining About",
+    updatedAt: 1,
+    live: true,
+    running: false,
+    kind: "sync",
+    sync: {
+      conflictSessionId: "cs1",
+      branch: "content/page",
+      tip: "tip",
+      incoming: "incoming",
+      files: ["page.md"],
+      phase,
+      startedAt: 1,
+      repairAttempted: false,
+    },
+  };
 }
 
 async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
@@ -238,9 +344,12 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
   });
 
-  it("offers an auto-approve switch", async () => {
+  it("offers tool approvals beside the agent picker", async () => {
     const w = await mountPanel();
-    expect(w.find("[data-testid='chat-auto-approve']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-header'] [data-testid='chat-auto-approve']").exists()).toBe(false);
+    const composer = w.find("[data-testid='chat-composer']");
+    expect(composer.find("[data-testid='chat-agent']").exists()).toBe(true);
+    expect(composer.find("[data-testid='chat-auto-approve']").attributes("data-approve")).toBe("ask");
   });
 
   it("starts with recent messages and loads earlier history when scrolling to the top", async () => {
@@ -395,6 +504,35 @@ describe("ChatPanel", () => {
     expect(calls.indexOf(model!)).toBeLessThan(calls.indexOf(messagePosts()[1]!));
   });
 
+  it("refreshes the chat list when the history opens", async () => {
+    const w = await mountPanel();
+    chats.unshift({
+      id: "c9",
+      provider: "cursor",
+      model: null,
+      title: "From another tab",
+      updatedAt: Date.now(),
+      live: true,
+      running: false,
+    });
+    histories.c9 = { chunks: [], provider: "cursor", model: null, running: false };
+    await w.find("[data-testid='chat-history-toggle']").trigger("click");
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("From another tab");
+    });
+  });
+
+  it("adds a newly created chat to the history without waiting for its turn to end", async () => {
+    const w = await mountPanel();
+    await send(w, "hi");
+    const id = useChatStore().activeChatId("p1")!;
+    await vi.waitFor(() => expect(useChatStore().chats.p1?.map((c) => c.id)).toContain(id));
+    await w.find("[data-testid='chat-history-toggle']").trigger("click");
+    await flushPromises();
+    const items = [...document.body.querySelectorAll("[data-testid='chat-history-item']")];
+    expect(items).toHaveLength(1);
+  });
+
   it("marks the chat running in the store until chat.turn ends it", async () => {
     const w = await mountPanel();
     const store = useChatStore();
@@ -404,6 +542,67 @@ describe("ChatPanel", () => {
     expect(store.running.p1).toBe(id);
     finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);
     await vi.waitFor(() => expect(store.running.p1).toBeNull());
+  });
+
+  it("renders streamed chunks and ends the turn from the stream, without chat.turn", async () => {
+    const w = await mountPanel();
+    await send(w, "hello");
+    const id = useChatStore().activeChatId("p1")!;
+    const src = await streamFor(id);
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hello" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Streamed " });
+    src.frame({ type: "text_delta", session_id: "s", text: "reply" });
+    await vi.waitFor(() => expect(w.text()).toContain("Streamed reply"));
+    expect(w.find("[data-testid='chat-working']").exists()).toBe(true);
+    // The optimistic bubble was replaced by the echoed user_text, not added next to it.
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+
+    src.frame({ type: "turn_end", session_id: "s", stop_reason: "end_turn" });
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
+  });
+
+  it("skips history it already rendered, and rebuilds from the replay after a reconnect", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: false,
+      chunks: [
+        { type: "user_text", session_id: "s", text: "hi" },
+        { type: "text_delta", session_id: "s", text: "Hello there" },
+      ],
+    };
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    const src = await streamFor("c1");
+    src.open();
+    // The daemon replays the whole transcript; these two chunks are already on screen.
+    src.frame({ type: "user_text", session_id: "s", text: "hi" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
+    await flushPromises();
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+
+    // EventSource reconnected: the replay starts again from the first chunk.
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hi" });
+    src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
+    await flushPromises();
+    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+    expect(w.text()).toContain("Hello there");
+  });
+
+  it("closes the old chat's stream when another chat opens", async () => {
+    chats = [
+      { id: "c1", provider: "cursor", model: null, title: "One", updatedAt: 2, live: true, running: false },
+      { id: "c2", provider: "cursor", model: null, title: "Two", updatedAt: 1, live: true, running: false },
+    ];
+    histories.c1 = { provider: "cursor", model: null, running: false, chunks: [] };
+    histories.c2 = { provider: "cursor", model: null, running: false, chunks: [] };
+    useChatStore().setActive("p1", "c1");
+    await mountPanel();
+    const first = await streamFor("c1");
+    useChatStore().setActive("p1", "c2");
+    await vi.waitFor(() => expect(first.closed).toBe(true));
+    await streamFor("c2");
   });
 
   it("stops the running turn on the daemon and clears the spinner when it ends", async () => {
@@ -588,7 +787,7 @@ describe("ChatPanel", () => {
     const second = useChatStore().activeChatId("p1")!;
     expect(second).not.toBe(first);
     expect(messagePosts().map(textOf)).toEqual(["first chat", "second chat"]);
-    expect(useChatStore().runningChatIds("p1")).toEqual([first, second]);
+    expect(useChatStore().runningChatIds("p1").sort()).toEqual([first, second].sort());
 
     finish(first, [{ type: "turn_end", session_id: "s", stop_reason: "end_turn" }]);
     await vi.waitFor(() => expect(useChatStore().runningChatIds("p1")).toEqual([second]));
@@ -882,41 +1081,337 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-header']").classes()).not.toContain("border-b");
   });
 
+  describe("sync chats", () => {
+    const openSync = async (phase: string, chunks: Chunk[] = []) => {
+      chats = [syncChat(phase)];
+      histories.c1 = { chunks, provider: "cursor", model: null, running: false };
+      useChatStore().setActive("p1", "c1");
+      return mountPanel();
+    };
+
+    it("renders stage lines without agent steps and offers End sync", async () => {
+      const w = await openSync("working", [
+        { type: "user_text", session_id: "s", text: "combine these" },
+        { type: "thought_delta", session_id: "s", text: "Pondering the pages" },
+        {
+          type: "tool_call",
+          session_id: "s",
+          tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "page.md" }] },
+        },
+        { type: "text_delta", session_id: "s", text: "I'll keep both changes." },
+        { type: "sync_status", phase: "working", text: "Reading your pages…" },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-status']").text()).toBe("Reading your pages…"),
+      );
+      expect(w.find("[data-testid='chat-steps']").exists()).toBe(false);
+      expect(w.text()).toContain("I'll keep both changes.");
+      expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.working);
+      expect(w.find("[data-testid='sync-end']").text()).toBe(SYNC_ACTIONS.end);
+      expect(w.find("[data-testid='chat-composer']").exists()).toBe(true);
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
+    });
+
+    it("wears the phase as a quiet badge once combined", async () => {
+      const w = await openSync("combined");
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
+      );
+      const badge = w.find("[data-testid='sync-phase']");
+      expect(badge.attributes("data-slot")).toBe("badge");
+      expect(badge.classes()).toContain("bg-secondary");
+    });
+
+    it("keeps a combining phase in a quiet badge", async () => {
+      const w = await openSync("working");
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.working),
+      );
+      const badge = w.find("[data-testid='sync-phase']");
+      expect(badge.attributes("data-slot")).toBe("badge");
+      expect(badge.classes()).toContain("bg-secondary");
+    });
+
+    it("keeps a stopped phase in an outline badge", async () => {
+      const w = await openSync("expired");
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.expired),
+      );
+      const badge = w.find("[data-testid='sync-phase']");
+      expect(badge.attributes("data-slot")).toBe("badge");
+      expect(badge.classes()).toContain("bg-background");
+    });
+
+    it("hides a raw agent error and its path from a sync transcript", async () => {
+      const w = await openSync("ended", [
+        { type: "user_text", session_id: "s", text: "combine these" },
+        {
+          type: "error",
+          message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`: No such file or directory",
+        },
+        { type: "sync_status", phase: "ended", text: "Your assistant isn't available." },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-status']").text()).toBe("Your assistant isn't available."),
+      );
+      expect(w.text()).not.toContain("cursor-agent");
+      expect(w.text()).not.toContain("/usr/local/bin");
+    });
+
+    it("keeps a raw agent error in a normal chat", async () => {
+      chats = [
+        { id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: false },
+      ];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [
+          { type: "user_text", session_id: "s", text: "hi" },
+          { type: "error", message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`" },
+        ],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      await vi.waitFor(() => expect(w.text()).toContain("/usr/local/bin/cursor-agent"));
+    });
+
+    it("locks the composer with the stage copy while checking", async () => {
+      const w = await openSync("checking", [
+        { type: "sync_status", phase: "checking", text: "Checking the site still works…" },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='chat-locked']").text()).toBe(PHASE_LABEL.checking),
+      );
+      expect(w.find("[data-testid='chat-input']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(true);
+    });
+
+    it("keeps a combined sync read-only, with no final actions and no composer", async () => {
+      const w = await openSync("combined", [
+        { type: "sync_status", phase: "combined", text: "Done. Your changes and the latest site are combined." },
+      ]);
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
+      );
+      expect(w.find("[data-testid='chat-composer']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-pick']").exists()).toBe(false);
+      expect(w.find("[data-testid='sync-again']").exists()).toBe(false);
+    });
+
+    it.each(["ended", "expired"] as const)("labels a %s sync as Ended", async (phase) => {
+      const w = await openSync(phase);
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-phase']").text()).toBe("Ended"));
+      expect(w.find("[data-testid='sync-final']").exists()).toBe(true);
+      expect(w.find("[data-testid='sync-pick']").text()).toBe(SYNC_ACTIONS.pick);
+      expect(w.find("[data-testid='sync-again']").text()).toBe(SYNC_ACTIONS.again);
+      expect(w.find("[data-testid='sync-end']").exists()).toBe(false);
+    });
+
+    it("ends the combine from the chat summary, without a remembered session", async () => {
+      const w = await openSync("working");
+      const changes = useChangesStore();
+      expect(changes.syncSessionId).toBeNull();
+      await w.find("[data-testid='sync-end']").trigger("click");
+      await vi.waitFor(() =>
+        expect(
+          calls.some(
+            (c) =>
+              c.method === "POST"
+              && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync/c1/end`,
+          ),
+        ).toBe(true),
+      );
+      expect(changes.syncSessionId).toBeNull();
+    });
+
+    it("picks the changes by hand from the summary after a reload", async () => {
+      const w = await openSync("ended");
+      const changes = useChangesStore();
+      expect(changes.syncSessionId).toBeNull();
+      await w.find("[data-testid='sync-pick']").trigger("click");
+      await vi.waitFor(() => expect(changes.selectedConflictId).toBe("cs1"));
+      expect(changes.currentConflict?.id).toBe("cs1");
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "GET"
+            && c.url === `${ORIGIN}/api/changes/conflicts/cs1?project=p1`,
+        ),
+      ).toBe(true);
+    });
+
+    it("combines again with the summary's session after a reload", async () => {
+      const w = await openSync("ended");
+      expect(useChangesStore().syncSessionId).toBeNull();
+      await vi.waitFor(() => expect(useAgentProvidersStore().provider).toBe("cursor"));
+      await w.find("[data-testid='sync-again']").trigger("click");
+      await vi.waitFor(() => {
+        const post = calls.find(
+          (c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync`,
+        );
+        expect(post).toBeDefined();
+        expect(JSON.parse(String(post!.init.body))).toEqual({ project: "p1", provider: "cursor" });
+      });
+      await vi.waitFor(() => expect(useChatStore().activeChatId("p1")).not.toBe("c1"));
+    });
+
+    it("issues both final actions on an expired sync", async () => {
+      const w = await openSync("expired");
+      const changes = useChangesStore();
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-pick']").exists()).toBe(true));
+
+      await w.find("[data-testid='sync-pick']").trigger("click");
+      await vi.waitFor(() => expect(changes.selectedConflictId).toBe("cs1"));
+      expect(changes.currentConflict?.id).toBe("cs1");
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "GET"
+            && c.url === `${ORIGIN}/api/changes/conflicts/cs1?project=p1`,
+        ),
+      ).toBe(true);
+
+      await vi.waitFor(() => expect(useAgentProvidersStore().provider).toBe("cursor"));
+      await w.find("[data-testid='sync-again']").trigger("click");
+      await vi.waitFor(() => {
+        const post = calls.find(
+          (c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes/conflicts/cs1/sync`,
+        );
+        expect(post).toBeDefined();
+        expect(JSON.parse(String(post!.init.body))).toEqual({ project: "p1", provider: "cursor" });
+      });
+      await vi.waitFor(() => expect(useChatStore().activeChatId("p1")).not.toBe("c1"));
+    });
+
+    it("drops steps once a late chat summary marks the transcript as a sync", async () => {
+      let release!: () => void;
+      chatsGate = new Promise((r) => (release = r));
+      chats = [syncChat("working")];
+      histories.c1 = {
+        provider: "cursor",
+        model: null,
+        running: false,
+        chunks: [
+          { type: "user_text", session_id: "s", text: "combine these" },
+          { type: "thought_delta", session_id: "s", text: "Pondering the pages" },
+          {
+            type: "tool_call",
+            session_id: "s",
+            tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "page.md" }] },
+          },
+          { type: "text_delta", session_id: "s", text: "I'll keep both changes." },
+          { type: "sync_status", phase: "working", text: "Reading your pages…" },
+        ],
+      };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      // The history rendered before the chat list landed, so it still shows the step group.
+      expect(w.find("[data-testid='chat-steps']").exists()).toBe(true);
+      release();
+      await vi.waitFor(() => expect(w.find("[data-testid='chat-steps']").exists()).toBe(false));
+      expect(w.find("[data-testid='sync-status']").text()).toBe("Reading your pages…");
+      expect(w.text()).toContain("I'll keep both changes.");
+    });
+
+    it("marks a combining chat in the history meta line", async () => {
+      const w = await openSync("working");
+      await w.find("[data-testid='chat-history-toggle']").trigger("click");
+      await vi.waitFor(() => {
+        const item = document.body.querySelector("[data-testid='chat-history-item']")!;
+        expect(item.textContent).toContain("· Combining");
+      });
+    });
+
+    it("does not follow a finished sync chat", async () => {
+      const w = await openSync("combined");
+      await vi.waitFor(() =>
+        expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
+      );
+      await flushPromises();
+      expect(FakeEventSource.forChat("c1").filter((s) => !s.closed)).toHaveLength(0);
+    });
+
+    it("stops following the stream when the sync ends", async () => {
+      const w = await openSync("working");
+      const src = await streamFor("c1");
+      src.open();
+      expect(src.closed).toBe(false);
+
+      chats = [syncChat("ended")];
+      await useChatStore().load("p1");
+      await vi.waitFor(() => expect(src.closed).toBe(true));
+      await flushPromises();
+      expect(FakeEventSource.forChat("c1").filter((s) => !s.closed)).toHaveLength(0);
+      // The ended chat still renders, now with the final actions.
+      await vi.waitFor(() => expect(w.find("[data-testid='sync-pick']").exists()).toBe(true));
+    });
+
+    it("keeps its copy free of implementation words", () => {
+      const forbidden = /branch|commit|merge|conflict|worktree|checkout|clone|\bgit\b|origin|main|markers|npm|<<<<<<</i;
+      const copy = [
+        ...Object.values(PHASE_LABEL),
+        SYNC_ACTIONS.end,
+        SYNC_ACTIONS.pick,
+        SYNC_ACTIONS.again,
+      ];
+      for (const text of copy) expect(text).not.toMatch(forbidden);
+    });
+  });
+
   describe("element references", () => {
     type Vm = { insertReference(t: string): void };
     const ref1 = '[element <section id="hero"> "Stop building" in src/Hero.astro:5:69] /p/attachments/a.png ';
     const ref2 = "[element <h1> at `h1`]";
     const input = (w: Awaited<ReturnType<typeof mountPanel>>) =>
       w.find<HTMLTextAreaElement>("[data-testid='chat-input']");
+    const badges = (w: Awaited<ReturnType<typeof mountPanel>>) =>
+      w.findAll("[data-testid='chat-reference']");
 
-    it("shows a short numbered tag in the input instead of the full reference", async () => {
+    it("shows a picked element as a badge instead of a tag in the input", async () => {
       const w = await mountPanel();
       const vm = w.vm as unknown as Vm;
       vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      expect(input(w).element.value).toBe("[Element #1] [Element #2]");
+      expect(input(w).element.value).toBe("");
+      expect(badges(w).map((b) => b.text())).toEqual(["section#hero", "h1"]);
     });
 
-    it("sends the full reference text in place of each tag", async () => {
-      const w = await mountPanel();
-      (w.vm as unknown as Vm).insertReference(ref1);
-      await flushPromises();
-      await send(w, `${input(w).element.value} make it shorter`);
-      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} make it shorter`);
-    });
-
-    it("drops a reference whose tag was deleted, and numbers afresh after sending", async () => {
+    it("sends each picked element ahead of the typed text", async () => {
       const w = await mountPanel();
       const vm = w.vm as unknown as Vm;
       vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      await send(w, "[Element #2] only");
-      expect(textOf(messagePosts()[0]!)).toBe(`${ref2} only`);
+      await send(w, "make it shorter");
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} ${ref2} make it shorter`);
+    });
+
+    it("removes a picked element with its badge and clears them after sending", async () => {
+      const w = await mountPanel();
+      const vm = w.vm as unknown as Vm;
+      vm.insertReference(ref1);
       vm.insertReference(ref2);
       await flushPromises();
-      expect(input(w).element.value).toBe("[Element #1]");
+      await w.findAll("[data-testid='chat-reference-remove']")[1]!.trigger("click");
+      expect(badges(w).map((b) => b.text())).toEqual(["section#hero"]);
+      await send(w, "only the hero");
+      expect(textOf(messagePosts()[0]!)).toBe(`${ref1.trim()} only the hero`);
+      expect(badges(w)).toHaveLength(0);
+      vm.insertReference(ref2);
+      await flushPromises();
+      expect(badges(w).map((b) => b.text())).toEqual(["h1"]);
+    });
+
+    it("sends with only picked elements", async () => {
+      const w = await mountPanel();
+      (w.vm as unknown as Vm).insertReference(ref2);
+      await flushPromises();
+      await send(w, "");
+      expect(textOf(messagePosts()[0]!)).toBe(ref2);
     });
   });
 });

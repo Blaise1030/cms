@@ -46,11 +46,17 @@ export function useFrameHistory() {
     return true;
   }
 
+  /** The path `step` entries away from the current one, or null when there is nowhere to go. */
+  function target(step: -1 | 1): string | null {
+    if (step < 0 ? !canGoBack.value : !canGoForward.value) return null;
+    return entries.value[index.value + step] ?? null;
+  }
+
   function reset() {
     entries.value = [];
     index.value = -1;
     pending = null;
   }
 
-  return { entries, index, current, canGoBack, canGoForward, visit, back, forward, reset };
+  return { entries, index, current, canGoBack, canGoForward, visit, back, forward, target, reset };
 }

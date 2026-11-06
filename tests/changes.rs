@@ -344,6 +344,153 @@ async fn push_sends_branch_to_origin() {
     );
 }
 
+fn identity() -> git::Identity {
+    git::Identity {
+        name: "Ada".into(),
+        email: "ada@example.com".into(),
+    }
+}
+
+fn rev(dir: &Path, r: &str) -> String {
+    git_cli(dir, &["rev-parse", r])
+}
+
+fn is_ancestor(dir: &Path, a: &str, b: &str) -> bool {
+    Command::new("git")
+        .args(["merge-base", "--is-ancestor", a, b])
+        .current_dir(dir)
+        .status()
+        .unwrap()
+        .success()
+}
+
+/// Another writer pushes `name` on `branch` to the shared remote; returns the new remote tip.
+fn teammate_push(tmp: &Path, branch: &str, name: &str, content: &str) -> String {
+    let mate = tmp.join("mate");
+    if !mate.exists() {
+        git_cli(tmp, &["clone", "remote.git", "mate"]);
+        git_cli(&mate, &["config", "user.name", "Grace"]);
+        git_cli(&mate, &["config", "user.email", "grace@example.com"]);
+    }
+    git_cli(&mate, &["fetch", "origin"]);
+    git_cli(
+        &mate,
+        &["checkout", "-B", branch, &format!("origin/{branch}")],
+    );
+    commit_file(&mate, name, content, &format!("add {name}"));
+    git_cli(&mate, &["push", "origin", branch]);
+    rev(&tmp.join("remote.git"), &format!("refs/heads/{branch}"))
+}
+
+#[tokio::test]
+async fn integrate_remote_merges_a_teammates_commits_into_the_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let change = changes::create(&work, "Launch").await.unwrap();
+    changes::push(&work, &change.branch, &[]).await.unwrap();
+    let teammate = teammate_push(tmp.path(), &change.branch, "theirs.md", "theirs\n");
+    commit_file(&work, "ours.md", "ours\n", "ours");
+
+    let outcome = changes::integrate_remote(&work, &change.branch, &[], &identity())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(outcome, changes::Integration::Ready),
+        "{outcome:?}"
+    );
+    assert!(is_ancestor(
+        &work,
+        &teammate,
+        &format!("refs/heads/{}", change.branch)
+    ));
+    // The checked-out change follows the merge.
+    assert_eq!(
+        std::fs::read_to_string(work.join("theirs.md")).unwrap(),
+        "theirs\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(work.join("ours.md")).unwrap(),
+        "ours\n"
+    );
+
+    changes::push(&work, &change.branch, &[]).await.unwrap();
+    assert_eq!(
+        rev(
+            &tmp.path().join("remote.git"),
+            &format!("refs/heads/{}", change.branch)
+        ),
+        rev(&work, &format!("refs/heads/{}", change.branch))
+    );
+}
+
+#[tokio::test]
+async fn integrate_remote_fast_forwards_a_change_with_no_local_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let change = changes::create(&work, "Launch").await.unwrap();
+    changes::push(&work, &change.branch, &[]).await.unwrap();
+    let teammate = teammate_push(tmp.path(), &change.branch, "theirs.md", "theirs\n");
+
+    let outcome = changes::integrate_remote(&work, &change.branch, &[], &identity())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(outcome, changes::Integration::Ready),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        rev(&work, &format!("refs/heads/{}", change.branch)),
+        teammate
+    );
+    assert!(work.join("theirs.md").exists());
+}
+
+#[tokio::test]
+async fn integrate_remote_reports_a_conflict_and_leaves_the_change_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let change = changes::create(&work, "Launch").await.unwrap();
+    changes::push(&work, &change.branch, &[]).await.unwrap();
+    let teammate = teammate_push(tmp.path(), &change.branch, "README.md", "theirs\n");
+    commit_file(&work, "README.md", "mine\n", "mine");
+    let tip = rev(&work, &format!("refs/heads/{}", change.branch));
+
+    let outcome = changes::integrate_remote(&work, &change.branch, &[], &identity())
+        .await
+        .unwrap();
+
+    match outcome {
+        changes::Integration::Conflict { incoming } => assert_eq!(incoming, teammate),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+    assert_eq!(rev(&work, &format!("refs/heads/{}", change.branch)), tip);
+    assert_eq!(
+        std::fs::read_to_string(work.join("README.md")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[tokio::test]
+async fn integrate_remote_is_a_no_op_before_the_first_push() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let change = changes::create(&work, "Launch").await.unwrap();
+    commit_file(&work, "notes.md", "hi\n", "notes");
+    let tip = rev(&work, &format!("refs/heads/{}", change.branch));
+
+    let outcome = changes::integrate_remote(&work, &change.branch, &[], &identity())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(outcome, changes::Integration::Ready),
+        "{outcome:?}"
+    );
+    assert_eq!(rev(&work, &format!("refs/heads/{}", change.branch)), tip);
+}
+
 #[tokio::test]
 async fn http_create_and_active() {
     let tmp = tempfile::tempdir().unwrap();
@@ -474,6 +621,31 @@ async fn http_status_is_null_without_a_github_remote() {
         req("GET", "/api/changes/content%2Fx/status?project=nope", None),
     )
     .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn http_sync_is_not_needed_when_main_is_already_latest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+    let st = AppState::with_scaffold_install(config(&projects), false);
+    let info = st.projects.create("Site").await.unwrap();
+    let app = http::router(st);
+
+    let (s, body) = call(
+        &app,
+        req(
+            "GET",
+            &format!("/api/changes/sync?project={}", info.id),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "needed": false }));
+
+    let (s, _) = call(&app, req("GET", "/api/changes/sync?project=nope", None)).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 

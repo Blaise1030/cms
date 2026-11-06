@@ -56,16 +56,20 @@ pub async fn serve_until(
     let identity = state.github.identity().await;
     state.projects.ensure_identities(&identity).await;
     state.github.note_applied(&identity).await;
+    // A sync that survived the restart is reconciled before anything watches it.
+    changes::sync_chat::recover(&state).await;
     state.watch_all().await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;
     let cleanup = tokio::spawn({
         let previews = previews.clone();
+        let state = state.clone();
         async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 previews.prune(&sessions.active_ids().await).await;
+                changes::sync_chat::sweep(&state).await;
             }
         }
     });

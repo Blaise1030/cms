@@ -21,6 +21,8 @@ const pendingDelete = ref<ChatSummary | null>(null);
 
 const when = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const titleOf = (c: ChatSummary) => c.title || "Untitled chat";
+/** A sync chat still combining its draft with the latest site. */
+const combining = (c: ChatSummary) => c.kind === "sync" && c.sync?.phase === "working";
 
 function pick(id: string) {
   open.value = false;
@@ -63,7 +65,7 @@ function confirmDelete() {
           >
             <span class="w-full truncate">{{ titleOf(c) }}</span>
             <span class="text-muted-foreground text-xs">
-              {{ when(c.updatedAt) }}<template v-if="runningIds.includes(c.id)"> · Running</template>
+              {{ when(c.updatedAt) }}<template v-if="combining(c)"> · Combining</template><template v-if="runningIds.includes(c.id)"> · Running</template>
             </span>
           </button>
           <Button

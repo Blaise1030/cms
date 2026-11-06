@@ -15,6 +15,9 @@ const merged: PrStatus = {
   state: "merged",
   checks: "none",
   previewUrl: null,
+  mergeable: true,
+  mergeableState: "clean",
+  upToDate: true,
 };
 
 function mountWith(status: PrStatus | null) {

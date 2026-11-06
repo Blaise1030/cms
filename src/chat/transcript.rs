@@ -135,7 +135,9 @@ fn last_session_id(chunks: &[UiChunk]) -> String {
             | UiChunk::Permission { session_id, .. }
             | UiChunk::TurnEnd { session_id, .. }
             | UiChunk::Unknown { session_id, .. } => session_id.as_str(),
-            UiChunk::Error { .. } | UiChunk::Checkpoint { .. } => continue,
+            UiChunk::Error { .. } | UiChunk::Checkpoint { .. } | UiChunk::SyncStatus { .. } => {
+                continue
+            }
         };
         if !id.is_empty() {
             return id.to_string();

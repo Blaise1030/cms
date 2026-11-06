@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,6 +61,12 @@ export function orsoGlob({ base, pattern, kind, singleton = null, ...options } =
   });
   return loader;
 }
+
+/**
+ * Element-picking and appearance bridge for the direct (cross-origin) dev preview.
+ * Injected inline during `astro dev`; never part of a build.
+ */
+const PREVIEW_BRIDGE = readFileSync(new URL("./bridge.js", import.meta.url), "utf8");
 
 const CONTENT_CONFIG_NAMES = ["content.config.ts", "content.config.js", "content.config.mjs", "content.config.mts"];
 
@@ -142,8 +148,11 @@ export function orso() {
     name: "orso-content",
     hooks: {
       // `astro sync` runs as production, where Astro skips `astro:server:setup`.
-      "astro:config:setup": ({ command: current, updateConfig, logger }) => {
+      "astro:config:setup": ({ command: current, updateConfig, logger, injectScript }) => {
         command = current;
+        // The dev UI frames this server directly (so client components hydrate), which
+        // makes the frame cross-origin; the bridge keeps picking and appearance working.
+        if (command === "dev") injectScript("head-inline", PREVIEW_BRIDGE);
         if (command !== "sync") return;
         updateConfig({
           vite: {

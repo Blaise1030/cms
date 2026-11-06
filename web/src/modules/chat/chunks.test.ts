@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DynamicToolUIPart } from "ai";
-import { chunksToMessages } from "./chunks";
+import type { UiChunk } from "@/core/types";
+import { chunksToMessages, createTranscript } from "./chunks";
 
 const s = "session-1";
 
@@ -110,6 +111,43 @@ describe("chunksToMessages", () => {
     ]);
   });
 
+  it("drops agent errors from a sync transcript but keeps them for a normal chat", () => {
+    const chunks = [
+      { type: "user_text", session_id: s, text: "go" },
+      { type: "error", message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`" },
+      { type: "text_delta", session_id: s, text: "Your assistant isn't available." },
+    ] satisfies UiChunk[];
+
+    const normal = chunksToMessages(chunks);
+    expect(normal[1]!.parts).toEqual([
+      {
+        type: "data-agent-error",
+        data: { code: "failed", message: "failed to spawn ACP agent `/usr/local/bin/cursor-agent`" },
+      },
+      { type: "text", text: "Your assistant isn't available." },
+    ]);
+
+    const sync = createTranscript({ hideSteps: true });
+    for (const chunk of chunks) sync.push(chunk);
+    expect(sync.messages[1]!.parts).toEqual([
+      { type: "text", text: "Your assistant isn't available." },
+    ]);
+    expect(JSON.stringify(sync.messages)).not.toContain("cursor-agent");
+  });
+
+  it("keeps a sync stage line as a data part, verbatim", () => {
+    const [, assistant] = chunksToMessages([
+      { type: "user_text", session_id: s, text: "go" },
+      { type: "sync_status", phase: "working", text: "Reading your pages…" },
+    ]);
+    expect(assistant!.parts).toEqual([
+      {
+        type: "data-sync-status",
+        data: { phase: "working", text: "Reading your pages…" },
+      },
+    ]);
+  });
+
   it("ignores plans, permissions, unknown updates, and turn ends", () => {
     const messages = chunksToMessages([
       { type: "user_text", session_id: s, text: "go" },
@@ -120,5 +158,80 @@ describe("chunksToMessages", () => {
     ]);
     expect(messages).toHaveLength(1);
     expect(messages[0]!.parts).toEqual([{ type: "text", text: "go" }]);
+  });
+});
+
+describe("createTranscript", () => {
+  it("builds the same messages as a full pass, one streamed chunk at a time", () => {
+    const chunks = [
+      { type: "user_text", session_id: s, text: "hi" },
+      { type: "thought_delta", session_id: s, text: "let me look" },
+      {
+        type: "tool_call",
+        session_id: s,
+        tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "a.md" }] },
+      },
+      {
+        type: "tool_call_update",
+        session_id: s,
+        tool_call: { toolCallId: "t1", status: "completed", content: "done" },
+      },
+      { type: "text_delta", session_id: s, text: "Hel" },
+      { type: "text_delta", session_id: s, text: "lo" },
+    ] satisfies UiChunk[];
+    const transcript = createTranscript();
+    for (const chunk of chunks) transcript.push(chunk);
+    expect(transcript.messages).toEqual(chunksToMessages(chunks));
+  });
+
+  it("hides agent steps but keeps text and sync status when asked", () => {
+    const transcript = createTranscript({ hideSteps: true });
+    for (const chunk of [
+      { type: "user_text", session_id: s, text: "combine these" },
+      { type: "thought_delta", session_id: s, text: "Pondering" },
+      {
+        type: "tool_call",
+        session_id: s,
+        tool_call: { toolCallId: "t1", kind: "read", status: "pending", locations: [{ path: "a.md" }] },
+      },
+      {
+        type: "tool_call_update",
+        session_id: s,
+        tool_call: { toolCallId: "t1", status: "completed", content: "done" },
+      },
+      { type: "text_delta", session_id: s, text: "Done." },
+      { type: "sync_status", phase: "combined", text: "Done. Your changes are combined." },
+    ] satisfies UiChunk[]) {
+      transcript.push(chunk);
+    }
+    expect(transcript.messages.map((m) => m.parts)).toEqual([
+      [{ type: "text", text: "combine these" }],
+      [
+        { type: "text", text: "Done." },
+        {
+          type: "data-sync-status",
+          data: { phase: "combined", text: "Done. Your changes are combined." },
+        },
+      ],
+    ]);
+  });
+
+  it("keeps agent steps by default", () => {
+    const transcript = createTranscript();
+    transcript.push({ type: "thought_delta", session_id: s, text: "Pondering" });
+    expect(transcript.messages[0]!.parts).toEqual([
+      { type: "reasoning", text: "Pondering", state: "done" },
+    ]);
+  });
+
+  it("appends a delta to the open assistant message in place", () => {
+    const transcript = createTranscript();
+    transcript.push({ type: "user_text", session_id: s, text: "hi" });
+    transcript.push({ type: "text_delta", session_id: s, text: "one" });
+    const assistant = transcript.messages.at(-1)!;
+    transcript.push({ type: "text_delta", session_id: s, text: " two" });
+    expect(transcript.messages).toHaveLength(2);
+    expect(transcript.messages.at(-1)).toBe(assistant);
+    expect(assistant.parts).toEqual([{ type: "text", text: "one two" }]);
   });
 });

@@ -191,7 +191,6 @@ export async function startorso(): Promise<orsoEnv> {
 
   const root = repoRoot();
   const agents = path.join(tmp, "agents.json");
-  const resolver = path.join(root, "tests/fixtures/fake_resolver.sh");
   const acp = fakeAcpPath(root);
   fs.writeFileSync(
     agents,
@@ -200,8 +199,14 @@ export async function startorso(): Promise<orsoEnv> {
         command: ["python3", acp, "edit"],
         acp: ["python3", acp, "edit"],
       },
-      "fake-resolver": ["sh", resolver, "needs-input"],
-      "fake-garbage": ["sh", resolver, "garbage"],
+      "fake-sync": {
+        command: ["python3", acp, "sync"],
+        acp: ["python3", acp, "sync"],
+      },
+      "fake-garbage": {
+        command: ["python3", acp, "garbage"],
+        acp: ["python3", acp, "garbage"],
+      },
       cursor: {
         command: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
         acp: ["python3", acp, "chat", path.join(root, CURSOR_TURN_FIXTURE)],
@@ -281,12 +286,29 @@ export async function startorso(): Promise<orsoEnv> {
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
     },
     stop: async () => {
+      const exitedWithin = (ms: number) =>
+        exited !== null
+          ? Promise.resolve(true)
+          : new Promise<boolean>((resolve) => {
+              const timer = setTimeout(() => resolve(false), ms);
+              child.once("exit", () => {
+                clearTimeout(timer);
+                resolve(true);
+              });
+            });
+
+      let timedOut = false;
       if (exited === null) {
         child.kill("SIGTERM");
-        await new Promise<void>((r) => child.once("exit", () => r()));
+        timedOut = !(await exitedWithin(10_000));
+        if (timedOut) {
+          child.kill("SIGKILL");
+          await exitedWithin(5_000);
+        }
       }
       await stub.close();
       fs.rmSync(tmp, { recursive: true, force: true });
+      if (timedOut) throw new Error("orso did not exit within 10s of SIGTERM");
     },
   };
 }

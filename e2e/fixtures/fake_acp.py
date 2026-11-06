@@ -3,10 +3,13 @@
 
 `chat` mode replays the final assistant text of the Cursor stream-json fixture,
 edits `about.md`, and reports one edit step. `edit` mode edits `notes.md` and
-replies with one short line. Both end the turn normally so the daemon checkpoints.
+replies with one short line. `sync` mode takes the latest side of every collided
+file, stages everything, and replies; `garbage` mode leaves the collision for the
+writer. Every mode ends the turn normally so the daemon checkpoints.
 """
 
 import json
+import subprocess
 import sys
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "edit"
@@ -56,6 +59,16 @@ def edit(target, session_id):
     )
 
 
+def reply(session_id, text):
+    update(
+        session_id,
+        {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": text},
+        },
+    )
+
+
 while True:
     line = sys.stdin.readline()
     if not line:
@@ -94,22 +107,30 @@ while True:
         session_id = params.get("sessionId", "")
         if mode == "chat":
             edit("about.md", session_id)
-            update(
-                session_id,
-                {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": {"type": "text", "text": fixture_reply()},
-                },
+            reply(session_id, fixture_reply())
+        elif mode == "sync":
+            # Resolve the merge the daemon left in the worktree: keep the latest
+            # side of each collided page and stage the result.
+            subprocess.run(
+                ["sh", "-c", "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A"],
+                check=False,
             )
+            reply(session_id, "I kept both changes and the site still works.")
+        elif mode == "garbage":
+            # Give up mid-way: every collided page still visibly needs a decision.
+            unmerged = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=U"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout
+            for path in unmerged.splitlines():
+                with open(path, "a", encoding="utf-8") as handle:
+                    handle.write("<<<<<<< yours\n=======\n>>>>>>> latest\n")
+            reply(session_id, "I couldn't settle these pages.")
         else:
             edit("notes.md", session_id)
-            update(
-                session_id,
-                {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": {"type": "text", "text": "Updated the notes."},
-                },
-            )
+            reply(session_id, "Updated the notes.")
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
     elif method == "session/cancel":
         # Notification: no response. A real agent would abort the prompt.

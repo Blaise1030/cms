@@ -195,6 +195,12 @@ struct ApiPull {
     state: Option<String>,
     #[serde(default)]
     merged_at: Option<String>,
+    /// GitHub's verdict on merging: null until it has computed one.
+    #[serde(default)]
+    mergeable: Option<bool>,
+    /// `clean`, `dirty`, `blocked`, `behind`, `unstable`, `draft`, …
+    #[serde(default)]
+    mergeable_state: Option<String>,
     #[serde(default)]
     head: Option<ApiPullHead>,
 }
@@ -210,6 +216,9 @@ struct ApiPullHead {
 struct ApiMerge {
     #[serde(default)]
     merged: bool,
+    /// The commit the merge produced on the base branch (the one that gets deployed).
+    #[serde(default)]
+    sha: Option<String>,
 }
 
 /// Where a pull request stands, as shown in the preview browser bar.
@@ -234,6 +243,17 @@ pub enum ChecksState {
     Failing,
 }
 
+/// Whether the deploy that runs on a published commit has shipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployState {
+    /// No deploy check on the commit (yet): a site without CI, or a run GitHub hasn't queued.
+    Unknown,
+    Building,
+    Live,
+    Failed,
+}
+
 /// `GET /api/changes/{branch}/status` payload for a branch with a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -244,6 +264,12 @@ pub struct PrStatus {
     pub checks: ChecksState,
     /// `environment_url` of the latest successful deployment of the head SHA.
     pub preview_url: Option<String>,
+    /// Whether GitHub can merge the PR as it stands; null until it has computed that.
+    pub mergeable: Option<bool>,
+    /// GitHub's finer-grained merge state (`clean`, `dirty`, `blocked`, `behind`, …).
+    pub mergeable_state: Option<String>,
+    /// The local branch tip is the PR head: nothing new to push.
+    pub up_to_date: bool,
     /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
     #[serde(skip)]
     pub head_sha: String,
@@ -264,6 +290,9 @@ pub struct PublishResult {
     pub number: u64,
     pub url: String,
     pub state: PrState,
+    /// The commit the merge produced on the base branch; the deploy that ships the change
+    /// runs on it. `None` when GitHub's answer didn't include one.
+    pub merge_sha: Option<String>,
 }
 
 /// The parts of a pull request that decide its [`PrState`] (besides reviews).
@@ -293,6 +322,8 @@ struct ApiCheckRuns {
 
 #[derive(Deserialize)]
 struct ApiCheckRun {
+    #[serde(default)]
+    name: String,
     status: String,
     #[serde(default)]
     conclusion: Option<String>,
@@ -310,6 +341,16 @@ struct ApiDeploymentStatus {
     state: String,
     #[serde(default)]
     environment_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiBranch {
+    commit: ApiBranchCommit,
+}
+
+#[derive(Deserialize)]
+struct ApiBranchCommit {
+    sha: String,
 }
 
 /// Merged / closed win; then draft; then approved when every reviewer's latest decisive review
@@ -371,6 +412,39 @@ fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
     } else {
         ChecksState::Passing
     }
+}
+
+/// A check run that deploys: GitHub Pages names its own "pages build and deployment", and
+/// deploy workflows are named for it ("deploy", "Deploy Cloudflare Workers", …).
+fn is_deploy_check(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["deploy", "pages", "publish", "release"]
+        .iter()
+        .any(|word| name.contains(word))
+}
+
+/// [`DeployState`] from a commit's check runs. A failing deploy wins over one still running;
+/// checks that aren't deploys (tests, lint) are ignored, so their failures never read as a
+/// failed deploy. No deploy check at all stays [`DeployState::Unknown`].
+fn deploy_state_of(runs: &[ApiCheckRun]) -> DeployState {
+    let deploys: Vec<&ApiCheckRun> = runs.iter().filter(|r| is_deploy_check(&r.name)).collect();
+    if deploys.is_empty() {
+        return DeployState::Unknown;
+    }
+    let failed = deploys.iter().any(|r| {
+        r.status == "completed"
+            && !matches!(
+                r.conclusion.as_deref(),
+                Some("success" | "neutral" | "skipped")
+            )
+    });
+    if failed {
+        return DeployState::Failed;
+    }
+    if deploys.iter().any(|r| r.status != "completed") {
+        return DeployState::Building;
+    }
+    DeployState::Live
 }
 
 impl From<ApiPull> for PullRequest {
@@ -1073,6 +1147,9 @@ impl GithubAuth {
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                mergeable: None,
+                mergeable_state: None,
+                up_to_date: false,
                 // Unknown without the re-read; only used server-side (cleanup), never sent.
                 head_sha: String::new(),
             },
@@ -1190,14 +1267,18 @@ impl GithubAuth {
         if !status.is_success() {
             return Err(publish_refused(status));
         }
-        let merged = serde_json::from_slice::<ApiMerge>(&body).is_ok_and(|m| m.merged);
-        if !merged {
+        let merged = serde_json::from_slice::<ApiMerge>(&body).unwrap_or(ApiMerge {
+            merged: false,
+            sha: None,
+        });
+        if !merged.merged {
             return Err(publish_failed());
         }
         Ok(PublishResult {
             number: pull.number,
             url: pull.html_url,
             state: PrState::Merged,
+            merge_sha: merged.sha,
         })
     }
 
@@ -1232,8 +1313,19 @@ impl GithubAuth {
             state,
             checks,
             preview_url,
+            mergeable: pull.mergeable,
+            mergeable_state: pull.mergeable_state,
+            up_to_date: false,
             head_sha: sha,
         }))
+    }
+
+    /// The commit GitHub's `main` currently points at.
+    pub async fn main_head(&self, repo: &str) -> Result<String, ApiError> {
+        let branch: ApiBranch = self
+            .get_json(&format!("/repos/{repo}/branches/main"))
+            .await?;
+        Ok(branch.commit.sha)
     }
 
     /// Just the [`PrState`] and head of `head_branch`'s pull request (no checks or deployments).
@@ -1316,6 +1408,20 @@ impl GithubAuth {
             }
         }
         Ok(None)
+    }
+
+    /// Whether the deploy that runs on `sha` (a publish's merge commit) has shipped, from
+    /// that commit's check runs. Never an error: a site or token GitHub can't describe stays
+    /// [`DeployState::Unknown`] rather than making a publish look failed.
+    pub async fn deploy_state(&self, repo: &str, sha: &str) -> DeployState {
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        match self
+            .get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+            .await
+        {
+            Ok(runs) => deploy_state_of(&runs),
+            Err(_) => DeployState::Unknown,
+        }
     }
 
     /// [`Self::pr_ref`] of each branch, looked up concurrently. Best effort: an error, or a
@@ -2512,7 +2618,12 @@ esac"#,
     }
 
     fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
+        named("test", status, conclusion)
+    }
+
+    fn named(name: &str, status: &str, conclusion: Option<&str>) -> ApiCheckRun {
         ApiCheckRun {
+            name: name.into(),
             status: status.into(),
             conclusion: conclusion.map(Into::into),
         }
@@ -2543,6 +2654,60 @@ esac"#,
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn deploy_is_live_only_when_its_check_succeeds() {
+        assert_eq!(
+            deploy_state_of(&[
+                named("deploy", "completed", Some("success")),
+                named("test", "completed", Some("failure")),
+            ]),
+            DeployState::Live,
+            "an unrelated failing check is not a failed deploy"
+        );
+        assert_eq!(
+            deploy_state_of(&[named(
+                "pages build and deployment",
+                "completed",
+                Some("success")
+            )]),
+            DeployState::Live
+        );
+    }
+
+    #[test]
+    fn deploy_is_building_while_its_check_runs() {
+        for status in ["queued", "in_progress", "waiting", "requested"] {
+            assert_eq!(
+                deploy_state_of(&[named("deploy", status, None)]),
+                DeployState::Building,
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn deploy_fails_when_its_check_fails_even_beside_a_running_one() {
+        for bad in ["failure", "timed_out", "cancelled", "action_required"] {
+            assert_eq!(
+                deploy_state_of(&[
+                    named("deploy", "completed", Some(bad)),
+                    named("deploy preview", "in_progress", None),
+                ]),
+                DeployState::Failed,
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn deploy_is_unknown_without_a_deploy_check() {
+        assert_eq!(deploy_state_of(&[]), DeployState::Unknown);
+        assert_eq!(
+            deploy_state_of(&[named("test", "completed", Some("success"))]),
+            DeployState::Unknown
+        );
     }
 
     fn status_auth(base: String, tag: &str) -> GithubAuth {
@@ -2609,6 +2774,79 @@ esac"#,
         stop();
     }
 
+    #[test]
+    fn deploy_state_serializes_as_a_plain_word() {
+        assert_eq!(
+            serde_json::to_value(DeployState::Live).unwrap(),
+            serde_json::json!("live")
+        );
+        assert_eq!(
+            serde_json::to_value(DeployState::Unknown).unwrap(),
+            serde_json::json!("unknown")
+        );
+    }
+
+    #[tokio::test]
+    async fn deploy_state_reads_the_merge_commits_check_runs() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/commits/{sha}/check-runs",
+            get(|AxPath(sha): AxPath<String>| async move {
+                Json(match sha.as_str() {
+                    "live" => serde_json::json!({ "check_runs": [
+                        { "name": "test", "status": "completed", "conclusion": "failure" },
+                        { "name": "deploy", "status": "completed", "conclusion": "success" },
+                    ]}),
+                    "building" => serde_json::json!({ "check_runs": [
+                        { "name": "deploy", "status": "in_progress", "conclusion": null },
+                    ]}),
+                    _ => serde_json::json!({ "check_runs": [] }),
+                })
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploy-state");
+        assert_eq!(
+            auth.deploy_state("acme/site", "live").await,
+            DeployState::Live
+        );
+        assert_eq!(
+            auth.deploy_state("acme/site", "building").await,
+            DeployState::Building
+        );
+        assert_eq!(
+            auth.deploy_state("acme/site", "none").await,
+            DeployState::Unknown
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn deploy_state_is_unknown_when_github_cannot_be_read() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/commits/{sha}/check-runs",
+            get(|| async {
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "message": "boom" })),
+                )
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "deploy-broken");
+        assert_eq!(
+            auth.deploy_state("acme/site", "abc").await,
+            DeployState::Unknown
+        );
+        stop();
+    }
+
     #[tokio::test]
     async fn pr_status_combines_pr_reviews_checks_and_deployment() {
         use axum::routing::get;
@@ -2625,6 +2863,8 @@ esac"#,
                         "draft": false,
                         "state": "open",
                         "merged_at": null,
+                        "mergeable": false,
+                        "mergeable_state": "dirty",
                         "head": { "ref": "content/launch-week", "sha": "abc" }
                     }]))
                 }),
@@ -2668,10 +2908,15 @@ esac"#,
         assert_eq!(st.state, PrState::Approved);
         assert_eq!(st.checks, ChecksState::Passing);
         assert_eq!(st.preview_url.as_deref(), Some("https://lw.pages.dev"));
+        assert_eq!(st.mergeable, Some(false));
+        assert_eq!(st.mergeable_state.as_deref(), Some("dirty"));
         let json = serde_json::to_value(&st).unwrap();
         assert_eq!(json["state"], "approved");
         assert_eq!(json["checks"], "passing");
         assert_eq!(json["previewUrl"], "https://lw.pages.dev");
+        assert_eq!(json["mergeable"], false);
+        assert_eq!(json["mergeableState"], "dirty");
+        assert_eq!(json["upToDate"], false);
         stop();
     }
 
@@ -2690,6 +2935,23 @@ esac"#,
             auth.pr_status("acme/site", "content/x").await.unwrap(),
             None
         );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn main_head_reads_the_github_branch_tip() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new().route(
+            "/repos/acme/site/branches/main",
+            get(|| async {
+                Json(serde_json::json!({ "name": "main", "commit": { "sha": "abc" } }))
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "mainhead");
+        assert_eq!(auth.main_head("acme/site").await.unwrap(), "abc");
         stop();
     }
 
@@ -3446,6 +3708,9 @@ esac"#,
                 state: PrState::Open,
                 checks: ChecksState::None,
                 preview_url: None,
+                mergeable: None,
+                mergeable_state: None,
+                up_to_date: false,
                 head_sha: String::new(),
             }
         );
@@ -3501,6 +3766,7 @@ esac"#,
                 number: 4,
                 url: "https://github.com/acme/site/pull/4".into(),
                 state: PrState::Merged,
+                merge_sha: Some("def".into()),
             }
         );
         // The merge is a PUT on the PR found by head, with an explicit merge method.

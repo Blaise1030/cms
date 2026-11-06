@@ -63,6 +63,26 @@ function toolPart(call: ToolCall, id: string): DynamicToolUIPart {
 
 /** Rebuild one transcript's chunks as the assistant/user messages ChatMessage renders. */
 export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
+  const transcript = createTranscript();
+  for (const chunk of chunks) transcript.push(chunk);
+  return transcript.messages;
+}
+
+export interface Transcript {
+  /** Complete message list so far; later pushes may mutate already-returned messages. */
+  readonly messages: UIMessage[];
+  /** Fold one chunk in. A live stream calls this per frame. */
+  push(chunk: UiChunk): void;
+}
+
+export interface TranscriptOptions {
+  /** Drop agent steps (reasoning and tool calls), keeping text and stage lines. */
+  hideSteps?: boolean;
+}
+
+/** Incremental form of [`chunksToMessages`], so a streaming chat does not re-walk its history. */
+export function createTranscript(opts: TranscriptOptions = {}): Transcript {
+  const hideSteps = opts.hideSteps ?? false;
   const messages: UIMessage[] = [];
   /** Raw tool calls by id, so a later update can merge into its part. */
   const calls = new Map<string, ToolCall>();
@@ -77,7 +97,7 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
     return assistant;
   };
 
-  for (const chunk of chunks) {
+  function push(chunk: UiChunk) {
     switch (chunk.type) {
       case "user_text":
         assistant = null;
@@ -95,6 +115,7 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         break;
       }
       case "thought_delta": {
+        if (hideSteps) break;
         const message = assistantMessage();
         const last = message.parts.at(-1);
         if (last?.type === "reasoning") last.text += chunk.text;
@@ -102,6 +123,7 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         break;
       }
       case "tool_call": {
+        if (hideSteps) break;
         const call = chunk.tool_call;
         const id =
           typeof call.toolCallId === "string" ? call.toolCallId : `tool-${++toolSeq}`;
@@ -110,6 +132,7 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         break;
       }
       case "tool_call_update": {
+        if (hideSteps) break;
         const id = typeof chunk.tool_call.toolCallId === "string" ? chunk.tool_call.toolCallId : "";
         if (!id) break;
         const merged = { ...(calls.get(id) ?? {}), ...chunk.tool_call };
@@ -132,7 +155,17 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         assistantMessage().parts.push({ type: "data-checkpoint", data } as Part);
         break;
       }
+      case "sync_status":
+        assistantMessage().parts.push({
+          type: "data-sync-status",
+          data: { phase: chunk.phase, text: chunk.text },
+        } as Part);
+        break;
       case "error":
+        // A sync transcript is the writer's view. The raw chunk stays on disk
+        // for support, but an agent error can name a path or a binary, so it
+        // never reaches these rendered parts.
+        if (hideSteps) break;
         assistantMessage().parts.push({
           type: "data-agent-error",
           data: { code: "failed", message: chunk.message },
@@ -143,5 +176,6 @@ export function chunksToMessages(chunks: UiChunk[]): UIMessage[] {
         break;
     }
   }
-  return messages;
+
+  return { messages, push };
 }

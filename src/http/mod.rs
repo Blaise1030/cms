@@ -69,6 +69,7 @@ pub fn router(state: AppState) -> Router {
             "/api/projects/{id}/protection-hint/dismiss",
             post(projects::dismiss_protection_hint),
         )
+        .route("/api/projects/{id}/deploy", get(changes::deploy))
         .route(
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
@@ -148,20 +149,17 @@ pub fn router(state: AppState) -> Router {
             post(changes::abandon_conflict),
         )
         .route(
-            "/api/changes/conflicts/{id}/auto",
-            get(changes::auto_status).post(changes::start_auto),
+            "/api/changes/conflicts/{id}/sync",
+            get(changes::sync_status).post(changes::start_sync),
         )
         .route(
-            "/api/changes/conflicts/{id}/auto/answers",
-            post(changes::answer_auto),
-        )
-        .route(
-            "/api/changes/conflicts/{id}/auto/cancel",
-            post(changes::cancel_auto),
+            "/api/changes/conflicts/{id}/sync/{chat}/end",
+            post(changes::end_sync),
         )
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
+        .route("/api/changes/sync", get(changes::sync))
         .route(
             "/api/docs/branch-protection",
             get(changes::branch_protection_doc),

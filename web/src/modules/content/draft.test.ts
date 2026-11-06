@@ -9,7 +9,6 @@ import { ApiError } from "@/core/api";
 import { EditorView } from "@codemirror/view";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("./ContentTree.vue", () => import("@/test/contentTreeStub"));
 import { useContentStore } from "./store";
 
 const collection = { name: "blog", kind: "markdown", editable: true, reason: null, fields: { type: "object", required: true, properties: {
@@ -177,7 +176,6 @@ it("opens and toggles a Blog body without dirtying the draft, then saves a body 
   await setMode("raw");
   await setMode("rich");
   expect(useContentStore().dirty).toBe(false);
-  expect(w.get('[data-testid="content-rename"]').attributes("disabled")).toBeUndefined();
   await typeBody("Intro\n\n* one\n* two\n");
   expect(useContentStore().dirty).toBe(true);
   await w.get('[data-testid="content-save"]').trigger("submit"); await flushPromises();

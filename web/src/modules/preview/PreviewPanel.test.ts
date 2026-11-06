@@ -31,6 +31,9 @@ describe("PreviewPanel", () => {
       state: "draft",
       checks: "passing",
       previewUrl: "https://lw.pages.dev",
+      mergeable: null,
+      mergeableState: "draft",
+      upToDate: false,
     };
     await flushPromises();
     expect(w.find("[data-testid='pr-status']").exists()).toBe(false);
@@ -41,6 +44,96 @@ describe("PreviewPanel", () => {
   it("embeds the proxied preview URL", () => {
     const w = mountPanel();
     expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:7800/preview/site-1/");
+    w.unmount();
+  });
+
+  it("frames the project's own dev server in a Vite dev build", () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    localStorage.setItem("orso.preview.path.site-1", "/blog/");
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/");
+    expect((w.find("[data-testid='preview-address']").element as HTMLInputElement).value).toBe("/blog/");
+    w.unmount();
+  });
+
+  it("reopens the page the frame was on when the view reloads", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    // A cross-origin frame reports where the reader went (the injected bridge forwards it);
+    // the agent's checkpoint then reloads the preview, which must come back to that page.
+    usePreviewStore().setFramePath("site-1", "/blog/");
+    await flushPromises();
+    usePreviewStore().reload();
+    await flushPromises();
+    expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/");
+    w.unmount();
+  });
+
+  it("keeps the preview tools enabled when framing the dev server directly", () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    expect(w.find("[data-testid='preview-appearance']").attributes("disabled")).toBeUndefined();
+    expect(w.find("[data-testid='element-picker']").attributes("disabled")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("picks in the direct frame without switching to the proxied preview", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const store = usePreviewStore();
+    const src = () => w.find("iframe").attributes("src");
+
+    await w.find("[data-testid='element-picker']").trigger("click");
+    await flushPromises();
+    expect(store.picking).toBe(true);
+    expect(src()).toBe("http://127.0.0.1:56066/preview/site-1/");
+
+    await w.find("[data-testid='element-picker']").trigger("click");
+    await flushPromises();
+    expect(store.picking).toBe(false);
+    w.unmount();
+  });
+
+  it("cancels a selection when Escape is pressed in the app", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const store = usePreviewStore();
+    await w.find("[data-testid='element-picker']").trigger("click");
+    await flushPromises();
+    expect(store.picking).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(store.picking).toBe(false);
+    w.unmount();
+  });
+
+  it("navigates the directly framed preview from the address field", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const address = w.find("[data-testid='preview-address']");
+    await address.setValue("about/");
+    await w.find("form").trigger("submit");
+    expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/about/");
+    expect((address.element as HTMLInputElement).value).toBe("/about/");
     w.unmount();
   });
 
@@ -80,6 +173,23 @@ describe("PreviewPanel", () => {
     store.setDevice("mobile");
     await flushPromises();
     expect(width()).toBe("390px");
+    w.unmount();
+  });
+
+  it("outlines a device-sized preview so its edge is visible", async () => {
+    const w = mountPanel();
+    const store = usePreviewStore();
+    const boundary = () => w.find("[data-testid='preview-boundary']");
+    expect(boundary().exists()).toBe(false);
+    store.setDevice("tablet");
+    await flushPromises();
+    expect(boundary().exists()).toBe(true);
+    store.setDevice("mobile");
+    await flushPromises();
+    expect(boundary().exists()).toBe(true);
+    store.setDevice("desktop");
+    await flushPromises();
+    expect(boundary().exists()).toBe(false);
     w.unmount();
   });
 

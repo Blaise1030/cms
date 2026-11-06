@@ -118,7 +118,12 @@ function chooseVariant(value: unknown) {
   set(next ? { ...(empty(next) as object), [props.descriptor.discriminator!]: name } : {});
 }
 /** The field name shown to the writer (`coverAlt` → "Cover alt"); list items have no label of their own. */
-const title = computed(() => (props.label ? humanize(props.label) : undefined));
+const title = computed(() => {
+  if (!props.label) return undefined;
+  // A document's own title is what the page shows; its file name is the slug, shown above the form.
+  if (props.label === "title" && props.path.length === 1) return "Display title";
+  return humanize(props.label);
+});
 const phrase = computed(() => (props.label ? humanizeLower(props.label) : undefined));
 const placeholder = computed(() => (phrase.value ? `Enter ${phrase.value}` : "Enter a value"));
 </script>

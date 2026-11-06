@@ -135,6 +135,37 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* macOS draws thick, track-lined scrollbars when the system is set to always show them. Keep
+     every scroller thin and track-free, and show the thumb only while its scroller moves
+     (`lib/scrollbars.ts` marks it). The chat's auto-scroll hides even that. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 9999px;
+  }
+  *[data-scrolling] {
+    scrollbar-color: color-mix(in oklab, var(--foreground) 28%, transparent) transparent;
+  }
+  *[data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 28%, transparent);
+  }
+  [data-autoscrolling] {
+    scrollbar-color: transparent transparent;
+  }
+  [data-autoscrolling]::-webkit-scrollbar-thumb {
+    background-color: transparent;
+  }
 }
 
 /* Pierre trees set `color-scheme: light dark` on :host, which makes their light-dark() colors follow the OS. */

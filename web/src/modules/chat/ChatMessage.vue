@@ -6,9 +6,11 @@ import "vue-stream-markdown/index.css";
 import {
   Brain,
   CircleAlert,
+  CircleCheck,
   FilePen,
   FileText,
   Globe,
+  Info,
   ListChecks,
   MousePointerClick,
   Paperclip,
@@ -37,6 +39,9 @@ import {
   formatValue,
   groupSteps,
   stepsTitle,
+  syncIsTerminal,
+  syncPhaseData,
+  syncPhaseOf,
   toolLabel,
   type AgentErrorData,
   type CheckpointData,
@@ -183,6 +188,20 @@ const agentError = (data: unknown) => data as AgentErrorData;
           :project-id="projectId"
           :checkpoint="checkpoint(group.part.data)"
         />
+
+        <template v-else-if="group.part.type === 'data-sync-status'">
+          <Alert
+            v-if="syncIsTerminal(syncPhaseOf(group.part.data))"
+            data-testid="sync-status"
+          >
+            <CircleCheck v-if="syncPhaseOf(group.part.data) === 'combined'" />
+            <Info v-else />
+            <AlertDescription>{{ syncPhaseData(group.part.data).text }}</AlertDescription>
+          </Alert>
+          <p v-else data-testid="sync-status" class="text-muted-foreground text-xs">
+            {{ syncPhaseData(group.part.data).text }}
+          </p>
+        </template>
 
         <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">
           <CircleAlert />
