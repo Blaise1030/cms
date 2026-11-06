@@ -54,6 +54,61 @@ function mountComposer(autoApprove: boolean, locked: string | null = null) {
   });
 }
 
+describe("ChatComposer page context", () => {
+  it("shows a badge for the current page context", () => {
+    const w = mount(ChatComposer, {
+      props: {
+        modelValue: "",
+        provider: "cursor",
+        model: null,
+        providers: ["cursor"],
+        models: {},
+        providerLocked: false,
+        streaming: false,
+        blocked: null,
+        attachments: [],
+        attaching: false,
+        references: [],
+        autoApprove: false,
+        pageContext: { tab: "preview", fields: { path: "/about" } },
+      },
+      global: { stubs },
+    });
+    expect(w.find("[data-testid='chat-page-context']").text()).toContain("Preview · /about");
+  });
+
+  it("hides the badge when there is no page context", () => {
+    expect(mountComposer(false).find("[data-testid='chat-page-context']").exists()).toBe(false);
+  });
+
+  it("offers a dismiss control before the context label", async () => {
+    const w = mount(ChatComposer, {
+      props: {
+        modelValue: "",
+        provider: "cursor",
+        model: null,
+        providers: ["cursor"],
+        models: {},
+        providerLocked: false,
+        streaming: false,
+        blocked: null,
+        attachments: [],
+        attaching: false,
+        references: [],
+        autoApprove: false,
+        pageContext: { tab: "preview", fields: { path: "/about" } },
+      },
+      global: { stubs },
+    });
+    const badge = w.find("[data-testid='chat-page-context']");
+    const remove = badge.find("[data-testid='chat-page-context-remove']");
+    expect(remove.exists()).toBe(true);
+    expect(badge.element.firstElementChild).toBe(remove.element);
+    await remove.trigger("click");
+    expect(w.emitted("clearPageContext")).toEqual([[]]);
+  });
+});
+
 describe("ChatComposer lock", () => {
   it("shows the reason in place of the input", () => {
     const w = mountComposer(false, "Checking the site still works…");

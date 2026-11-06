@@ -14,10 +14,13 @@ import ChatPanel from "./ChatPanel.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
+import { useChatSteps } from "@/lib/chatSteps";
 import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
+import { usePreviewStore } from "@/modules/preview/store";
 import { routes, settingsPath } from "@/router";
+import { formatPageContext, splitPageContext } from "./pageContext";
 
 enableAutoUnmount(afterEach);
 
@@ -100,6 +103,10 @@ async function fetchMock(input: RequestInfo | URL, init: RequestInit = {}): Prom
     });
   if (path === "/api/chat/p1/attachments" && method === "POST")
     return json({ path: "/state/p1/attachments/abc123.png" });
+  if (path === "/api/changes" && method === "POST") {
+    const body = JSON.parse(String(init.body)) as { title: string };
+    return json({ branch: "content/launch-week", title: body.title }, 201);
+  }
   if (path === "/api/chat/p1" && method === "GET") {
     if (chatsGate) await chatsGate;
     return json({ chats, running: chats.find((c) => c.running)?.id ?? null });
@@ -241,7 +248,9 @@ async function streamFor(id: string) {
 
 const messagePosts = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/message"));const createPosts = () =>
   calls.filter((c) => c.method === "POST" && c.url === `${ORIGIN}/api/chat/p1`);
-const textOf = (call: Call) => JSON.parse(String(call.init.body)).text as string;
+const rawTextOf = (call: Call) => JSON.parse(String(call.init.body)).text as string;
+/** User-visible text (page-context wire block stripped) for existing send assertions. */
+const textOf = (call: Call) => splitPageContext(rawTextOf(call)).text;
 
 beforeEach(() => {
   localStorage.clear();
@@ -436,7 +445,63 @@ describe("ChatPanel", () => {
     expect(w.text()).toContain("Prompt 0");
   });
 
+  it("shows a page-context badge and injects preview path into the outbound message", async () => {
+    usePreviewStore().setFramePath("p1", "/about");
+    const w = await mountPanel();
+    expect(w.find("[data-testid='chat-page-context']").text()).toContain("Preview · /about");
+    await send(w, "hi");
+    expect(rawTextOf(messagePosts()[0]!)).toBe(
+      `hi\n${formatPageContext({ tab: "preview", fields: { path: "/about" } })}`,
+    );
+    expect(textOf(messagePosts()[0]!)).toBe("hi");
+  });
+
+  it("injects content collection and entry from the route", async () => {
+    const router = testRouter();
+    await router.push("/p/p1/content/posts/hello");
+    await router.isReady();
+    const w = mount(ChatPanel, {
+      props: { projectId: "p1", active: true },
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='chat-page-context']").text()).toContain("Content · posts/hello");
+    await send(w, "edit this");
+    expect(rawTextOf(messagePosts()[0]!)).toBe(
+      `edit this\n${formatPageContext({ tab: "content", fields: { collection: "posts", entry: "hello" } })}`,
+    );
+  });
+
+  it("keeps sticky content context after leaving for another module until dismissed", async () => {
+    const router = testRouter();
+    await router.push("/p/p1/content/posts/hello");
+    await router.isReady();
+    const w = mount(ChatPanel, {
+      props: { projectId: "p1", active: true },
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='chat-page-context-remove']").exists()).toBe(true);
+
+    await router.push("/p/p1/design");
+    await flushPromises();
+    expect(w.find("[data-testid='chat-page-context']").text()).toContain("Content · posts/hello");
+    expect(w.find("[data-testid='chat-page-context-remove']").exists()).toBe(true);
+
+    await send(w, "keep going");
+    expect(rawTextOf(messagePosts()[0]!)).toBe(
+      `keep going\n${formatPageContext({ tab: "content", fields: { collection: "posts", entry: "hello" } })}`,
+    );
+
+    await w.find("[data-testid='chat-page-context-remove']").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid='chat-page-context']").exists()).toBe(false);
+  });
+
   it("creates a chat, posts only the new message with auth, then renders the saved reply", async () => {
+    useChatSteps().set(true);
     const w = await mountPanel();
     await send(w, "hi");
     const create = createPosts()[0]!;
@@ -598,6 +663,64 @@ describe("ChatPanel", () => {
       expect(w.find("[data-testid='chat-error-action']").text()).toBe("Set up");
       await w.find("[data-testid='chat-error-action']").trigger("click");
       expect(assistantDialogOpen.value).toBe(true);
+    });
+
+    it("opens Start a change first on CHANGE_REQUIRED and resends after the branch is created", async () => {
+      messageFailure = json(
+        {
+          error: {
+            code: "CHANGE_REQUIRED",
+            message: "Start a change first — GitHub projects cannot be edited on main",
+          },
+        },
+        409,
+      );
+      const w = await mountPanel();
+      await send(w, "edit the notes");
+      await flushPromises();
+
+      expect(w.find("[data-testid='chat-error']").exists()).toBe(false);
+      const dialog = document.body.querySelector<HTMLElement>("[role=dialog]");
+      expect(dialog).toBeTruthy();
+      expect(dialog!.textContent).toContain("Start a change first");
+      expect(messagePosts()).toHaveLength(1);
+
+      messageFailure = null;
+      const title = dialog!.querySelector("input")!;
+      title.value = "Launch week";
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+      await flushPromises();
+      dialog!.querySelector<HTMLButtonElement>("button[type=submit]")!.click();
+      await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+      expect(textOf(messagePosts()[1]!)).toBe("edit the notes");
+      expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes`)).toBe(true);
+    });
+
+    it("puts the prompt back in the composer when Start a change is cancelled", async () => {
+      messageFailure = json(
+        {
+          error: {
+            code: "CHANGE_REQUIRED",
+            message: "Start a change first — GitHub projects cannot be edited on main",
+          },
+        },
+        409,
+      );
+      const w = await mountPanel();
+      await send(w, "edit the notes");
+      await flushPromises();
+
+      const dialog = document.body.querySelector<HTMLElement>("[role=dialog]")!;
+      expect(dialog).toBeTruthy();
+      const cancel = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Cancel"));
+      cancel!.click();
+      await flushPromises();
+
+      expect(document.body.querySelector("[role=dialog]")).toBeNull();
+      expect((w.find("[data-testid='chat-input']").element as HTMLTextAreaElement).value).toBe(
+        "edit the notes",
+      );
+      expect(messagePosts()).toHaveLength(1);
     });
 
     it("retries the last send from a failed assistant card", async () => {

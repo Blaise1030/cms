@@ -42,8 +42,9 @@ async function submit() {
   if (!title.value.trim() || store.creating) return;
   try {
     const change = await store.create(props.projectId, title.value);
-    open.value = false;
+    // Emit before closing so parents can clear pending work without treating this as cancel.
     emit("created", change);
+    open.value = false;
   } catch (e) {
     toast.error(errorMessage(e));
   }

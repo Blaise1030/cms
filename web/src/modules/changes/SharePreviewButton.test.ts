@@ -60,4 +60,35 @@ describe("SharePreviewButton", () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="share-preview"]').exists()).toBe(true);
   });
+
+  it("links the live site on main when a production URL is known", async () => {
+    setActivePinia(createPinia());
+    const store = useChangesStore();
+    store.active = null;
+    store.liveUrl = "https://acme.pages.dev";
+    const wrapper = mount(SharePreviewButton, {
+      props: { projectId: "site", repo: "acme/site" },
+      global: { stubs: { PrMenu: true, ProtectionHint: true } },
+    });
+    const a = wrapper.get('[data-testid="live-site-link"]');
+    expect(a.attributes("href")).toBe("https://acme.pages.dev");
+    expect(a.text()).toContain("Open live site");
+  });
+
+  it("hides the live site link without a production URL or while on a change", async () => {
+    const { store, wrapper } = mountWith();
+    store.liveUrl = "https://acme.pages.dev";
+    await flushPromises();
+    expect(wrapper.find('[data-testid="live-site-link"]').exists()).toBe(false);
+
+    setActivePinia(createPinia());
+    const onMain = useChangesStore();
+    onMain.active = null;
+    onMain.liveUrl = null;
+    const empty = mount(SharePreviewButton, {
+      props: { projectId: "site", repo: "acme/site" },
+      global: { stubs: { PrMenu: true, ProtectionHint: true } },
+    });
+    expect(empty.find('[data-testid="live-site-link"]').exists()).toBe(false);
+  });
 });

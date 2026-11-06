@@ -6,6 +6,7 @@ import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
 import SetupCheck from "@/app/SetupCheck.vue";
 import UpdateNotice from "@/app/UpdateNotice.vue";
 import { SETUP_WAIT_MS, dismissSetup, setupDismissed, setupIncomplete } from "@/app/setup";
+import { Spinner } from "@/components/ui/spinner";
 import { Toaster } from "@/components/ui/sonner";
 import { useDaemon } from "@/core/daemon";
 import type { SetupStatus } from "@/core/types";
@@ -87,7 +88,16 @@ onBeforeUnmount(() => {
     @retry="retry"
     @connect="connect"
   />
-  <div v-else-if="setupPending" class="bg-background h-svh" aria-busy="true" data-testid="setup-pending" />
+  <div
+    v-else-if="setupPending"
+    class="bg-background text-muted-foreground flex h-svh items-center justify-center gap-2 text-sm"
+    role="status"
+    aria-busy="true"
+    data-testid="setup-pending"
+  >
+    <Spinner class="size-4" aria-hidden="true" />
+    <span>Loading…</span>
+  </div>
   <SetupCheck
     v-else-if="showSetup"
     class="bg-background text-foreground"

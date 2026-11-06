@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
+import { ChevronLeft, FileJson, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
 import { Button } from "@/components/ui/button";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
@@ -256,37 +267,65 @@ function beforeUnload(event: BeforeUnloadEvent) { if(store.dirty) { event.preven
 onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 // File events stop refreshing Content while the tab is closed; reopening it refreshes once.
 onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
+
+/** Same as App Settings sidebar nav (no primary tint — that belongs on the icon rail). */
+const navItem = "h-9 rounded-lg px-2.5 text-[13px]";
+const navActive = [
+  "font-medium shadow-sm btn-raised-soft",
+  "data-[active=true]:bg-card data-[active=true]:text-sidebar-accent-foreground",
+  "data-[active=true]:hover:bg-card",
+].join(" ");
+/** Same kind glyphs as the entry list, so a collection's type is visible before you open it. */
+const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as const;
 </script>
 <template>
   <div class="h-full min-h-0" data-testid="content-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
       <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :order="1" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
-      <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
-        <SidebarContent class="overflow-hidden">
-          <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
+      <Sidebar collapsible="none" class="bg-background h-full min-h-0 w-full min-w-0" data-testid="content-collections-sidebar">
+        <SidebarContent class="gap-0 overflow-hidden py-2">
+          <SidebarGroup class="min-h-0 flex-1 px-1.5 py-1">
+            <SidebarGroupLabel class="text-sidebar-foreground/50 h-7 px-2 text-[11px] tracking-wide">
+              Collections
+            </SidebarGroupLabel>
             <SidebarGroupContent class="flex min-h-0 flex-1 flex-col gap-2">
-              <p class="px-2 text-xs font-medium text-muted-foreground">Collections</p>
-              <InputGroup class="mx-1 h-8 w-auto">
+              <InputGroup class="h-8 w-auto border-sidebar-border bg-card shadow-none">
                 <InputGroupAddon align="inline-start">
                   <Search class="size-4 opacity-50" aria-hidden="true" />
                 </InputGroupAddon>
-                <InputGroupInput v-model="collectionQuery" data-testid="content-collection-filter" placeholder="Filter collections" aria-label="Filter collections" class="h-8" />
+                <InputGroupInput
+                  v-model="collectionQuery"
+                  data-testid="content-collection-filter"
+                  placeholder="Filter collections"
+                  aria-label="Filter collections"
+                  class="h-8 text-[13px]"
+                />
               </InputGroup>
-              <nav data-testid="content-collections" aria-label="Collections" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto">
-                <div v-for="c in filteredCollections" :key="c.name" class="group flex items-center gap-0.5">
-                  <button
+              <!-- Padding keeps btn-raised-soft's shadow inside the scroller (overflow clips paint). -->
+              <SidebarMenu data-testid="content-collections" aria-label="Collections" class="min-h-0 flex-1 gap-0.5 overflow-y-auto p-1.5">
+                <SidebarMenuItem v-for="c in filteredCollections" :key="c.name">
+                  <SidebarMenuButton
                     type="button"
-                    class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:bg-accent"
-                    :class="store.selectedCollection === c.name ? 'bg-accent text-accent-foreground' : ''"
+                    :is-active="store.selectedCollection === c.name"
+                    :class="[navItem, store.selectedCollection === c.name ? navActive : '']"
                     :aria-current="store.selectedCollection === c.name ? 'page' : undefined"
                     data-testid="content-collection"
                     :data-collection-name="c.name"
                     @click="openCollection(c)"
-                  >{{ humanize(c.name) }}</button>
-                </div>
-                <p v-if="!filteredCollections.length" class="px-2 py-1.5 text-xs text-muted-foreground" data-testid="content-collections-empty">No matches</p>
-              </nav>
+                  >
+                    <component :is="COLLECTION_ICON[c.kind]" aria-hidden="true" />
+                    <span>{{ humanize(c.name) }}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <p
+                  v-if="!filteredCollections.length"
+                  class="text-sidebar-foreground/50 px-3 py-2 text-xs"
+                  data-testid="content-collections-empty"
+                >
+                  No matches
+                </p>
+              </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>

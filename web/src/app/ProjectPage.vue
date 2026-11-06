@@ -13,8 +13,10 @@ import { report } from "@/modules/changes/getLatest";
 import { useChangesStore } from "@/modules/changes/store";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
 import { useProjectsStore } from "@/modules/projects/store";
+import AgentFloatingHost from "@/modules/chat/AgentFloatingHost.vue";
 import AgentPanel from "@/modules/chat/AgentPanel.vue";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
+import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 import { projectTabFromRoute } from "@/router";
 
 const props = defineProps<{ id: string }>();
@@ -25,7 +27,9 @@ const router = useRouter();
 const projects = useProjectsStore();
 const changes = useChangesStore();
 const outbox = useAgentOutboxStore();
+const panelLayout = useChatPanelLayout();
 const shell = ref<InstanceType<typeof Shell> | null>(null);
+const floatingHost = ref<InstanceType<typeof AgentFloatingHost> | null>(null);
 
 const project = computed(() => projects.projects.find((p) => p.id === props.id) ?? null);
 /** Something was sent to the agent from a tab that normally hides it. */
@@ -34,6 +38,8 @@ const showChat = computed(() => {
   const tab = projectTabFromRoute(route.name);
   return chatRequested.value || tab === "preview" || tab === "content" || tab === "design" || tab === "code";
 });
+const floatingChat = computed(() => showChat.value && panelLayout.floating.value);
+const sidebarChat = computed(() => showChat.value && !panelLayout.floating.value);
 
 watch(
   () => route.name,
@@ -46,7 +52,8 @@ watch(
   async () => {
     chatRequested.value = true;
     await nextTick();
-    shell.value?.openChat();
+    if (panelLayout.floating.value) floatingHost.value?.expand();
+    else shell.value?.openChat();
   },
 );
 
@@ -98,7 +105,7 @@ watch(
 </script>
 
 <template>
-  <Shell ref="shell" :show-chat="showChat">
+  <Shell ref="shell" :show-chat="sidebarChat">
     <template #rail>
       <ProjectRail v-if="project" :project-id="project.id">
         <template #footer>
@@ -128,4 +135,10 @@ watch(
       />
     </template>
   </Shell>
+  <AgentFloatingHost
+    v-if="project && floatingChat"
+    ref="floatingHost"
+    :key="`float-${project.id}`"
+    :project-id="project.id"
+  />
 </template>

@@ -64,6 +64,23 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("shows a page-context badge and hides the raw wire block", async () => {
+    const w = await render(
+      [
+        {
+          type: "text",
+          text: "Fix the hero\n[page-context]\ntab: preview\npath: /about\n[/page-context]",
+        },
+      ],
+      "user",
+    );
+    expect(w.find("[data-testid='message-page-context']").text()).toContain("Preview · /about");
+    expect(w.text()).toContain("Fix the hero");
+    expect(w.text()).not.toContain("[page-context]");
+    expect(w.text()).not.toContain("tab: preview");
+    w.unmount();
+  });
+
   it("shows attached images as previews and other files as chips instead of their paths", async () => {
     const dir = "/Users/me/orso-projects/.orso/p/attachments";
     const w = await render(

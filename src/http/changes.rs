@@ -1,8 +1,8 @@
 //! `POST /api/changes`, `GET /api/changes`, `GET /api/changes/active`,
 //! `POST /api/changes/{branch}/switch`, `POST /api/changes/{branch}/share`,
-//! `GET /api/changes/{branch}/status`, `GET /api/docs/branch-protection`, `POST /api/changes/update`,
-//! `POST /api/changes/{branch}/cleanup`, `POST /api/changes/{branch}/ready`,
-//! `POST /api/changes/{branch}/publish`.
+//! `GET /api/changes/{branch}/status`, `GET /api/changes/live`, `GET /api/docs/branch-protection`,
+//! `POST /api/changes/update`, `POST /api/changes/{branch}/cleanup`,
+//! `POST /api/changes/{branch}/ready`, `POST /api/changes/{branch}/publish`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
@@ -21,7 +21,7 @@ use crate::changes::{self, PrMerge};
 use crate::chat::history::{self, SyncPhase};
 use crate::conflict_preview::{PreviewState, Source};
 use crate::error::ApiError;
-use crate::github::{pr_body, pr_title, BranchProtection, PrRef, PrState};
+use crate::github::{self, pr_body, pr_title, BranchProtection, PrRef, PrState};
 use crate::state::AppState;
 
 /// Upper bound on each change's PR-state lookup in `GET /api/changes` (they run concurrently),
@@ -712,6 +712,34 @@ pub async fn status(
         _ => None,
     };
     Ok(Json(json!({ "pr": pr })))
+}
+
+/// `GET /api/changes/live?project=` → `{ url }`. Successful deployment of GitHub's `main`
+/// tip, or `null` when the project has no GitHub remote / no production deployment yet.
+/// Failures from GitHub become `null` so the header link simply stays hidden.
+pub async fn live(
+    State(state): State<AppState>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    let Some(repo) = project.repo.as_deref() else {
+        return Ok(Json(json!({ "url": null })));
+    };
+    let worker = github::worker_name_from_wrangler(&project.dir);
+    let url = match state
+        .github
+        .live_url(repo, worker.as_deref())
+        .await
+    {
+        Ok(url) => url,
+        Err(_) => None,
+    };
+    Ok(Json(json!({ "url": url })))
 }
 
 /// `GET /api/changes/sync?project=` → `{ needed }`. False when Get latest would do nothing:

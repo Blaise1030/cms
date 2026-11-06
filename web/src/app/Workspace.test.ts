@@ -4,6 +4,7 @@ import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 vi.mock("@/modules/changes/store", () => ({ useChangesStore: () => ({ selectedConflictId: null }) }));
+import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 import Workspace from "./Workspace.vue";
 
 const empty = { render: () => null };
@@ -66,6 +67,17 @@ describe("Workspace", () => {
     await flushPromises();
     expect(preview.classes()).not.toContain("invisible");
     expect((surface.element as HTMLElement).style.display).toBe("none");
+    w.unmount();
+  });
+
+  it("pads the workspace for the floating agent session bar", async () => {
+    localStorage.clear();
+    const { w } = await setup("/p/site/preview");
+    expect(w.get("[data-testid='workspace-root']").classes()).not.toContain("pb-11");
+
+    useChatPanelLayout().set("floating");
+    await flushPromises();
+    expect(w.get("[data-testid='workspace-root']").classes()).toContain("pb-11");
     w.unmount();
   });
 });

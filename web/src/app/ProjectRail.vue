@@ -28,8 +28,9 @@ const macDesktop = isMacDesktop();
 const item = "relative flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-all active:translate-y-px hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
 /** The home link sits raised, like the app's other buttons. */
 const raised = "bg-background text-foreground btn-raised-soft dark:bg-accent/50";
-/** The current tab is raised and tinted with the primary colour so it stands out from the rail. */
-const current = "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30";
+/** Selected tab: primary tint + raised gloss. */
+const current =
+  "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30";
 </script>
 
 <template>
@@ -58,11 +59,6 @@ const current = "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 
             :aria-current="active === tab.id ? 'page' : undefined"
             :data-testid="`workspace-tab-${tab.id}`"
           >
-            <span
-              v-if="active === tab.id"
-              class="absolute top-1.5 bottom-1.5 -left-2.5 w-1 rounded-r-full bg-primary"
-              aria-hidden="true"
-            />
             <component :is="tab.icon" />
           </RouterLink>
         </TooltipTrigger>

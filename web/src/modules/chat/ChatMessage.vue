@@ -35,8 +35,10 @@ import {
 import { useDaemon } from "@/core/daemon";
 import { useChatSteps } from "@/lib/chatSteps";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
+import { Badge } from "@/components/ui/badge";
 import { splitAttachments } from "./attachments";
 import { openWebLink } from "./links";
+import { pageContextBadge, splitPageContext } from "./pageContext";
 import {
   formatValue,
   groupSteps,
@@ -64,9 +66,14 @@ const emit = defineEmits<{
 const daemon = useDaemon();
 const chatSteps = useChatSteps();
 
-/** The user's text parts, with the attachment paths ChatPanel appended split back out. */
+/** The user's text parts, with attachment paths and page-context blocks split back out. */
 const userTexts = computed(() =>
-  props.message.parts.flatMap((p) => (p.type === "text" ? [splitAttachments(p.text)] : [])),
+  props.message.parts.flatMap((p) => {
+    if (p.type !== "text") return [];
+    const attached = splitAttachments(p.text);
+    const { text, context } = splitPageContext(attached.text);
+    return [{ text, files: attached.files, context }];
+  }),
 );
 const groups = computed(() => groupSteps(props.message.parts));
 /** Attached images that failed to load (e.g. a cross-site daemon); shown as file chips. */
@@ -154,6 +161,14 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
               </template>
             </BubbleContent>
           </Bubble>
+          <Badge
+            v-if="sent.context"
+            variant="secondary"
+            data-testid="message-page-context"
+            class="max-w-full py-1 pr-2 pl-2 text-xs"
+          >
+            {{ pageContextBadge(sent.context) }}
+          </Badge>
           <Bubble v-if="sent.text" variant="tinted" align="end">
             <BubbleContent class="whitespace-pre-wrap">
               <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">

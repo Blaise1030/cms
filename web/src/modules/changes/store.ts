@@ -60,6 +60,8 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /** Production site URL while on `main`; null on a change or when unknown. */
+  const liveUrl = ref<string | null>(null);
   /** Whether Get latest would change anything; null while unknown (the button stays enabled). */
   const syncNeeded = ref<boolean | null>(null);
   const conflictSessions = ref<ConflictSession[]>([]);
@@ -114,6 +116,23 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   /**
+   * Re-read the production site URL while on `main`. Failures and change branches clear it
+   * so the header link stays hidden rather than pointing at a stale preview.
+   */
+  async function refreshLiveUrl() {
+    const id = projectId.value;
+    if (!id || active.value) {
+      liveUrl.value = null;
+      return;
+    }
+    try {
+      liveUrl.value = await daemon.api.liveSiteUrl(id);
+    } catch {
+      liveUrl.value = null;
+    }
+  }
+
+  /**
    * Re-read whether Get latest would change anything. A failure leaves it unknown, so the
    * button stays enabled rather than being wrongly disabled.
    */
@@ -150,6 +169,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = null;
       prUrl.value = null;
       status.value = null;
+      liveUrl.value = null;
       syncNeeded.value = null;
       protectionHint.value = null;
       items.value = [];
@@ -185,8 +205,12 @@ export const useChangesStore = defineStore("changes", () => {
       if (projectId.value === id) loading.value = false;
     }
     if (projectId.value !== id) return;
-    if (active.value) await refreshStatus();
-    else await refreshSync();
+    if (active.value) {
+      liveUrl.value = null;
+      await refreshStatus();
+    } else {
+      await Promise.all([refreshSync(), refreshLiveUrl()]);
+    }
   }
 
   async function list(id: string) {
@@ -216,6 +240,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = null;
       status.value = null;
+      liveUrl.value = null;
       stopStatusPolling();
       protectionHint.value = null;
       await refreshTreeAndPreview(change.branch);
@@ -255,6 +280,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = change.prUrl ?? null;
       status.value = null;
+      liveUrl.value = null;
       protectionHint.value = null;
       await refreshTreeAndPreview(change.branch);
       await refreshStatus();
@@ -553,6 +579,7 @@ export const useChangesStore = defineStore("changes", () => {
         protectionHint.value = null;
         await refreshTreeAndPreview("main");
         void refreshSync();
+        void refreshLiveUrl();
       } catch (e) {
         error.value = errorMessage(e);
         void refreshStatus();
@@ -591,6 +618,7 @@ export const useChangesStore = defineStore("changes", () => {
       }
       await refreshTreeAndPreview("main");
       void refreshSync();
+      void refreshLiveUrl();
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);
@@ -744,6 +772,7 @@ export const useChangesStore = defineStore("changes", () => {
     pendingSwitch,
     needsSignIn,
     status,
+    liveUrl,
     syncNeeded,
     conflictSessions,
     selectedConflictId,

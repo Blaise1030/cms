@@ -81,6 +81,8 @@ Merge with existing `vite` / `integrations` — do not drop them. Orso sets `PUB
 - Rewrite the site to match the marketing template
 - Commit secrets or force-push
 
+When you *are* asked to add or fix deploy workflows: record GitHub **Deployments** for both production (`main`, with live `environment_url`) and PR previews (with preview `environment_url`). orso’s **Open live site** / preview links read those statuses — see `templates/astro-marketing/.github/workflows/deploy.yml` and `working-in-orso`.
+
 ## Humans: install this skill
 
 ```bash

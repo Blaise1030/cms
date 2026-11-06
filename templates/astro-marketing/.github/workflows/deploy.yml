@@ -1,6 +1,9 @@
 # Build the static Astro site and deploy it to Cloudflare Workers (static assets).
 #
-#   push to main          -> production deploy (`wrangler deploy`).
+#   push to main          -> production deploy (`wrangler deploy`). Recorded as a GitHub
+#                            deployment of the push SHA (`environment: production`) whose status
+#                            carries the live URL (`environment_url`). The CMS orso reads that
+#                            deployment to show "Open live site" on main.
 #   pull request (opened, -> preview of the PR head commit: `wrangler versions upload
 #   updated, reopened)       --preview-alias=<alias>`, the alias made from the head branch by
 #                            .github/scripts/preview-alias.sh, so each branch keeps one stable URL
@@ -65,7 +68,7 @@ jobs:
       - run: npm run build
 
       - name: Start GitHub deployment (preview)
-        id: deployment
+        id: preview_deployment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
@@ -85,8 +88,28 @@ jobs:
             });
             core.setOutput("id", data.id);
 
+      - name: Start GitHub deployment (production)
+        id: production_deployment
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: "production",
+              transient_environment: false,
+              production_environment: true,
+              auto_merge: false,
+              required_contexts: [],
+              description: "Cloudflare Workers production",
+            });
+            core.setOutput("id", data.id);
+
       # `--preview-alias` needs wrangler 4.21+; the action would otherwise install 3.x.
       - name: Deploy ./dist to Cloudflare Workers (production)
+        id: production
         if: github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v3
         with:
@@ -105,11 +128,37 @@ jobs:
           wranglerVersion: "4.149.0"
           command: versions upload --name="${{ env.WORKER_NAME }}" --preview-alias="${{ steps.alias.outputs.name }}"
 
-      - name: Publish preview URL (deployment status + sticky PR comment)
-        if: always() && steps.deployment.outputs.id
+      - name: Publish production URL (deployment status)
+        if: always() && steps.production_deployment.outputs.id
         uses: actions/github-script@v7
         env:
-          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          DEPLOYMENT_ID: ${{ steps.production_deployment.outputs.id }}
+          DEPLOY_OUTCOME: ${{ steps.production.outcome }}
+          WRANGLER_OUTPUT: ${{ steps.production.outputs.command-output }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+        with:
+          script: |
+            // Prefer an explicit repo variable; else the URL wrangler printed; else give up
+            // (orso can still derive production from a preview URL + wrangler.toml name).
+            const out = process.env.WRANGLER_OUTPUT || "";
+            const fromWrangler = (out.match(/https:\/\/[^\s]+workers\.dev\/?/i) || [])[0];
+            const url = (process.env.PUBLIC_SITE_URL || fromWrangler || "").replace(/\/$/, "");
+            const ok = process.env.DEPLOY_OUTCOME === "success" && /^https:\/\//i.test(url);
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: ok ? "success" : "failure",
+              ...(ok ? { environment_url: url } : {}),
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              auto_inactive: true,
+            });
+
+      - name: Publish preview URL (deployment status + sticky PR comment)
+        if: always() && steps.preview_deployment.outputs.id
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.preview_deployment.outputs.id }}
           DEPLOY_OUTCOME: ${{ steps.preview.outcome }}
           WRANGLER_OUTPUT: ${{ steps.preview.outputs.command-output }}
         with:

@@ -26,42 +26,29 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
-import { useDaemon } from "@/core/daemon";
-import type { SetupStatus } from "@/core/types";
 import DeviceCodeDialog from "@/modules/github/DeviceCodeDialog.vue";
 import { useGithubStore } from "@/modules/github/store";
 import SettingsSection from "./SettingsSection.vue";
 
-const daemon = useDaemon();
 const gh = useGithubStore();
 
-const status = ref<SetupStatus | null>(null);
 const checking = ref(false);
-const failed = ref(false);
 
+const status = computed(() => gh.setup);
 const githubSignedIn = computed(() => gh.user != null || status.value?.githubSignedIn === true);
-const loading = computed(() => !status.value && !failed.value);
+const loading = computed(() => !status.value && !gh.setupError);
 
 async function recheck() {
   checking.value = true;
   try {
-    const [next] = await Promise.all([
-      daemon.api.setupStatus(),
-      gh.load().catch(() => {
-        // Without GitHub status the account row keeps the manual sign-in hint.
-      }),
-    ]);
-    status.value = next;
-    failed.value = false;
-  } catch {
-    failed.value = true;
+    await gh.loadSetup();
   } finally {
     checking.value = false;
   }
 }
 
 onMounted(() => {
-  if (!status.value) void recheck();
+  if (!gh.setup) void recheck();
 });
 </script>
 
@@ -89,7 +76,7 @@ onMounted(() => {
       </p>
 
       <Alert
-        v-else-if="failed || !status"
+        v-else-if="gh.setupError || !status"
         variant="destructive"
         class="m-4"
         data-testid="github-settings-error"
