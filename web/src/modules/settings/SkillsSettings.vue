@@ -47,12 +47,17 @@ async function save() {
   }
 }
 
-/** The daemon resets to the default on an empty path; reflect it optimistically and after the reply. */
+/** Editing the path makes the last save stale. */
+function onInput(value: string | number) {
+  path.value = String(value);
+  saved.value = false;
+}
+
+/** The daemon resets to the default on an empty path; apply the returned default on success. */
 async function reset() {
   saving.value = true;
   saved.value = false;
   error.value = null;
-  path.value = defaultPath.value;
   try {
     const settings = await daemon.api.saveSkillsSettings({ globalPath: "" });
     path.value = settings.globalPath;
@@ -79,10 +84,11 @@ onMounted(load);
         <Label for="skills-settings-path" class="text-xs font-medium">Global skills path</Label>
         <Input
           id="skills-settings-path"
-          v-model="path"
+          :model-value="path"
           data-testid="skills-settings-path"
           class="font-mono text-xs"
           :disabled="loading"
+          @update:model-value="onInput"
         />
         <p class="text-muted-foreground text-xs">
           Default: <code>{{ defaultPath }}</code>

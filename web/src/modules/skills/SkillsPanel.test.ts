@@ -88,6 +88,33 @@ describe("SkillsPanel", () => {
     w.unmount();
   });
 
+  it("an install refused on main from the empty state closes the dialog and shows Create change", async () => {
+    const { ApiError } = await import("@/core/api");
+    const installSkill = vi.fn().mockRejectedValue(new ApiError("CHANGE_REQUIRED", "Start a change first", 409));
+    const { w } = await setup({
+      skills: vi.fn(async () => ({
+        installed: [],
+        catalog: [{ id: "seo", name: "SEO", description: "SEO guidance", installedProject: false, installedGlobal: false }],
+      })),
+      installSkill,
+    });
+    expect(w.find('[data-testid="skills-empty"]').exists()).toBe(true);
+    await button(w, "skills-install").trigger("click");
+    await flushPromises();
+
+    const install = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="install-catalog-install"][data-skill-id="seo"]',
+    );
+    expect(install).not.toBeNull();
+    install!.click();
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-testid="install-skill-dialog"]')).toBeNull();
+    expect(w.find('[data-testid="skills-empty"]').exists()).toBe(true);
+    expect(w.get('[data-testid="skills-create-change"]').text()).toContain("Create change");
+    w.unmount();
+  });
+
   it("a failed list load surfaces the error above the empty state", async () => {
     const { w } = await setup({ skills: vi.fn().mockRejectedValue(new Error("boom")) });
     expect(w.get('[data-testid="skills-error"]').text()).toBe("boom");
@@ -180,7 +207,7 @@ describe("SkillsPanel", () => {
     await button(w, "skills-uninstall").trigger("click");
     await flushPromises();
     expect(w.get('[data-testid="skills-needs-change"]').text()).toContain("Create change");
-    expect(w.get('[data-testid="skills-needs-change"]').text()).toContain("edit or remove");
+    expect(w.get('[data-testid="skills-needs-change"]').text()).toContain("edit, install, or remove");
     await button(w, "skills-create-change").trigger("click");
     await button(w, "new-change-stub").trigger("click");
     await flushPromises();

@@ -80,9 +80,13 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
         </SidebarContent>
       </Sidebar>
 
-      <SidebarInset class="h-full min-h-0 min-w-0 overflow-hidden bg-background">
-        <p v-if="store.error" role="alert" class="px-4 pt-3 pb-1 text-sm text-destructive" data-testid="skills-error">{{ store.error }}</p>
-        <section v-if="store.invalid" role="alert" class="flex h-full min-h-0 flex-col overflow-auto p-4 text-sm" data-testid="skills-invalid">
+      <SidebarInset class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+        <p v-if="store.error" role="alert" class="shrink-0 px-4 pt-3 pb-1 text-sm text-destructive" data-testid="skills-error">{{ store.error }}</p>
+        <section v-if="store.needsChange" role="alert" class="mx-4 mt-3 shrink-0 rounded-md border p-3 text-sm" data-testid="skills-needs-change">
+          <p>Create a change to edit, install, or remove project skills.</p>
+          <Button type="button" size="sm" class="mt-2" data-testid="skills-create-change" @click="showNewChange = true">Create change</Button>
+        </section>
+        <section v-if="store.invalid" role="alert" class="flex min-h-0 flex-1 flex-col overflow-auto p-4 text-sm" data-testid="skills-invalid">
           <p class="rounded-md border border-destructive p-3">This skill has invalid frontmatter. Fix it, or remove it.</p>
           <p class="mt-2 text-xs text-muted-foreground">{{ store.invalid }}</p>
           <pre v-if="store.invalidSource" class="mt-2 max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap" data-testid="skills-invalid-source">{{ store.invalidSource }}</pre>
@@ -105,10 +109,6 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
           </header>
           <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
             <div class="px-4">
-              <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="skills-needs-change">
-                <p>Create a change to edit or remove project skills.</p>
-                <Button type="button" size="sm" class="mt-2" data-testid="skills-create-change" @click="showNewChange = true">Create change</Button>
-              </section>
               <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="skills-changed-on-disk">
                 <p>The skill changed on disk. Your unsaved draft is preserved.</p>
                 <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.reloadFromDisk()">Reload</Button>
@@ -130,22 +130,23 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
               <MarkdownBodyEditor :body="store.draftBody" :original="store.doc.body" kind="markdown" :rich="true" @change="store.setBody($event.body)" />
             </div>
           </div>
-          <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
         </template>
 
-        <div v-else-if="!store.loading && !store.list.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-empty">
+        <div v-else-if="!store.loading && !store.list.length" class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-empty">
           <Sparkles class="size-8 opacity-50" aria-hidden="true" />
           <p class="font-medium text-foreground">No skills installed</p>
           <Button type="button" data-testid="skills-install" @click="installOpen = true">Install…</Button>
         </div>
 
-        <p v-else-if="store.loading" class="p-4 text-sm text-muted-foreground">Loading skills…</p>
+        <p v-else-if="store.loading" class="shrink-0 p-4 text-sm text-muted-foreground">Loading skills…</p>
 
-        <div v-else class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-no-selection">
+        <div v-else class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-no-selection">
           <Sparkles class="size-8 opacity-50" aria-hidden="true" />
           <p>Select a skill or install one.</p>
           <Button type="button" data-testid="skills-install" @click="installOpen = true">Install…</Button>
         </div>
+
+        <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       </SidebarInset>
     </SidebarProvider>
 

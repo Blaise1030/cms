@@ -71,4 +71,29 @@ describe("SkillsSettings", () => {
 
     expect(fns.saveSkillsSettings).toHaveBeenCalledWith({ globalPath: "/custom/path" });
   });
+
+  it("editing after a save clears the saved state", async () => {
+    await setup();
+    mountSettings();
+    await flushPromises();
+
+    await wrapper!.get('[data-testid="skills-settings-save"]').trigger("click");
+    await flushPromises();
+    expect(wrapper!.find('[data-testid="skills-settings-saved"]').exists()).toBe(true);
+
+    await pathInput().setValue("/another/path");
+    expect(wrapper!.find('[data-testid="skills-settings-saved"]').exists()).toBe(false);
+  });
+
+  it("Reset keeps the old path and shows the error when the save fails", async () => {
+    await setup({ saveSkillsSettings: vi.fn().mockRejectedValue(new Error("disk full")) });
+    mountSettings();
+    await flushPromises();
+
+    await wrapper!.get('[data-testid="skills-settings-reset"]').trigger("click");
+    await flushPromises();
+
+    expect(pathInput().element.value).toBe("/Users/ada/global-skills");
+    expect(wrapper!.get('[data-testid="skills-settings-error"]').text()).toContain("disk full");
+  });
 });

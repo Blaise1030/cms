@@ -25,17 +25,20 @@ const fileName = ref("");
 const blankName = ref("");
 const blankDescription = ref("");
 
-const error = computed(() => store.error);
+const error = computed(() => store.error ?? store.conflict?.message ?? null);
 
 watch(open, (isOpen) => {
   if (!isOpen) return;
+  // A fresh open starts clean: a stale install error/conflict must not linger.
+  store.error = null;
+  store.conflict = null;
   segment.value = "catalog";
   scope.value = "project";
   skillMd.value = "";
   fileName.value = "";
   blankName.value = "";
   blankDescription.value = "";
-});
+}, { immediate: true });
 
 function installedInScope(item: CatalogItem) {
   return scope.value === "project" ? item.installedProject : item.installedGlobal;
@@ -133,6 +136,13 @@ function onFile(event: Event) {
                 {{ installedInScope(item) ? "Installed" : "Install" }}
               </Button>
             </div>
+            <p
+              v-if="!store.catalog.length"
+              class="text-muted-foreground py-2 text-xs"
+              data-testid="install-catalog-empty"
+            >
+              {{ store.loading ? "Loading catalog…" : "No catalog skills available." }}
+            </p>
           </TabsContent>
 
           <TabsContent value="import" class="grid gap-4">
