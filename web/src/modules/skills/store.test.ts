@@ -165,6 +165,15 @@ describe("skills store", () => {
     expect(store.doc?.id).toBe("design");
   });
 
+  it("install maps a project CHANGE_REQUIRED to needsChange", async () => {
+    const installSkill = vi.fn().mockRejectedValue(new ApiError("CHANGE_REQUIRED", "create a change", 409));
+    const { store } = setup({ installSkill });
+    await store.open("p");
+    await expect(store.install("project", { catalog: { id: "seo" } })).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsChange).toBe(true);
+    expect(store.error).toBeNull();
+  });
+
   it("uninstall maps a project CHANGE_REQUIRED to needsChange", async () => {
     const uninstallSkill = vi.fn().mockRejectedValue(new ApiError("CHANGE_REQUIRED", "create a change", 409));
     const { store } = setup({ uninstallSkill });

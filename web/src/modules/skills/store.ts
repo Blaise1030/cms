@@ -55,11 +55,11 @@ export const useSkillsStore = defineStore("skills", () => {
     doc.value = next; resetDrafts(next); changedOnDisk.value = false; clearSaveState();
   }
   /** Map a refused read or write onto Create Change, conflict, or an error message; the draft stays. */
-  function recordFailure(err: unknown, scope: SkillScope) {
+  function recordFailure(err: unknown, scope: SkillScope, opts: { invalidAsError?: boolean } = {}) {
     if (err instanceof ApiError) {
       if (scope === "project" && err.code === "CHANGE_REQUIRED") needsChange.value = true;
       else if (err.reason === "stale_content" || err.reason === "branch_changed") conflict.value = { reason: err.reason, message: err.message };
-      else if (err.reason === "invalid_skill") {
+      else if (!opts.invalidAsError && err.reason === "invalid_skill") {
         invalid.value = err.message;
         invalidSource.value = err.details?.find(d => d.path[0] === "source")?.message ?? null;
       }
@@ -206,7 +206,7 @@ export const useSkillsStore = defineStore("skills", () => {
     const action = pendingAction.value;
     pendingAction.value = null;
     if (action === "uninstall") return uninstall();
-    return save();
+    if (action === "save") return save();
   }
 
   /** Install a skill into a scope, then refresh the list and select it. */
@@ -221,7 +221,7 @@ export const useSkillsStore = defineStore("skills", () => {
       await select(meta.id, meta.scope);
       return meta;
     } catch (err) {
-      error.value = errorMessage(err);
+      recordFailure(err, scope, { invalidAsError: true });
       throw err;
     } finally { saving.value = false; }
   }

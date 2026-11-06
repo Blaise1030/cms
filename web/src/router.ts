@@ -13,13 +13,14 @@ import SkillsPanel from "@/modules/skills/SkillsPanel.vue";
 export type ProjectTab = "preview" | "content" | "design" | "skills" | "code" | "history" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
-export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
+export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "skills" | "about";
 
 export const APP_SETTINGS_TABS: readonly AppSettingsTab[] = [
   "assistant",
   "builder",
   "github",
   "appearance",
+  "skills",
   "about",
 ];
 

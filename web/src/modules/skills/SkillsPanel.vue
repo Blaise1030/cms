@@ -10,6 +10,7 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change, SkillMeta } from "@/core/types";
 import { useSkillsStore } from "./store";
+import InstallSkillDialog from "./InstallSkillDialog.vue";
 
 // Tiptap and CodeMirror load with the first skill, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("@/modules/content/MarkdownBodyEditor.vue"));
@@ -17,7 +18,7 @@ const MarkdownBodyEditor = defineAsyncComponent(() => import("@/modules/content/
 const props = defineProps<{ projectId: string }>();
 const store = useSkillsStore();
 const showNewChange = ref(false);
-/** The install dialog body lands in Task 6; this task only opens the stub. */
+/** The install dialog is opened from the header and the empty/no-selection states. */
 const installOpen = ref(false);
 
 watch(() => props.projectId, id => void store.open(id), { immediate: true });
@@ -148,11 +149,6 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
       </SidebarInset>
     </SidebarProvider>
 
-    <div v-if="installOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-background/80" data-testid="skills-install-stub">
-      <div class="w-full max-w-sm rounded-lg border bg-background p-4 shadow-lg">
-        <p class="text-sm">Installing skills is coming soon.</p>
-        <Button type="button" variant="outline" size="sm" class="mt-3" @click="installOpen = false">Close</Button>
-      </div>
-    </div>
+    <InstallSkillDialog v-model:open="installOpen" />
   </div>
 </template>

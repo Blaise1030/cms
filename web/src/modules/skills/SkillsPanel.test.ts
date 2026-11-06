@@ -75,7 +75,7 @@ async function setup(api: Record<string, unknown> = {}) {
 }
 const button = (w: Awaited<ReturnType<typeof setup>>["w"], id: string) => w.get(`[data-testid="${id}"]`);
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { vi.clearAllMocks(); document.body.innerHTML = ""; });
 
 describe("SkillsPanel", () => {
   it("with no installed skills shows the install CTA", async () => {
@@ -83,7 +83,8 @@ describe("SkillsPanel", () => {
     expect(w.get('[data-testid="skills-empty"]').text()).toContain("Install");
     expect(w.find('[data-testid="skills-editor"]').exists()).toBe(false);
     await button(w, "skills-install").trigger("click");
-    expect(w.find('[data-testid="skills-install-stub"]').exists()).toBe(true);
+    await flushPromises();
+    expect(document.body.querySelector('[data-testid="install-skill-dialog"]')).not.toBeNull();
     w.unmount();
   });
 
