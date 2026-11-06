@@ -3,6 +3,14 @@ import { computed, ref } from "vue";
 import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -85,7 +93,6 @@ const pickerLabel = computed(() => {
   if (!provider.value) return "Assistant";
   return props.models[provider.value]?.find((m) => m.id === model.value)?.name ?? labelOf(provider.value);
 });
-const singleAssistant = computed(() => shownProviders.value.length === 1);
 /** Vitest: keep submenu items mounted so picks don't need real hover. */
 const forceSubMount = import.meta.env.MODE === "test";
 
@@ -274,78 +281,53 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                   <ChevronDown class="text-muted-foreground size-4 shrink-0 opacity-50" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="min-w-48">
-                <!-- One assistant: models on the first layer; slash ids still fly out. -->
-                <template v-if="singleAssistant">
-                  <template v-for="p in shownProviders" :key="p">
-                    <DropdownMenuItem
-                      v-for="m in menus[p]?.direct"
-                      :key="m.id"
-                      data-testid="chat-model-item"
-                      :data-provider="p"
-                      :data-value="`${p}:${m.id}`"
-                      @select="pickModel(p, m.id)"
-                    >
-                      <ProviderIcon :provider="p" class="size-3.5 text-current" />
-                      <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
-                      <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                    </DropdownMenuItem>
-                    <DropdownMenuSub v-for="sub in menus[p]?.subs" :key="`${p}:${sub.heading}`">
-                      <DropdownMenuSubTrigger
-                        data-testid="chat-model-sub"
-                        :data-provider="p"
-                        :data-model-provider="sub.heading"
-                      >
-                        <ProviderIcon :provider="p" class="size-3.5 text-current" />
-                        <span class="min-w-0 flex-1 truncate">{{ sub.heading }}</span>
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent class="min-w-48" :force-mount="forceSubMount || undefined">
-                        <DropdownMenuItem
-                          v-for="m in sub.items"
-                          :key="m.id"
-                          data-testid="chat-model-sub-item"
-                          :data-provider="p"
-                          :data-value="`${p}:${m.id}`"
-                          @select="pickModel(p, m.id)"
-                        >
-                          <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
-                          <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                        </DropdownMenuItem>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  </template>
-                </template>
-                <!-- Several assistants: each provider is a flyout of its models. -->
-                <template v-else>
-                  <DropdownMenuSub v-for="p in shownProviders" :key="p">
-                    <DropdownMenuSubTrigger data-testid="chat-agent-sub" :data-provider="p">
-                      <ProviderIcon :provider="p" class="size-3.5 text-current" />
-                      <span class="min-w-0 flex-1 truncate">{{ labelOf(p) }}</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent class="min-w-48" :force-mount="forceSubMount || undefined">
-                      <DropdownMenuItem
-                        v-for="m in menus[p]?.direct"
-                        :key="m.id"
-                        data-testid="chat-model-item"
-                        :data-provider="p"
-                        :data-value="`${p}:${m.id}`"
-                        @select="pickModel(p, m.id)"
-                      >
-                        <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
-                        <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                      </DropdownMenuItem>
-                      <DropdownMenuSub v-for="sub in menus[p]?.subs" :key="`${p}:${sub.heading}`">
-                        <DropdownMenuSubTrigger
+              <DropdownMenuContent align="start" class="min-w-48" data-testid="chat-agent-menu">
+                <!-- Providers on the first layer; models open in a searchable hover flyout. -->
+                <DropdownMenuSub v-for="p in shownProviders" :key="p">
+                  <DropdownMenuSubTrigger data-testid="chat-agent-sub" :data-provider="p">
+                    <ProviderIcon :provider="p" class="size-3.5 text-current" />
+                    <span class="min-w-0 flex-1 truncate">{{ labelOf(p) }}</span>
+                    <Check v-if="provider === p" class="size-4" />
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    class="w-72 p-0"
+                    :force-mount="forceSubMount || undefined"
+                    @close-auto-focus.prevent
+                  >
+                    <Command :data-testid="`chat-model-menu-${p}`">
+                      <CommandInput
+                        placeholder="Search models…"
+                        data-testid="chat-model-search"
+                        @keydown.stop
+                      />
+                      <CommandList class="max-h-[min(320px,50vh)]">
+                        <CommandEmpty>No models found.</CommandEmpty>
+                        <CommandGroup v-if="menus[p]?.direct.length">
+                          <CommandItem
+                            v-for="m in menus[p]?.direct"
+                            :key="m.id"
+                            :value="`${m.id} ${m.label}`"
+                            data-testid="chat-model-item"
+                            :data-provider="p"
+                            :data-value="`${p}:${m.id}`"
+                            @select="pickModel(p, m.id)"
+                          >
+                            <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
+                            <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
+                          </CommandItem>
+                        </CommandGroup>
+                        <CommandGroup
+                          v-for="sub in menus[p]?.subs"
+                          :key="`${p}:${sub.heading}`"
+                          :heading="sub.heading"
                           data-testid="chat-model-sub"
                           :data-provider="p"
                           :data-model-provider="sub.heading"
                         >
-                          <span class="min-w-0 flex-1 truncate">{{ sub.heading }}</span>
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent class="min-w-48" :force-mount="forceSubMount || undefined">
-                          <DropdownMenuItem
+                          <CommandItem
                             v-for="m in sub.items"
                             :key="m.id"
+                            :value="`${m.id} ${sub.heading} ${m.label}`"
                             data-testid="chat-model-sub-item"
                             :data-provider="p"
                             :data-value="`${p}:${m.id}`"
@@ -353,12 +335,12 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                           >
                             <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
                             <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                          </DropdownMenuItem>
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                </template>
+                          </CommandItem>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem data-testid="chat-agent-setup" @select="setupAnother">
                   <Settings2 class="size-3.5 text-current" aria-hidden="true" />

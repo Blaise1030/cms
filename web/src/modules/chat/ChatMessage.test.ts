@@ -74,6 +74,23 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("puts each image, file chips, and text in separate bubbles", async () => {
+    const dir = "/Users/me/orso-projects/.orso/p/attachments";
+    const w = await render(
+      [{ type: "text", text: `Please fix this\n${dir}/5d83a351365d7d18.png\n${dir}/0123456789abcdef.pdf` }],
+      "user",
+    );
+    const bubbles = w.findAll('[data-slot="bubble"]');
+    expect(bubbles).toHaveLength(3);
+    expect(bubbles[0]!.find("[data-testid='message-attachment'] img").exists()).toBe(true);
+    expect(bubbles[0]!.text()).not.toContain("Please fix this");
+    expect(bubbles[1]!.text()).toContain("PDF file");
+    expect(bubbles[1]!.find("img").exists()).toBe(false);
+    expect(bubbles[2]!.text()).toContain("Please fix this");
+    expect(bubbles[2]!.find("[data-testid='message-attachment']").exists()).toBe(false);
+    w.unmount();
+  });
+
   it("falls back to a chip when an attached image can't load", async () => {
     const w = await render(
       [{ type: "text", text: "/s/.orso/p/attachments/5d83a351365d7d18.png" }],

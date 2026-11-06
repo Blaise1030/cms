@@ -119,11 +119,5 @@ function onInputKeydown(e: KeyboardEvent) {
     </CommandList>
   </CommandDialog>
 
-  <NewChangeDialog
-    v-if="projectId"
-    v-model:open="showNewChange"
-    :project-id="projectId"
-    via-agent
-    description="The assistant starts it from the latest version of the site."
-  />
+  <NewChangeDialog v-if="projectId" v-model:open="showNewChange" :project-id="projectId" />
 </template>

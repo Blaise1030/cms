@@ -70,4 +70,44 @@ describe("ChangesBranchPicker", () => {
     expect(search?.placeholder).toBe("Search changes…");
     expect(document.body.querySelector('[data-slot="command"]')).toBeTruthy();
   });
+
+  it("creates a change through the API instead of asking the agent", async () => {
+    const createChange = vi.fn(async () => ({
+      branch: "content/seo-audit",
+      title: "SEO audit",
+      lastEdited: null,
+    }));
+    h.daemon = createFakeDaemon({
+      listChanges: vi.fn(async () => []),
+      createChange,
+      tree: vi.fn(async () => ({ entries: [] })),
+      getActiveChange: vi.fn(async () => ({
+        branch: "content/seo-audit",
+        title: "SEO audit",
+        lastEdited: null,
+      })),
+      listChats: vi.fn(async () => []),
+      listProviders: vi.fn(async () => ({ providers: [] })),
+    });
+    setActivePinia(createPinia());
+    useChangesStore().active = { branch: "main", title: "main" };
+    const wrapper = mount(ChangesBranchPicker, {
+      props: { projectId: "site" },
+      attachTo: document.body,
+    });
+    await openMenu(wrapper);
+    document.body.querySelector<HTMLElement>('[data-testid="new-change"]')!.click();
+    await flushPromises();
+
+    const input = document.body.querySelector("[role=dialog] input") as HTMLInputElement;
+    expect(input).toBeTruthy();
+    input.value = "SEO audit";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushPromises();
+    (document.body.querySelector("[role=dialog] button[type=submit]") as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(createChange).toHaveBeenCalledWith("site", "SEO audit");
+    wrapper.unmount();
+  });
 });

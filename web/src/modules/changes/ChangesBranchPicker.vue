@@ -155,12 +155,7 @@ function onNewChange() {
     </PopoverContent>
   </Popover>
 
-  <NewChangeDialog
-    v-model:open="showNewChange"
-    :project-id="projectId"
-    via-agent
-    description="The assistant starts it from the latest version of the site."
-  />
+  <NewChangeDialog v-model:open="showNewChange" :project-id="projectId" />
 
   <ConfirmSwitchDialog />
 </template>

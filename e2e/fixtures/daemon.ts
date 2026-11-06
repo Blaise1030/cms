@@ -70,9 +70,8 @@ export async function createChange(
 }
 
 /**
- * Start a change the way the app's Content and Design "Create change" prompts do. The Changes
- * menu and command palette hand "New change" to the coding agent instead, which the fake ACP
- * agent cannot act on, so specs start changes here and reload the page to pick them up.
+ * Start a change the way the app's New change dialog does (`POST /api/changes`). Specs call
+ * this directly so they do not depend on opening the UI dialog.
  */
 export async function startChange(
   env: Pick<orsoEnv, "origin" | "token" | "projectId">,

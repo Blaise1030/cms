@@ -13,7 +13,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@orso/utils";
 import type { Change } from "@/core/types";
-import { askAgentForNewChange } from "./agentRequests";
 import { useChangesStore } from "./store";
 
 const open = defineModel<boolean>("open", { default: false });
@@ -22,13 +21,10 @@ const props = withDefaults(
     projectId: string;
     heading?: string;
     description?: string;
-    /** Ask the assistant to start the change instead of creating it here (no `created` event). */
-    viaAgent?: boolean;
   }>(),
   {
     heading: "New change",
     description: "Creates a branch from the latest main. Your assistant's saves are committed to it.",
-    viaAgent: false,
   },
 );
 const emit = defineEmits<{ created: [change: Change] }>();
@@ -44,11 +40,6 @@ watch(open, (isOpen) => {
 
 async function submit() {
   if (!title.value.trim() || store.creating) return;
-  if (props.viaAgent) {
-    askAgentForNewChange(title.value);
-    open.value = false;
-    return;
-  }
   try {
     const change = await store.create(props.projectId, title.value);
     open.value = false;

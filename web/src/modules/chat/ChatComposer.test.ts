@@ -5,18 +5,29 @@ import ChatComposer from "./ChatComposer.vue";
 
 enableAutoUnmount(afterEach);
 
-/** Render the menu inline; items emit `select` on click, as the real one does. */
+/** Render menus inline; items emit `select` on click, as the real ones do. */
 const stubs = {
   DropdownMenu: { template: "<div><slot /></div>" },
   DropdownMenuTrigger: { template: "<div><slot /></div>" },
   DropdownMenuContent: { template: "<div><slot /></div>" },
   DropdownMenuLabel: { template: "<div><slot /></div>" },
   DropdownMenuSeparator: { template: "<hr />" },
-  DropdownMenuGroup: { template: "<div><slot /></div>" },
   DropdownMenuSub: { template: "<div><slot /></div>" },
   DropdownMenuSubTrigger: { template: "<div><slot /></div>" },
   DropdownMenuSubContent: { template: "<div><slot /></div>" },
   DropdownMenuItem: {
+    emits: ["select"],
+    template: `<div @click="$emit('select')"><slot /></div>`,
+  },
+  Command: { template: "<div><slot /></div>" },
+  CommandInput: { template: "<input />" },
+  CommandList: { template: "<div><slot /></div>" },
+  CommandEmpty: { template: "<div><slot /></div>" },
+  CommandGroup: {
+    props: ["heading"],
+    template: `<div><div v-if="heading" data-slot="command-group-heading">{{ heading }}</div><slot /></div>`,
+  },
+  CommandItem: {
     emits: ["select"],
     template: `<div @click="$emit('select')"><slot /></div>`,
   },
@@ -103,7 +114,7 @@ describe("ChatComposer assistant setup", () => {
 });
 
 describe("ChatComposer model groups", () => {
-  it("shows slash model providers as flyout submenus with short labels", async () => {
+  it("lists providers first; models and search live in the hover flyout", async () => {
     const w = mount(ChatComposer, {
       props: {
         modelValue: "",
@@ -128,8 +139,11 @@ describe("ChatComposer model groups", () => {
     });
     await flushPromises();
 
+    expect(w.find("[data-testid='chat-agent-sub'][data-provider='opencode']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-model-search']").exists()).toBe(true);
+
     const subs = [...w.element.querySelectorAll("[data-testid='chat-model-sub']")].map((el) =>
-      el.textContent?.trim(),
+      el.getAttribute("data-model-provider"),
     );
     expect(subs).toEqual(["deepseek", "opencode-go"]);
 

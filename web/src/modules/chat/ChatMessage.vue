@@ -19,7 +19,7 @@ import {
   Wrench,
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { Message, MessageContent } from "@/components/ui/message";
@@ -107,17 +107,21 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
   <!-- Padding keeps btn-raised-soft's shadow inside the scroller item (content-visibility clips paint). -->
   <Message v-if="message.role === 'user'" align="end" class="p-1">
     <MessageContent>
-      <Bubble variant="tinted" align="end">
+      <BubbleGroup class="items-end">
         <template v-for="(sent, i) in userTexts" :key="i">
-          <div v-if="sent.files.length" class="flex flex-wrap justify-end gap-1.5">
-            <template v-for="f in sent.files" :key="f.name">
+          <template v-for="f in sent.files" :key="f.name">
+            <Bubble
+              v-if="f.image && !broken.has(f.name)"
+              variant="tinted"
+              align="end"
+              class="overflow-hidden p-1"
+            >
               <a
-                v-if="f.image && !broken.has(f.name)"
                 data-testid="message-attachment"
                 :href="daemon.api.attachmentUrl(projectId, f.name)"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="block overflow-hidden rounded-lg border"
+                class="block overflow-hidden rounded-lg"
               >
                 <img
                   :src="daemon.api.attachmentUrl(projectId, f.name)"
@@ -126,26 +130,38 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
                   @error="broken.add(f.name)"
                 />
               </a>
-              <span
-                v-else
-                data-testid="message-attachment"
-                class="bg-secondary inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-              ><Paperclip class="size-3" aria-hidden="true" />{{ f.kind }} file</span>
-            </template>
-          </div>
-          <BubbleContent v-if="sent.text" class="whitespace-pre-wrap">
-            <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">
-              <span
-                v-if="seg.kind === 'element'"
-                data-testid="element-tag"
-                :title="seg.full"
-                class="bg-background/60 inline-flex items-center gap-1 rounded-md border px-1.5 align-baseline font-mono text-xs"
-              ><MousePointerClick class="size-3" aria-hidden="true" />{{ seg.label }}</span>
-              <template v-else>{{ seg.text }}</template>
-            </template>
-          </BubbleContent>
+            </Bubble>
+          </template>
+          <Bubble
+            v-if="sent.files.some((f) => !f.image || broken.has(f.name))"
+            variant="tinted"
+            align="end"
+          >
+            <BubbleContent class="flex flex-wrap justify-end gap-1.5">
+              <template v-for="f in sent.files" :key="f.name">
+                <span
+                  v-if="!f.image || broken.has(f.name)"
+                  data-testid="message-attachment"
+                  class="bg-secondary inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                ><Paperclip class="size-3" aria-hidden="true" />{{ f.kind }} file</span>
+              </template>
+            </BubbleContent>
+          </Bubble>
+          <Bubble v-if="sent.text" variant="tinted" align="end">
+            <BubbleContent class="whitespace-pre-wrap">
+              <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">
+                <span
+                  v-if="seg.kind === 'element'"
+                  data-testid="element-tag"
+                  :title="seg.full"
+                  class="bg-background/60 inline-flex items-center gap-1 rounded-md border px-1.5 align-baseline font-mono text-xs"
+                ><MousePointerClick class="size-3" aria-hidden="true" />{{ seg.label }}</span>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </BubbleContent>
+          </Bubble>
         </template>
-      </Bubble>
+      </BubbleGroup>
     </MessageContent>
   </Message>
 

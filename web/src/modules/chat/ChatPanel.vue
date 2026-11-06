@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import type { UIMessage } from "ai";
 import { ArrowUp, CircleAlert, MessageSquare, Plus, ShieldQuestion, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -26,6 +27,7 @@ import { useAssistantStore } from "@/modules/assistant/store";
 import { openAssistantSetup } from "@/modules/assistant/dialog";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChangesStore } from "@/modules/changes/store";
+import { settingsPath } from "@/router";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
@@ -38,6 +40,7 @@ import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream"
 import { useChatStore } from "./store";
 
 const props = defineProps<{ projectId: string; active: boolean }>();
+const router = useRouter();
 
 /** Assistants this UI can drive. */
 const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
@@ -598,9 +601,9 @@ function insert(text: string) {
   composer.value?.focus();
 }
 
-/** Open the one assistant setup dialog; sign-in and download live there. */
+/** Open Assistant settings so the writer can add or finish setting up an assistant. */
 function openSetup() {
-  openAssistantSetup();
+  void router.push(settingsPath("assistant"));
 }
 
 /** The last thing the user asked, from this session or the rendered transcript. */

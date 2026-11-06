@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { createMemoryHistory, createRouter } from "vue-router";
 import ChatPanel from "./ChatPanel.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { assistantDialogOpen } from "@/modules/assistant/dialog";
@@ -16,6 +17,7 @@ import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
 import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
+import { routes, settingsPath } from "@/router";
 
 enableAutoUnmount(afterEach);
 
@@ -267,10 +269,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function testRouter() {
+  return createRouter({ history: createMemoryHistory(), routes });
+}
+
 async function mountPanel() {
-  const w = mount(ChatPanel, { props: { projectId: "p1", active: true }, attachTo: document.body });
+  const router = testRouter();
+  await router.push("/p/p1/preview");
+  await router.isReady();
+  const w = mount(ChatPanel, {
+    props: { projectId: "p1", active: true },
+    attachTo: document.body,
+    global: { plugins: [router] },
+  });
   await flushPromises();
-  return w;
+  return Object.assign(w, { router });
 }
 
 /** A sync chat summary as the daemon lists it, with the combine it is doing. */
@@ -558,10 +571,11 @@ describe("ChatPanel", () => {
         "Set up your assistant to start chatting",
       );
       await w.find("[data-testid='chat-setup']").trigger("click");
-      expect(assistantDialogOpen.value).toBe(true);
+      await flushPromises();
+      expect(w.router.currentRoute.value.fullPath).toBe(settingsPath("assistant"));
     });
 
-    it("opens setup from the picker's last item", async () => {
+    it("opens Assistant settings from the picker's last item", async () => {
       const w = await mountPanel();
       const picker = agentPicker(w);
       await picker.open();
@@ -569,7 +583,7 @@ describe("ChatPanel", () => {
       expect(item.textContent).toContain("Set up another assistant…");
       item.click();
       await flushPromises();
-      expect(assistantDialogOpen.value).toBe(true);
+      expect(w.router.currentRoute.value.fullPath).toBe(settingsPath("assistant"));
     });
 
     it("maps a missing-binary send failure to a Set up action", async () => {
