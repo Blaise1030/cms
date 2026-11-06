@@ -82,6 +82,8 @@ export const useSkillsStore = defineStore("skills", () => {
       const sel = selected.value;
       if (!sel) return;
       if (!next.installed.some(m => m.id === sel.id && m.scope === sel.scope)) {
+        // The skill vanished from the list; a dirty draft is kept and flagged rather than discarded.
+        if (dirty.value) { changedOnDisk.value = true; return; }
         selected.value = null; doc.value = null; resetDrafts(null); return;
       }
       await readDoc(sel, version);
@@ -212,7 +214,7 @@ export const useSkillsStore = defineStore("skills", () => {
       selected.value = null; doc.value = null; resetDrafts(null);
       await reload();
     } catch (err) {
-      error.value = errorMessage(err);
+      recordFailure(err, sel.scope);
       throw err;
     } finally { saving.value = false; }
   }

@@ -164,4 +164,49 @@ describe("skills store", () => {
     expect(store.selected).toEqual({ id: "design", scope: "global" });
     expect(store.doc?.id).toBe("design");
   });
+
+  it("uninstall maps a project CHANGE_REQUIRED to needsChange", async () => {
+    const uninstallSkill = vi.fn().mockRejectedValue(new ApiError("CHANGE_REQUIRED", "create a change", 409));
+    const { store } = setup({ uninstallSkill });
+    await store.open("p");
+    await store.select("seo", "project");
+    await expect(store.uninstall()).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsChange).toBe(true);
+    expect(store.error).toBeNull();
+    expect(store.selected).toEqual({ id: "seo", scope: "project" });
+  });
+
+  it("uninstall maps stale_content to conflict", async () => {
+    const uninstallSkill = vi.fn().mockRejectedValue(new ApiError("CONFLICT", "file changed", 409, { reason: "stale_content" }));
+    const { store } = setup({ uninstallSkill });
+    await store.open("p");
+    await store.select("seo", "project");
+    await expect(store.uninstall()).rejects.toBeInstanceOf(ApiError);
+    expect(store.conflict).toEqual({ reason: "stale_content", message: "file changed" });
+    expect(store.error).toBeNull();
+  });
+
+  it("reload keeps a dirty draft when the selected skill disappears", async () => {
+    const skills = vi.fn().mockResolvedValueOnce(listPayload()).mockResolvedValue({ installed: [], catalog: [] });
+    const { store } = setup({ skills });
+    await store.open("p");
+    await store.select("seo", "project");
+    store.setBody("# Edited");
+    await store.reload();
+    expect(store.selected).toEqual({ id: "seo", scope: "project" });
+    expect(store.doc?.id).toBe("seo");
+    expect(store.draftBody).toBe("# Edited");
+    expect(store.dirty).toBe(true);
+    expect(store.changedOnDisk).toBe(true);
+  });
+
+  it("reload clears a clean selection when the skill disappears", async () => {
+    const skills = vi.fn().mockResolvedValueOnce(listPayload()).mockResolvedValue({ installed: [], catalog: [] });
+    const { store } = setup({ skills });
+    await store.open("p");
+    await store.select("seo", "project");
+    await store.reload();
+    expect(store.selected).toBeNull();
+    expect(store.doc).toBeNull();
+  });
 });
