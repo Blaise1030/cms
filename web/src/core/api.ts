@@ -328,6 +328,9 @@ export function createApi(
       json<Change>("GET", "/api/changes/active", { query: { project } }),
     switchChange: (project: string, branch: string) =>
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    /** Check out `main` without deleting local change branches. */
+    leaveChange: (project: string) =>
+      json<{ branch: string }>("POST", "/api/changes/leave", { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
     /** Whether Get latest would change anything (remote `main`, or a draft behind it). */

@@ -261,7 +261,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
   <div class="h-full min-h-0" data-testid="content-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
-      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
+      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :order="1" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 flex-1 px-1 py-2">
@@ -293,7 +293,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
       </Sidebar>
       </ResizablePanel>
       <ResizableHandle v-if="!editing" with-handle class="bg-transparent" />
-      <ResizablePanel id="content-editor" :default-size="80" :min-size="40">
+      <ResizablePanel id="content-editor" :order="2" :default-size="80" :min-size="40">
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
       <div v-if="!editing" class="flex h-full min-h-0 flex-col">
         <div class="flex h-11 shrink-0 items-center px-2">

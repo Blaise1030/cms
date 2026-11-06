@@ -4,10 +4,27 @@
 // the one action the user picked. It never talks to the daemon itself, so the
 // same row works inside SetupCheck and inside a dialog.
 import { computed } from "vue";
-import { CircleAlert, Download, LogIn, RefreshCw, RotateCcw, X } from "@lucide/vue";
+import {
+  BotMessageSquare,
+  CircleAlert,
+  Download,
+  LogIn,
+  Package,
+  RefreshCw,
+  RotateCcw,
+  X,
+} from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { LABELS, type AssistantRow, type RowAction } from "./rows";
@@ -62,6 +79,9 @@ const actionVariant = computed<"default" | "outline">(() =>
   props.row.action === "cancel" || props.row.action === "retry" ? "outline" : "default",
 );
 
+/** The row's leading mark: a package for the site builder, an assistant otherwise. */
+const rowIcon = computed(() => (props.row.id === "node" ? Package : BotMessageSquare));
+
 const actionAria = computed(() => {
   switch (props.row.action) {
     case "download":
@@ -85,22 +105,27 @@ const actionAria = computed(() => {
 </script>
 
 <template>
-  <li
-    class="flex flex-col gap-2 py-3"
+  <Item
+    as="li"
+    class="flex-col items-stretch gap-2 rounded-none border-0 bg-transparent p-0 py-3"
     :data-testid="`assistant-row-${row.id}`"
     :data-phase="row.phase"
     :data-tone="row.tone"
     :data-action="row.action"
   >
     <div class="flex items-start gap-3">
-      <div class="flex min-w-0 flex-1 flex-col gap-1">
+      <ItemMedia variant="icon" class="mt-0.5">
+        <component :is="rowIcon" aria-hidden="true" />
+      </ItemMedia>
+
+      <ItemContent class="min-w-0 gap-1">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="font-medium">{{ row.name }}</span>
+          <ItemTitle>{{ row.name }}</ItemTitle>
           <Badge v-if="row.recommended" variant="secondary" data-testid="assistant-recommended">
             Recommended
           </Badge>
         </div>
-        <p v-if="row.description" class="text-muted-foreground text-sm">{{ row.description }}</p>
+        <ItemDescription v-if="row.description">{{ row.description }}</ItemDescription>
         <p
           v-if="size"
           class="text-muted-foreground text-xs"
@@ -115,9 +140,9 @@ const actionAria = computed(() => {
         >
           Version {{ row.version }}<template v-if="source"> · {{ source }}</template>
         </p>
-      </div>
+      </ItemContent>
 
-      <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <ItemActions class="shrink-0 flex-wrap justify-end">
         <Badge
           v-if="statusBadge"
           :variant="statusBadge.variant"
@@ -151,7 +176,7 @@ const actionAria = computed(() => {
           <LogIn v-else-if="row.action === 'signIn' || row.action === 'connect'" aria-hidden="true" />
           {{ actionLabel }}
         </Button>
-      </div>
+      </ItemActions>
     </div>
 
     <div
@@ -181,5 +206,5 @@ const actionAria = computed(() => {
         </details>
       </AlertDescription>
     </Alert>
-  </li>
+  </Item>
 </template>

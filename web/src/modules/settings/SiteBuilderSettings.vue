@@ -5,14 +5,7 @@ import { computed, onMounted, ref } from "vue";
 import { CircleAlert, Package, RefreshCw } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Empty,
   EmptyDescription,
@@ -24,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import ProviderRow from "@/modules/assistant/ProviderRow.vue";
 import { useAssistantStore } from "@/modules/assistant/store";
 import type { AssistantRow, RowAction } from "@/modules/assistant/rows";
+import SettingsSection from "./SettingsSection.vue";
 
 const store = useAssistantStore();
 
@@ -65,27 +59,23 @@ function onAction(action: RowAction) {
 </script>
 
 <template>
-  <Card data-testid="site-builder-settings">
-    <CardHeader>
-      <CardTitle>Site builder</CardTitle>
-      <CardDescription>Lets orso build and preview your site.</CardDescription>
-      <CardAction>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="rechecking"
-          data-testid="site-builder-recheck"
-          @click="recheck"
-        >
-          <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
-        </Button>
-      </CardAction>
-    </CardHeader>
+  <SettingsSection label="Package" :icon="Package" data-testid="site-builder-settings">
+    <template #actions>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="rechecking"
+        data-testid="site-builder-recheck"
+        @click="recheck"
+      >
+        <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
+      </Button>
+    </template>
 
-    <CardContent>
+    <Card class="gap-0 overflow-hidden p-0">
       <p
         v-if="loading"
-        class="text-muted-foreground flex items-center gap-2 text-sm"
+        class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
         data-testid="site-builder-loading"
       >
         <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
@@ -94,6 +84,7 @@ function onAction(action: RowAction) {
       <Alert
         v-else-if="store.error && !store.snapshot"
         variant="destructive"
+        class="m-4"
         data-testid="site-builder-error"
       >
         <CircleAlert aria-hidden="true" />
@@ -111,7 +102,7 @@ function onAction(action: RowAction) {
         </AlertDescription>
       </Alert>
 
-      <Empty v-else-if="store.node == null" data-testid="site-builder-not-needed">
+      <Empty v-else-if="store.node == null" class="border-0" data-testid="site-builder-not-needed">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <Package aria-hidden="true" />
@@ -123,9 +114,9 @@ function onAction(action: RowAction) {
         </EmptyHeader>
       </Empty>
 
-      <ul v-else class="flex flex-col divide-y" data-testid="site-builder-row">
+      <ul v-else class="divide-y divide-border px-4" data-testid="site-builder-row">
         <ProviderRow :row="row" @action="onAction" />
       </ul>
-    </CardContent>
-  </Card>
+    </Card>
+  </SettingsSection>
 </template>

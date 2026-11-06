@@ -176,6 +176,22 @@ pub async fn switch(
     Ok(Json(change_json(&change)))
 }
 
+/// `POST /api/changes/leave` `{ project }` → `{ branch: "main" }`.
+/// Checks out `main` and keeps every local change branch.
+pub async fn leave(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
+    })?;
+    let dir = project_dir(&state, &req.project).await?;
+    save_edits(&state, &req.project, &dir, false).await?;
+    changes::leave_to_main(&dir).await?;
+    let _ = state.devservers.start(&req.project).await;
+    Ok(Json(json!({ "branch": "main" })))
+}
+
 #[derive(Deserialize)]
 struct ShareRequest {
     project: String,

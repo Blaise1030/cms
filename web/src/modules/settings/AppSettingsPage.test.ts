@@ -41,6 +41,7 @@ let router: Router;
 
 function mountAt(path = "/settings", api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon({
+    health: vi.fn(async () => ({ status: "ok", version: "0.1.0" })),
     setupStatus: vi.fn(async (): Promise<SetupStatus> => ({
       git: true,
       gh: true,
@@ -91,9 +92,16 @@ async function mountPage(path = "/settings", api: Record<string, unknown> = {}) 
   return { w, router };
 }
 
-/** Reka tabs activate on mousedown. */
 async function openTab(w: Awaited<ReturnType<typeof mountPage>>["w"], tab: string) {
-  await w.get(`[data-testid='app-settings-tab-${tab}']`).trigger("mousedown");
+  await w.get(`[data-testid='app-settings-tab-${tab}']`).trigger("click");
+  await flushPromises();
+}
+
+async function search(
+  w: Awaited<ReturnType<typeof mountPage>>["w"],
+  value: string,
+) {
+  await w.get("[data-testid='app-settings-search']").setValue(value);
   await flushPromises();
 }
 
@@ -102,6 +110,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => {
   localStorage.clear();
   document.documentElement.classList.remove("dark");
+  delete document.documentElement.dataset.desktop;
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener() {},
@@ -114,23 +123,38 @@ afterEach(() => {
 });
 
 describe("AppSettingsPage", () => {
-  it("renders the app shell with Settings and the GitHub account", async () => {
+  it("renders the sidebar groups, search and GitHub account", async () => {
     const { w } = await mountPage();
     expect(w.get("[data-testid='app-settings-page']").text()).toContain("Settings");
+    expect(w.find("[data-testid='app-settings-sidebar']").exists()).toBe(true);
+    expect(w.get("[data-testid='app-settings-search']").attributes("placeholder")).toBe(
+      "Find a setting",
+    );
+    expect(w.get("[data-testid='app-settings-search-hint']").text()).toContain("⌘F");
+    expect(w.get("[data-testid='app-settings-nav']").text()).toContain("Setup");
+    expect(w.get("[data-testid='app-settings-nav']").text()).toContain("Preferences");
+    expect(w.findAll("[data-testid^='app-settings-tab-']")).toHaveLength(5);
+    expect(w.find("[data-testid='app-settings-tab-about']").exists()).toBe(true);
     expect(w.find("[data-testid='app-settings-account']").exists()).toBe(true);
-    expect(w.findAll("[data-testid^='app-settings-tab-']")).toHaveLength(4);
   });
 
-  it("defaults to the Assistant tab", async () => {
+  it("adds room for the traffic lights on the macOS desktop", async () => {
+    document.documentElement.dataset.desktop = "macos";
+    const { w } = await mountPage();
+    expect(w.get("[data-testid='app-settings-sidebar-header']").classes()).toContain("pt-11");
+  });
+
+  it("defaults to the Assistant section with its nav row active", async () => {
     const { w, router } = await mountPage();
     expect(router.currentRoute.value.query.tab).toBeUndefined();
     expect(w.find("[data-testid='assistant-settings']").exists()).toBe(true);
-    expect(w.get("[data-testid='app-settings-tab-assistant']").attributes("data-state")).toBe(
-      "active",
+    expect(w.get("[data-testid='app-settings-tab-assistant']").attributes("data-active")).toBe(
+      "true",
     );
+    expect(w.get("[data-testid='app-settings-tab-assistant']").text()).toContain("Assistant");
   });
 
-  it("loads each tab and records it in the query", async () => {
+  it("loads each section and records it in the query", async () => {
     const { w, router } = await mountPage();
 
     await openTab(w, "builder");
@@ -145,6 +169,10 @@ describe("AppSettingsPage", () => {
     expect(router.currentRoute.value.query.tab).toBe("appearance");
     expect(w.find("[data-testid='appearance-settings']").exists()).toBe(true);
 
+    await openTab(w, "about");
+    expect(router.currentRoute.value.query.tab).toBe("about");
+    expect(w.find("[data-testid='about-settings']").exists()).toBe(true);
+
     await openTab(w, "assistant");
     expect(router.currentRoute.value.query.tab).toBe("assistant");
     expect(w.find("[data-testid='assistant-settings']").exists()).toBe(true);
@@ -156,6 +184,36 @@ describe("AppSettingsPage", () => {
 
     const { w: w2 } = await mountPage("/settings?tab=nope");
     expect(w2.find("[data-testid='assistant-settings']").exists()).toBe(true);
+  });
+
+  it("filters the nav by label and Enter opens the first match", async () => {
+    const { w, router } = await mountPage();
+
+    await search(w, "appear");
+    expect(w.find("[data-testid='app-settings-tab-assistant']").exists()).toBe(false);
+    expect(w.find("[data-testid='app-settings-tab-appearance']").exists()).toBe(true);
+    expect(w.find("[data-testid='app-settings-tab-about']").exists()).toBe(false);
+
+    await w.get("[data-testid='app-settings-search']").trigger("keydown.enter");
+    await flushPromises();
+    expect(router.currentRoute.value.query.tab).toBe("appearance");
+    expect(w.find("[data-testid='appearance-settings']").exists()).toBe(true);
+  });
+
+  it("shows a quiet empty line when no setting matches", async () => {
+    const { w } = await mountPage();
+    await search(w, "nothing-like-this");
+    expect(w.find("[data-testid='app-settings-tab-assistant']").exists()).toBe(false);
+    expect(w.find("[data-testid='app-settings-tab-about']").exists()).toBe(false);
+    expect(w.get("[data-testid='app-settings-search-empty']").text()).toBe("No settings found.");
+  });
+
+  it("focuses the search field with Cmd/Ctrl+F", async () => {
+    const { w } = await mountPage();
+    const input = w.get("[data-testid='app-settings-search']");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true }));
+    await flushPromises();
+    expect(document.activeElement).toBe(input.element);
   });
 
   it("goes home from Back when there is no previous page", async () => {
@@ -179,10 +237,11 @@ describe("AppSettingsPage", () => {
 });
 
 describe("Assistant settings", () => {
-  it("renders the assistant rows and handles their actions", async () => {
+  it("renders the Assistants section and handles the row actions", async () => {
     const download = vi.fn(async () => runtime());
     const { w } = await mountPage("/settings", { downloadRuntime: download });
-    expect(w.get("[data-testid='assistant-settings']").text()).toContain(
+    expect(w.get("[data-testid='assistant-settings']").text()).toContain("Assistants");
+    expect(w.get("[data-testid='app-settings-page']").text()).toContain(
       "The assistant makes the changes you ask for.",
     );
     expect(w.find("[data-testid='assistant-row-opencode']").exists()).toBe(true);
@@ -224,18 +283,19 @@ describe("Assistant settings", () => {
 });
 
 describe("Site builder settings", () => {
-  it("shows the site builder row with its version", async () => {
+  it("shows the Package section and the Node row with its version", async () => {
     const { w } = await mountPage();
     await openTab(w, "builder");
-    const card = w.get("[data-testid='site-builder-settings']");
-    expect(card.text()).toContain("Lets orso build and preview your site.");
+    const section = w.get("[data-testid='site-builder-settings']");
+    expect(section.text()).toContain("Package");
+    expect(section.text()).toContain("Lets orso build and preview your site.");
     expect(w.find("[data-testid='assistant-row-node']").exists()).toBe(true);
     expect(w.get("[data-testid='assistant-version-node']").text()).toContain("24.0.0");
   });
 });
 
 describe("GitHub settings", () => {
-  it("lists Git, the GitHub tools and the account, with the device sign-in", async () => {
+  it("lists Git, the GitHub tools and the account in one Account card", async () => {
     const start = vi.fn(async () => ({
       userCode: "ABCD-1234",
       verificationUri: "https://github.com/login/device",
@@ -247,6 +307,7 @@ describe("GitHub settings", () => {
       githubDevicePoll: vi.fn(),
     });
     await openTab(w, "github");
+    expect(w.get("[data-testid='github-settings']").text()).toContain("Account");
     expect(w.get("[data-testid='github-settings-git']").text()).toContain("Ready");
     expect(w.get("[data-testid='github-settings-tools']").text()).toContain("GitHub tools");
     const account = w.get("[data-testid='github-settings-account']");
@@ -260,20 +321,50 @@ describe("GitHub settings", () => {
 });
 
 describe("Appearance settings", () => {
-  it("changes the theme and the typing sound", async () => {
+  it("changes the theme with the visual choices", async () => {
     const { w } = await mountPage();
     await openTab(w, "appearance");
-    const selects = w.findAllComponents(SelectRoot);
-    expect(selects).toHaveLength(2);
+    expect(w.get("[data-testid='appearance-settings']").text()).toContain("Light and dark");
+    expect(w.get("[data-testid='appearance-settings']").text()).toContain("Typing");
+    expect(w.get("[data-testid='appearance-theme-light']").attributes("aria-pressed")).toBe(
+      "false",
+    );
 
-    selects[0]!.vm.$emit("update:model-value", "dark");
+    await w.get("[data-testid='appearance-theme-dark']").trigger("click");
     await flushPromises();
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(localStorage.getItem("orso.theme")).toBe("dark");
+    expect(w.get("[data-testid='appearance-theme-dark']").attributes("aria-pressed")).toBe("true");
 
-    selects[1]!.vm.$emit("update:model-value", "mx-blue");
+    await w.get("[data-testid='appearance-theme-system']").trigger("click");
+    await flushPromises();
+    expect(w.get("[data-testid='appearance-theme-system']").attributes("aria-pressed")).toBe(
+      "true",
+    );
+    expect(localStorage.getItem("orso.theme")).toBeNull();
+  });
+
+  it("chooses a typing sound from the select", async () => {
+    const { w } = await mountPage();
+    await openTab(w, "appearance");
+    const selects = w.findAllComponents(SelectRoot);
+    expect(selects).toHaveLength(1);
+
+    selects[0]!.vm.$emit("update:model-value", "mx-blue");
     await flushPromises();
     expect(useTypingSound().setting.value).toBe("mx-blue");
     expect(localStorage.getItem("orso.typingSound")).toBe("mx-blue");
+  });
+});
+
+describe("About settings", () => {
+  it("shows the running version and the local-first note", async () => {
+    const { w } = await mountPage();
+    await openTab(w, "about");
+    const section = w.get("[data-testid='about-settings']");
+    expect(section.text()).toContain("About");
+    expect(w.get("[data-testid='about-version']").text()).toBe("v0.1.0");
+    expect(section.text()).toContain("Your data stays local");
+    expect(section.text()).toContain("Sites, content, and history live on this Mac.");
   });
 });

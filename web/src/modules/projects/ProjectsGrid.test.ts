@@ -199,11 +199,11 @@ describe("ProjectsGrid", () => {
     w.unmount();
   });
 
-  it("opens app settings from the header assistant pill", async () => {
+  it("opens app settings from the header settings pill", async () => {
     const w = mountGrid();
     await flushPromises();
-    const pill = w.get("[data-testid='open-assistant']");
-    expect(pill.text()).toContain("Assistant");
+    const pill = w.get("[data-testid='open-settings']");
+    expect(pill.text()).toContain("Settings");
     expect(pill.attributes("href")).toBe("/settings?tab=assistant");
     await pill.trigger("click");
     await flushPromises();

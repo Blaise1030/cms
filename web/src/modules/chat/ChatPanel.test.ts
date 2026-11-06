@@ -331,27 +331,32 @@ async function send(w: Awaited<ReturnType<typeof mountPanel>>, text: string) {
   await flushPromises();
 }
 
-/** The agent and model picker: a portalled popover with a searchable list grouped by agent. */
+/** The agent and model picker: each provider is a flyout of its models. */
 function agentPicker(w: Awaited<ReturnType<typeof mountPanel>>) {
   const trigger = () => w.find("[data-testid='chat-agent']");
-  const list = () => [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-model-item']")];
+  const list = () =>
+    [
+      ...document.body.querySelectorAll<HTMLElement>(
+        "[data-testid='chat-model-item'], [data-testid='chat-model-sub-item']",
+      ),
+    ];
   return {
     label: () => trigger().text(),
     provider: () => trigger().attributes("data-provider"),
-    groups: () =>
-      [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-agent-group']")].map((g) => g.dataset.provider),
+    groups: () => {
+      const subs = [...document.body.querySelectorAll<HTMLElement>("[data-testid='chat-agent-sub']")].map(
+        (g) => g.dataset.provider,
+      );
+      if (subs.length) return subs;
+      return [...new Set(list().map((i) => i.dataset.provider).filter((p): p is string => !!p))];
+    },
     open: async () => {
       await trigger().trigger("click");
       await flushPromises();
     },
     items: () => list().map((i) => i.dataset.value),
-    search: async (text: string) => {
-      const input = document.body.querySelector<HTMLInputElement>("[data-testid='chat-agent-search']")!;
-      input.value = text;
-      input.dispatchEvent(new Event("input"));
-      await flushPromises();
-    },
     choose: async (id: string) => {
+      await vi.waitFor(() => expect(list().some((i) => i.dataset.value === id)).toBe(true));
       list()
         .find((i) => i.dataset.value === id)!
         .click();
@@ -503,18 +508,10 @@ describe("ChatPanel", () => {
     expect(body).not.toHaveProperty("model");
   });
 
-  it("filters models across agents by the search text", async () => {
+  it("picks a model from another assistant's submenu", async () => {
     const w = await mountPanel();
     const picker = agentPicker(w);
     await picker.open();
-    await vi.waitFor(() => expect(picker.items()).toContain("codex:codex-smart"));
-    await picker.search("sma");
-    expect(picker.items()).toEqual([
-      "cursor:cursor-smart",
-      "claude:claude-smart",
-      "codex:codex-smart",
-      "opencode:opencode-smart",
-    ]);
     await picker.choose("codex:codex-smart");
     expect(picker.provider()).toBe("codex");
     expect(picker.label()).toBe("Smart");

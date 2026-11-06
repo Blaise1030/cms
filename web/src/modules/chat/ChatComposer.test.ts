@@ -11,6 +11,11 @@ const stubs = {
   DropdownMenuTrigger: { template: "<div><slot /></div>" },
   DropdownMenuContent: { template: "<div><slot /></div>" },
   DropdownMenuLabel: { template: "<div><slot /></div>" },
+  DropdownMenuSeparator: { template: "<hr />" },
+  DropdownMenuGroup: { template: "<div><slot /></div>" },
+  DropdownMenuSub: { template: "<div><slot /></div>" },
+  DropdownMenuSubTrigger: { template: "<div><slot /></div>" },
+  DropdownMenuSubContent: { template: "<div><slot /></div>" },
   DropdownMenuItem: {
     emits: ["select"],
     template: `<div @click="$emit('select')"><slot /></div>`,
@@ -37,8 +42,6 @@ function mountComposer(autoApprove: boolean, locked: string | null = null) {
     global: { stubs },
   });
 }
-
-const setupItem = () => document.body.querySelector<HTMLElement>("[data-testid='chat-agent-setup']");
 
 describe("ChatComposer lock", () => {
   it("shows the reason in place of the input", () => {
@@ -78,11 +81,10 @@ describe("ChatComposer approvals menu", () => {
 describe("ChatComposer assistant setup", () => {
   it("ends the assistant list with a setup action and emits it", async () => {
     const w = mountComposer(false);
-    await w.find("[data-testid='chat-agent']").trigger("click");
     await flushPromises();
-    const item = setupItem();
-    expect(item?.textContent).toContain("Set up another assistant…");
-    item!.click();
+    const item = w.find("[data-testid='chat-agent-setup']");
+    expect(item.text()).toContain("Set up another assistant…");
+    await item.trigger("click");
     await flushPromises();
     expect(w.emitted("setup")).toHaveLength(1);
     expect(w.find("[data-testid='chat-agent']").attributes("data-provider")).toBe("cursor");
@@ -97,5 +99,81 @@ describe("ChatComposer assistant setup", () => {
     for (const word of ["agent", "cli", "acp", "sdk", "npx", "path"]) {
       expect(text).not.toContain(word);
     }
+  });
+});
+
+describe("ChatComposer model groups", () => {
+  it("shows slash model providers as flyout submenus with short labels", async () => {
+    const w = mount(ChatComposer, {
+      props: {
+        modelValue: "",
+        provider: "opencode",
+        model: null,
+        providers: ["opencode"],
+        models: {
+          opencode: [
+            { id: "deepseek/deepseek-flash", name: "deepseek/deepseek-flash" },
+            { id: "opencode-go/beam-free", name: "opencode-go/beam-free" },
+          ],
+        },
+        providerLocked: false,
+        streaming: false,
+        blocked: null,
+        attachments: [],
+        attaching: false,
+        references: [],
+        autoApprove: false,
+      },
+      global: { stubs },
+    });
+    await flushPromises();
+
+    const subs = [...w.element.querySelectorAll("[data-testid='chat-model-sub']")].map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(subs).toEqual(["deepseek", "opencode-go"]);
+
+    const topLabels = [...w.element.querySelectorAll("[data-testid='chat-model-item']")].map((el) =>
+      el.querySelector("[data-testid='chat-model-label']")?.textContent?.trim(),
+    );
+    expect(topLabels).toContain("Default");
+    expect(topLabels).not.toContain("deepseek-flash");
+
+    const nested = [...w.element.querySelectorAll("[data-testid='chat-model-sub-item']")].map((el) =>
+      el.querySelector("[data-testid='chat-model-label']")?.textContent?.trim(),
+    );
+    expect(nested).toEqual(["deepseek-flash", "beam-free"]);
+  });
+
+  it("shows every assistant as a provider flyout when several are available", async () => {
+    const w = mount(ChatComposer, {
+      props: {
+        modelValue: "",
+        provider: "cursor",
+        model: null,
+        providers: ["cursor", "claude", "opencode"],
+        models: {
+          cursor: [{ id: "cursor-smart", name: "Smart" }],
+          claude: [{ id: "sonnet", name: "Sonnet" }],
+          opencode: [{ id: "deepseek/flash", name: "deepseek/flash" }],
+        },
+        providerLocked: false,
+        streaming: false,
+        blocked: null,
+        attachments: [],
+        attaching: false,
+        references: [],
+        autoApprove: false,
+      },
+      global: { stubs },
+    });
+    await flushPromises();
+
+    const agents = [...w.element.querySelectorAll("[data-testid='chat-agent-sub']")].map((el) =>
+      el.getAttribute("data-provider"),
+    );
+    expect(agents).toEqual(["cursor", "claude", "opencode"]);
+    expect(w.find("[data-testid='chat-model-item'][data-value='cursor:default']").exists()).toBe(true);
+    expect(w.find("[data-testid='chat-model-sub'][data-model-provider='deepseek']").exists()).toBe(true);
   });
 });

@@ -10,11 +10,17 @@ const h = vi.hoisted(() => ({
   daemon: null as unknown as FakeDaemon,
   toastInfo: vi.fn(),
   toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
   toastError: vi.fn(),
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({
-  toast: { info: h.toastInfo, success: h.toastSuccess, warning: vi.fn(), error: h.toastError },
+  toast: {
+    info: h.toastInfo,
+    success: h.toastSuccess,
+    warning: h.toastWarning,
+    error: h.toastError,
+  },
 }));
 
 import { STATUS_POLL_MS, useChangesStore } from "./store";
@@ -912,6 +918,82 @@ describe("changes store cleanup", () => {
   });
 });
 
+describe("changes store goLive", () => {
+  it("leaves an open change on main without deleting it", async () => {
+    const open = [{ branch: "content/lw", title: "LW" }];
+    const leaveChange = vi.fn(async () => ({ branch: "main" }));
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
+    const store = setup({
+      leaveChange,
+      cleanupChange,
+      listChanges: vi.fn(async () => open),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    store.active = { branch: "content/lw", title: "LW" };
+    store.items = open;
+    const reload = vi.spyOn(usePreviewStore(), "reload");
+
+    await store.goLive("site");
+
+    expect(leaveChange).toHaveBeenCalledWith("site");
+    expect(cleanupChange).not.toHaveBeenCalled();
+    expect(store.active).toBeNull();
+    expect(store.status).toBeNull();
+    expect(store.items).toEqual(open);
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("cleans up when the active change is no longer open", async () => {
+    const leaveChange = vi.fn(async () => ({ branch: "main" }));
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
+    const store = setup({
+      leaveChange,
+      cleanupChange,
+      listChanges: vi.fn(async () => []),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    store.active = { branch: "content/lw", title: "LW" };
+    store.items = [];
+
+    await store.goLive("site");
+
+    expect(cleanupChange).toHaveBeenCalledWith("site", "content/lw");
+    expect(leaveChange).not.toHaveBeenCalled();
+    expect(store.active).toBeNull();
+  });
+
+  it("is a no-op when already on the live site", async () => {
+    const leaveChange = vi.fn(async () => ({ branch: "main" }));
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
+    const store = setup({ leaveChange, cleanupChange });
+    store.active = null;
+
+    await store.goLive("site");
+
+    expect(leaveChange).not.toHaveBeenCalled();
+    expect(cleanupChange).not.toHaveBeenCalled();
+  });
+
+  it("warns when cleanup could not update main", async () => {
+    const store = setup({
+      cleanupChange: vi.fn(async () => ({ branch: "main", mainUpdated: false })),
+      listChanges: vi.fn(async () => []),
+      tree: vi.fn(async () => ({ entries: [] })),
+    });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    store.active = { branch: "content/lw", title: "LW" };
+    store.items = [];
+
+    await store.goLive("site");
+
+    expect(h.toastWarning).toHaveBeenCalledWith(
+      "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+    );
+  });
+});
+
 describe("changes store publish", () => {
   const pr: PrStatus = {
     number: 1,
@@ -925,36 +1007,68 @@ describe("changes store publish", () => {
   };
 
   function publishStore(api: Record<string, unknown> = {}) {
-    return setup({
+    const store = setup({
       publishChange: vi.fn(async () => pr),
+      cleanupChange: vi.fn(async () => ({ branch: "main", mainUpdated: true })),
       listChanges: vi.fn(async () => []),
       tree: vi.fn(async () => ({ entries: [] })),
       ...api,
     });
+    vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
+    return store;
   }
 
-  it("publishes the active change and shows the returned status", async () => {
+  it("publishes then cleans up onto main", async () => {
     const publishChange = vi.fn(async () => pr);
-    const store = publishStore({ publishChange });
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
+    const store = publishStore({ publishChange, cleanupChange });
     store.active = { branch: "content/lw", title: "LW" };
+    store.items = [
+      { branch: "content/lw", title: "LW" },
+      { branch: "content/other", title: "Other" },
+    ];
+    const reload = vi.spyOn(usePreviewStore(), "reload");
     try {
-      await store.publish("site", "content/lw");
+      await expect(store.publish("site", "content/lw")).resolves.toBe("published");
       expect(publishChange).toHaveBeenCalledWith("site", "content/lw");
-      expect(store.status).toEqual(pr);
-      expect(store.prUrl).toBe(pr.url);
+      expect(cleanupChange).toHaveBeenCalledWith("site", "content/lw");
+      expect(store.active).toBeNull();
+      expect(store.status).toBeNull();
+      expect(store.prUrl).toBeNull();
+      expect(store.items.map((c) => c.branch)).toEqual(["content/other"]);
       expect(store.publishing).toBe(false);
+      expect(reload).toHaveBeenCalled();
     } finally {
       store.stopStatusPolling();
     }
   });
 
-  it("refreshes the change list after publishing", async () => {
-    const listChanges = vi.fn(async () => []);
-    const store = publishStore({ listChanges });
+  it("warns when main couldn't be updated during the post-publish cleanup", async () => {
+    const store = publishStore({
+      cleanupChange: vi.fn(async () => ({ branch: "main", mainUpdated: false })),
+    });
     store.active = { branch: "content/lw", title: "LW" };
     try {
-      await store.publish("site", "content/lw");
-      expect(listChanges).toHaveBeenCalledWith("site");
+      await expect(store.publish("site", "content/lw")).resolves.toBe("published");
+      expect(h.toastWarning).toHaveBeenCalledWith(
+        "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+      );
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("keeps the merged change when cleanup fails after publish", async () => {
+    const store = publishStore({
+      cleanupChange: vi.fn(async () => {
+        throw new ApiError("CONFLICT", "This change has not been merged yet", 409);
+      }),
+    });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await expect(store.publish("site", "content/lw")).rejects.toThrow(/not been merged/);
+      expect(store.active).toEqual({ branch: "content/lw", title: "LW" });
+      expect(store.publishing).toBe(false);
     } finally {
       store.stopStatusPolling();
     }
@@ -979,14 +1093,17 @@ describe("changes store publish", () => {
   });
 
   it("surfaces publish failures and keeps the change", async () => {
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
     const store = publishStore({
       publishChange: vi.fn(async () => {
         throw new ApiError("SANDBOX", "Ask an owner to add you to this site.", 403);
       }),
+      cleanupChange,
     });
     store.active = { branch: "content/lw", title: "LW" };
     await expect(store.publish("site", "content/lw")).rejects.toBeInstanceOf(ApiError);
     expect(store.active).toEqual({ branch: "content/lw", title: "LW" });
+    expect(cleanupChange).not.toHaveBeenCalled();
     expect(store.publishing).toBe(false);
   });
 
@@ -1127,10 +1244,18 @@ describe("changes store sync chats", () => {
       .fn()
       .mockResolvedValueOnce({ conflict: { branch: "content/a", sessionId: "s1" } })
       .mockResolvedValueOnce(merged);
+    const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
     const activeChange = vi.fn(async () => ({ branch: "content/a", title: "A" }));
     const listChanges = vi.fn(async () => []);
     const listConflicts = vi.fn(async () => []);
-    const store = setupSync({ startSyncChat, publishChange, activeChange, listChanges, listConflicts });
+    const store = setupSync({
+      startSyncChat,
+      publishChange,
+      cleanupChange,
+      activeChange,
+      listChanges,
+      listConflicts,
+    });
     useAgentProvidersStore().provider = "fake";
     store.projectId = "site";
     store.active = { branch: "content/a", title: "A" };
@@ -1156,7 +1281,9 @@ describe("changes store sync chats", () => {
       expect(listChanges).toHaveBeenCalledWith("site");
       expect(listConflicts).toHaveBeenCalledWith("site");
       expect(publishChange).toHaveBeenCalledTimes(2);
-      expect(store.status).toEqual(merged);
+      expect(cleanupChange).toHaveBeenCalledWith("site", "content/a");
+      expect(store.active).toBeNull();
+      expect(store.status).toBeNull();
       expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
     } finally {
       store.stopStatusPolling();

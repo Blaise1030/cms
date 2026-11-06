@@ -526,6 +526,51 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   /**
+   * Return to the live site (`main`). Open changes are kept; a change that is no longer
+   * open (already on `main`) is cleaned up. No-op when already on the live site.
+   */
+  async function goLive(id: string): Promise<void> {
+    const branch = active.value?.branch;
+    if (!branch) return;
+    const previous = items.value;
+    try {
+      await list(id);
+    } catch {
+      // Keep the last known open list when refresh fails.
+      items.value = previous;
+    }
+    const stillOpen = items.value.some((c) => c.branch === branch);
+    if (stillOpen) {
+      switching.value = true;
+      error.value = null;
+      stopStatusPolling();
+      try {
+        await daemon.api.leaveChange(id);
+        projectId.value = id;
+        active.value = null;
+        prUrl.value = null;
+        status.value = null;
+        protectionHint.value = null;
+        await refreshTreeAndPreview("main");
+        void refreshSync();
+      } catch (e) {
+        error.value = errorMessage(e);
+        void refreshStatus();
+        throw e;
+      } finally {
+        switching.value = false;
+      }
+      return;
+    }
+    const { mainUpdated } = await cleanup(id, branch);
+    if (!mainUpdated) {
+      toast.warning(
+        "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+      );
+    }
+  }
+
+  /**
    * Clean up a merged change: back on updated `main`, the change gone from the list.
    * `mainUpdated` is false when GitHub couldn't be reached to update `main`.
    */
@@ -646,9 +691,8 @@ export const useChangesStore = defineStore("changes", () => {
 
   /**
    * Publish the change: push it, share it (opening a pull request if it has none), mark it
-   * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
-   * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
-   * after the usual interval.
+   * ready, merge it on GitHub, then clean up onto updated `main`. Clean up stays available when
+   * the merge happened outside orso, or when this post-publish cleanup fails.
    *
    * Returns `combining` when someone else moved the change first: the combine dialog opens and
    * publishing retries automatically once it succeeds.
@@ -664,18 +708,12 @@ export const useChangesStore = defineStore("changes", () => {
         await startSyncChat(id, result.conflict.sessionId);
         return "combining";
       }
-      const pr = result;
-      if (active.value?.branch === branch) {
-        stopStatusPolling();
-        status.value = pr;
-        if (pr) {
-          prUrl.value = pr.url;
-          pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
-        }
+      const { mainUpdated } = await cleanup(id, branch);
+      if (!mainUpdated) {
+        toast.warning(
+          "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+        );
       }
-      // The drafts menu drops the published change; the change itself stays until Clean up.
-      await list(id).catch(() => undefined);
-      void refreshSync();
       return "published";
     } catch (e) {
       if (e instanceof ApiError && e.needsGithubSignIn) {
@@ -736,6 +774,7 @@ export const useChangesStore = defineStore("changes", () => {
     combineAgain,
     onSyncChanged,
     share,
+    goLive,
     cleanup,
     markReady,
     publish,

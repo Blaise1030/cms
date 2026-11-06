@@ -1,33 +1,100 @@
 <script setup lang="ts">
-// App-level settings, separate from a project's settings. The open tab lives in
-// `?tab=`, so deep links and the command palette can point at one section.
-import { computed, type Component } from "vue";
+// App-level settings. A fixed sidebar holds the sections and their search; the
+// content pane scrolls on its own. The open section lives in `?tab=`, so deep
+// links and the command palette can point at one page.
+import { computed, onBeforeUnmount, onMounted, ref, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ArrowLeft, BotMessageSquare, GitBranch, Info, Package, Palette, Search } from "@lucide/vue";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import {
-  ArrowLeft,
-  BotMessageSquare,
-  GitBranch,
-  Package,
-  Palette,
-} from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
+import { isMacDesktop } from "@/lib/desktop";
 import { APP_SETTINGS_TABS, type AppSettingsTab } from "@/router";
+import AboutSettings from "./AboutSettings.vue";
 import AppearanceSettings from "./AppearanceSettings.vue";
 import AssistantSettings from "./AssistantSettings.vue";
 import GithubSettings from "./GithubSettings.vue";
 import SiteBuilderSettings from "./SiteBuilderSettings.vue";
 
+interface SettingsSection {
+  id: AppSettingsTab;
+  label: string;
+  title: string;
+  description: string;
+  icon: Component;
+  component: Component;
+}
+
+const SECTIONS: SettingsSection[] = [
+  {
+    id: "assistant",
+    label: "Assistant",
+    title: "Assistant",
+    description: "The assistant makes the changes you ask for. You can add another at any time.",
+    icon: BotMessageSquare,
+    component: AssistantSettings,
+  },
+  {
+    id: "builder",
+    label: "Site builder",
+    title: "Site builder",
+    description: "Lets orso build and preview your site.",
+    icon: Package,
+    component: SiteBuilderSettings,
+  },
+  {
+    id: "github",
+    label: "GitHub",
+    title: "GitHub",
+    description:
+      "Git and the GitHub tools are optional for local work. Sign in to share previews and publish.",
+    icon: GitBranch,
+    component: GithubSettings,
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    title: "Appearance",
+    description: "How orso looks and sounds while you work.",
+    icon: Palette,
+    component: AppearanceSettings,
+  },
+  {
+    id: "about",
+    label: "About",
+    title: "About",
+    description: "Version, your data, and where to find more.",
+    icon: Info,
+    component: AboutSettings,
+  },
+];
+
+const GROUPS: { label: string; ids: AppSettingsTab[] }[] = [
+  { label: "Setup", ids: ["assistant", "builder", "github"] },
+  { label: "Preferences", ids: ["appearance"] },
+];
+
+const ABOUT = SECTIONS.find((section) => section.id === "about")!;
+
 const route = useRoute();
 const router = useRouter();
+const macDesktop = isMacDesktop();
 
-const TABS: { id: AppSettingsTab; label: string; icon: Component }[] = [
-  { id: "assistant", label: "Assistant", icon: BotMessageSquare },
-  { id: "builder", label: "Site builder", icon: Package },
-  { id: "github", label: "GitHub", icon: GitBranch },
-  { id: "appearance", label: "Appearance", icon: Palette },
-];
+const query = ref("");
+const searchWrap = ref<HTMLElement | null>(null);
 
 function isTab(value: unknown): value is AppSettingsTab {
   return typeof value === "string" && (APP_SETTINGS_TABS as readonly string[]).includes(value);
@@ -39,11 +106,57 @@ const activeTab = computed<AppSettingsTab>(() => {
   return isTab(value) ? value : "assistant";
 });
 
-function setTab(value: unknown) {
-  const tab = isTab(value) ? value : "assistant";
+const activeSection = computed(
+  () => SECTIONS.find((section) => section.id === activeTab.value) ?? SECTIONS[0]!,
+);
+
+function setTab(tab: AppSettingsTab) {
   if (tab === activeTab.value) return;
   void router.replace({ query: { ...route.query, tab } });
 }
+
+const needle = computed(() => query.value.trim().toLowerCase());
+
+/** Only the nav labels are filtered; the card contents always show the whole section. */
+function matches(section: SettingsSection) {
+  return needle.value.length === 0 || section.label.toLowerCase().includes(needle.value);
+}
+
+const visibleGroups = computed(() =>
+  GROUPS.map((group) => ({
+    label: group.label,
+    sections: group.ids
+      .map((id) => SECTIONS.find((section) => section.id === id))
+      .filter((section): section is SettingsSection => section != null)
+      .filter(matches),
+  })).filter((group) => group.sections.length > 0),
+);
+
+const aboutMatches = computed(() => matches(ABOUT));
+const hasMatches = computed(() => visibleGroups.value.length > 0 || aboutMatches.value);
+
+/** Enter jumps to the first section still visible under the current query. */
+function selectFirstMatch() {
+  const first = visibleGroups.value[0]?.sections[0] ?? (aboutMatches.value ? ABOUT : null);
+  if (first) setTab(first.id);
+}
+
+function focusSearch() {
+  const input = searchWrap.value?.querySelector("input");
+  if (!input) return;
+  input.focus();
+  input.select();
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    focusSearch();
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 /** Back to the previous page when the browser has one; a deep link falls back home. */
 function goBack() {
@@ -51,73 +164,159 @@ function goBack() {
   if (typeof back === "string" && back.length > 0) router.back();
   else void router.push("/");
 }
+
+const navItem = "h-9 rounded-lg px-2.5 text-[13px]";
+const navActive = "bg-card text-sidebar-accent-foreground font-medium shadow-sm btn-raised-soft";
 </script>
 
 <template>
-  <div
-    class="bg-background text-foreground flex h-full min-h-0 flex-col"
+  <SidebarProvider
+    class="h-full min-h-0 overflow-hidden"
+    :shortcut="false"
     data-testid="app-settings-page"
   >
-    <header class="flex h-11 shrink-0 items-center gap-2 px-2">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Back"
-        data-testid="app-settings-back"
-        @click="goBack"
+    <Sidebar
+      collapsible="none"
+      class="bg-background h-full min-h-0 shrink-0"
+      data-testid="app-settings-sidebar"
+    >
+      <SidebarHeader
+        data-testid="app-settings-sidebar-header"
+        :class="[
+          'gap-3 px-3 pb-3',
+          macDesktop ? 'pt-11 fullscreen:pt-3' : 'pt-3',
+        ]"
       >
-        <ArrowLeft />
-      </Button>
-      <div class="min-w-0 leading-tight">
-        <h1 class="truncate text-sm font-semibold">Settings</h1>
-        <p class="text-muted-foreground truncate text-xs">
-          Assistant, site builder, GitHub, and appearance
-        </p>
-      </div>
-      <div class="ml-auto flex items-center gap-2" data-testid="app-settings-account">
-        <GithubAccount />
-      </div>
-    </header>
-
-    <div class="min-h-0 flex-1 overflow-y-auto">
-      <div class="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
-        <Tabs
-          :model-value="activeTab"
-          class="flex-col gap-6 md:flex-row md:items-start md:gap-8"
-          @update:model-value="setTab"
-        >
-          <TabsList
-            class="flex h-auto w-full max-w-full items-center justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-48 md:flex-col md:overflow-visible"
-            aria-label="App settings"
+        <h1 class="px-1 text-sm font-semibold">Settings</h1>
+        <div ref="searchWrap">
+          <InputGroup
+            class="h-8 border-sidebar-border bg-card shadow-none"
           >
-            <TabsTrigger
-              v-for="tab in TABS"
-              :key="tab.id"
-              :value="tab.id"
-              :data-testid="`app-settings-tab-${tab.id}`"
-              class="h-9 flex-none justify-start gap-2 px-3 md:w-full"
-            >
-              <component :is="tab.icon" aria-hidden="true" />
-              {{ tab.label }}
-            </TabsTrigger>
-          </TabsList>
+            <InputGroupAddon align="inline-start">
+              <Search aria-hidden="true" />
+            </InputGroupAddon>
+            <InputGroupInput
+              v-model="query"
+              data-testid="app-settings-search"
+              placeholder="Find a setting"
+              aria-label="Find a setting"
+              class="h-8 text-[13px]"
+              @keydown.enter.prevent="selectFirstMatch"
+              @keydown.esc="query = ''"
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupText>
+                <kbd
+                  class="rounded border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 font-sans text-[10px] leading-none"
+                  data-testid="app-settings-search-hint"
+                >
+                  ⌘F
+                </kbd>
+              </InputGroupText>
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
+      </SidebarHeader>
 
-          <div class="min-w-0 flex-1">
-            <TabsContent value="assistant" class="m-0">
-              <AssistantSettings />
-            </TabsContent>
-            <TabsContent value="builder" class="m-0">
-              <SiteBuilderSettings />
-            </TabsContent>
-            <TabsContent value="github" class="m-0">
-              <GithubSettings />
-            </TabsContent>
-            <TabsContent value="appearance" class="m-0">
-              <AppearanceSettings />
-            </TabsContent>
+      <SidebarContent class="gap-0 py-2" data-testid="app-settings-nav">
+        <template v-for="(group, index) in visibleGroups" :key="group.label">
+          <div v-if="index > 0" class="h-4" aria-hidden="true" />
+          <SidebarGroup class="py-1">
+            <SidebarGroupLabel
+              class="text-sidebar-foreground/50 h-7 px-2 text-[11px] tracking-wide"
+            >
+              {{ group.label }}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu class="gap-0.5">
+                <SidebarMenuItem v-for="section in group.sections" :key="section.id">
+                  <SidebarMenuButton
+                    type="button"
+                    :is-active="activeTab === section.id"
+                    :class="[navItem, activeTab === section.id ? navActive : '']"
+                    :aria-current="activeTab === section.id ? 'page' : undefined"
+                    :data-testid="`app-settings-tab-${section.id}`"
+                    @click="setTab(section.id)"
+                  >
+                    <component :is="section.icon" aria-hidden="true" />
+                    <span>{{ section.label }}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </template>
+
+        <p
+          v-if="!hasMatches"
+          class="text-sidebar-foreground/50 px-3 py-2 text-xs"
+          data-testid="app-settings-search-empty"
+        >
+          No settings found.
+        </p>
+
+        <div v-if="aboutMatches" class="mt-auto">
+          <div class="my-2" aria-hidden="true" />
+          <SidebarGroup class="py-1">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    type="button"
+                    :is-active="activeTab === ABOUT.id"
+                    :class="[navItem, activeTab === ABOUT.id ? navActive : '']"
+                    :aria-current="activeTab === ABOUT.id ? 'page' : undefined"
+                    data-testid="app-settings-tab-about"
+                    @click="setTab(ABOUT.id)"
+                  >
+                    <component :is="ABOUT.icon" aria-hidden="true" />
+                    <span>{{ ABOUT.label }}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </div>
+      </SidebarContent>
+
+      <SidebarFooter class="p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              type="button"
+              :class="navItem"
+              data-testid="app-settings-back"
+              @click="goBack"
+            >
+              <ArrowLeft aria-hidden="true" />
+              <span>Back to app</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </Sidebar>
+
+    <SidebarInset class="h-full min-h-0 w-auto overflow-y-auto">
+      <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8 sm:px-8">
+        <header class="flex items-start gap-3">
+          <div
+            class="bg-card text-foreground btn-raised-soft flex size-11 shrink-0 items-center justify-center rounded-xl border"
+          >
+            <component :is="activeSection.icon" class="size-5" aria-hidden="true" />
           </div>
-        </Tabs>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-2xl font-semibold tracking-tight">{{ activeSection.title }}</h2>
+            <p class="text-muted-foreground mt-1 text-sm text-balance">
+              {{ activeSection.description }}
+            </p>
+          </div>
+          <div class="ml-auto shrink-0" data-testid="app-settings-account">
+            <GithubAccount />
+          </div>
+        </header>
+
+        <component :is="activeSection.component" />
       </div>
-    </div>
-  </div>
+    </SidebarInset>
+  </SidebarProvider>
 </template>

@@ -69,6 +69,7 @@ describe("router", () => {
   it("builds app settings links with the section in the query", () => {
     expect(settingsPath()).toBe("/settings?tab=assistant");
     expect(settingsPath("builder")).toBe("/settings?tab=builder");
+    expect(settingsPath("about")).toBe("/settings?tab=about");
     const r = router().resolve(settingsPath("github"));
     expect(r.name).toBe("app-settings");
     expect(r.path).toBe("/settings");

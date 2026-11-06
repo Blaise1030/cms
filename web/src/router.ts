@@ -12,13 +12,14 @@ import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
 export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
-export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance";
+export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
 
 export const APP_SETTINGS_TABS: readonly AppSettingsTab[] = [
   "assistant",
   "builder",
   "github",
   "appearance",
+  "about",
 ];
 
 const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };

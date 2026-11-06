@@ -146,6 +146,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
+        .route("/api/changes/leave", post(changes::leave))
         .route("/api/changes/update", post(changes::update))
         .route("/api/changes/conflicts", get(changes::list_conflicts))
         .route("/api/changes/conflicts/{id}", get(changes::get_conflict))

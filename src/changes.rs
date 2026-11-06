@@ -418,6 +418,26 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     })
 }
 
+/// Check out `main` without deleting the current change branch. No-op when already on `main`.
+/// The working tree must be clean.
+pub async fn leave_to_main(dir: &Path) -> Result<(), ApiError> {
+    let current = run(dir, &["branch", "--show-current"])
+        .await?
+        .trim()
+        .to_string();
+    if current.is_empty() || current == "main" {
+        return Ok(());
+    }
+    ensure_clean(dir, "returning to the live site").await?;
+    run_env(
+        dir,
+        &["checkout", "main"],
+        &[(crate::git_shim::ALLOW_ENV.to_string(), "1".to_string())],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Outcome of [`get_latest`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

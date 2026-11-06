@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, BotMessageSquare, Trash2, UserPlus } from "@lucide/vue";
+import { EllipsisVertical, Settings, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -89,8 +89,8 @@ function open(project: Project) {
     >
       <div class="flex items-center gap-2" data-testid="account-slot">
         <Button variant="outline" size="sm" as-child>
-          <RouterLink :to="settingsPath('assistant')" data-testid="open-assistant">
-            <BotMessageSquare /> Assistant
+          <RouterLink :to="settingsPath()" data-testid="open-settings">
+            <Settings /> Settings
           </RouterLink>
         </Button>
         <GithubAccount />

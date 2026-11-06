@@ -5,14 +5,7 @@ import { computed, onMounted, ref } from "vue";
 import { BotMessageSquare, CircleAlert, RefreshCw } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Empty,
   EmptyContent,
@@ -27,6 +20,7 @@ import ProviderRow from "@/modules/assistant/ProviderRow.vue";
 import SignInPanel from "@/modules/assistant/SignInPanel.vue";
 import { useAssistantStore } from "@/modules/assistant/store";
 import type { AssistantRow, RowAction } from "@/modules/assistant/rows";
+import SettingsSection from "./SettingsSection.vue";
 
 const store = useAssistantStore();
 
@@ -85,29 +79,23 @@ function onAction(row: AssistantRow, action: RowAction) {
 </script>
 
 <template>
-  <Card data-testid="assistant-settings">
-    <CardHeader>
-      <CardTitle>Assistant</CardTitle>
-      <CardDescription>
-        The assistant makes the changes you ask for. You can add another at any time.
-      </CardDescription>
-      <CardAction>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="rechecking"
-          data-testid="assistant-settings-recheck"
-          @click="recheck"
-        >
-          <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
-        </Button>
-      </CardAction>
-    </CardHeader>
+  <SettingsSection label="Assistants" :icon="BotMessageSquare" data-testid="assistant-settings">
+    <template #actions>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="rechecking"
+        data-testid="assistant-settings-recheck"
+        @click="recheck"
+      >
+        <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
+      </Button>
+    </template>
 
-    <CardContent>
+    <Card class="gap-0 overflow-hidden p-0">
       <p
         v-if="loading"
-        class="text-muted-foreground flex items-center gap-2 text-sm"
+        class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
         data-testid="assistant-settings-loading"
       >
         <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
@@ -116,6 +104,7 @@ function onAction(row: AssistantRow, action: RowAction) {
       <Alert
         v-else-if="store.error && !store.snapshot"
         variant="destructive"
+        class="m-4"
         data-testid="assistant-settings-error"
       >
         <CircleAlert aria-hidden="true" />
@@ -133,7 +122,7 @@ function onAction(row: AssistantRow, action: RowAction) {
         </AlertDescription>
       </Alert>
 
-      <Empty v-else-if="!rows.length" data-testid="assistant-settings-empty">
+      <Empty v-else-if="!rows.length" class="border-0" data-testid="assistant-settings-empty">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <BotMessageSquare aria-hidden="true" />
@@ -150,7 +139,7 @@ function onAction(row: AssistantRow, action: RowAction) {
         </EmptyContent>
       </Empty>
 
-      <ul v-else class="flex flex-col divide-y" data-testid="assistant-settings-rows">
+      <ul v-else class="divide-y divide-border px-4" data-testid="assistant-settings-rows">
         <template v-for="row in rows" :key="row.id">
           <ProviderRow :row="row" hide-connected-action @action="onAction(row, $event)" />
           <li v-if="panelFor(row.id)" class="pb-3">
@@ -165,6 +154,6 @@ function onAction(row: AssistantRow, action: RowAction) {
           </li>
         </template>
       </ul>
-    </CardContent>
-  </Card>
+    </Card>
+  </SettingsSection>
 </template>
