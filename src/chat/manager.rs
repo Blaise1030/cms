@@ -181,6 +181,7 @@ struct StopGate {
 struct Inner {
     slots: Mutex<Slots>,
     state_dir: PathBuf,
+    projects_dir: PathBuf,
     events: EventBus,
     on_turn_end: Mutex<Option<TurnEndHook>>,
     /// Projects whose permission requests are allowed without asking.
@@ -210,7 +211,7 @@ impl ChatManager {
         self.inner.slots.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn new(events: EventBus, state_dir: PathBuf) -> Self {
+    pub fn new(events: EventBus, state_dir: PathBuf, projects_dir: PathBuf) -> Self {
         Self {
             inner: Arc::new(Inner {
                 slots: Mutex::new(Slots {
@@ -218,6 +219,7 @@ impl ChatManager {
                     stopping: HashSet::new(),
                 }),
                 state_dir,
+                projects_dir,
                 events,
                 on_turn_end: Mutex::new(None),
                 auto_approve: Mutex::new(HashSet::new()),
@@ -404,6 +406,13 @@ impl ChatManager {
                 return Err(e);
             }
         };
+
+        // Refresh the Cursor rule now that a session exists, so a newly installed skill is
+        // visible without restarting the daemon or an already-live chat.
+        let global_root = crate::skills::load_global_root(&self.inner.projects_dir);
+        if let Err(e) = crate::providers::write_cursor_rule(cwd, &global_root) {
+            eprintln!("orso: cursor rule unavailable for {project_id} ({e})");
+        }
 
         let client = Arc::new(client);
         let mut rx = client.event_stream();
@@ -1137,7 +1146,11 @@ mod tests {
 
     fn manager() -> (ChatManager, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let chats = ChatManager::new(EventBus::new(), dir.path().to_path_buf());
+        let chats = ChatManager::new(
+            EventBus::new(),
+            dir.path().join("state"),
+            dir.path().join("projects"),
+        );
         (chats, dir)
     }
 
