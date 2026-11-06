@@ -40,6 +40,8 @@ import { attachPicker, describeElement, relativeFile } from "./elementPicker";
 import { captureElement } from "./elementShot";
 import { applyFrameAppearance } from "./frameAppearance";
 import { BRIDGE_TYPE, isBridgeMessage } from "./frameBridge";
+import { useChatPanelLayout } from "@/lib/chatPanelLayout";
+import { cn } from "@/lib/utils";
 import { DESKTOP_MIN_WIDTH, frameFit } from "./frameFit";
 import { useFrameHistory } from "./frameHistory";
 import { type PageError, watchPageErrors } from "./pageErrors";
@@ -48,6 +50,14 @@ import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 const props = defineProps<{ projectId: string; devserver?: DevserverState; port?: number }>();
 
 const store = usePreviewStore();
+const panelLayout = useChatPanelLayout();
+/** Floating agent chrome sits under the preview, so the shell gets a full radius again. */
+const shellClass = computed(() =>
+  cn(
+    "bg-background flex min-h-0 flex-1 flex-col overflow-hidden border shadow-sm",
+    panelLayout.floating.value ? "rounded-xl" : "rounded-t-xl border-b-0",
+  ),
+);
 const daemon = useDaemon();
 
 watch(
@@ -372,7 +382,7 @@ function toggleFullscreen() {
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
-    <div ref="shell" class="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-xl border border-b-0 shadow-sm">
+    <div ref="shell" data-testid="preview-shell" :class="shellClass">
       <TooltipProvider>
         <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
           <Tooltip>

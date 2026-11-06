@@ -2,7 +2,7 @@
 // App settings → Appearance. The theme and typing sound are read and written by
 // the same shared composables the rest of the app uses (and the command palette).
 import { computed } from "vue";
-import { AudioLines, ListChecks, SunMoon, Volume2 } from "@lucide/vue";
+import { AudioLines, ListChecks, PanelRight, SunMoon, Volume2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -21,6 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  useChatPanelLayout,
+  type ChatPanelLayout,
+} from "@/lib/chatPanelLayout";
 import { useChatSteps } from "@/lib/chatSteps";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 import {
@@ -35,6 +39,19 @@ import ThemePreview from "./ThemePreview.vue";
 const theme = useTheme();
 const typingSound = useTypingSound();
 const chatSteps = useChatSteps();
+const panelLayout = useChatPanelLayout();
+
+const LAYOUT_OPTIONS: { id: ChatPanelLayout; label: string }[] = [
+  { id: "sidebar", label: "Sidebar" },
+  { id: "floating", label: "Floating" },
+];
+const layoutValue = computed(() => panelLayout.layout.value);
+
+function onLayout(value: unknown) {
+  if (value === "sidebar" || value === "floating") {
+    panelLayout.set(value);
+  }
+}
 
 const THEMES: { id: ThemePreference; label: string }[] = [
   { id: "light", label: "Light" },
@@ -157,25 +174,55 @@ function playSample() {
 
     <SettingsSection label="Chat" :icon="ListChecks">
       <Card class="gap-0 overflow-hidden p-0">
-        <Item>
-          <ItemMedia variant="icon">
-            <ListChecks aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Show assistant steps</ItemTitle>
-            <ItemDescription>
-              Shows “Worked through N steps” under each reply. Off by default for a quieter chat.
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <Switch
-              :model-value="chatSteps.enabled.value"
-              data-testid="appearance-show-steps"
-              aria-label="Show assistant steps"
-              @update:model-value="chatSteps.set"
-            />
-          </ItemActions>
-        </Item>
+        <div class="divide-y divide-border">
+          <Item>
+            <ItemMedia variant="icon">
+              <PanelRight aria-hidden="true" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Agent panel</ItemTitle>
+              <ItemDescription>
+                Dock the chat in a sidebar, or float it over the page with a bottom bar like Linear.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Select :model-value="layoutValue" @update:model-value="onLayout">
+                <SelectTrigger
+                  id="appearance-panel-layout"
+                  data-testid="appearance-panel-layout"
+                  class="w-40"
+                  aria-label="Agent panel"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="option in LAYOUT_OPTIONS" :key="option.id" :value="option.id">
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </ItemActions>
+          </Item>
+          <Item>
+            <ItemMedia variant="icon">
+              <ListChecks aria-hidden="true" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Show assistant steps</ItemTitle>
+              <ItemDescription>
+                Shows “Worked through N steps” under each reply. Off by default for a quieter chat.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                :model-value="chatSteps.enabled.value"
+                data-testid="appearance-show-steps"
+                aria-label="Show assistant steps"
+                @update:model-value="chatSteps.set"
+              />
+            </ItemActions>
+          </Item>
+        </div>
       </Card>
     </SettingsSection>
   </div>

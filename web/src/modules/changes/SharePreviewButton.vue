@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { LogIn, RefreshCw, Share2 } from "@lucide/vue";
+import { ExternalLink, Globe, LogIn, RefreshCw, Share2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
@@ -37,6 +37,24 @@ const showPublish = computed(
 const showGroup = computed(
   () => !!(showShare.value || changes.prUrl || showPublish.value),
 );
+
+/** Production deployment of `main`, only as a plain web URL while on the live site. */
+const liveHref = computed(() => {
+  if (changes.active !== null || props.repo == null) return null;
+  const url = changes.liveUrl;
+  return url && /^https?:\/\/./i.test(url) ? url : null;
+});
+
+/**
+ * Open the live site in the desktop shell's browser. Same pattern as PrMenu: `window.open`
+ * so the shell's new-window handler gets the URL.
+ */
+function openLive(e: MouseEvent) {
+  const href = (e.currentTarget as HTMLAnchorElement | null)?.href ?? "";
+  if (!/^https?:\/\//i.test(href)) return;
+  e.preventDefault();
+  window.open(href, "_blank", "noopener,noreferrer");
+}
 
 async function onShare() {
   if (!changes.active) return;
@@ -79,6 +97,26 @@ async function onShare() {
         :repo="repo ?? null"
       />
     </ButtonGroup>
+
+    <Button
+      v-else-if="liveHref"
+      as-child
+      variant="outline"
+      size="sm"
+      class="h-7 gap-1.5 px-2.5 text-xs"
+    >
+      <a
+        :href="liveHref"
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid="live-site-link"
+        @click="openLive"
+      >
+        <Globe class="size-4" />
+        Open live site
+        <ExternalLink class="size-3.5 opacity-60" />
+      </a>
+    </Button>
 
     <Button
       v-if="changes.needsSignIn"

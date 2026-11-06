@@ -395,6 +395,10 @@ export function createApi(
         })
       ).pr,
 
+    /** Production site URL for the live (`main`) tip, or null when unknown. */
+    liveSiteUrl: async (project: string): Promise<string | null> =>
+      (await json<{ url: string | null }>("GET", "/api/changes/live", { query: { project } })).url,
+
     /** Mark a change's draft PR ready for review; returns its fresh status. */
     markChangeReady: async (project: string, branch: string): Promise<PrStatus | null> =>
       (

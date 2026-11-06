@@ -322,6 +322,28 @@ describe("GitHub settings", () => {
     await flushPromises();
     expect(start).toHaveBeenCalled();
   });
+
+  it("keeps the cached setup status when revisiting the GitHub tab", async () => {
+    const setupStatus = vi.fn(async (): Promise<SetupStatus> => ({
+      git: true,
+      gh: true,
+      githubSignedIn: false,
+      node: runtime({ version: "24.0.0" }),
+      providers: [],
+      projectsDir: "/Users/ada/orso-projects",
+    }));
+    const { w } = await mountPage("/settings", { setupStatus });
+    await openTab(w, "github");
+    expect(w.find("[data-testid='github-settings-git']").exists()).toBe(true);
+    const callsAfterFirstVisit = setupStatus.mock.calls.length;
+    expect(callsAfterFirstVisit).toBeGreaterThan(0);
+
+    await openTab(w, "appearance");
+    await openTab(w, "github");
+    expect(w.find("[data-testid='github-settings-loading']").exists()).toBe(false);
+    expect(w.find("[data-testid='github-settings-git']").exists()).toBe(true);
+    expect(setupStatus).toHaveBeenCalledTimes(callsAfterFirstVisit);
+  });
 });
 
 describe("Appearance settings", () => {
@@ -352,9 +374,12 @@ describe("Appearance settings", () => {
     const { w } = await mountPage();
     await openTab(w, "appearance");
     const selects = w.findAllComponents(SelectRoot);
-    expect(selects).toHaveLength(1);
+    const soundSelect = selects.find((s) =>
+      s.find("[data-testid='appearance-typing-sound']").exists(),
+    );
+    expect(soundSelect).toBeTruthy();
 
-    selects[0]!.vm.$emit("update:model-value", "mx-blue");
+    soundSelect!.vm.$emit("update:model-value", "mx-blue");
     await flushPromises();
     expect(useTypingSound().setting.value).toBe("mx-blue");
     expect(localStorage.getItem("orso.typingSound")).toBe("mx-blue");
@@ -371,6 +396,26 @@ describe("Appearance settings", () => {
     await toggle.trigger("click");
     await flushPromises();
     expect(localStorage.getItem("orso.chat.showSteps")).toBe("1");
+  });
+
+  it("switches the agent panel between sidebar and floating", async () => {
+    const { w } = await mountPage();
+    await openTab(w, "appearance");
+    expect(w.get("[data-testid='appearance-settings']").text()).toContain("Agent panel");
+    expect(localStorage.getItem("orso.chat.panelLayout")).toBeNull();
+
+    const selects = w.findAllComponents(SelectRoot);
+    const panelSelect = selects.find((s) =>
+      s.find("[data-testid='appearance-panel-layout']").exists(),
+    );
+    expect(panelSelect).toBeTruthy();
+    panelSelect!.vm.$emit("update:model-value", "floating");
+    await flushPromises();
+    expect(localStorage.getItem("orso.chat.panelLayout")).toBe("floating");
+
+    panelSelect!.vm.$emit("update:model-value", "sidebar");
+    await flushPromises();
+    expect(localStorage.getItem("orso.chat.panelLayout")).toBeNull();
   });
 });
 

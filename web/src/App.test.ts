@@ -69,7 +69,10 @@ describe("App setup gate", () => {
   it("holds the shell back while the check is in flight", async () => {
     const { w } = mountWith(() => new Promise<SetupStatus>(() => {}));
     await flushPromises();
-    expect(w.find("[data-testid='setup-pending']").exists()).toBe(true);
+    const pending = w.find("[data-testid='setup-pending']");
+    expect(pending.exists()).toBe(true);
+    expect(pending.attributes("role")).toBe("status");
+    expect(pending.text()).toContain("Loading…");
     expect(w.find("[data-testid='shell']").exists()).toBe(false);
     expect(w.find("[data-testid='setup-check']").exists()).toBe(false);
   });

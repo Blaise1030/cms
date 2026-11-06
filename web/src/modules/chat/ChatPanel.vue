@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import type { UIMessage } from "ai";
-import { ArrowUp, CircleAlert, MessageSquare, Plus, ShieldQuestion, X } from "@lucide/vue";
+import { ArrowUp, CircleAlert, MessageSquare, Minus, Plus, ShieldQuestion, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { errorMessage } from "@orso/utils";
-import { mapErrorResponse } from "@/core/api";
+import { ApiError, mapErrorResponse } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { ChatHistory as ChatHistoryData, UiChunk } from "@/core/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -25,22 +25,43 @@ import { Spinner } from "@/components/ui/spinner";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useAssistantStore } from "@/modules/assistant/store";
 import { openAssistantSetup } from "@/modules/assistant/dialog";
+import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChangesStore } from "@/modules/changes/store";
-import { settingsPath } from "@/router";
+import { usePreviewStore } from "@/modules/preview/store";
+import { projectTabFromRoute, settingsPath, type ProjectTab } from "@/router";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
 import { attachmentMessage } from "./attachments";
 import { createTranscript, type Transcript } from "./chunks";
+import {
+  clearStickyPageContext,
+  nextStickyPageContext,
+  resolvePageContext,
+  splitPageContext,
+  withPageContext,
+  type StickyPageContext,
+} from "./pageContext";
 import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal, syncPhaseBadge } from "./parts";
 import { referenceLabel } from "./references";
 import { spawnRecovery, type RecoveryAction } from "./recovery";
 import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
 
-const props = defineProps<{ projectId: string; active: boolean }>();
+const props = withDefaults(
+  defineProps<{
+    projectId: string;
+    active: boolean;
+    /** Floating layout adds minimize/close beside the usual header actions. */
+    layout?: "sidebar" | "floating";
+  }>(),
+  { layout: "sidebar" },
+);
+const emit = defineEmits<{ minimize: []; close: [] }>();
+const route = useRoute();
 const router = useRouter();
+const preview = usePreviewStore();
 
 /** Assistants this UI can drive. */
 const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
@@ -109,6 +130,9 @@ const sendingChats = ref<Record<string, boolean>>({});
 const loadingChat = ref(false);
 /** The latest API failure, shown above the composer. */
 const errorText = ref<string | null>(null);
+/** Prompt held while the writer names a new change after `CHANGE_REQUIRED`. */
+const pendingChangePrompt = ref<string | null>(null);
+const showStartChange = ref(false);
 /** The provider saved on the open chat; null for a draft with no messages yet. */
 const chatProvider = ref<string | null>(null);
 /** The model saved on the open chat; null is the agent's default. */
@@ -511,14 +535,34 @@ async function sendNow(text: string): Promise<boolean> {
     if (optimisticId && id === activeId.value) messages.value = messages.value.filter(m => m.id !== optimisticId);
     store.clearChatSending(props.projectId, id);
     if (id === activeId.value) {
-      const message = errorMessage(e);
-      errorText.value = mapErrorResponse(0, message, message).message;
+      if (e instanceof ApiError && e.code === "CHANGE_REQUIRED") {
+        errorText.value = null;
+        pendingChangePrompt.value = trimmed;
+        showStartChange.value = true;
+      } else {
+        const message = errorMessage(e);
+        errorText.value = mapErrorResponse(0, message, message).message;
+      }
     }
     if (id && store.queued[props.projectId]?.[id]?.length) store.setQueuePaused(props.projectId, id, true);
     return false;
   } finally {
     sendingChats.value[id] = false;
   }
+}
+
+watch(showStartChange, (open) => {
+  if (open || !pendingChangePrompt.value) return;
+  // Cancelled: put the prompt back so the writer can edit or try again.
+  if (!input.value) input.value = splitPageContext(pendingChangePrompt.value).text;
+  pendingChangePrompt.value = null;
+});
+
+async function onChangeCreated() {
+  const text = pendingChangePrompt.value;
+  pendingChangePrompt.value = null;
+  showStartChange.value = false;
+  if (text) await sendNow(text);
 }
 
 async function drainQueue() {
@@ -542,29 +586,85 @@ async function drainQueue() {
 
 watch([streaming, loadingChat, activeId], () => void drainQueue(), { flush: "post" });
 
-async function send(text: string, preview = text) {
+/** Sticky page context: live on Preview/Content, frozen after leaving those modules. */
+const stickyPageContext = ref<StickyPageContext>({ context: null, frozen: false });
+const pageContext = computed(() => stickyPageContext.value.context);
+
+function currentPageTab(): ProjectTab {
+  return projectTabFromRoute(route?.name);
+}
+
+function resolvedPageContext() {
+  const tab = currentPageTab();
+  return resolvePageContext({
+    tab,
+    params: {
+      path: preview.framePathFor(props.projectId),
+      collection: typeof route?.params?.collection === "string" ? route.params.collection : undefined,
+      entry: typeof route?.params?.entry === "string" ? route.params.entry : undefined,
+    },
+  });
+}
+
+function syncStickyPageContext() {
+  stickyPageContext.value = nextStickyPageContext(
+    stickyPageContext.value,
+    currentPageTab(),
+    resolvedPageContext(),
+  );
+}
+
+watch(
+  () => [
+    route?.name,
+    route?.params?.collection,
+    route?.params?.entry,
+    preview.framePathFor(props.projectId),
+    props.projectId,
+  ],
+  syncStickyPageContext,
+  { immediate: true },
+);
+
+function clearPageContext() {
+  stickyPageContext.value = clearStickyPageContext();
+}
+
+async function send(text: string, previewText = text) {
   const trimmed = text.trim();
   if (!trimmed) return;
   const id = activeId.value ?? store.newChat(props.projectId);
   if (streaming.value || store.isQueuePaused(props.projectId, id) || store.queued[props.projectId]?.[id]?.length) {
-    store.enqueue(props.projectId, id, trimmed, preview);
+    store.enqueue(props.projectId, id, trimmed, previewText);
     if (!streaming.value) void drainQueue();
     return;
   }
   await sendNow(trimmed);
 }
 
+/** Outbox / external sends: inject the current page context; keep the queue preview clean. */
+function sendWithPageContext(text: string, previewText = text) {
+  void send(withPageContext(text, pageContext.value), previewText);
+}
+
 function submit(text: string) {
   const picked = references.value.map((r) => r.full);
   const typed = text.trim();
-  const preview = typed
+  const previewText = typed
     || references.value.map((r) => r.label).join(", ")
     || attachments.value.map((a) => a.name).join(", ");
   input.value = "";
   references.value = [];
   const paths = attachments.value.map((a) => a.path);
   attachments.value = [];
-  void send(attachmentMessage([...picked, typed].filter(Boolean).join(" "), paths), preview);
+  // Context after the typed text; attachment paths stay last so display splitting still works.
+  void send(
+    attachmentMessage(
+      withPageContext([...picked, typed].filter(Boolean).join(" "), pageContext.value),
+      paths,
+    ),
+    previewText,
+  );
 }
 
 async function stop() {
@@ -675,13 +775,14 @@ function onMessageScroll(event: Event) {
   if (viewport.scrollTop <= 80 && firstVisibleMessage.value > 0) loadEarlierMessages();
 }
 
-defineExpose({ insert, insertReference, send, busy });
+defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
 </script>
 
 <template>
   <div data-testid="chat-panel" class="bg-background text-foreground flex h-full min-h-0 flex-col">
     <div data-testid="chat-header" class="flex h-11 shrink-0 items-center gap-1 px-1.5">
       <ChatHistory
+        v-if="layout !== 'floating'"
         v-model:open="historyOpen"
         :chats="chats"
         :active-id="activeId"
@@ -709,14 +810,41 @@ defineExpose({ insert, insertReference, send, busy });
       >
         {{ SYNC_ACTIONS.end }}
       </Button>
-      <Button variant="ghost" size="icon-sm" aria-label="New chat" data-testid="chat-new" @click="startNew">
+      <Button
+        v-if="layout !== 'floating'"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="New chat"
+        data-testid="chat-new"
+        @click="startNew"
+      >
         <Plus />
       </Button>
+      <template v-if="layout === 'floating'">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Minimize agent"
+          data-testid="agent-minimize"
+          @click="emit('minimize')"
+        >
+          <Minus />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Close agent"
+          data-testid="agent-close"
+          @click="emit('close')"
+        >
+          <X />
+        </Button>
+      </template>
     </div>
 
     <div
       v-if="loadingChat"
-      class="text-muted-foreground flex min-h-0 flex-1 items-center justify-center gap-2 text-sm"
+      class="text-muted-foreground flex min-h-0 flex-1 items-start gap-2 p-3 text-sm"
       role="status"
       data-testid="chat-loading"
     >
@@ -881,15 +1009,25 @@ defineExpose({ insert, insertReference, send, busy });
         :attachments="attachments"
         :attaching="attaching"
         :references="references"
+        :page-context="pageContext"
         :auto-approve="autoApprove"
         @submit="submit"
         @stop="stop"
         @attach="attach"
         @remove-attachment="attachments.splice($event, 1)"
         @remove-reference="references.splice($event, 1)"
+        @clear-page-context="clearPageContext"
         @set-auto-approve="setAutoApprove"
         @setup="openSetup"
       />
     </div>
+
+    <NewChangeDialog
+      v-model:open="showStartChange"
+      :project-id="projectId"
+      heading="Start a change first"
+      description="GitHub projects cannot be edited on main. Name this change to create a branch, then your assistant will continue."
+      @created="onChangeCreated"
+    />
   </div>
 </template>

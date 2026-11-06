@@ -31,6 +31,37 @@ describe("github store", () => {
     expect(gh.user).toEqual(ada);
   });
 
+  it("loadSetup caches setup status and github account", async () => {
+    const setupStatus = {
+      git: true,
+      gh: true,
+      githubSignedIn: true,
+      providers: [],
+      projectsDir: "/Users/ada/orso-projects",
+    };
+    const gh = setup({
+      setupStatus: vi.fn(async () => setupStatus),
+      githubStatus: vi.fn(async () => ({ configured: true, deviceFlow: true, source: "oauth", user: ada })),
+    });
+    expect(gh.setup).toBeNull();
+    await gh.loadSetup();
+    expect(gh.setup).toEqual(setupStatus);
+    expect(gh.user).toEqual(ada);
+    expect(gh.setupError).toBe(false);
+  });
+
+  it("loadSetup records a failure when setup status cannot be fetched", async () => {
+    const gh = setup({
+      setupStatus: vi.fn(async () => {
+        throw new Error("daemon down");
+      }),
+      githubStatus: vi.fn(async () => ({ configured: false, deviceFlow: false, source: null, user: null })),
+    });
+    await gh.loadSetup();
+    expect(gh.setup).toBeNull();
+    expect(gh.setupError).toBe(true);
+  });
+
   it("polls the device flow at the given interval until signed in", async () => {
     const poll = vi
       .fn()

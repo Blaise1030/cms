@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, ListPlus, MapPin, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
+import { pageContextBadge, type PageContext } from "./pageContext";
 import {
   Command,
   CommandEmpty,
@@ -49,6 +50,8 @@ const props = defineProps<{
   attaching: boolean;
   /** Elements picked from the preview for the next message. */
   references: ChatReference[];
+  /** Ambient page context that will be sent with the next message. */
+  pageContext?: PageContext | null;
   /** Run the assistant's tools without asking. */
   autoApprove: boolean;
 }>();
@@ -58,6 +61,7 @@ const emit = defineEmits<{
   attach: [files: File[]];
   removeAttachment: [index: number];
   removeReference: [index: number];
+  clearPageContext: [];
   setAutoApprove: [on: boolean];
   /** The user wants to set up another assistant; the caller opens its setup. */
   setup: [];
@@ -187,7 +191,28 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
         Drop files for your assistant
       </div>
       <InputGroup>
-        <div v-if="attachments.length || attaching || references.length" class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5">
+        <div
+          v-if="attachments.length || attaching || references.length || pageContext"
+          class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5"
+        >
+          <Badge
+            v-if="pageContext"
+            variant="secondary"
+            data-testid="chat-page-context"
+            class="max-w-full py-1 pr-2 pl-1 text-xs"
+          >
+            <button
+              type="button"
+              class="hover:bg-background shrink-0 rounded p-0.5"
+              :aria-label="`Remove ${pageContextBadge(pageContext)}`"
+              data-testid="chat-page-context-remove"
+              @click="emit('clearPageContext')"
+            >
+              <X class="size-3" aria-hidden="true" />
+            </button>
+            <MapPin class="size-3 shrink-0" aria-hidden="true" />
+            <span class="min-w-0 truncate">{{ pageContextBadge(pageContext) }}</span>
+          </Badge>
           <Badge
             v-for="(reference, i) in references"
             :key="reference.full"

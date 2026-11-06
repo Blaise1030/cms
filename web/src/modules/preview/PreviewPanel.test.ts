@@ -11,6 +11,7 @@ import PreviewPanel from "./PreviewPanel.vue";
 import { usePreviewStore } from "./store";
 import { useChangesStore } from "@/modules/changes/store";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
+import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
@@ -45,6 +46,22 @@ describe("PreviewPanel", () => {
     const w = mountPanel();
     expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:7800/preview/site-1/");
     w.unmount();
+  });
+
+  it("uses a full radius when the agent sits in the bottom chrome", async () => {
+    useChatPanelLayout().set("sidebar");
+    const docked = mountPanel();
+    expect(docked.get("[data-testid='preview-shell']").classes()).toContain("rounded-t-xl");
+    expect(docked.get("[data-testid='preview-shell']").classes()).toContain("border-b-0");
+    docked.unmount();
+
+    const floating = mountPanel();
+    useChatPanelLayout().set("floating");
+    await flushPromises();
+    expect(floating.get("[data-testid='preview-shell']").classes()).toContain("rounded-xl");
+    expect(floating.get("[data-testid='preview-shell']").classes()).not.toContain("border-b-0");
+    useChatPanelLayout().set("sidebar");
+    floating.unmount();
   });
 
   it("frames the project's own dev server in a Vite dev build", () => {

@@ -387,6 +387,32 @@ describe("changes store", () => {
     expect(store.error).toBeNull();
   });
 
+  it("load fetches the live site URL when on main", async () => {
+    const liveSiteUrl = vi.fn(async () => "https://acme.pages.dev");
+    const store = setup({
+      activeChange: vi.fn(async () => {
+        throw new ApiError("ENOENT", "no active change", 404);
+      }),
+      liveSiteUrl,
+    });
+    await store.load("site");
+    expect(liveSiteUrl).toHaveBeenCalledWith("site");
+    expect(store.liveUrl).toBe("https://acme.pages.dev");
+  });
+
+  it("load clears the live site URL when opening a change", async () => {
+    const liveSiteUrl = vi.fn(async () => "https://acme.pages.dev");
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => null),
+      liveSiteUrl,
+    });
+    store.liveUrl = "https://stale.pages.dev";
+    await store.load("site");
+    expect(liveSiteUrl).not.toHaveBeenCalled();
+    expect(store.liveUrl).toBeNull();
+  });
+
   it("ignores stale load responses after project switch", async () => {
     let resolveA!: (v: { branch: string; title: string }) => void;
     const a = new Promise<{ branch: string; title: string }>((r) => {
@@ -929,9 +955,11 @@ describe("changes store goLive", () => {
     const open = [{ branch: "content/lw", title: "LW" }];
     const leaveChange = vi.fn(async () => ({ branch: "main" }));
     const cleanupChange = vi.fn(async () => ({ branch: "main", mainUpdated: true }));
+    const liveSiteUrl = vi.fn(async () => "https://acme.pages.dev");
     const store = setup({
       leaveChange,
       cleanupChange,
+      liveSiteUrl,
       listChanges: vi.fn(async () => open),
       tree: vi.fn(async () => ({ entries: [] })),
     });
@@ -948,6 +976,8 @@ describe("changes store goLive", () => {
     expect(store.status).toBeNull();
     expect(store.items).toEqual(open);
     expect(reload).toHaveBeenCalled();
+    expect(liveSiteUrl).toHaveBeenCalledWith("site");
+    expect(store.liveUrl).toBe("https://acme.pages.dev");
   });
 
   it("cleans up when the active change is no longer open", async () => {
