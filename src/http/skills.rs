@@ -25,7 +25,8 @@ pub struct SkillQuery {
 
 #[derive(Deserialize)]
 pub struct UninstallQuery {
-    project: String,
+    #[serde(default)]
+    project: Option<String>,
     scope: SkillScope,
     #[serde(default)]
     branch: Option<String>,
@@ -88,7 +89,7 @@ pub async fn uninstall(
     q: Result<Query<UninstallQuery>, QueryRejection>,
 ) -> Result<Json<()>, ApiError> {
     let q = query_or_badreq(q)?;
-    crate::skills::uninstall(&state, &id, &q.project, q.scope, q.branch.as_deref()).await?;
+    crate::skills::uninstall(&state, &id, q.project.as_deref(), q.scope, q.branch.as_deref()).await?;
     Ok(Json(()))
 }
 

@@ -401,3 +401,149 @@ async fn settings_round_trip_and_reset() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["globalPath"], default_str.as_str());
 }
+
+#[tokio::test]
+async fn install_global_without_project_ok() {
+    let e = env(false).await;
+    // No `project` field: global scope resolves its own root.
+    let (s, v) = install(
+        &e,
+        json!({"scope": "global", "source": {"catalog": {"id": "seo"}}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], "seo");
+    assert!(e
+        .projects_dir()
+        .join(".orso/global-skills/seo/SKILL.md")
+        .exists());
+}
+
+#[tokio::test]
+async fn save_global_stale_hash() {
+    let e = env(false).await;
+    install(
+        &e,
+        json!({"scope": "global", "source": {"catalog": {"id": "seo"}}}),
+    )
+    .await;
+    let (s, v) = get(&e, "seo", "global").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let hash = v["hash"].as_str().unwrap().to_string();
+    let path = e.projects_dir().join(".orso/global-skills/seo/SKILL.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let (s, v) = save(
+        &e,
+        "seo",
+        json!({"scope": "global", "body": "changed\n", "hash": hash}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert_ne!(before, after);
+
+    // The same (now stale) hash is refused and the file is left unchanged.
+    let (s, v) = save(
+        &e,
+        "seo",
+        json!({"scope": "global", "body": "again\n", "hash": hash}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{v}");
+    assert_eq!(v["error"]["reason"], "stale_content");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+}
+
+#[tokio::test]
+async fn install_copy_global_to_project() {
+    let e = env(true).await;
+    install(
+        &e,
+        json!({"scope": "global", "source": {"catalog": {"id": "seo"}}}),
+    )
+    .await;
+    let b = branch(&e);
+    let (s, v) = install(
+        &e,
+        json!({"project": e.id, "branch": b, "scope": "project", "source": {"copy": {"id": "seo", "fromScope": "global"}}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], "seo");
+    assert_eq!(v["scope"], "project");
+    assert!(e.dir.join(".orso/skills/seo/SKILL.md").exists());
+    assert_eq!(
+        git_cli(&e.dir, &["log", "-1", "--format=%s"]),
+        "checkpoint: Installed skill"
+    );
+}
+
+#[tokio::test]
+async fn import_slugifies_id() {
+    let e = env(false).await;
+    let skill_md = "---\nname: My Custom Skill\ndescription: Does things\n---\n# Body\n";
+
+    // An explicit id is honored.
+    let (s, v) = install(
+        &e,
+        json!({"scope": "global", "source": {"import": {"skillMd": skill_md, "id": "custom"}}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], "custom");
+    assert!(e
+        .projects_dir()
+        .join(".orso/global-skills/custom/SKILL.md")
+        .exists());
+
+    // An omitted id derives a slug from the front-matter name.
+    let (s, v) = install(
+        &e,
+        json!({"scope": "global", "source": {"import": {"skillMd": skill_md}}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], "my-custom-skill");
+    assert!(e
+        .projects_dir()
+        .join(".orso/global-skills/my-custom-skill/SKILL.md")
+        .exists());
+}
+
+#[tokio::test]
+async fn unknown_catalog_404() {
+    let e = env(false).await;
+    let (s, v) = install(
+        &e,
+        json!({"scope": "global", "source": {"catalog": {"id": "nope"}}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    assert_eq!(v["error"]["code"], "ENOENT");
+}
+
+#[tokio::test]
+async fn save_rejects_empty_name() {
+    let e = env(false).await;
+    install(
+        &e,
+        json!({"scope": "global", "source": {"catalog": {"id": "seo"}}}),
+    )
+    .await;
+    let (s, v) = get(&e, "seo", "global").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let hash = v["hash"].as_str().unwrap().to_string();
+    let path = e.projects_dir().join(".orso/global-skills/seo/SKILL.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let (s, v) = save(
+        &e,
+        "seo",
+        json!({"scope": "global", "name": "", "body": "x\n", "hash": hash}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"]["reason"], "invalid_skill");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
