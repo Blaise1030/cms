@@ -110,7 +110,13 @@ fn branch(e: &Env) -> String {
 }
 
 async fn list(e: &Env) -> (StatusCode, Value) {
-    call(&e.app, "GET", &format!("/api/skills?project={}", e.id), None).await
+    call(
+        &e.app,
+        "GET",
+        &format!("/api/skills?project={}", e.id),
+        None,
+    )
+    .await
 }
 
 async fn get(e: &Env, id: &str, scope: &str) -> (StatusCode, Value) {
@@ -193,7 +199,10 @@ async fn install_catalog_project_checkpoints() {
     assert_eq!(v["id"], "seo");
     assert_eq!(v["scope"], "project");
     assert_eq!(v["name"], "SEO");
-    assert!(v["description"].as_str().unwrap().contains("optimization"), "{v}");
+    assert!(
+        v["description"].as_str().unwrap().contains("optimization"),
+        "{v}"
+    );
 
     let path = e.dir.join(".orso/skills/seo/SKILL.md");
     assert!(path.exists());
@@ -204,7 +213,10 @@ async fn install_catalog_project_checkpoints() {
         "checkpoint: Installed skill"
     );
     assert_eq!(
-        git_cli(&e.dir, &["status", "--porcelain", ".orso/skills/seo/SKILL.md"]),
+        git_cli(
+            &e.dir,
+            &["status", "--porcelain", ".orso/skills/seo/SKILL.md"]
+        ),
         ""
     );
 }
@@ -236,9 +248,7 @@ async fn install_global_without_change_ok() {
 
     let path = e.projects_dir().join(".orso/global-skills/design/SKILL.md");
     assert!(path.exists());
-    assert!(std::fs::read_to_string(&path)
-        .unwrap()
-        .contains("Design"));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("Design"));
 }
 
 #[tokio::test]
@@ -331,8 +341,7 @@ async fn uninstall_project() {
 async fn duplicate_id_conflict() {
     let e = env(true).await;
     let b = branch(&e);
-    let body =
-        json!({"project": e.id, "branch": b, "scope": "project", "source": {"catalog": {"id": "seo"}}});
+    let body = json!({"project": e.id, "branch": b, "scope": "project", "source": {"catalog": {"id": "seo"}}});
     let (s, v) = install(&e, body.clone()).await;
     assert_eq!(s, StatusCode::OK, "{v}");
 
@@ -354,7 +363,11 @@ async fn get_invalid_skill_reason() {
     let e = env(false).await;
     let dir = e.dir.join(".orso/skills/broken");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("SKILL.md"), "---\ndescription: no name\n---\nbody\n").unwrap();
+    std::fs::write(
+        dir.join("SKILL.md"),
+        "---\ndescription: no name\n---\nbody\n",
+    )
+    .unwrap();
 
     let (s, v) = get(&e, "broken", "project").await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
@@ -541,6 +554,17 @@ async fn save_rejects_empty_name() {
         &e,
         "seo",
         json!({"scope": "global", "name": "", "body": "x\n", "hash": hash}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"]["reason"], "invalid_skill");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+    // Whitespace-only is no better than empty.
+    let (s, v) = save(
+        &e,
+        "seo",
+        json!({"scope": "global", "name": "   ", "body": "x\n", "hash": hash}),
     )
     .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");

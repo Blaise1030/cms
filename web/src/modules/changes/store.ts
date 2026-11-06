@@ -10,6 +10,7 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
+import { useSkillsStore } from "@/modules/skills/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
 
@@ -140,6 +141,7 @@ export const useChangesStore = defineStore("changes", () => {
       branch ? useContentStore().refreshForBranch(branch) : undefined,
       branch ? useDesignStore().refreshForBranch(branch) : undefined,
       branch ? useSettingsStore().refreshForBranch(branch) : undefined,
+      branch ? useSkillsStore().refreshForBranch(branch) : undefined,
     ]);
     usePreviewStore().reload();
   }

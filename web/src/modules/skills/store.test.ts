@@ -154,6 +154,58 @@ describe("skills store", () => {
     expect(store.doc).toBeNull();
   });
 
+  it("invalid_skill on save sets error, not invalid, and keeps the doc and draft", async () => {
+    const saveSkill = vi.fn().mockRejectedValue(new ApiError("BADREQ", "bad frontmatter", 400, { reason: "invalid_skill" }));
+    const { store } = setup({ saveSkill });
+    await store.open("p");
+    await store.select("seo", "project");
+    store.setBody("# Edited");
+    await expect(store.save()).rejects.toBeInstanceOf(ApiError);
+    expect(store.error).toBe("bad frontmatter");
+    expect(store.invalid).toBeNull();
+    expect(store.doc?.id).toBe("seo");
+    expect(store.draftBody).toBe("# Edited");
+  });
+
+  it("refreshForBranch re-reads a clean selection and later project saves use the new branch", async () => {
+    const saveSkill = vi.fn(async () => doc({ hash: "h2" }));
+    const { store } = setup({ saveSkill });
+    await store.open("p");
+    await store.select("seo", "project");
+    await store.refreshForBranch("content/new");
+    expect(store.branch).toBe("content/new");
+    expect(store.changedOnDisk).toBe(false);
+    store.setBody("# Edited");
+    await store.save();
+    expect(saveSkill).toHaveBeenLastCalledWith("seo", expect.objectContaining({ branch: "content/new" }));
+  });
+
+  it("refreshForBranch keeps a dirty draft and flags changedOnDisk", async () => {
+    const { store, fns } = setup();
+    await store.open("p");
+    await store.select("seo", "project");
+    store.setBody("# Edited");
+    await store.refreshForBranch("content/new");
+    expect(store.branch).toBe("content/new");
+    expect(store.draftBody).toBe("# Edited");
+    expect(store.changedOnDisk).toBe(true);
+    expect(fns.skills).toHaveBeenCalledTimes(1);
+    expect(fns.skill).toHaveBeenCalledTimes(1);
+  });
+
+  it("a successful save updates the matching list entry", async () => {
+    const skills = vi.fn(async () => ({ installed: [meta({ scope: "global" })], catalog: [] }));
+    const skill = vi.fn(async () => doc({ scope: "global" }));
+    const saveSkill = vi.fn(async () => doc({ scope: "global", name: "SEO 2", description: "New guidance", path: "/g/seo/SKILL.md", hash: "h2" }));
+    const { store } = setup({ skills, skill, saveSkill });
+    await store.open("p");
+    await store.select("seo", "global");
+    store.setName("SEO 2");
+    store.setDescription("New guidance");
+    await store.save();
+    expect(store.list).toEqual([meta({ scope: "global", name: "SEO 2", description: "New guidance", path: "/g/seo/SKILL.md" })]);
+  });
+
   it("install calls the API then refreshes the list and selects the installed skill", async () => {
     const installSkill = vi.fn(async () => meta({ id: "design", name: "Design", scope: "global" }));
     const skill = vi.fn(async () => doc({ id: "design", scope: "global" }));

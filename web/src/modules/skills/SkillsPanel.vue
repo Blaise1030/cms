@@ -26,7 +26,15 @@ onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 
 async function save() { try { await store.save(); } catch { /* recorded on the store; the draft stays */ } }
-async function uninstall() { try { await store.uninstall(); } catch { /* recorded on the store */ } }
+async function uninstall() {
+  if (store.selected?.scope === "global" && !window.confirm("Remove this global skill? This cannot be undone.")) return;
+  try { await store.uninstall(); } catch { /* recorded on the store */ }
+}
+async function duplicateToProject() {
+  const sel = store.selected;
+  if (!sel || sel.scope !== "global") return;
+  try { await store.install("project", { copy: { id: sel.id, fromScope: "global" } }); } catch { /* recorded on the store; Create change is the retry path */ }
+}
 async function resume(change: Change) { try { await store.resumeSave(change.branch); } catch { /* recorded on the store */ } }
 
 function beforeUnload(event: BeforeUnloadEvent) { if (store.dirty) { event.preventDefault(); event.returnValue = ""; } }
@@ -102,6 +110,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
             <p class="truncate text-xs text-muted-foreground" data-testid="skills-path" :title="store.doc.path">{{ store.doc.path }}</p>
             <div class="ml-auto flex shrink-0 items-center gap-2">
               <Button type="button" variant="outline" size="sm" data-testid="skills-install" @click="installOpen = true">Install…</Button>
+              <Button v-if="store.selected?.scope === 'global'" type="button" variant="secondary" size="sm" data-testid="skills-duplicate" @click="duplicateToProject">Duplicate to project</Button>
               <Button type="button" variant="ghost" size="sm" data-testid="skills-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
               <Button type="button" size="sm" data-testid="skills-save" :disabled="saveDisabled" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
               <Button type="button" variant="destructive" size="sm" data-testid="skills-uninstall" @click="uninstall">Uninstall</Button>

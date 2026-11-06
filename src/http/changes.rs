@@ -178,10 +178,7 @@ pub async fn switch(
 
 /// `POST /api/changes/leave` `{ project }` → `{ branch: "main" }`.
 /// Checks out `main` and keeps every local change branch.
-pub async fn leave(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<Json<Value>, ApiError> {
+pub async fn leave(State(state): State<AppState>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let req: SwitchRequest = serde_json::from_slice(&body).map_err(|e| {
         ApiError::badreq(format!("expected JSON body {{\"project\": string}}: {e}"))
     })?;

@@ -80,7 +80,7 @@ fn invalid(message: impl std::fmt::Display) -> ApiError {
 
 fn require_string(map: &Map<String, Value>, key: &str) -> Result<(), ApiError> {
     match map.get(key) {
-        Some(Value::String(s)) if !s.is_empty() => Ok(()),
+        Some(Value::String(s)) if !s.trim().is_empty() => Ok(()),
         _ => Err(invalid(format!("`{key}` must be a non-empty string"))),
     }
 }
@@ -205,6 +205,7 @@ pub fn skills_index(project_root: &Path, global_root: &Path) -> String {
             path
         ));
     }
+    lines.push(String::new());
     lines.push(
         "Read a skill's SKILL.md when the task matches its description. Do not load every skill up front."
             .to_string(),
@@ -333,14 +334,19 @@ pub struct InstallSkill {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SkillSource {
-    Catalog { id: String },
+    Catalog {
+        id: String,
+    },
     Import {
         #[serde(rename = "skillMd")]
         skill_md: String,
         #[serde(default)]
         id: Option<String>,
     },
-    Blank { name: String, description: String },
+    Blank {
+        name: String,
+        description: String,
+    },
     Copy {
         id: String,
         #[serde(rename = "fromScope")]
@@ -377,8 +383,8 @@ fn root_and_path(
 ) -> Result<PathBuf, ApiError> {
     match scope {
         SkillScope::Project => {
-            let root = root
-                .ok_or_else(|| ApiError::badreq("project is required for project skills"))?;
+            let root =
+                root.ok_or_else(|| ApiError::badreq("project is required for project skills"))?;
             resolve(&root, &format!("{PROJECT_SKILLS_REL}/{id}/{SKILL_FILE}"))
         }
         SkillScope::Global => Ok(global_root.join(id).join(SKILL_FILE)),
@@ -536,7 +542,8 @@ pub async fn install(state: &AppState, req: InstallSkill) -> Result<SkillMeta, A
     let _guard = lock.lock().await;
     if std::fs::symlink_metadata(&path).is_ok() {
         return Err(
-            ApiError::conflict(format!("skill {id} is already installed")).with_reason("duplicate_slug"),
+            ApiError::conflict(format!("skill {id} is already installed"))
+                .with_reason("duplicate_slug"),
         );
     }
     if let Some(root) = &root {
@@ -577,7 +584,8 @@ pub async fn uninstall(
         SkillScope::Project => Some(
             project_root(
                 state,
-                project.ok_or_else(|| ApiError::badreq("project is required for project skills"))?,
+                project
+                    .ok_or_else(|| ApiError::badreq("project is required for project skills"))?,
             )
             .await?,
         ),
@@ -595,8 +603,8 @@ pub async fn uninstall(
         return Err(ApiError::enoent(format!("no such skill: {id}")));
     }
     if let Some(root) = &root {
-        let branch = branch
-            .ok_or_else(|| ApiError::badreq("branch is required for project skills"))?;
+        let branch =
+            branch.ok_or_else(|| ApiError::badreq("branch is required for project skills"))?;
         require_content_change(root, branch).await?;
     }
     std::fs::remove_file(&path)?;
@@ -634,7 +642,10 @@ fn resolve_source(
             let mut map = Map::new();
             map.insert("name".into(), json!(name));
             map.insert("description".into(), json!(description));
-            let md = render_skill(&map, "")?;
+            let body = format!(
+                "# {name}\n\nUse this skill when the task matches its description. Replace this line with the instructions the agent should follow.\n"
+            );
+            let md = render_skill(&map, &body)?;
             Ok((slugify(name), md))
         }
         SkillSource::Copy { id, from_scope } => {
@@ -705,7 +716,11 @@ mod tests {
         let root = tmp.path().join(PROJECT_SKILLS_REL);
         std::fs::create_dir_all(root.join("seo")).unwrap();
         std::fs::create_dir_all(root.join("broken")).unwrap();
-        std::fs::write(root.join("seo/SKILL.md"), skill_source("seo", "SEO guidance")).unwrap();
+        std::fs::write(
+            root.join("seo/SKILL.md"),
+            skill_source("seo", "SEO guidance"),
+        )
+        .unwrap();
         std::fs::write(
             root.join("broken/SKILL.md"),
             "---\ndescription: no name\n---\nbody\n",
@@ -751,11 +766,29 @@ mod tests {
         let expected = format!(
             "## Installed skills\n\
              - **seo** (project): SEO guidance — `.orso/skills/seo/SKILL.md`\n\
-             - **design** (global): Design guidance — `{}`\n\
+             - **design** (global): Design guidance — `{}`\n\n\
              Read a skill's SKILL.md when the task matches its description. Do not load every skill up front.",
             global_root.join("design/SKILL.md").display()
         );
         assert_eq!(skills_index(&project_root, &global_root), expected);
+    }
+
+    #[test]
+    fn blank_source_has_a_placeholder_body() {
+        let (id, md) = resolve_source(
+            None,
+            Path::new("/tmp/global"),
+            &SkillSource::Blank {
+                name: "QA".into(),
+                description: "Test guidance".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(id, "qa");
+        let (map, body) = split_skill(&md).unwrap();
+        assert_eq!(map["name"], json!("QA"));
+        assert!(!body.trim().is_empty());
+        assert!(body.contains("Use this skill"));
     }
 
     #[test]

@@ -233,4 +233,57 @@ describe("SkillsPanel", () => {
     vi.unstubAllGlobals();
     w.unmount();
   });
+
+  it("an invalid_skill save error keeps the editor visible", async () => {
+    const { ApiError } = await import("@/core/api");
+    const saveSkill = vi.fn().mockRejectedValue(new ApiError("BADREQ", "bad frontmatter", 400, { reason: "invalid_skill" }));
+    const { w } = await setup({ saveSkill });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    await button(w, "body-edit").trigger("click");
+    await button(w, "skills-save").trigger("click");
+    await flushPromises();
+    expect(w.get('[data-testid="skills-error"]').text()).toBe("bad frontmatter");
+    expect(w.find('[data-testid="skills-editor"]').exists()).toBe(true);
+    expect(w.get('[data-testid="body-text"]').text()).toBe("# Edited");
+    w.unmount();
+  });
+
+  it("Duplicate to project installs the selected global skill as a project copy", async () => {
+    const installSkill = vi.fn(async () => meta({ id: "seo", scope: "project" }));
+    const { w } = await setup({
+      skills: vi.fn(async () => listPayload([meta({ scope: "global" })])),
+      skill: vi.fn(async () => doc({ scope: "global" })),
+      installSkill,
+    });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    await button(w, "skills-duplicate").trigger("click");
+    await flushPromises();
+    expect(installSkill).toHaveBeenCalledWith({
+      project: "site", branch: "content/a", scope: "project", source: { copy: { id: "seo", fromScope: "global" } },
+    });
+    w.unmount();
+  });
+
+  it("uninstalling a global skill asks first; cancel leaves it, confirm removes it", async () => {
+    const uninstallSkill = vi.fn(async () => undefined);
+    const { w } = await setup({
+      skills: vi.fn(async () => listPayload([meta({ scope: "global" })])),
+      skill: vi.fn(async () => doc({ scope: "global" })),
+      uninstallSkill,
+    });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    await button(w, "skills-uninstall").trigger("click");
+    await flushPromises();
+    expect(uninstallSkill).not.toHaveBeenCalled();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    await button(w, "skills-uninstall").trigger("click");
+    await flushPromises();
+    expect(uninstallSkill).toHaveBeenCalledWith("seo", { scope: "global" });
+    vi.unstubAllGlobals();
+    w.unmount();
+  });
 });

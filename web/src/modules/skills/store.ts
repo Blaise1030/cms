@@ -102,19 +102,35 @@ export const useSkillsStore = defineStore("skills", () => {
     else if (next.hash !== doc.value?.hash) changedOnDisk.value = true;
   }
 
-  /** Show `id`'s skills; reopening the same project re-reads them. */
-  async function open(id: string) {
-    if (id === projectId.value) return reload();
-    if (!canLeave()) return;
-    ++request; ++generation; saving.value = false;
-    projectId.value = id; branch.value = null; list.value = []; catalog.value = [];
-    selected.value = null; doc.value = null; resetDrafts(null); changedOnDisk.value = false; clearSaveState();
+  /** Re-read `id`'s active change branch, unless another project was opened meanwhile. */
+  async function readBranch(id: string) {
     try {
       const change = await daemon.api.activeChange(id);
       if (projectId.value === id) branch.value = change.branch;
     } catch {
       if (projectId.value === id) branch.value = null;
     }
+  }
+
+  /** Show `id`'s skills; reopening the same project re-reads them and its active branch. */
+  async function open(id: string) {
+    if (id === projectId.value) {
+      await readBranch(id);
+      return reload();
+    }
+    if (!canLeave()) return;
+    ++request; ++generation; saving.value = false;
+    projectId.value = id; branch.value = null; list.value = []; catalog.value = [];
+    selected.value = null; doc.value = null; resetDrafts(null); changedOnDisk.value = false; clearSaveState();
+    await readBranch(id);
+    await reload();
+  }
+
+  /** The project moved to `branch`: a clean draft is re-read from it; a dirty one is kept and flagged. */
+  async function refreshForBranch(next: string) {
+    branch.value = next;
+    if (!projectId.value) return;
+    if (dirty.value) { changedOnDisk.value = true; return; }
     await reload();
   }
 
@@ -174,13 +190,16 @@ export const useSkillsStore = defineStore("skills", () => {
         scope: d.scope, name: draftName.value, description: draftDescription.value, body: draftBody.value, hash: d.hash,
       });
       if (gen !== generation) return next;
+      // A global rename shows in the sidebar immediately, without waiting for a reload.
+      const entry = list.value.find(m => m.id === next.id && m.scope === next.scope);
+      if (entry) { entry.name = next.name; entry.description = next.description; entry.path = next.path; }
       // Edits typed while the request was in flight stay in the draft, rebased on the saved file.
       if (draftName.value === submitted.name && draftDescription.value === submitted.description && draftBody.value === submitted.body) apply(next);
       else { doc.value = next; changedOnDisk.value = false; clearSaveState(); }
       return next;
     } catch (err) {
       if (gen === generation) {
-        recordFailure(err, d.scope);
+        recordFailure(err, d.scope, { invalidAsError: true });
         if (needsChange.value) pendingAction.value = "save";
       }
       throw err;
@@ -253,6 +272,6 @@ export const useSkillsStore = defineStore("skills", () => {
 
   return {
     projectId, branch, list, catalog, selected, doc, draftName, draftDescription, draftBody, dirty, loading, saving, error, conflict, needsChange, changedOnDisk, invalid, invalidSource,
-    open, select, setName, setDescription, setBody, save, resumeSave, discard, reloadFromDisk, install, uninstall, reload, canLeave,
+    open, select, setName, setDescription, setBody, save, resumeSave, discard, reloadFromDisk, install, uninstall, reload, refreshForBranch, canLeave,
   };
 });

@@ -889,9 +889,7 @@ mod tests {
     }
 
     fn install_skill(project: &Path, id: &str, name: &str, description: &str) {
-        let skill_dir = project
-            .join(crate::skills::PROJECT_SKILLS_REL)
-            .join(id);
+        let skill_dir = project.join(crate::skills::PROJECT_SKILLS_REL).join(id);
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), skill_md(name, description)).unwrap();
     }
@@ -904,7 +902,10 @@ mod tests {
         install_skill(&project, "seo", "SEO", "SEO guidance");
 
         let prompt = guided_prompt(&project, &global);
-        assert!(prompt.starts_with(&agent_guide()), "prompt must lead with agent_guide");
+        assert!(
+            prompt.starts_with(&agent_guide()),
+            "prompt must lead with agent_guide"
+        );
         assert!(prompt.contains("## Installed skills"));
         assert!(prompt.contains("**seo** (project): SEO guidance"));
     }

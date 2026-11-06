@@ -54,7 +54,9 @@ pub async fn get(
     q: Result<Query<SkillQuery>, QueryRejection>,
 ) -> Result<Json<SkillDoc>, ApiError> {
     let q = query_or_badreq(q)?;
-    Ok(Json(crate::skills::get(&state, &q.project, &id, q.scope).await?))
+    Ok(Json(
+        crate::skills::get(&state, &q.project, &id, q.scope).await?,
+    ))
 }
 
 /// `PUT /api/skills/:id` saves front matter and body for an installed skill.
@@ -77,7 +79,9 @@ pub async fn install(
     body: Bytes,
 ) -> Result<Json<SkillMeta>, ApiError> {
     let req: InstallSkill = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::badreq(format!("expected JSON body {{project, branch?, scope, source}}: {e}"))
+        ApiError::badreq(format!(
+            "expected JSON body {{project, branch?, scope, source}}: {e}"
+        ))
     })?;
     Ok(Json(crate::skills::install(&state, req).await?))
 }
@@ -89,7 +93,14 @@ pub async fn uninstall(
     q: Result<Query<UninstallQuery>, QueryRejection>,
 ) -> Result<Json<()>, ApiError> {
     let q = query_or_badreq(q)?;
-    crate::skills::uninstall(&state, &id, q.project.as_deref(), q.scope, q.branch.as_deref()).await?;
+    crate::skills::uninstall(
+        &state,
+        &id,
+        q.project.as_deref(),
+        q.scope,
+        q.branch.as_deref(),
+    )
+    .await?;
     Ok(Json(()))
 }
 
