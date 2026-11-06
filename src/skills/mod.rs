@@ -6,12 +6,20 @@
 //! a horizontal rule in the body is left alone. Unknown keys are kept so a round trip preserves
 //! everything the editor does not understand.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
+use crate::content::catalog;
+use crate::content::lifecycle::{Journal, Undo};
+use crate::content::mutation::{
+    emit_checkpoint, lock_for, project_root, read_current, require_content_change, resolve, stale,
+    write_atomic,
+};
 use crate::error::ApiError;
+use crate::{git, state::AppState};
 
 /// The file inside a skill directory that holds the skill's front matter and instructions.
 pub const SKILL_FILE: &str = "SKILL.md";
@@ -228,6 +236,370 @@ pub fn catalog_skill_md(id: &str) -> Option<&'static str> {
         "seo" => Some(CATALOG_SEO_MD),
         "design" => Some(CATALOG_DESIGN_MD),
         _ => None,
+    }
+}
+
+/// The configured global skills root and the default it falls back to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsSettings {
+    pub global_path: PathBuf,
+    pub default_global_path: PathBuf,
+}
+
+/// `{projects_dir}/.orso/skills-settings.json`.
+pub fn skills_settings_path(projects_dir: &Path) -> PathBuf {
+    projects_dir.join(".orso/skills-settings.json")
+}
+
+/// The configured global skills root, or the default when unset, empty, or not absolute.
+pub fn load_global_root(projects_dir: &Path) -> PathBuf {
+    let default = default_global_skills_dir(projects_dir);
+    let Ok(text) = std::fs::read_to_string(skills_settings_path(projects_dir)) else {
+        return default;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return default;
+    };
+    if let Some(global_path) = value.get("globalPath").and_then(Value::as_str) {
+        let path = PathBuf::from(global_path);
+        if path.is_absolute() {
+            return path;
+        }
+    }
+    default
+}
+
+/// Persist `path` as the global skills root. The path must be absolute; its parent
+/// directory is created on save.
+pub fn save_global_root(projects_dir: &Path, path: &Path) -> Result<(), ApiError> {
+    if !path.is_absolute() {
+        return Err(ApiError::badreq("global skills path must be absolute"));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let settings_path = skills_settings_path(projects_dir);
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let value = json!({ "globalPath": path.to_string_lossy() });
+    write_atomic(&settings_path, value.to_string().as_bytes(), 0o644)?;
+    Ok(())
+}
+
+/// A built-in catalog skill and whether it is installed in each scope.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub installed_project: bool,
+    pub installed_global: bool,
+}
+
+/// The `GET /api/skills` payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsList {
+    pub installed: Vec<SkillMeta>,
+    pub catalog: Vec<CatalogItem>,
+}
+
+/// `PUT /api/skills/:id` body; the id comes from the URL path.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSkill {
+    pub project: String,
+    pub branch: Option<String>,
+    pub scope: SkillScope,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub body: String,
+    pub hash: String,
+}
+
+/// `POST /api/skills/install` body.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSkill {
+    pub project: String,
+    pub branch: Option<String>,
+    pub scope: SkillScope,
+    pub source: SkillSource,
+}
+
+/// Where an installed skill comes from (externally tagged, camelCase fields).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SkillSource {
+    Catalog { id: String },
+    Import {
+        #[serde(rename = "skillMd")]
+        skill_md: String,
+        #[serde(default)]
+        id: Option<String>,
+    },
+    Blank { name: String, description: String },
+    Copy {
+        id: String,
+        #[serde(rename = "fromScope")]
+        from_scope: SkillScope,
+    },
+}
+
+fn validate_skill_id(id: &str) -> Result<(), ApiError> {
+    if id.is_empty() || id.starts_with('.') || id.contains(['/', '\\', '\0']) {
+        return Err(ApiError::badreq("invalid skill id"));
+    }
+    Ok(())
+}
+
+/// Absolute path of a skill's `SKILL.md` in the given scope.
+fn skill_path(
+    root: &Path,
+    global_root: &Path,
+    id: &str,
+    scope: SkillScope,
+) -> Result<PathBuf, ApiError> {
+    match scope {
+        SkillScope::Project => resolve(root, &format!("{PROJECT_SKILLS_REL}/{id}/{SKILL_FILE}")),
+        SkillScope::Global => Ok(global_root.join(id).join(SKILL_FILE)),
+    }
+}
+
+/// A lowercase, hyphen-separated id derived from a display name.
+fn slugify(name: &str) -> String {
+    let mut slug = String::new();
+    for ch in name.chars() {
+        let ch = ch.to_ascii_lowercase();
+        slug.push(if ch.is_ascii_alphanumeric() { ch } else { '-' });
+    }
+    slug.split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn read_doc(id: &str, scope: SkillScope, path: &Path, source: &str) -> Result<SkillDoc, ApiError> {
+    let (map, body) = split_skill(source)?;
+    Ok(SkillDoc {
+        id: id.to_string(),
+        name: map["name"].as_str().unwrap_or_default().to_string(),
+        description: map["description"].as_str().unwrap_or_default().to_string(),
+        body,
+        hash: catalog::hash(source),
+        scope,
+        path: path.to_path_buf(),
+        valid: true,
+        error: None,
+    })
+}
+
+/// Installed skills plus the built-in catalog with per-scope install flags.
+pub async fn list(state: &AppState, project: &str) -> Result<SkillsList, ApiError> {
+    let root = project_root(state, project).await?;
+    let global_root = load_global_root(&state.config.projects_dir);
+    let project_skills = list_dir(&root.join(PROJECT_SKILLS_REL), SkillScope::Project);
+    let global_skills = list_dir(&global_root, SkillScope::Global);
+    let catalog = catalog_entries()
+        .into_iter()
+        .map(|(id, name, description)| CatalogItem {
+            installed_project: project_skills.iter().any(|m| m.id == id),
+            installed_global: global_skills.iter().any(|m| m.id == id),
+            id,
+            name,
+            description,
+        })
+        .collect();
+    let mut installed = project_skills;
+    installed.extend(global_skills);
+    installed.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(SkillsList { installed, catalog })
+}
+
+/// Read one installed skill; a missing file is `ENOENT`, an unparseable one `BADREQ`.
+pub async fn get(
+    state: &AppState,
+    project: &str,
+    id: &str,
+    scope: SkillScope,
+) -> Result<SkillDoc, ApiError> {
+    validate_skill_id(id)?;
+    let root = project_root(state, project).await?;
+    let global_root = load_global_root(&state.config.projects_dir);
+    let path = skill_path(&root, &global_root, id, scope)?;
+    let source = read_current(&path)?;
+    read_doc(id, scope, &path, &source)
+}
+
+/// Replace an installed skill's front matter and body. Project saves run through the
+/// content change gate and checkpoint; global saves only enforce the stale hash.
+pub async fn save(state: &AppState, id: &str, req: SaveSkill) -> Result<SkillDoc, ApiError> {
+    validate_skill_id(id)?;
+    let root = project_root(state, &req.project).await?;
+    let global_root = load_global_root(&state.config.projects_dir);
+    let path = skill_path(&root, &global_root, id, req.scope)?;
+    let lock_dir = match req.scope {
+        SkillScope::Project => root.clone(),
+        SkillScope::Global => global_root.clone(),
+    };
+    let lock = lock_for(&lock_dir);
+    let _guard = lock.lock().await;
+    if req.scope == SkillScope::Project {
+        let branch = req
+            .branch
+            .as_deref()
+            .ok_or_else(|| ApiError::badreq("branch is required for project skills"))?;
+        require_content_change(&root, branch).await?;
+    }
+    let old = read_current(&path)?;
+    if catalog::hash(&old) != req.hash {
+        return Err(stale());
+    }
+    let (mut map, _) = split_skill(&old)?;
+    if let Some(name) = &req.name {
+        map.insert("name".into(), json!(name));
+    }
+    if let Some(description) = &req.description {
+        map.insert("description".into(), json!(description));
+    }
+    let source = render_skill(&map, &req.body)?;
+    let mode = std::fs::metadata(&path)?.permissions().mode() & 0o7777;
+    write_atomic(&path, source.as_bytes(), mode)?;
+    let mut journal = Journal::default();
+    journal.0.push(Undo::Write {
+        path: path.clone(),
+        bytes: old.clone(),
+        mode,
+    });
+    if req.scope == SkillScope::Project {
+        let rel = PathBuf::from(format!("{PROJECT_SKILLS_REL}/{id}/{SKILL_FILE}"));
+        let checkpoint = match git::checkpoint_paths(&root, "Updated skill", &[rel]).await {
+            Ok(cp) => cp,
+            Err(e) => return Err(journal.fail(e)),
+        };
+        emit_checkpoint(state, &req.project, checkpoint);
+    }
+    read_doc(id, req.scope, &path, &source)
+}
+
+/// Install a skill from the catalog, an import, a blank scaffold, or a cross-scope copy.
+pub async fn install(state: &AppState, req: InstallSkill) -> Result<SkillMeta, ApiError> {
+    let root = project_root(state, &req.project).await?;
+    let global_root = load_global_root(&state.config.projects_dir);
+    let (id, md) = resolve_source(&root, &global_root, &req.source)?;
+    validate_skill_id(&id)?;
+    let path = skill_path(&root, &global_root, &id, req.scope)?;
+    let lock_dir = match req.scope {
+        SkillScope::Project => root.clone(),
+        SkillScope::Global => global_root.clone(),
+    };
+    let lock = lock_for(&lock_dir);
+    let _guard = lock.lock().await;
+    if std::fs::symlink_metadata(&path).is_ok() {
+        return Err(
+            ApiError::conflict(format!("skill {id} is already installed")).with_reason("duplicate_slug"),
+        );
+    }
+    if req.scope == SkillScope::Project {
+        let branch = req
+            .branch
+            .as_deref()
+            .ok_or_else(|| ApiError::badreq("branch is required for project skills"))?;
+        require_content_change(&root, branch).await?;
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_atomic(&path, md.as_bytes(), 0o644)?;
+    let mut journal = Journal::default();
+    journal.0.push(Undo::Remove(path.clone()));
+    if req.scope == SkillScope::Project {
+        let rel = PathBuf::from(format!("{PROJECT_SKILLS_REL}/{id}/{SKILL_FILE}"));
+        let checkpoint = match git::checkpoint_paths(&root, "Installed skill", &[rel]).await {
+            Ok(cp) => cp,
+            Err(e) => return Err(journal.fail(e)),
+        };
+        emit_checkpoint(state, &req.project, checkpoint);
+    }
+    Ok(parse_meta(&id, req.scope, &path, &md))
+}
+
+/// Remove an installed skill. Project removal runs the change gate and checkpoints.
+pub async fn uninstall(
+    state: &AppState,
+    id: &str,
+    project: &str,
+    scope: SkillScope,
+    branch: Option<&str>,
+) -> Result<(), ApiError> {
+    validate_skill_id(id)?;
+    let root = project_root(state, project).await?;
+    let global_root = load_global_root(&state.config.projects_dir);
+    let path = skill_path(&root, &global_root, id, scope)?;
+    let dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| global_root.join(id));
+    let lock_dir = match scope {
+        SkillScope::Project => root.clone(),
+        SkillScope::Global => global_root.clone(),
+    };
+    let lock = lock_for(&lock_dir);
+    let _guard = lock.lock().await;
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Err(ApiError::enoent(format!("no such skill: {id}")));
+    }
+    if scope == SkillScope::Project {
+        let branch = branch
+            .ok_or_else(|| ApiError::badreq("branch is required for project skills"))?;
+        require_content_change(&root, branch).await?;
+    }
+    std::fs::remove_file(&path)?;
+    let _ = std::fs::remove_dir(&dir);
+    if scope == SkillScope::Project {
+        let rel = PathBuf::from(format!("{PROJECT_SKILLS_REL}/{id}/{SKILL_FILE}"));
+        let checkpoint = git::checkpoint_paths(&root, "Removed skill", &[rel]).await?;
+        emit_checkpoint(state, project, checkpoint);
+    }
+    Ok(())
+}
+
+/// Turn an install `source` into the skill id and its full `SKILL.md` markdown.
+fn resolve_source(
+    root: &Path,
+    global_root: &Path,
+    source: &SkillSource,
+) -> Result<(String, String), ApiError> {
+    match source {
+        SkillSource::Catalog { id } => {
+            let md = catalog_skill_md(id)
+                .ok_or_else(|| ApiError::enoent(format!("no such catalog skill: {id}")))?;
+            Ok((id.clone(), md.to_string()))
+        }
+        SkillSource::Import { skill_md, id } => {
+            let (map, _) = split_skill(skill_md)?;
+            let name = map["name"].as_str().unwrap_or_default().to_string();
+            let id = id.clone().unwrap_or_else(|| slugify(&name));
+            Ok((id, skill_md.clone()))
+        }
+        SkillSource::Blank { name, description } => {
+            if name.trim().is_empty() || description.trim().is_empty() {
+                return Err(ApiError::badreq("skill name and description are required"));
+            }
+            let mut map = Map::new();
+            map.insert("name".into(), json!(name));
+            map.insert("description".into(), json!(description));
+            let md = render_skill(&map, "")?;
+            Ok((slugify(name), md))
+        }
+        SkillSource::Copy { id, from_scope } => {
+            let src = skill_path(root, global_root, id, *from_scope)?;
+            let md = read_current(&src)?;
+            split_skill(&md)?;
+            Ok((id.clone(), md))
+        }
     }
 }
 
