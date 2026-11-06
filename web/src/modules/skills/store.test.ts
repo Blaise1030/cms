@@ -209,4 +209,36 @@ describe("skills store", () => {
     expect(store.selected).toBeNull();
     expect(store.doc).toBeNull();
   });
+
+  it("reloadFromDisk replaces a dirty draft after confirming", async () => {
+    const skill = vi.fn().mockResolvedValueOnce(doc()).mockResolvedValue(doc({ body: "# On disk", hash: "h9" }));
+    const { store } = setup({ skill });
+    await store.open("p");
+    await store.select("seo", "project");
+    store.setBody("# Edited");
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    await store.reloadFromDisk();
+    expect(store.draftBody).toBe("# Edited");
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    await store.reloadFromDisk();
+    expect(store.draftBody).toBe("# On disk");
+    expect(store.doc?.hash).toBe("h9");
+    vi.unstubAllGlobals();
+  });
+
+  it("resumeSave retries a refused uninstall on the new branch", async () => {
+    const uninstallSkill = vi.fn()
+      .mockRejectedValueOnce(new ApiError("CHANGE_REQUIRED", "create a change", 409))
+      .mockResolvedValueOnce(undefined);
+    const { store } = setup({ uninstallSkill });
+    await store.open("p");
+    await store.select("seo", "project");
+    await expect(store.uninstall()).rejects.toBeInstanceOf(ApiError);
+    expect(store.needsChange).toBe(true);
+    await store.resumeSave("c/1");
+    expect(uninstallSkill).toHaveBeenLastCalledWith("seo", { project: "p", scope: "project", branch: "c/1" });
+    expect(store.needsChange).toBe(false);
+    expect(store.selected).toBeNull();
+    expect(store.doc).toBeNull();
+  });
 });

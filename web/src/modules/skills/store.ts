@@ -29,6 +29,8 @@ export const useSkillsStore = defineStore("skills", () => {
   const conflict = ref<SkillConflict | null>(null);
   /** The save was refused because the project is on main; waiting for a change to be created. */
   const needsChange = ref(false);
+  /** The mutation to retry once Create Change finishes (`save` or `uninstall`). */
+  const pendingAction = ref<"save" | "uninstall" | null>(null);
   /** The skill changed on disk while the draft was being edited. */
   const changedOnDisk = ref(false);
   /** The daemon could not read the skill's front matter; the message says why. */
@@ -44,7 +46,7 @@ export const useSkillsStore = defineStore("skills", () => {
   });
 
   function clearSaveState() {
-    error.value = null; conflict.value = null; needsChange.value = false; invalid.value = null; invalidSource.value = null;
+    error.value = null; conflict.value = null; needsChange.value = false; invalid.value = null; invalidSource.value = null; pendingAction.value = null;
   }
   function resetDrafts(d: SkillDoc | null) {
     draftName.value = d?.name ?? ""; draftDescription.value = d?.description ?? ""; draftBody.value = d?.body ?? "";
@@ -145,6 +147,21 @@ export const useSkillsStore = defineStore("skills", () => {
     if (stale) void reload();
   }
 
+  /** The writer chose to take the file as it is on disk: after confirming, it replaces the draft. */
+  async function reloadFromDisk() {
+    const sel = selected.value;
+    if (!sel || !projectId.value) return;
+    if (dirty.value && !window.confirm("Discard unsaved skill changes?")) return;
+    const version = ++request;
+    loading.value = true; error.value = null;
+    try {
+      const next = await daemon.api.skill(projectId.value, sel.id, sel.scope);
+      if (version === request) apply(next);
+    } catch (err) {
+      if (version === request) recordFailure(err, sel.scope);
+    } finally { if (version === request) loading.value = false; }
+  }
+
   /** Bumped when another skill (or project) is selected; a save only records its outcome while its generation is current. */
   let generation = 0;
   let flight: { generation: number; id: string; scope: SkillScope; promise: Promise<SkillDoc> } | null = null;
@@ -162,7 +179,10 @@ export const useSkillsStore = defineStore("skills", () => {
       else { doc.value = next; changedOnDisk.value = false; clearSaveState(); }
       return next;
     } catch (err) {
-      if (gen === generation) recordFailure(err, d.scope);
+      if (gen === generation) {
+        recordFailure(err, d.scope);
+        if (needsChange.value) pendingAction.value = "save";
+      }
       throw err;
     } finally { if (gen === generation) saving.value = false; }
   }
@@ -179,10 +199,13 @@ export const useSkillsStore = defineStore("skills", () => {
     flight = mine;
     try { return await mine.promise; } finally { if (flight === mine) flight = null; }
   }
-  /** After Create Change from main: retry the same save on the new branch. */
+  /** After Create Change from main: retry the refused mutation (save or uninstall) on the new branch. */
   function resumeSave(nextBranch: string) {
     needsChange.value = false;
     branch.value = nextBranch;
+    const action = pendingAction.value;
+    pendingAction.value = null;
+    if (action === "uninstall") return uninstall();
     return save();
   }
 
@@ -215,6 +238,7 @@ export const useSkillsStore = defineStore("skills", () => {
       await reload();
     } catch (err) {
       recordFailure(err, sel.scope);
+      if (needsChange.value) pendingAction.value = "uninstall";
       throw err;
     } finally { saving.value = false; }
   }
@@ -229,6 +253,6 @@ export const useSkillsStore = defineStore("skills", () => {
 
   return {
     projectId, branch, list, catalog, selected, doc, draftName, draftDescription, draftBody, dirty, loading, saving, error, conflict, needsChange, changedOnDisk, invalid, invalidSource,
-    open, select, setName, setDescription, setBody, save, resumeSave, discard, install, uninstall, reload, canLeave,
+    open, select, setName, setDescription, setBody, save, resumeSave, discard, reloadFromDisk, install, uninstall, reload, canLeave,
   };
 });

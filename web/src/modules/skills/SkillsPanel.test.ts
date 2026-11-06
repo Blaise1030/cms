@@ -87,6 +87,13 @@ describe("SkillsPanel", () => {
     w.unmount();
   });
 
+  it("a failed list load surfaces the error above the empty state", async () => {
+    const { w } = await setup({ skills: vi.fn().mockRejectedValue(new Error("boom")) });
+    expect(w.get('[data-testid="skills-error"]').text()).toBe("boom");
+    expect(w.get('[data-testid="skills-empty"]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it("selecting a sidebar row loads and shows its body", async () => {
     const { w } = await setup();
     await button(w, "skills-sidebar-row").trigger("click");
@@ -130,6 +137,72 @@ describe("SkillsPanel", () => {
     expect(button(w, "skills-save").attributes("disabled")).toBeDefined();
     await button(w, "body-edit").trigger("click");
     expect(button(w, "skills-save").attributes("disabled")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("with skills but no selection shows the choose prompt", async () => {
+    const { w } = await setup();
+    expect(w.get('[data-testid="skills-no-selection"]').text()).toContain("Select a skill or install one");
+    expect(w.get('[data-testid="skills-install"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("invalid frontmatter shows the read-only message and Uninstall removes it", async () => {
+    const { ApiError } = await import("@/core/api");
+    const skill = vi.fn().mockRejectedValue(new ApiError("BADREQ", "bad frontmatter", 400, {
+      reason: "invalid_skill",
+      details: [{ path: ["source"], message: "---\n: [\n---\nbody" }],
+    }));
+    const uninstallSkill = vi.fn(async () => undefined);
+    const { w } = await setup({ skill, uninstallSkill });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    const msg = w.get('[data-testid="skills-invalid"]');
+    expect(msg.text()).toContain("invalid frontmatter");
+    expect(msg.text()).toContain("bad frontmatter");
+    expect(w.get('[data-testid="skills-invalid-source"]').text()).toBe("---\n: [\n---\nbody");
+    expect(w.find('[data-testid="skills-editor"]').exists()).toBe(false);
+    await button(w, "skills-uninstall").trigger("click");
+    await flushPromises();
+    expect(uninstallSkill).toHaveBeenCalledWith("seo", { project: "site", scope: "project", branch: "content/a" });
+    w.unmount();
+  });
+
+  it("a refused uninstall on main shows Create change, then retries on the new branch", async () => {
+    const { ApiError } = await import("@/core/api");
+    const uninstallSkill = vi.fn()
+      .mockRejectedValueOnce(new ApiError("CHANGE_REQUIRED", "Start a change first", 409))
+      .mockResolvedValueOnce(undefined);
+    const { w } = await setup({ uninstallSkill });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    await button(w, "skills-uninstall").trigger("click");
+    await flushPromises();
+    expect(w.get('[data-testid="skills-needs-change"]').text()).toContain("Create change");
+    expect(w.get('[data-testid="skills-needs-change"]').text()).toContain("edit or remove");
+    await button(w, "skills-create-change").trigger("click");
+    await button(w, "new-change-stub").trigger("click");
+    await flushPromises();
+    expect(uninstallSkill).toHaveBeenLastCalledWith("seo", { project: "site", scope: "project", branch: "content/new" });
+    expect(w.find('[data-testid="skills-needs-change"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("the changed-on-disk Reload replaces the draft with the file after confirming", async () => {
+    const skill = vi.fn().mockResolvedValueOnce(doc()).mockResolvedValue(doc({ body: "# On disk", hash: "h9" }));
+    const { w } = await setup({ skill });
+    await button(w, "skills-sidebar-row").trigger("click");
+    await flushPromises();
+    await button(w, "body-edit").trigger("click");
+    await useSkillsStore().reload();
+    await flushPromises();
+    expect(w.find('[data-testid="skills-changed-on-disk"]').exists()).toBe(true);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    await button(w, "skills-reload").trigger("click");
+    await flushPromises();
+    expect(w.get('[data-testid="body-text"]').text()).toBe("# On disk");
+    expect(w.find('[data-testid="skills-changed-on-disk"]').exists()).toBe(false);
+    vi.unstubAllGlobals();
     w.unmount();
   });
 });

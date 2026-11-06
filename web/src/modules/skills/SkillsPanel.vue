@@ -80,6 +80,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
       </Sidebar>
 
       <SidebarInset class="h-full min-h-0 min-w-0 overflow-hidden bg-background">
+        <p v-if="store.error" role="alert" class="px-4 pt-3 pb-1 text-sm text-destructive" data-testid="skills-error">{{ store.error }}</p>
         <section v-if="store.invalid" role="alert" class="flex h-full min-h-0 flex-col overflow-auto p-4 text-sm" data-testid="skills-invalid">
           <p class="rounded-md border border-destructive p-3">This skill has invalid frontmatter. Fix it, or remove it.</p>
           <p class="mt-2 text-xs text-muted-foreground">{{ store.invalid }}</p>
@@ -103,18 +104,17 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
           </header>
           <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
             <div class="px-4">
-              <p v-if="store.error" role="alert" class="text-sm text-destructive" data-testid="skills-error">{{ store.error }}</p>
               <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="skills-needs-change">
-                <p>This skill cannot be edited on main. Create a change to save your edits.</p>
+                <p>Create a change to edit or remove project skills.</p>
                 <Button type="button" size="sm" class="mt-2" data-testid="skills-create-change" @click="showNewChange = true">Create change</Button>
               </section>
               <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="skills-changed-on-disk">
                 <p>The skill changed on disk. Your unsaved draft is preserved.</p>
-                <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.discard()">Reload</Button>
+                <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.reloadFromDisk()">Reload</Button>
               </section>
               <section v-if="store.conflict" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="skills-conflict">
                 <p>{{ store.conflict.message }}. Your edits are kept.</p>
-                <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.discard()">Reload</Button>
+                <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.reloadFromDisk()">Reload</Button>
               </section>
             </div>
             <div class="mx-auto w-full max-w-3xl px-4 pt-4 pb-8" data-testid="skills-editor">
