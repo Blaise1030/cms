@@ -28,6 +28,8 @@ import {
   type SyncPhase,
   type PendingCombine,
   type PublishResult,
+  type PublishedPr,
+  type DeployStatus,
   type PrStatus,
   type Checkpoint,
   type ErrorCode,
@@ -358,11 +360,15 @@ export function createApi(
     /** Publish a change: push it, open + ready its PR if needed, then merge it on GitHub.
      *  A colliding remote copy comes back as a combine to finish first. */
     publishChange: async (project: string, branch: string): Promise<PublishResult> => {
-      const { pr, conflict } = await json<{ pr: PrStatus | null; conflict?: PendingCombine }>(
+      const { pr, conflict } = await json<{ pr: PublishedPr | null; conflict?: PendingCombine }>(
         "POST", `/api/changes/${enc(branch)}/publish`, { body: { project } },
       );
       return conflict ? { conflict } : pr;
     },
+
+    /** Whether the deploy of a published change's merge commit has shipped. */
+    deployStatus: (project: string, sha: string): Promise<DeployStatus> =>
+      json<DeployStatus>("GET", `/api/projects/${enc(project)}/deploy`, { query: { sha } }),
 
     listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
       (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))

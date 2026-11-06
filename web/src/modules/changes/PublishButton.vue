@@ -37,8 +37,8 @@ async function onPublish() {
   const branch = store.active?.branch;
   if (!branch) return;
   try {
-    const outcome = await store.publish(props.projectId, branch);
-    if (outcome === "published") toast.success("It's live.");
+    // Publish reports "live" only once the site's deploy has shipped (see the store).
+    await store.publish(props.projectId, branch);
   } catch (e) {
     toast.error(errorMessage(e));
   }

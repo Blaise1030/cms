@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::Path as AxPath;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -88,6 +89,24 @@ async fn fake_github_with(repos_unauthorized: bool) -> String {
                         "pushed_at": "2026-10-20T12:00:00Z"
                     }])),
                 )
+            }),
+        )
+        .route(
+            "/repos/acme/site/commits/{sha}/check-runs",
+            get(|AxPath(sha): AxPath<String>| async move {
+                let check = match sha.chars().next() {
+                    Some('a') => {
+                        json!({ "name": "deploy", "status": "completed", "conclusion": "success" })
+                    }
+                    Some('b') => {
+                        json!({ "name": "deploy", "status": "in_progress", "conclusion": null })
+                    }
+                    Some('c') => {
+                        json!({ "name": "deploy", "status": "completed", "conclusion": "failure" })
+                    }
+                    _ => return Json(json!({ "check_runs": [] })),
+                };
+                Json(json!({ "check_runs": [check] }))
             }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -492,7 +511,9 @@ async fn publish_pushes_and_merges_the_change_without_cleaning_up() {
         json!({ "pr": {
             "number": 4,
             "url": "https://github.com/acme/site/pull/4",
-            "state": "merged"
+            "state": "merged",
+            // The commit whose deploy ships the change, so the app can tell when it's live.
+            "mergeSha": "def"
         }})
     );
     let sent = merges.lock().unwrap().clone();
@@ -822,4 +843,55 @@ async fn status_applies_the_cli_identity_to_existing_projects() {
         git(&fresh, &["config", "--local", "user.name"]),
         "Ada Lovelace"
     );
+}
+
+#[tokio::test]
+async fn deploy_status_reports_the_merged_commits_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    let git_root = tmp.path().join("git");
+    bare_repo(&git_root);
+    let base = fake_github().await;
+    let app = http::router(AppState::with_scaffold_install(
+        config(&projects, &base, &git_root),
+        false,
+    ));
+
+    // Sign in, then open the repo the check-runs route describes.
+    call(&app, req("POST", "/api/github/device", None)).await;
+    call(&app, req("POST", "/api/github/device/poll", None)).await;
+    let (_, body) = call(&app, req("POST", "/api/github/device/poll", None)).await;
+    assert_eq!(body["status"], "signedIn");
+    let (s, _) = call(
+        &app,
+        req(
+            "POST",
+            "/api/github/clone",
+            Some(json!({ "repo": "acme/site" })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    // The fake checks answer by the sha's first character.
+    for (initial, expected) in [
+        ('a', "live"),
+        ('b', "building"),
+        ('c', "failed"),
+        ('d', "unknown"),
+    ] {
+        let sha = initial.to_string().repeat(40);
+        let (s, body) = call(
+            &app,
+            req("GET", &format!("/api/projects/site/deploy?sha={sha}"), None),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        assert_eq!(body["state"], expected, "{initial}");
+    }
+
+    // A sha that can't name a deploy is a bad request, not a silent "unknown".
+    let (s, body) = call(&app, req("GET", "/api/projects/site/deploy?sha=nope", None)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "BADREQ");
 }

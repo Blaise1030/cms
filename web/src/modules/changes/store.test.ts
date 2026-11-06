@@ -8,16 +8,23 @@ import type { PrStatus } from "@/core/types";
 
 const h = vi.hoisted(() => ({
   daemon: null as unknown as FakeDaemon,
+  toastLoading: vi.fn(),
   toastInfo: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({
-  toast: { info: h.toastInfo, success: h.toastSuccess, warning: vi.fn(), error: h.toastError },
+  toast: {
+    loading: h.toastLoading,
+    info: h.toastInfo,
+    success: h.toastSuccess,
+    warning: vi.fn(),
+    error: h.toastError,
+  },
 }));
 
-import { STATUS_POLL_MS, useChangesStore } from "./store";
+import { DEPLOY_POLL_MS, DEPLOY_TIMEOUT_MS, STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
@@ -1002,6 +1009,158 @@ describe("changes store publish", () => {
   });
 });
 
+describe("changes store deploy tracking", () => {
+  const SHA = "a".repeat(40);
+  const pr: PrStatus = {
+    number: 1,
+    url: "https://github.com/acme/site/pull/1",
+    state: "merged",
+    checks: "none",
+    previewUrl: null,
+    mergeable: true,
+    mergeableState: "clean",
+    upToDate: true,
+  };
+
+  function deployStore(api: Record<string, unknown> = {}) {
+    return setup({
+      publishChange: vi.fn(async () => ({ ...pr, mergeSha: SHA })),
+      deployStatus: vi.fn(async () => ({ state: "building" })),
+      listChanges: vi.fn(async () => []),
+      tree: vi.fn(async () => ({ entries: [] })),
+      ...api,
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("waits for the deploy before saying it's live", async () => {
+    vi.useFakeTimers();
+    const deployStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "building" })
+      .mockResolvedValueOnce({ state: "live" });
+    const store = deployStore({ deployStatus });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      expect(h.toastLoading).toHaveBeenCalledWith(
+        "Published. Waiting for the site to update…",
+        { id: expect.any(String) },
+      );
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS);
+      expect(deployStatus).toHaveBeenCalledWith("site", SHA);
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+      expect(store.deploy).toBe("building");
+
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS);
+      expect(h.toastSuccess).toHaveBeenCalledWith("It's live.", { id: expect.any(String) });
+      expect(store.deploy).toBe("live");
+    } finally {
+      store.stopDeployTracking();
+    }
+  });
+
+  it("says the site didn't update when the deploy fails", async () => {
+    vi.useFakeTimers();
+    const store = deployStore({ deployStatus: vi.fn(async () => ({ state: "failed" })) });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS);
+      expect(h.toastError).toHaveBeenCalledWith(
+        "Published, but the site didn't update. Ask an owner to check it.",
+        { id: expect.any(String) },
+      );
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+      expect(store.deploy).toBe("failed");
+    } finally {
+      store.stopDeployTracking();
+    }
+  });
+
+  it("gives up on a deploy that never reports, without claiming it shipped", async () => {
+    vi.useFakeTimers();
+    const deployStatus = vi.fn(async () => ({ state: "unknown" }));
+    const store = deployStore({ deployStatus });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(DEPLOY_TIMEOUT_MS);
+      expect(h.toastInfo).toHaveBeenCalledWith(
+        "Published. The site is taking longer than usual to update.",
+        { id: expect.any(String) },
+      );
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+      expect(h.toastError).not.toHaveBeenCalled();
+
+      // Settled: no timer keeps asking GitHub.
+      const asked = deployStatus.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS * 3);
+      expect(deployStatus.mock.calls.length).toBe(asked);
+    } finally {
+      store.stopDeployTracking();
+    }
+  });
+
+  it("replaces the deploy it is watching when another publish starts", async () => {
+    vi.useFakeTimers();
+    const after = "b".repeat(40);
+    const deployStatus = vi.fn(async (_id: string, sha: string) => ({
+      state: sha === after ? "live" : "building",
+    }));
+    const publishChange = vi
+      .fn()
+      .mockResolvedValueOnce({ ...pr, mergeSha: SHA })
+      .mockResolvedValueOnce({ ...pr, mergeSha: after });
+    const store = deployStore({ publishChange, deployStatus });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS);
+
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS);
+
+      expect(deployStatus).toHaveBeenLastCalledWith("site", after);
+      // One toast, updated in place, and only the new deploy gets to finish it.
+      expect(h.toastSuccess).toHaveBeenCalledTimes(1);
+      expect(h.toastSuccess).toHaveBeenCalledWith("It's live.", { id: "orso-deploy" });
+      const asked = deployStatus.mock.calls.map((call) => call[1]);
+      expect(asked.filter((sha) => sha === SHA)).toHaveLength(1);
+    } finally {
+      store.stopDeployTracking();
+    }
+  });
+
+  it("says only that it published when GitHub reports no merge commit", async () => {
+    vi.useFakeTimers();
+    const deployStatus = vi.fn();
+    const store = deployStore({ publishChange: vi.fn(async () => pr), deployStatus });
+    store.active = { branch: "content/lw", title: "LW" };
+    try {
+      await store.publish("site", "content/lw");
+      store.stopStatusPolling();
+      expect(h.toastInfo).toHaveBeenCalledWith("Published. The site should update shortly.");
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(DEPLOY_POLL_MS * 2);
+      expect(deployStatus).not.toHaveBeenCalled();
+      expect(store.deploy).toBeNull();
+    } finally {
+      store.stopDeployTracking();
+    }
+  });
+});
+
 describe("changes store sync chats", () => {
   const conflictResult = {
     mainUpdated: true,
@@ -1157,9 +1316,12 @@ describe("changes store sync chats", () => {
       expect(listConflicts).toHaveBeenCalledWith("site");
       expect(publishChange).toHaveBeenCalledTimes(2);
       expect(store.status).toEqual(merged);
-      expect(h.toastSuccess).toHaveBeenCalledWith("It's live.");
+      // A retry merges too; "live" waits for the deploy, which this publish has no commit for.
+      expect(h.toastSuccess).not.toHaveBeenCalled();
+      expect(h.toastInfo).toHaveBeenCalledWith("Published. The site should update shortly.");
     } finally {
       store.stopStatusPolling();
+      store.stopDeployTracking();
     }
   });
 
