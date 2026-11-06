@@ -6,6 +6,12 @@ import ChatHistory from "./ChatHistory.vue";
 
 enableAutoUnmount(afterEach);
 
+const stubs = {
+  Popover: { template: "<div><slot /></div>" },
+  PopoverTrigger: { template: "<div><slot /></div>" },
+  PopoverContent: { template: "<div><slot /></div>" },
+};
+
 function chat(over: Partial<ChatSummary> & Pick<ChatSummary, "id" | "title">): ChatSummary {
   return {
     provider: "cursor",
@@ -26,33 +32,25 @@ function mountHistory(chats: ChatSummary[], runningIds: string[] = []) {
       runningIds,
       open: true,
     },
-    attachTo: document.body,
+    global: { stubs },
   });
 }
 
 describe("ChatHistory", () => {
-  afterEach(() => {
-    document.body.innerHTML = "";
-  });
-
   it("filters chats by title through the search field", async () => {
     const w = mountHistory([
       chat({ id: "a", title: "Help docs search" }),
       chat({ id: "b", title: "Sync with master" }),
     ]);
+    await w.get("[data-testid='chat-history-search']").setValue("sync");
     await flushPromises();
-    const input = document.body.querySelector<HTMLInputElement>("[data-testid='chat-history-search']")!;
-    expect(input).toBeTruthy();
-    input.value = "sync";
-    input.dispatchEvent(new Event("input"));
-    await flushPromises();
-    const items = [...document.body.querySelectorAll("[data-testid='chat-history-item']")];
+    const items = w.findAll("[data-testid='chat-history-item']");
     expect(items).toHaveLength(1);
-    expect(items[0]!.textContent).toContain("Sync with master");
+    expect(items[0]!.text()).toContain("Sync with master");
   });
 
   it("shows idle, running, and combining status icons", async () => {
-    mountHistory(
+    const w = mountHistory(
       [
         chat({ id: "idle", title: "Idle chat" }),
         chat({ id: "run", title: "Running chat" }),
@@ -74,27 +72,17 @@ describe("ChatHistory", () => {
       ],
       ["run"],
     );
-    await flushPromises();
 
-    expect(
-      document.body.querySelector('[data-testid="chat-history-item"][data-status="idle"]'),
-    ).toBeTruthy();
-    expect(
-      document.body.querySelector('[data-testid="chat-history-item"][data-status="running"]'),
-    ).toBeTruthy();
-    expect(
-      document.body.querySelector('[data-testid="chat-history-item"][data-status="combining"]'),
-    ).toBeTruthy();
+    expect(w.find('[data-testid="chat-history-item"][data-status="idle"]').exists()).toBe(true);
+    expect(w.find('[data-testid="chat-history-item"][data-status="running"]').exists()).toBe(true);
+    expect(w.find('[data-testid="chat-history-item"][data-status="combining"]').exists()).toBe(true);
   });
 
   it("shows no matching chats when the query misses", async () => {
-    mountHistory([chat({ id: "a", title: "Help docs" })]);
+    const w = mountHistory([chat({ id: "a", title: "Help docs" })]);
+    await w.get("[data-testid='chat-history-search']").setValue("zzzz");
     await flushPromises();
-    const input = document.body.querySelector<HTMLInputElement>("[data-testid='chat-history-search']")!;
-    input.value = "zzzz";
-    input.dispatchEvent(new Event("input"));
-    await flushPromises();
-    expect(document.body.textContent).toContain("No matching chats");
-    expect(document.body.querySelectorAll("[data-testid='chat-history-item']")).toHaveLength(0);
+    expect(w.text()).toContain("No matching chats");
+    expect(w.findAll("[data-testid='chat-history-item']")).toHaveLength(0);
   });
 });

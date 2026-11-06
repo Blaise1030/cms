@@ -33,6 +33,7 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { useDaemon } from "@/core/daemon";
+import { useChatSteps } from "@/lib/chatSteps";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
 import { splitAttachments } from "./attachments";
 import { openWebLink } from "./links";
@@ -46,6 +47,7 @@ import {
   toolLabel,
   type AgentErrorData,
   type CheckpointData,
+  type MessageGroup,
   type ToolInput,
 } from "./parts";
 import { segmentReferences } from "./references";
@@ -60,6 +62,7 @@ const emit = defineEmits<{
   assistantAction: [{ action: "setup" | "signIn" | "retry"; provider: string }];
 }>();
 const daemon = useDaemon();
+const chatSteps = useChatSteps();
 
 /** The user's text parts, with the attachment paths ChatPanel appended split back out. */
 const userTexts = computed(() =>
@@ -68,6 +71,10 @@ const userTexts = computed(() =>
 const groups = computed(() => groupSteps(props.message.parts));
 /** Attached images that failed to load (e.g. a cross-site daemon); shown as file chips. */
 const broken = reactive(new Set<string>());
+
+/** Finished steps follow Appearance; in-flight “Working…” always stays visible. */
+const showStepsGroup = (group: Extract<MessageGroup, { kind: "steps" }>) =>
+  group.working || chatSteps.enabled.value;
 
 /** Agent text is untrusted: replacing the parser's default `html` plugin leaves raw HTML as escaped text. */
 const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }] };
@@ -168,50 +175,52 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
   <Message v-else>
     <MessageContent @click.capture="openWebLink">
       <template v-for="(group, i) in groups" :key="i">
-        <Trace v-if="group.kind === 'steps'" data-testid="chat-steps">
-          <TraceCollapsible>
-            <TraceCollapsibleTrigger>
-              <TraceLine :status="group.working ? 'running' : undefined">
-                <TraceIcon><ListChecks /></TraceIcon>
-                <TraceTitle>{{ stepsTitle(group) }}</TraceTitle>
-              </TraceLine>
-            </TraceCollapsibleTrigger>
-            <TraceCollapsibleContent>
-              <Trace>
-                <TraceCollapsible v-for="(step, j) in group.steps" :key="j">
-                  <template v-if="step.type === 'reasoning'">
-                    <TraceCollapsibleTrigger>
-                      <TraceLine>
-                        <TraceIcon><Brain /></TraceIcon>
-                        <TraceTitle>Thinking</TraceTitle>
-                      </TraceLine>
-                    </TraceCollapsibleTrigger>
-                    <TraceCollapsibleContent class="whitespace-pre-wrap">{{ step.text }}</TraceCollapsibleContent>
-                  </template>
-                  <template v-else>
-                    <TraceCollapsibleTrigger>
-                      <TraceLine :status="toolStatus(step)">
-                        <TraceIcon><component :is="toolIcons[step.toolName] ?? Wrench" /></TraceIcon>
-                        <TraceTitle>{{ toolLabel(step) }}</TraceTitle>
-                      </TraceLine>
-                    </TraceCollapsibleTrigger>
-                    <TraceCollapsibleContent class="flex flex-col gap-2">
-                      <CodeBlock size="sm">
-                        <CodeBlockContent wrap>{{ formatValue(toolArgs(step)) }}</CodeBlockContent>
-                      </CodeBlock>
-                      <CodeBlock v-if="step.state === 'output-available' && step.output != null" size="sm">
-                        <CodeBlockContent wrap>{{ formatValue(step.output) }}</CodeBlockContent>
-                      </CodeBlock>
-                      <CodeBlock v-if="step.state === 'output-error'" size="sm" variant="destructive" data-testid="tool-error">
-                        <CodeBlockContent wrap>{{ step.errorText }}</CodeBlockContent>
-                      </CodeBlock>
-                    </TraceCollapsibleContent>
-                  </template>
-                </TraceCollapsible>
-              </Trace>
-            </TraceCollapsibleContent>
-          </TraceCollapsible>
-        </Trace>
+        <template v-if="group.kind === 'steps'">
+          <Trace v-if="showStepsGroup(group)" data-testid="chat-steps">
+            <TraceCollapsible>
+              <TraceCollapsibleTrigger>
+                <TraceLine :status="group.working ? 'running' : undefined">
+                  <TraceIcon><ListChecks /></TraceIcon>
+                  <TraceTitle>{{ stepsTitle(group) }}</TraceTitle>
+                </TraceLine>
+              </TraceCollapsibleTrigger>
+              <TraceCollapsibleContent>
+                <Trace>
+                  <TraceCollapsible v-for="(step, j) in group.steps" :key="j">
+                    <template v-if="step.type === 'reasoning'">
+                      <TraceCollapsibleTrigger>
+                        <TraceLine>
+                          <TraceIcon><Brain /></TraceIcon>
+                          <TraceTitle>Thinking</TraceTitle>
+                        </TraceLine>
+                      </TraceCollapsibleTrigger>
+                      <TraceCollapsibleContent class="whitespace-pre-wrap">{{ step.text }}</TraceCollapsibleContent>
+                    </template>
+                    <template v-else>
+                      <TraceCollapsibleTrigger>
+                        <TraceLine :status="toolStatus(step)">
+                          <TraceIcon><component :is="toolIcons[step.toolName] ?? Wrench" /></TraceIcon>
+                          <TraceTitle>{{ toolLabel(step) }}</TraceTitle>
+                        </TraceLine>
+                      </TraceCollapsibleTrigger>
+                      <TraceCollapsibleContent class="flex flex-col gap-2">
+                        <CodeBlock size="sm">
+                          <CodeBlockContent wrap>{{ formatValue(toolArgs(step)) }}</CodeBlockContent>
+                        </CodeBlock>
+                        <CodeBlock v-if="step.state === 'output-available' && step.output != null" size="sm">
+                          <CodeBlockContent wrap>{{ formatValue(step.output) }}</CodeBlockContent>
+                        </CodeBlock>
+                        <CodeBlock v-if="step.state === 'output-error'" size="sm" variant="destructive" data-testid="tool-error">
+                          <CodeBlockContent wrap>{{ step.errorText }}</CodeBlockContent>
+                        </CodeBlock>
+                      </TraceCollapsibleContent>
+                    </template>
+                  </TraceCollapsible>
+                </Trace>
+              </TraceCollapsibleContent>
+            </TraceCollapsible>
+          </Trace>
+        </template>
 
         <Markdown
           v-else-if="group.part.type === 'text'"

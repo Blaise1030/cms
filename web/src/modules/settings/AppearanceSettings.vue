@@ -2,7 +2,7 @@
 // App settings → Appearance. The theme and typing sound are read and written by
 // the same shared composables the rest of the app uses (and the command palette).
 import { computed } from "vue";
-import { AudioLines, SunMoon, Volume2 } from "@lucide/vue";
+import { AudioLines, ListChecks, SunMoon, Volume2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -20,6 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useChatSteps } from "@/lib/chatSteps";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 import {
   SOUND_PACKS,
@@ -32,6 +34,7 @@ import ThemePreview from "./ThemePreview.vue";
 
 const theme = useTheme();
 const typingSound = useTypingSound();
+const chatSteps = useChatSteps();
 
 const THEMES: { id: ThemePreference; label: string }[] = [
   { id: "light", label: "Light" },
@@ -147,6 +150,30 @@ function playSample() {
                 </SelectItem>
               </SelectContent>
             </Select>
+          </ItemActions>
+        </Item>
+      </Card>
+    </SettingsSection>
+
+    <SettingsSection label="Chat" :icon="ListChecks">
+      <Card class="gap-0 overflow-hidden p-0">
+        <Item>
+          <ItemMedia variant="icon">
+            <ListChecks aria-hidden="true" />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Show assistant steps</ItemTitle>
+            <ItemDescription>
+              Shows “Worked through N steps” under each reply. Off by default for a quieter chat.
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Switch
+              :model-value="chatSteps.enabled.value"
+              data-testid="appearance-show-steps"
+              aria-label="Show assistant steps"
+              @update:model-value="chatSteps.set"
+            />
           </ItemActions>
         </Item>
       </Card>

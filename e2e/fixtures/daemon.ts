@@ -60,7 +60,7 @@ export async function api(
   });
 }
 
-/** Start a change on the daemon (the UI's New change menu asks the agent instead). */
+/** Start a change on the daemon (`POST /api/changes`). */
 export async function createChange(
   env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   title: string,

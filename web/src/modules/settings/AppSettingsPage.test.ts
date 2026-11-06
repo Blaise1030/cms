@@ -355,6 +355,19 @@ describe("Appearance settings", () => {
     expect(useTypingSound().setting.value).toBe("mx-blue");
     expect(localStorage.getItem("orso.typingSound")).toBe("mx-blue");
   });
+
+  it("toggles showing assistant steps, off by default", async () => {
+    const { w } = await mountPage();
+    await openTab(w, "appearance");
+    expect(w.get("[data-testid='appearance-settings']").text()).toContain("Chat");
+    const toggle = w.get("[data-testid='appearance-show-steps']");
+    expect(toggle.attributes("aria-checked") ?? toggle.attributes("data-state")).toMatch(/false|unchecked/);
+    expect(localStorage.getItem("orso.chat.showSteps")).toBeNull();
+
+    await toggle.trigger("click");
+    await flushPromises();
+    expect(localStorage.getItem("orso.chat.showSteps")).toBe("1");
+  });
 });
 
 describe("About settings", () => {

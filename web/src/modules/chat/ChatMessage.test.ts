@@ -1,14 +1,20 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { UIMessage } from "ai";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import { useChatSteps } from "@/lib/chatSteps";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatMessage from "./ChatMessage.vue";
+
+beforeEach(() => {
+  // Most step tests need the preference on; individual tests flip it off.
+  useChatSteps().set(true);
+});
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -200,6 +206,24 @@ describe("ChatMessage", () => {
     expect(w.find("[data-testid='chat-steps']").text()).toContain("Working…");
     expect(w.find("[data-testid='chat-steps'] [data-slot='trace-line']").attributes("data-status")).toBe("running");
     w.unmount();
+  });
+
+  it("hides finished steps when the appearance preference is off, but still shows Working…", async () => {
+    useChatSteps().set(false);
+    const done = await render([
+      { type: "step-start" },
+      { type: "reasoning", text: "Pondering", state: "done" },
+      { type: "text", text: "Fixed it" },
+    ]);
+    expect(done.find("[data-testid='chat-steps']").exists()).toBe(false);
+    expect(done.text()).toContain("Fixed it");
+    done.unmount();
+
+    const running = await render([
+      { type: "dynamic-tool", toolName: "shell", toolCallId: "t1", state: "input-available", input: { command: "ls" } },
+    ]);
+    expect(running.find("[data-testid='chat-steps']").text()).toContain("Working…");
+    running.unmount();
   });
 
   it("shows reasoning behind a collapsed Thinking trigger", async () => {

@@ -1481,12 +1481,12 @@ describe("ChatPanel", () => {
       expect(w.text()).toContain("I'll keep both changes.");
     });
 
-    it("marks a combining chat in the history meta line", async () => {
+    it("marks a combining chat with a status icon in history", async () => {
       const w = await openSync("working");
       await w.find("[data-testid='chat-history-toggle']").trigger("click");
       await vi.waitFor(() => {
         const item = document.body.querySelector("[data-testid='chat-history-item']")!;
-        expect(item.textContent).toContain("· Combining");
+        expect(item.getAttribute("data-status")).toBe("combining");
       });
     });
 
