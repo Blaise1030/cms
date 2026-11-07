@@ -60,7 +60,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
             <SidebarGroupContent>
               <div v-if="store.list.length" class="px-2 pb-2">
                 <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" data-testid="skills-install" @click="installOpen = true">
-                  <Plus class="size-4" aria-hidden="true" /> Install…
+                  <Plus class="size-4" aria-hidden="true" /> Install skills
                 </Button>
               </div>
               <nav data-testid="skills-list" aria-label="Installed skills" class="flex flex-col gap-0.5">
@@ -156,7 +156,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
         <div v-else-if="!store.loading && !store.list.length" class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-empty">
           <Sparkles class="size-8 opacity-50" aria-hidden="true" />
           <p class="font-medium text-foreground">No skills installed</p>
-          <Button type="button" data-testid="skills-install" @click="installOpen = true">Install…</Button>
+          <Button type="button" data-testid="skills-install" @click="installOpen = true">Install skills</Button>
         </div>
 
         <p v-else-if="store.loading" class="shrink-0 p-4 text-sm text-muted-foreground">Loading skills…</p>
