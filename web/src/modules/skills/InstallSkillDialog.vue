@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,9 @@ const skillMd = ref("");
 const fileName = ref("");
 const blankName = ref("");
 const blankDescription = ref("");
+const blankBody = ref("");
+/** "New skill" opens a full editor instead of the catalog/import views. */
+const creatingSkill = ref(false);
 
 const error = computed(() => store.error ?? store.conflict?.message ?? null);
 
@@ -59,6 +63,8 @@ watch(open, (isOpen) => {
   fileName.value = "";
   blankName.value = "";
   blankDescription.value = "";
+  blankBody.value = "";
+  creatingSkill.value = false;
 }, { immediate: true });
 
 function installedInScope(item: CatalogItem) {
@@ -76,9 +82,29 @@ async function install(source: SkillSource) {
   }
 }
 
-/** "New skill" jumps to the blank form. */
+/** "New skill" opens the inline skill editor. */
 function newSkill() {
-  segment.value = "import";
+  blankName.value = "";
+  blankDescription.value = "";
+  blankBody.value = "";
+  creatingSkill.value = true;
+}
+
+/** Create the blank skill, then save the instructions the writer typed. */
+async function createSkill() {
+  try {
+    await store.install(scope.value, {
+      blank: { name: blankName.value.trim(), description: blankDescription.value.trim() },
+    });
+    if (blankBody.value.trim()) {
+      store.setBody(blankBody.value);
+      await store.save();
+    }
+    creatingSkill.value = false;
+    open.value = false;
+  } catch (err) {
+    if (store.needsChange) open.value = false;
+  }
 }
 
 function onFile(event: Event) {
@@ -105,7 +131,56 @@ function onFile(event: Event) {
         <DialogDescription>Add a built-in skill, import a SKILL.md, or create a blank skill.</DialogDescription>
       </DialogHeader>
 
-      <Tabs v-model="segment" class="min-w-0">
+      <p v-if="error" role="alert" class="text-destructive text-sm" data-testid="install-error">
+        {{ error }}
+      </p>
+
+      <template v-if="creatingSkill">
+        <div class="flex min-h-0 flex-1 flex-col gap-4">
+          <h3 class="text-base font-semibold">New skill</h3>
+          <div class="grid min-h-0 flex-1 gap-4 sm:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+            <div class="space-y-4">
+              <div class="space-y-1.5">
+                <Label for="install-blank-name" class="text-xs font-medium">Name</Label>
+                <Input id="install-blank-name" v-model="blankName" data-testid="install-blank-name" />
+              </div>
+              <div class="space-y-1.5">
+                <Label for="install-blank-description" class="text-xs font-medium">Description</Label>
+                <Textarea
+                  id="install-blank-description"
+                  v-model="blankDescription"
+                  data-testid="install-blank-description"
+                  rows="3"
+                  class="min-h-20 resize-y"
+                />
+              </div>
+            </div>
+            <div class="flex min-h-0 flex-col gap-1.5">
+              <Label for="install-blank-body" class="text-xs font-medium">Instructions</Label>
+              <Textarea
+                id="install-blank-body"
+                v-model="blankBody"
+                data-testid="install-blank-body"
+                placeholder="When should the agent use this skill, and what should it do?"
+                class="min-h-64 flex-1 resize-none font-mono text-sm"
+              />
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="ghost" @click="creatingSkill = false">Cancel</Button>
+            <Button
+              type="button"
+              :disabled="!blankName.trim() || !blankDescription.trim() || store.saving"
+              data-testid="install-blank-create"
+              @click="createSkill"
+            >
+              {{ store.saving ? "Creating…" : "Create skill" }}
+            </Button>
+          </div>
+        </div>
+      </template>
+
+      <Tabs v-else v-model="segment" class="min-w-0">
         <div class="flex flex-wrap items-center gap-3">
           <TabsList class="h-9 gap-2 bg-transparent p-0">
             <TabsTrigger
@@ -146,10 +221,6 @@ function onFile(event: Event) {
             </Button>
           </div>
         </div>
-
-        <p v-if="error" role="alert" class="mt-2 text-destructive text-sm" data-testid="install-error">
-          {{ error }}
-        </p>
 
         <TabsContent value="catalog" class="mt-4 min-w-0">
           <h3 class="px-2.5 text-sm font-semibold">Built-in</h3>

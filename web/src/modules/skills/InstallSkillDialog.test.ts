@@ -261,6 +261,33 @@ describe("InstallSkillDialog", () => {
     expect($('[data-testid="install-blank-description"]')).not.toBeNull();
   });
 
+  it("creates a new skill from the New skill editor", async () => {
+    const { fns } = await setup();
+    mountDialog();
+    await flushPromises();
+
+    $<HTMLButtonElement>('[data-testid="install-new"]')!.click();
+    await flushPromises();
+
+    const name = $<HTMLInputElement>('[data-testid="install-blank-name"]')!;
+    name.value = "Brand voice";
+    name.dispatchEvent(new Event("input"));
+    const description = $<HTMLTextAreaElement>('[data-testid="install-blank-description"]')!;
+    description.value = "How we sound";
+    description.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const create = $<HTMLButtonElement>('[data-testid="install-blank-create"]')!;
+    expect(create.disabled).toBe(false);
+    create.click();
+    await flushPromises();
+
+    expect(fns.installSkill).toHaveBeenCalledWith({
+      project: "site", branch: "content/a", scope: "project",
+      source: { blank: { name: "Brand voice", description: "How we sound" } },
+    });
+  });
+
   it("clears a stale error when the dialog reopens", async () => {
     const { store } = await setup();
     const w = mount(InstallSkillDialog, { props: { open: false }, attachTo: document.body });
