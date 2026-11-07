@@ -42,6 +42,10 @@ test:
     npm --prefix packages/astro test
     npm --prefix templates/astro-marketing test
 
+# Copy `packages/astro/src` runtime files into the template integrations/orso copy.
+sync-orso-integration:
+    ./scripts/sync-orso-integration.sh
+
 # Playwright smoke e2e (rebuilds the daemon so `web/dist` is embedded).
 e2e:
     pnpm -C web install --frozen-lockfile

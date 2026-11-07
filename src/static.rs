@@ -314,4 +314,19 @@ mod tests {
         assert!(safe_join(Path::new("/x"), "/abs").is_err());
         assert!(safe_join(Path::new("/x"), "a/b.txt").is_ok());
     }
+
+    #[test]
+    fn template_integrations_orso_matches_packages_astro_src() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for name in ["index.js", "manifest.js", "patch.js", "endpoint.js", "bridge.js"] {
+            let canonical = std::fs::read(root.join("packages/astro/src").join(name)).unwrap();
+            let templated = std::fs::read(
+                root.join("templates/astro-marketing/integrations/orso").join(name),
+            );
+            assert!(
+                templated.as_ref().ok() == Some(&canonical),
+                "{name} missing or drifted; run: just sync-orso-integration"
+            );
+        }
+    }
 }
