@@ -175,7 +175,7 @@ function onFile(event: Event) {
         </p>
 
         <TabsContent value="catalog" class="mt-6 min-w-0">
-          <h3 class="text-base font-semibold">Built-in</h3>
+          <h3 class="px-3 text-base font-semibold">Built-in</h3>
           <div class="mt-3 grid gap-x-10 gap-y-3 sm:grid-cols-2">
             <button
               v-for="item in visibleCatalog"
@@ -185,7 +185,7 @@ function onFile(event: Event) {
               :title="`Install ${item.name}`"
               data-testid="install-catalog-install"
               :data-skill-id="item.id"
-              class="group hover:bg-muted/50 flex min-w-0 items-center gap-4 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-default disabled:hover:bg-card"
+              class="group hover:bg-muted/50 flex min-w-0 items-center gap-4 rounded-xl p-3 text-left transition-colors disabled:cursor-default disabled:hover:bg-transparent"
               @click="install({ catalog: { id: item.id } })"
             >
               <span
