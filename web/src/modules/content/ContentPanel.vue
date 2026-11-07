@@ -389,7 +389,8 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
           </div>
         </template>
       </header>
-      <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
+      <div class="relative min-h-0 flex-1">
+      <div class="h-full overflow-auto [container-type:size]">
       <div class="px-4">
         <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
         <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
@@ -467,6 +468,8 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
         <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
       </template>
       <div v-if="store.entry && store.descriptor" class="h-24" aria-hidden="true" />
+      </div>
+      <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-linear-to-t from-background via-background/60 to-transparent" aria-hidden="true" />
       </div>
       <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0">
         <div v-if="store.creating || (store.entry && store.descriptor && (store.dirty || store.saving))" role="status" class="absolute bottom-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2" :style="{ left: `${unsavedCentre}px` }" data-testid="content-unsaved">
