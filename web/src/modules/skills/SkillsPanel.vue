@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change, SkillMeta } from "@/core/types";
 import { useSkillsStore } from "./store";
@@ -51,7 +52,9 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
 <template>
   <div class="h-full min-h-0" data-testid="skills-panel">
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
-      <Sidebar data-testid="skills-sidebar" collapsible="none" class="h-full min-h-0 w-64 min-w-0 shrink-0 bg-transparent">
+      <ResizablePanelGroup direction="horizontal" auto-save-id="skills-sidebar" class="h-full min-h-0">
+      <ResizablePanel id="skills-sidebar" :order="1" :default-size="20" :min-size="14" :max-size="40">
+      <Sidebar data-testid="skills-sidebar" collapsible="none" class="h-full min-h-0 w-full min-w-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 py-2">
             <SidebarGroupContent>
@@ -80,7 +83,9 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
-
+      </ResizablePanel>
+      <ResizableHandle with-handle class="bg-transparent" />
+      <ResizablePanel id="skills-editor" :order="2" :default-size="80" :min-size="40">
       <SidebarInset class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
         <p v-if="store.error" role="alert" class="shrink-0 px-4 pt-3 pb-1 text-sm text-destructive" data-testid="skills-error">{{ store.error }}</p>
         <section v-if="store.needsChange" role="alert" class="mx-4 mt-3 shrink-0 rounded-md border p-3 text-sm" data-testid="skills-needs-change">
@@ -150,6 +155,8 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
 
         <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
       </SidebarInset>
+      </ResizablePanel>
+      </ResizablePanelGroup>
     </SidebarProvider>
 
     <InstallSkillDialog v-model:open="installOpen" />
