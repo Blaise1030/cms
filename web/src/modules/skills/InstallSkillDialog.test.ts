@@ -237,6 +237,31 @@ describe("InstallSkillDialog", () => {
     expect($('[data-testid="install-blank-description"]')).not.toBeNull();
   });
 
+  it("reads a dropped .md file", async () => {
+    const { fns } = await setup();
+    mountDialog();
+    await flushPromises();
+
+    await openImportTab();
+
+    const text = "---\nname: Dropped\ndescription: Dropped skill\n---\nBody here.\n";
+    const file = new File([text], "dropped.md", { type: "text/markdown" });
+    const zone = $('[data-testid="install-import-dropzone"]')!;
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
+    zone.dispatchEvent(drop);
+    await vi.waitFor(() => {
+      expect($<HTMLButtonElement>('[data-testid="install-import-install"]')!.disabled).toBe(false);
+    });
+
+    $('[data-testid="install-import-install"]')!.click();
+    await flushPromises();
+
+    expect(fns.installSkill).toHaveBeenCalledWith(expect.objectContaining({
+      source: { import: { skillMd: text } },
+    }));
+  });
+
   it("creates a new skill from the New skill editor", async () => {
     const { fns } = await setup();
     mountDialog();

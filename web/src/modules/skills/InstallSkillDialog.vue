@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
-import { Check, Download, Palette, Search, Sparkles } from "@lucide/vue";
+import { Check, Download, Palette, Search, Sparkles, Upload } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,8 @@ const blankDescription = ref("");
 const blankBody = ref("");
 /** "New skill" opens a full editor instead of the catalog/import views. */
 const creatingSkill = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
+const dragging = ref(false);
 
 const error = computed(() => store.error ?? store.conflict?.message ?? null);
 
@@ -65,6 +67,7 @@ watch(open, (isOpen) => {
   blankDescription.value = "";
   blankBody.value = "";
   creatingSkill.value = false;
+  dragging.value = false;
 }, { immediate: true });
 
 function installedInScope(item: CatalogItem) {
@@ -107,15 +110,24 @@ async function createSkill() {
   }
 }
 
-function onFile(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
+function readFile(file: File) {
   fileName.value = file.name;
   const reader = new FileReader();
   reader.onload = () => { skillMd.value = typeof reader.result === "string" ? reader.result : ""; };
   reader.onerror = () => { skillMd.value = ""; fileName.value = ""; };
   reader.readAsText(file);
+}
+
+function onFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) readFile(file);
+}
+
+function onDrop(event: DragEvent) {
+  dragging.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (file) readFile(file);
 }
 </script>
 
@@ -180,7 +192,7 @@ function onFile(event: Event) {
         </div>
       </template>
 
-      <Tabs v-else v-model="segment" class="min-w-0">
+      <Tabs v-else v-model="segment" class="flex min-h-0 min-w-0 flex-1 flex-col">
         <div class="flex flex-wrap items-center gap-3">
           <TabsList class="h-9 gap-2 bg-transparent p-0">
             <TabsTrigger
@@ -271,35 +283,50 @@ function onFile(event: Event) {
           </div>
         </TabsContent>
 
-        <TabsContent value="import" class="mt-4 grid min-w-0 gap-4">
-          <div class="rounded-xl border p-5">
-            <Label for="install-import-file" class="text-sm font-medium">Import a SKILL.md</Label>
-            <p class="text-muted-foreground mt-1 text-sm">
-              A Markdown file with name and description front matter.
-            </p>
+        <TabsContent value="import" class="mt-4 flex min-h-0 min-w-0 flex-1">
+          <div
+            class="focus-visible:ring-ring relative flex min-h-[280px] flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center outline-none transition-colors focus-visible:ring-2"
+            :class="dragging ? 'border-primary bg-accent/40' : 'border-border hover:border-foreground/30 hover:bg-muted/40'"
+            data-testid="install-import-dropzone"
+            role="button"
+            tabindex="0"
+            @click="fileInput?.click()"
+            @keydown.enter.prevent="fileInput?.click()"
+            @keydown.space.prevent="fileInput?.click()"
+            @dragover.prevent="dragging = true"
+            @dragleave.prevent="dragging = false"
+            @drop.prevent="onDrop"
+          >
             <input
+              ref="fileInput"
               id="install-import-file"
               type="file"
               accept=".md,text/markdown"
               data-testid="install-import-file"
-              class="text-muted-foreground mt-4 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-secondary-foreground"
+              class="sr-only"
               @change="onFile"
             />
-            <p v-if="fileName" class="text-muted-foreground mt-2 truncate text-xs" data-testid="install-import-file-name">
-              {{ fileName }}
-            </p>
+            <span class="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
+              <Upload class="size-6" aria-hidden="true" />
+            </span>
+            <div class="space-y-1">
+              <p class="text-sm font-medium" data-testid="install-import-file-name">
+                {{ fileName || "Drop a SKILL.md here" }}
+              </p>
+              <p class="text-muted-foreground text-sm">
+                {{ fileName ? "Ready to install" : "or click to choose a file" }}
+              </p>
+            </div>
             <Button
               type="button"
               size="sm"
-              class="mt-4"
               :disabled="!skillMd || store.saving"
               data-testid="install-import-install"
-              @click="install({ import: { skillMd } })"
+              @click.stop="install({ import: { skillMd } })"
             >
-              Install
+              {{ store.saving ? "Installing…" : "Install" }}
             </Button>
           </div>
-
         </TabsContent>
       </Tabs>
 
