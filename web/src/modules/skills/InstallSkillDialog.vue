@@ -109,14 +109,14 @@ function onFile(event: Event) {
           <TabsList class="h-9 gap-2 bg-transparent p-0">
             <TabsTrigger
               value="catalog"
-              class="bg-secondary text-secondary-foreground h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-secondary/45 data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary/70"
+              class="h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary data-[state=active]:text-secondary-foreground dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-accent-foreground"
               data-testid="install-segment-catalog"
             >
               Catalog
             </TabsTrigger>
             <TabsTrigger
               value="import"
-              class="bg-secondary text-secondary-foreground h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-secondary/45 data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary/70"
+              class="h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary data-[state=active]:text-secondary-foreground dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-accent-foreground"
               data-testid="install-segment-import"
             >
               Import
