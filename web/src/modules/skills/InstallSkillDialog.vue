@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -136,29 +137,27 @@ function onFile(event: Event) {
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap items-center gap-2">
+        <div class="mt-4 flex flex-wrap items-center gap-3">
           <span class="text-muted-foreground text-sm">Install into</span>
-          <div class="bg-muted/40 inline-flex shrink-0 rounded-lg border p-0.5" role="group" aria-label="Install scope">
-            <button
-              type="button"
-              :aria-pressed="scope === 'project'"
-              data-testid="install-scope-project"
-              class="rounded-md px-3 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
-              :class="scope === 'project' ? 'bg-background text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-              @click="scope = 'project'"
+          <div class="flex shrink-0 items-center gap-2">
+            <span
+              class="text-sm"
+              :class="scope === 'project' ? 'text-foreground font-medium' : 'text-muted-foreground'"
             >
               This project
-            </button>
-            <button
-              type="button"
-              :aria-pressed="scope === 'global'"
+            </span>
+            <Switch
+              :model-value="scope === 'global'"
+              aria-label="Install globally"
               data-testid="install-scope-global"
-              class="rounded-md px-3 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
-              :class="scope === 'global' ? 'bg-background text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-              @click="scope = 'global'"
+              @update:model-value="(value) => (scope = value ? 'global' : 'project')"
+            />
+            <span
+              class="text-sm"
+              :class="scope === 'global' ? 'text-foreground font-medium' : 'text-muted-foreground'"
             >
               Global
-            </button>
+            </span>
           </div>
         </div>
 
@@ -168,7 +167,7 @@ function onFile(event: Event) {
 
         <TabsContent value="catalog" class="mt-6 min-w-0">
           <h3 class="text-base font-semibold">Built-in</h3>
-          <div class="mt-3 grid gap-x-10 gap-y-1 sm:grid-cols-2">
+          <div class="mt-3 grid gap-x-10 gap-y-3 sm:grid-cols-2">
             <button
               v-for="item in visibleCatalog"
               :key="item.id"
@@ -177,7 +176,7 @@ function onFile(event: Event) {
               :title="`Install ${item.name}`"
               data-testid="install-catalog-install"
               :data-skill-id="item.id"
-              class="group hover:bg-muted/60 flex min-w-0 items-center gap-4 rounded-xl p-3 text-left transition-colors disabled:cursor-default disabled:hover:bg-transparent"
+              class="group hover:bg-muted/50 flex min-w-0 items-center gap-4 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 disabled:cursor-default disabled:hover:bg-card"
               @click="install({ catalog: { id: item.id } })"
             >
               <span
