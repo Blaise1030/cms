@@ -125,16 +125,26 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                 <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="skills-reload" @click="store.reloadFromDisk()">Reload</Button>
               </section>
             </div>
-            <div class="mx-auto w-full max-w-3xl px-4 pt-4 pb-8" data-testid="skills-editor">
-              <div class="space-y-1">
-                <Label for="skills-name" class="text-xs font-medium">Name</Label>
-                <Input id="skills-name" :model-value="store.draftName" data-testid="skills-name" class="h-8" @update:model-value="store.setName(String($event))" />
+            <div class="@container flex min-h-full">
+              <div class="flex min-h-full w-full flex-col @3xl:flex-row">
+                <aside class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" data-testid="skills-editor-fields">
+                  <div class="space-y-4">
+                    <div class="space-y-1">
+                      <Label for="skills-name" class="text-xs font-medium">Name</Label>
+                      <Input id="skills-name" :model-value="store.draftName" data-testid="skills-name" class="h-8" @update:model-value="store.setName(String($event))" />
+                    </div>
+                    <div class="space-y-1">
+                      <Label for="skills-description" class="text-xs font-medium">Description</Label>
+                      <Input id="skills-description" :model-value="store.draftDescription" data-testid="skills-description" class="h-8" @update:model-value="store.setDescription(String($event))" />
+                    </div>
+                  </div>
+                </aside>
+                <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">
+                  <div class="mx-auto w-full max-w-3xl" data-testid="skills-editor">
+                    <MarkdownBodyEditor :body="store.draftBody" :original="store.doc.body" kind="markdown" :rich="true" @change="store.setBody($event.body)" />
+                  </div>
+                </div>
               </div>
-              <div class="mt-4 space-y-1">
-                <Label for="skills-description" class="text-xs font-medium">Description</Label>
-                <Input id="skills-description" :model-value="store.draftDescription" data-testid="skills-description" class="h-8" @update:model-value="store.setDescription(String($event))" />
-              </div>
-              <MarkdownBodyEditor :body="store.draftBody" :original="store.doc.body" kind="markdown" :rich="true" @change="store.setBody($event.body)" />
             </div>
           </div>
         </template>
