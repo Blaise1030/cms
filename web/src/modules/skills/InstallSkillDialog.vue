@@ -271,7 +271,7 @@ function onFile(event: Event) {
           </div>
         </TabsContent>
 
-        <TabsContent value="import" class="mt-4 grid min-w-0 gap-4 sm:grid-cols-2">
+        <TabsContent value="import" class="mt-4 grid min-w-0 gap-4">
           <div class="rounded-xl border p-5">
             <Label for="install-import-file" class="text-sm font-medium">Import a SKILL.md</Label>
             <p class="text-muted-foreground mt-1 text-sm">
@@ -300,39 +300,6 @@ function onFile(event: Event) {
             </Button>
           </div>
 
-          <div class="rounded-xl border p-5">
-            <p class="flex items-center gap-1.5 text-sm font-medium">
-              <Sparkles class="size-3.5" aria-hidden="true" /> Create a blank skill
-            </p>
-            <p class="text-muted-foreground mt-1 text-sm">
-              Start with a name and description, then write the instructions.
-            </p>
-            <div class="mt-4 grid gap-2">
-              <Input
-                v-model="blankName"
-                placeholder="Name"
-                data-testid="install-blank-name"
-                class="h-8"
-              />
-              <Input
-                v-model="blankDescription"
-                placeholder="Description"
-                data-testid="install-blank-description"
-                class="h-8"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                class="mt-1 self-start"
-                :disabled="!blankName.trim() || !blankDescription.trim() || store.saving"
-                data-testid="install-blank-create"
-                @click="install({ blank: { name: blankName.trim(), description: blankDescription.trim() } })"
-              >
-                Create blank
-              </Button>
-            </div>
-          </div>
         </TabsContent>
       </Tabs>
 

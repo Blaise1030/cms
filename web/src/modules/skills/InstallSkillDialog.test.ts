@@ -203,30 +203,6 @@ describe("InstallSkillDialog", () => {
     expect(w.emitted("update:open")?.at(-1)).toEqual([false]);
   });
 
-  it("creates a blank skill with its name and description", async () => {
-    const { fns } = await setup();
-    const w = mountDialog();
-    await flushPromises();
-
-    await openImportTab();
-
-    const name = $<HTMLInputElement>('[data-testid="install-blank-name"]')!;
-    name.value = "My Skill";
-    name.dispatchEvent(new Event("input"));
-    const description = $<HTMLInputElement>('[data-testid="install-blank-description"]')!;
-    description.value = "Does useful things";
-    description.dispatchEvent(new Event("input"));
-    await flushPromises();
-
-    $('[data-testid="install-blank-create"]')!.click();
-    await flushPromises();
-
-    expect(fns.installSkill).toHaveBeenCalledWith({
-      project: "site", branch: "content/a", scope: "project", source: { blank: { name: "My Skill", description: "Does useful things" } },
-    });
-    expect(w.emitted("update:open")?.at(-1)).toEqual([false]);
-  });
-
   it("shows a hint when the catalog is empty", async () => {
     await setup({ skills: vi.fn(async () => ({ installed: [], catalog: [] })) });
     mountDialog();
