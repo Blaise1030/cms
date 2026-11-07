@@ -106,11 +106,19 @@ function onFile(event: Event) {
 
       <Tabs v-model="segment" class="min-w-0">
         <div class="flex flex-wrap items-center gap-3">
-          <TabsList class="h-10 p-1">
-            <TabsTrigger value="catalog" class="px-4 text-[15px]" data-testid="install-segment-catalog">
+          <TabsList class="h-9 gap-2 bg-transparent p-0">
+            <TabsTrigger
+              value="catalog"
+              class="bg-secondary text-secondary-foreground h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-secondary/45 data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary/70"
+              data-testid="install-segment-catalog"
+            >
               Catalog
             </TabsTrigger>
-            <TabsTrigger value="import" class="px-4 text-[15px]" data-testid="install-segment-import">
+            <TabsTrigger
+              value="import"
+              class="bg-secondary text-secondary-foreground h-9 rounded-md border-0 px-4 text-[15px] data-[state=active]:bg-secondary dark:data-[state=active]:bg-secondary data-[state=inactive]:bg-secondary/45 data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary/70"
+              data-testid="install-segment-import"
+            >
               Import
             </TabsTrigger>
           </TabsList>
