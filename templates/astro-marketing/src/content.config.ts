@@ -1,6 +1,6 @@
 import { defineCollection } from "astro:content";
 import { z } from "astro/zod";
-import { orsoGlob } from "orso-astro";
+import { orsoGlob } from "../integrations/orso/index.js";
 
 const blog = defineCollection({
   loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
