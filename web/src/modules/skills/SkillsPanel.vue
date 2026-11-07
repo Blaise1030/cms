@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
@@ -139,7 +140,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                     </div>
                     <div class="space-y-1">
                       <Label for="skills-description" class="text-xs font-medium">Description</Label>
-                      <Input id="skills-description" :model-value="store.draftDescription" data-testid="skills-description" class="h-8" @update:model-value="store.setDescription(String($event))" />
+                      <Textarea id="skills-description" :model-value="store.draftDescription" data-testid="skills-description" rows="3" class="min-h-20 resize-y" @update:model-value="store.setDescription(String($event))" />
                     </div>
                   </div>
                 </aside>
