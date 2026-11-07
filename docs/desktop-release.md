@@ -86,8 +86,9 @@ repository **Actions variable** `DESKTOP_UNSIGNED` to `true`:
 gh variable set DESKTOP_UNSIGNED --body "true" --repo Blaise1030/cms
 ```
 
-With that flag, `release.yml` skips the Apple/Tauri secret checks, builds without signing
-env vars, skips **Verify signature and notarization**, packages only
+With that flag, `release.yml` skips the Apple/Tauri secret checks, runs `tauri build` without
+signing env vars and with `createUpdaterArtifacts` disabled via a `--config` override (so the
+build does not require `TAURI_SIGNING_*`), skips **Verify signature and notarization**, packages only
 `orso-<version>-aarch64.dmg` and `orso-<version>-x86_64.dmg`, and does **not** write or
 upload `latest.json` (in-app auto-update is deferred until the notarized path returns).
 
@@ -103,7 +104,7 @@ to anything other than `true`:
 gh variable delete DESKTOP_UNSIGNED --repo Blaise1030/cms
 ```
 
-All eight secrets below must be set before flipping back.
+All eight secrets in **Required GitHub secrets** above must be set before flipping back.
 
 ## Cutting a desktop release
 
