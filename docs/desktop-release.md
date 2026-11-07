@@ -12,9 +12,9 @@ certificate, notarizes and staples it, and uploads:
 | `orso-<version>-<arch>.app.tar.gz.sig` | Its updater signature. |
 | `latest.json` | Written by `publish` (`.github/scripts/desktop-latest-json.sh`); the updater reads `releases/latest/download/latest.json`. |
 
-`<arch>` is `aarch64` or `x86_64`. `publish` waits for `desktop`, so a release never
-goes out without a signed app. The job's first step fails if any secret below is
-empty: unsigned or un-notarized builds are never shipped.
+`<arch>` is `aarch64` or `x86_64`. `publish` waits for `desktop`. When the
+notarized path is active (default), the job's first step fails if any secret below is
+empty. When `DESKTOP_UNSIGNED` is set (see below), CI ships DMGs only.
 
 The installer stays small: assistant tools (Node, OpenCode, Claude, Codex, Cursor) are
 downloaded and verified in-app on first use into
@@ -77,13 +77,41 @@ variant of [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/ma
   new one and replace `APPLE_PASSWORD`.
 - **Apple Developer Program membership** must stay active, or notarization fails.
 
+## Unsigned launch (Product Hunt)
+
+For a deliberate unsigned cut (e.g. before Developer ID notarization is ready), set the
+repository **Actions variable** `DESKTOP_UNSIGNED` to `true`:
+
+```sh
+gh variable set DESKTOP_UNSIGNED --body "true" --repo Blaise1030/cms
+```
+
+With that flag, `release.yml` skips the Apple/Tauri secret checks, builds without signing
+env vars, skips **Verify signature and notarization**, packages only
+`orso-<version>-aarch64.dmg` and `orso-<version>-x86_64.dmg`, and does **not** write or
+upload `latest.json` (in-app auto-update is deferred until the notarized path returns).
+
+Users must clear Gatekeeper on first open: right-click the app → **Open**, or in **System
+Settings → Privacy & Security** use **Open Anyway** after the block appears. Document these
+steps on the download page; unsigned builds are not for routine distribution outside this
+explicit mode.
+
+To restore signed, notarized releases with updater artifacts, unset the variable or set it
+to anything other than `true`:
+
+```sh
+gh variable delete DESKTOP_UNSIGNED --repo Blaise1030/cms
+```
+
+All eight secrets below must be set before flipping back.
+
 ## Cutting a desktop release
 
 Nothing desktop-specific: merging the release PR (which bumps the root `package.json` version)
 runs `release.yml`, and `desktop` builds alongside `build` and `e2e`. The app's version comes
 from the root `package.json` (`tauri.conf.json` has `"version": "../package.json"`), so the
 app, `latest.json` and the tag always agree. After `publish`, check the release has both `.dmg`
-files, both `.app.tar.gz` + `.sig` pairs and `latest.json`.
+files. On the notarized path, also confirm both `.app.tar.gz` + `.sig` pairs and `latest.json`.
 
 Installed apps check `latest.json` on launch and every 6 hours, download a newer version in the
 background, and show **Update ready — restart to apply** once no terminal session is busy. Nothing
@@ -105,7 +133,8 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/orso-updater.key.password)" \
 Without the two `TAURI_SIGNING_*` variables the build fails, because `createUpdaterArtifacts`
 is on. Output lands in `src-tauri/target/release/bundle/macos/` (`orso.app`,
 `orso.app.tar.gz`, `orso.app.tar.gz.sig`). Local builds are unsigned unless the
-`APPLE_*` variables are set too; never distribute an unsigned build.
+`APPLE_*` variables are set too; do not distribute unsigned builds except via the
+`DESKTOP_UNSIGNED` CI path above.
 
 ## Local updater end-to-end test
 
