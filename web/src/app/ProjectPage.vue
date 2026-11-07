@@ -125,7 +125,7 @@ watch(
       />
     </template>
     <template #workspace>
-      <Workspace v-if="project" :project="project" />
+      <Workspace v-if="project" :project="project" :floating-chat="floatingChat" />
     </template>
     <template #chat>
       <AgentPanel

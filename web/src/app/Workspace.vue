@@ -2,20 +2,18 @@
 import { computed } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import type { Project } from "@/core/types";
-import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 import { projectTabFromRoute } from "@/router";
 import PreviewPanel from "@/modules/preview/PreviewPanel.vue";
 import ConflictView from "@/modules/changes/ConflictView.vue";
 import { useChangesStore } from "@/modules/changes/store";
 
-defineProps<{ project: Project }>();
+const props = defineProps<{ project: Project; floatingChat?: boolean }>();
 
 const route = useRoute();
 const tab = computed(() => projectTabFromRoute(route.name));
 const changes = useChangesStore();
-const panelLayout = useChatPanelLayout();
-/** Leave room for the floating agent session bar under the workspace (not the rail). */
-const floatingChrome = computed(() => panelLayout.floating.value);
+/** Leave room for the floating agent session bar only on pages where the chat is shown. */
+const floatingChrome = computed(() => props.floatingChat === true);
 </script>
 
 <template>
