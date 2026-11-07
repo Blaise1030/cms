@@ -128,7 +128,8 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
               <Button v-if="!store.creating" type="button" variant="destructive" size="sm" data-testid="skills-uninstall" @click="uninstall">Uninstall</Button>
             </div>
           </header>
-          <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
+          <div class="relative min-h-0 flex-1">
+            <div class="h-full overflow-auto [container-type:size]">
             <div class="px-4">
               <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="skills-changed-on-disk">
                 <p>The skill changed on disk. Your unsaved draft is preserved.</p>
@@ -160,6 +161,8 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                 </div>
               </div>
             </div>
+            </div>
+            <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-linear-to-t from-background via-background/60 to-transparent" aria-hidden="true" />
           </div>
         </template>
 
