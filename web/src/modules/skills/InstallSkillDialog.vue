@@ -97,7 +97,7 @@ function onFile(event: Event) {
   <Dialog v-model:open="open">
     <DialogContent
       :show-close-button="false"
-      class="max-h-[94vh] min-h-[min(680px,88vh)] gap-4 overflow-y-auto p-5 sm:max-w-5xl sm:p-6"
+      class="flex max-h-[94vh] min-h-[min(680px,88vh)] flex-col gap-4 overflow-y-auto p-5 sm:max-w-5xl sm:p-6"
       data-testid="install-skill-dialog"
     >
       <DialogHeader class="sr-only">
@@ -147,31 +147,7 @@ function onFile(event: Event) {
           </div>
         </div>
 
-        <div class="mt-3 flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground text-sm">Install into</span>
-          <div class="flex shrink-0 items-center gap-2">
-            <span
-              class="text-sm"
-              :class="scope === 'project' ? 'text-foreground font-medium' : 'text-muted-foreground'"
-            >
-              This project
-            </span>
-            <Switch
-              :model-value="scope === 'global'"
-              aria-label="Install globally"
-              data-testid="install-scope-global"
-              @update:model-value="(value) => (scope = value ? 'global' : 'project')"
-            />
-            <span
-              class="text-sm"
-              :class="scope === 'global' ? 'text-foreground font-medium' : 'text-muted-foreground'"
-            >
-              Global
-            </span>
-          </div>
-        </div>
-
-        <p v-if="error" role="alert" class="text-destructive text-sm" data-testid="install-error">
+        <p v-if="error" role="alert" class="mt-2 text-destructive text-sm" data-testid="install-error">
           {{ error }}
         </p>
 
@@ -288,6 +264,30 @@ function onFile(event: Event) {
           </div>
         </TabsContent>
       </Tabs>
+
+      <div class="mt-auto flex flex-wrap items-center gap-2 border-t pt-4">
+        <span class="text-muted-foreground text-sm">Install into</span>
+        <div class="flex shrink-0 items-center gap-2">
+          <span
+            class="text-sm"
+            :class="scope === 'project' ? 'text-foreground font-medium' : 'text-muted-foreground'"
+          >
+            This project
+          </span>
+          <Switch
+            :model-value="scope === 'global'"
+            aria-label="Install globally"
+            data-testid="install-scope-global"
+            @update:model-value="(value) => (scope = value ? 'global' : 'project')"
+          />
+          <span
+            class="text-sm"
+            :class="scope === 'global' ? 'text-foreground font-medium' : 'text-muted-foreground'"
+          >
+            Global
+          </span>
+        </div>
+      </div>
     </DialogContent>
   </Dialog>
 </template>
