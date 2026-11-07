@@ -96,7 +96,7 @@ function onFile(event: Event) {
   <Dialog v-model:open="open">
     <DialogContent
       :show-close-button="false"
-      class="max-h-[94vh] min-h-[420px] gap-4 overflow-y-auto p-5 sm:max-w-5xl sm:p-6"
+      class="max-h-[94vh] min-h-[min(680px,88vh)] gap-4 overflow-y-auto p-5 sm:max-w-5xl sm:p-6"
       data-testid="install-skill-dialog"
     >
       <DialogHeader class="sr-only">
