@@ -497,16 +497,20 @@ async fn real_npm_install_and_site_builds() {
         "node_modules must be ignored"
     );
 
-    assert!(dir.join("packages/astro/src/index.js").is_file());
+    assert!(dir.join("integrations/orso/index.js").is_file());
     let package_json = std::fs::read_to_string(dir.join("package.json")).unwrap();
     let package: Value = serde_json::from_str(&package_json).unwrap();
-    assert_eq!(package["dependencies"]["orso-astro"], "file:packages/astro");
+    assert!(package["dependencies"].get("orso-astro").is_none());
+    for name in ["js-yaml", "jsonc-parser", "yaml"] {
+        assert!(package["dependencies"][name].is_string(), "{name}");
+    }
     let lockfile = std::fs::read_to_string(dir.join("package-lock.json")).unwrap();
     for text in [&package_json, &lockfile] {
+        assert!(!text.contains("file:packages/astro"));
         assert!(!text.contains("file:../../packages/astro"));
     }
 
-    // The lockfile's rewritten `file:packages/astro` entry must install as-is.
+    // The scaffolded lockfile must install as-is and the site must build.
     std::fs::remove_dir_all(dir.join("node_modules")).unwrap();
     for args in [
         &["ci", "--no-audit", "--no-fund", "--no-progress"][..],

@@ -10,15 +10,26 @@ The package is plain ESM with no build step. `astro` is a peer dependency
 
 ## Install
 
-Scaffolded projects ship a copy of the package at `packages/astro/` and depend on it by
-path:
+Scaffolded projects receive a flattened copy of this package's `src/*.js` at
+`integrations/orso/`. That folder is generated: scaffolding overwrites it, and it is not
+an npm package. Import it with relative paths (from the project root, and from
+`src/content.config.ts`):
 
-```json
-"orso-astro": "file:packages/astro"
+```js
+import { orso } from "./integrations/orso/index.js";
 ```
 
-The template in this repository depends on `file:../../packages/astro`; scaffolding rewrites
-that path in `package.json` and `package-lock.json`.
+```ts
+import { orsoGlob } from "../integrations/orso/index.js";
+```
+
+`yaml`, `js-yaml`, and `jsonc-parser` are dependencies of the site. There is no
+`orso-astro` dependency and no `file:packages/astro` path.
+
+Canonical sources stay in `packages/astro/src/`. `just sync-orso-integration` copies them
+into `templates/astro-marketing/integrations/orso/` for in-repo template work. To vendor
+the same files into an existing site, sparse-checkout `packages/astro/src` and copy those
+`.js` files into `integrations/orso/`.
 
 ## Preview bridge
 
@@ -35,7 +46,7 @@ and it is not part of a build.
 ```js
 import { defineConfig } from "astro/config";
 import mdx from "@astrojs/mdx";
-import { orso } from "orso-astro";
+import { orso } from "./integrations/orso/index.js";
 
 export default defineConfig({
   integrations: [mdx(), orso()],
@@ -46,7 +57,7 @@ export default defineConfig({
 
 ```ts
 import { defineCollection } from "astro:content";
-import { orsoGlob } from "orso-astro";
+import { orsoGlob } from "../integrations/orso/index.js";
 import { z } from "astro/zod";
 
 export const collections = {

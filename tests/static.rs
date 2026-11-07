@@ -262,7 +262,6 @@ async fn host_allowlist_still_applies_to_the_shell() {
 fn content_editor_template_files_are_embedded() {
     use orso::static_files::Template;
     for path in [
-        ".npmrc",
         "astro.config.mjs",
         "src/content.config.ts",
         "src/pages/blog/index.astro",
