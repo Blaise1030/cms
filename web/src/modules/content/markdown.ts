@@ -2,7 +2,7 @@ import type { AnyExtension, JSONContent } from "@tiptap/core";
 import { Editor, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
-import { OrderedList } from "@tiptap/extension-list";
+import { OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 
@@ -28,6 +28,8 @@ export function markdownExtensions(resolveImage?: (src: string) => string): AnyE
   return [
     StarterKit.configure({ underline: false, trailingNode: false, orderedList: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
     NumericOrderedList,
+    TaskList,
+    TaskItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
     resolveImage ? SafeImage.configure({ resolveSrc: resolveImage }) : SafeImage,
     Markdown,
@@ -100,6 +102,7 @@ const SafeImage = Image.extend<{ resolveSrc: ((src: string) => string) | null } 
 const SUPPORTED_TOKENS = new Set([
   "space", "paragraph", "text", "heading", "list", "list_item", "blockquote", "code",
   "codespan", "strong", "em", "del", "link", "image", "br", "hr", "escape", "table",
+  "checkbox", "taskList", "taskItem",
 ]);
 
 type Cell = { tokens: Token[] };
@@ -119,7 +122,6 @@ function markdownManager(): MarkdownManager {
 function supportedTokens(tokens: Token[] | undefined): boolean {
   for (const token of tokens ?? []) {
     if (!SUPPORTED_TOKENS.has(token.type)) return false;
-    if (token.type === "list_item" && token.task) return false;
     // MDX module syntax and expressions, and stray angle brackets, are not plain Markdown text.
     if (token.type === "paragraph" && /^\s*(import|export)\s/.test(token.raw ?? "")) return false;
     if (token.type === "text" && !token.tokens && /[{}<]/.test(token.raw ?? "")) return false;
@@ -133,7 +135,21 @@ function supportedTokens(tokens: Token[] | undefined): boolean {
 }
 
 const words = (source: string) => source.replace(/[^\p{L}\p{N}]/gu, "");
-const same = (a: JSONContent, b: JSONContent) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Compare parsed documents ignoring insignificant line-wrap whitespace inside text nodes.
+ * Code blocks keep their text byte-for-byte.
+ */
+function canonical(node: JSONContent): JSONContent {
+  if (node.type === "codeBlock") return node;
+  return {
+    ...node,
+    ...(typeof node.text === "string" ? { text: node.text.replace(/\s+/g, " ") } : {}),
+    ...(node.content ? { content: node.content.map(canonical) } : {}),
+  };
+}
+const same = (a: JSONContent, b: JSONContent) =>
+  JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
 /**
  * Whether `source` can be edited in rich mode without losing anything. Conservative: every token must

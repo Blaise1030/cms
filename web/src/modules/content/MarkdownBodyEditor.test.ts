@@ -57,6 +57,8 @@ describe("canRoundTrip", () => {
     "| a | **b** |\n| :- | -: |\n| 1 | [two](https://x.test) |\n",
     "Is it allowed?\n\nNo. Meta restricts it.\n\nA. Yes, sometimes.\n",
     "## Voice & Tone\n\nFish & chips, R&D.\n",
+    "- [ ] Unique title\n- [x] Done\n",
+    "A paragraph wrapped\n at a soft line break.\n",
     "",
   ])("accepts supported Markdown %#", source => expect(canRoundTrip(source)).toBe(true));
 
@@ -72,7 +74,6 @@ describe("canRoundTrip", () => {
     ["reference link", "See [docs][d].\n\n[d]: https://x.test\n"],
     ["footnote", "Claim[^1].\n\n[^1]: Source.\n"],
     ["entity", "Fish &amp; chips\n"],
-    ["task list", "- [ ] todo\n"],
   ])("rejects %s", (_name, source) => expect(canRoundTrip(source)).toBe(false));
 
   it("writes a bare ampersand as-is, and escapes one that would read as an entity", () => {
