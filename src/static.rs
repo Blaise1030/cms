@@ -1,6 +1,6 @@
-//! Embedded assets: the scaffold template (`templates/astro-marketing/`), the `orso-astro`
-//! package it depends on (`packages/astro/`), and the built SPA (`web/dist`), which the daemon
-//! serves as its router fallback.
+//! Embedded assets: the scaffold template (`templates/astro-marketing/`), the Orso Astro
+//! integration sources (`packages/astro/src/`, extracted as `integrations/orso/`), and the built
+//! SPA (`web/dist`), which the daemon serves as its router fallback.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -131,22 +131,17 @@ pub async fn serve(method: Method, uri: Uri, headers: HeaderMap) -> Response {
 #[exclude = "dist/**"]
 #[exclude = ".astro/**"]
 #[exclude = ".DS_Store"]
+#[exclude = "integrations/orso/**"]
 pub struct Template;
 
-/// The `orso-astro` package (`packages/astro/`), copied into every scaffold as
-/// `packages/astro/` so projects install it without the orso checkout.
+/// Orso Astro integration sources (`packages/astro/src/`), copied into every scaffold as
+/// `integrations/orso/`.
 #[derive(RustEmbed)]
-#[folder = "packages/astro/"]
+#[folder = "packages/astro/src/"]
 #[exclude = "node_modules/**"]
 #[exclude = "test/**"]
-#[exclude = "package-lock.json"]
 #[exclude = ".DS_Store"]
 pub struct OrsoAstro;
-
-/// The template's dependency spec for `orso-astro` (relative to the orso checkout) and the
-/// spec it must have inside a scaffolded project.
-const ORSO_ASTRO_REPO_SPEC: &str = "file:../../packages/astro";
-const ORSO_ASTRO_SCAFFOLD_SPEC: &str = "file:packages/astro";
 
 fn embed_paths<T: RustEmbed>() -> Vec<String> {
     let mut v: Vec<String> = T::iter().map(|p| p.into_owned()).collect();
@@ -159,24 +154,17 @@ pub fn template_paths() -> Vec<String> {
     embed_paths::<Template>()
 }
 
-/// Relative paths of every embedded `orso-astro` file (forward-slash separated).
+/// Relative paths of every embedded Orso integration source (forward-slash separated).
 pub fn orso_astro_paths() -> Vec<String> {
     embed_paths::<OrsoAstro>()
 }
 
-/// Write the embedded template into `dest` (created if missing), with the `orso-astro` package
-/// under `dest/packages/astro` and the manifests pointing at it. Existing files are overwritten.
+/// Write the embedded template into `dest` (created if missing), with the Orso integration
+/// sources under `dest/integrations/orso`. Manifests are copied unchanged. Existing files are
+/// overwritten.
 pub fn extract_template(dest: &Path) -> io::Result<()> {
     extract_embed::<Template>(dest)?;
-    extract_embed::<OrsoAstro>(&safe_join(dest, "packages/astro")?)?;
-    for manifest in ["package.json", "package-lock.json"] {
-        let path = safe_join(dest, manifest)?;
-        let text = std::fs::read_to_string(&path)?;
-        std::fs::write(
-            &path,
-            text.replace(ORSO_ASTRO_REPO_SPEC, ORSO_ASTRO_SCAFFOLD_SPEC),
-        )?;
-    }
+    extract_embed::<OrsoAstro>(&safe_join(dest, "integrations/orso")?)?;
     Ok(())
 }
 
@@ -252,26 +240,29 @@ mod tests {
         ] {
             assert!(!paths.iter().any(|p| p == gone), "still embeds {gone}");
         }
-        assert!(orso_astro_paths().iter().any(|p| p == "src/index.js"));
+        assert!(orso_astro_paths().iter().any(|p| p == "index.js"));
     }
 
     #[test]
     fn orso_astro_contains_package_sources_only() {
         let paths = orso_astro_paths();
         for want in [
-            "package.json",
-            "README.md",
-            "src/index.js",
-            "src/manifest.js",
-            "src/patch.js",
-            "src/endpoint.js",
+            "index.js",
+            "manifest.js",
+            "patch.js",
+            "endpoint.js",
+            "bridge.js",
         ] {
             assert!(paths.iter().any(|p| p == want), "missing {want}: {paths:?}");
         }
         assert!(
-            !paths.iter().any(|p| p.starts_with("node_modules/")
-                || p.starts_with("test/")
-                || p == "package-lock.json"),
+            !paths.iter().any(|p| {
+                p == "package.json"
+                    || p == "README.md"
+                    || p.starts_with("src/")
+                    || p.starts_with("test/")
+                    || p.starts_with("node_modules/")
+            }),
             "{paths:?}"
         );
     }
@@ -279,33 +270,36 @@ mod tests {
     #[test]
     fn template_does_not_embed_orso_astro() {
         let paths = template_paths();
-        for want in [
-            "package.json",
-            ".npmrc",
-            "astro.config.mjs",
-            "src/content.config.ts",
-        ] {
+        for want in ["package.json", "astro.config.mjs", "src/content.config.ts"] {
             assert!(paths.iter().any(|p| p == want), "missing {want}: {paths:?}");
         }
         assert!(
-            !paths.iter().any(|p| p.starts_with("packages/astro")),
+            !paths
+                .iter()
+                .any(|p| p.starts_with("integrations/orso") || p.starts_with("packages/astro")),
             "{paths:?}"
         );
     }
 
     #[test]
-    fn extract_template_copies_orso_astro_and_rewrites_manifests() {
+    fn extract_template_copies_integrations_orso() {
         let tmp = tempfile::tempdir().unwrap();
         extract_template(tmp.path()).unwrap();
-        assert!(tmp.path().join("packages/astro/src/index.js").is_file());
+        assert!(tmp.path().join("integrations/orso/index.js").is_file());
+        assert!(tmp.path().join("integrations/orso/bridge.js").is_file());
+        assert!(!tmp.path().join("packages/astro").exists());
         let manifest = std::fs::read_to_string(tmp.path().join("package.json")).unwrap();
         let json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-        assert_eq!(json["dependencies"]["orso-astro"], "file:packages/astro");
+        assert!(json["dependencies"].get("orso-astro").is_none());
+        for name in ["js-yaml", "jsonc-parser", "yaml"] {
+            assert!(json["dependencies"][name].is_string(), "{name}");
+        }
         let lock = std::fs::read_to_string(tmp.path().join("package-lock.json")).unwrap();
         for text in [&manifest, &lock] {
+            assert!(!text.contains("orso-astro"));
             assert!(!text.contains("file:../../packages/astro"));
+            assert!(!text.contains("file:packages/astro"));
         }
-        assert!(lock.contains("file:packages/astro"));
     }
 
     #[test]
