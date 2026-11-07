@@ -168,6 +168,32 @@ describe("SkillsPanel", () => {
     w.unmount();
   });
 
+  it("creates a new skill in the outer editor", async () => {
+    const installSkill = vi.fn(async (body: { scope: "project" | "global" }) => meta({ scope: body.scope }));
+    const { w } = await setup({
+      skills: vi.fn(async () => ({ installed: [], catalog: [] })),
+      installSkill,
+    });
+
+    await button(w, "skills-install").trigger("click");
+    await flushPromises();
+    document.body.querySelector<HTMLButtonElement>('[data-testid="install-new"]')!.click();
+    await flushPromises();
+
+    expect(w.find('[data-testid="skills-editor"]').exists()).toBe(true);
+    expect(w.get('[data-testid="skills-new-scope"]').text()).toContain("This project");
+
+    await w.get('[data-testid="skills-name"]').setValue("Brand voice");
+    await w.get('[data-testid="skills-description"]').setValue("How we sound");
+    await w.get('[data-testid="skills-save"]').trigger("click");
+    await flushPromises();
+
+    expect(installSkill).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "project",
+      source: { blank: { name: "Brand voice", description: "How we sound" } },
+    }));
+  });
+
   it("with skills but no selection shows the choose prompt", async () => {
     const { w } = await setup();
     expect(w.get('[data-testid="skills-no-selection"]').text()).toContain("Select a skill or install one");

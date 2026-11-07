@@ -225,16 +225,19 @@ describe("InstallSkillDialog", () => {
     expect(installButton("design")).not.toBeNull();
   });
 
-  it("New skill opens the blank form", async () => {
-    await setup();
-    mountDialog();
+  it("New skill hands off to the outer editor", async () => {
+    const { store } = await setup();
+    const w = mountDialog();
     await flushPromises();
 
+    $<HTMLButtonElement>('[data-testid="install-scope-global"]')!.click();
+    await flushPromises();
     $<HTMLButtonElement>('[data-testid="install-new"]')!.click();
     await flushPromises();
 
-    expect($('[data-testid="install-blank-name"]')).not.toBeNull();
-    expect($('[data-testid="install-blank-description"]')).not.toBeNull();
+    expect(w.emitted("update:open")?.at(-1)).toEqual([false]);
+    expect(store.creating).toBe(true);
+    expect(store.newScope).toBe("global");
   });
 
   it("reads a dropped .md file", async () => {
@@ -260,33 +263,6 @@ describe("InstallSkillDialog", () => {
     expect(fns.installSkill).toHaveBeenCalledWith(expect.objectContaining({
       source: { import: { skillMd: text } },
     }));
-  });
-
-  it("creates a new skill from the New skill editor", async () => {
-    const { fns } = await setup();
-    mountDialog();
-    await flushPromises();
-
-    $<HTMLButtonElement>('[data-testid="install-new"]')!.click();
-    await flushPromises();
-
-    const name = $<HTMLInputElement>('[data-testid="install-blank-name"]')!;
-    name.value = "Brand voice";
-    name.dispatchEvent(new Event("input"));
-    const description = $<HTMLTextAreaElement>('[data-testid="install-blank-description"]')!;
-    description.value = "How we sound";
-    description.dispatchEvent(new Event("input"));
-    await flushPromises();
-
-    const create = $<HTMLButtonElement>('[data-testid="install-blank-create"]')!;
-    expect(create.disabled).toBe(false);
-    create.click();
-    await flushPromises();
-
-    expect(fns.installSkill).toHaveBeenCalledWith({
-      project: "site", branch: "content/a", scope: "project",
-      source: { blank: { name: "Brand voice", description: "How we sound" } },
-    });
   });
 
   it("clears a stale error when the dialog reopens", async () => {

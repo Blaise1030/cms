@@ -45,7 +45,14 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
 
 const isSelected = (m: SkillMeta) => store.selected?.id === m.id && store.selected?.scope === m.scope;
 /** Project saves are change-gated; global saves only need a dirty draft. */
-const saveDisabled = computed(() => !store.dirty || store.saving || (store.doc?.scope === "project" && store.needsChange));
+const saveDisabled = computed(() => {
+  if (!store.dirty || store.saving) return true;
+  if (store.creating) {
+    if (!store.draftName.trim() || !store.draftDescription.trim()) return true;
+    return store.newScope === "project" && store.needsChange;
+  }
+  return store.doc?.scope === "project" && store.needsChange;
+});
 
 function select(m: SkillMeta) { void store.select(m.id, m.scope); }
 </script>
@@ -107,16 +114,18 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
           </div>
         </section>
 
-        <template v-else-if="store.doc">
+        <template v-else-if="store.doc || store.creating">
           <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
             <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-            <h2 class="truncate px-1 text-sm font-medium">{{ store.doc.name }}</h2>
-            <p class="truncate text-xs text-muted-foreground" data-testid="skills-path" :title="store.doc.path">{{ store.doc.path }}</p>
+            <h2 class="truncate px-1 text-sm font-medium">{{ store.creating ? "New skill" : store.doc?.name }}</h2>
+            <p v-if="!store.creating" class="truncate text-xs text-muted-foreground" data-testid="skills-path" :title="store.doc?.path">{{ store.doc?.path }}</p>
+            <p v-else class="truncate text-xs text-muted-foreground" data-testid="skills-new-scope">{{ store.newScope === "project" ? "This project" : "Global" }}</p>
             <div class="ml-auto flex shrink-0 items-center gap-2">
-              <Button v-if="store.selected?.scope === 'global'" type="button" variant="secondary" size="sm" data-testid="skills-duplicate" @click="duplicateToProject">Duplicate to project</Button>
-              <Button type="button" variant="ghost" size="sm" data-testid="skills-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
-              <Button type="button" size="sm" data-testid="skills-save" :disabled="saveDisabled" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
-              <Button type="button" variant="destructive" size="sm" data-testid="skills-uninstall" @click="uninstall">Uninstall</Button>
+              <Button v-if="!store.creating && store.selected?.scope === 'global'" type="button" variant="secondary" size="sm" data-testid="skills-duplicate" @click="duplicateToProject">Duplicate to project</Button>
+              <Button v-if="store.creating" type="button" variant="ghost" size="sm" data-testid="skills-discard" :disabled="store.saving" @click="store.cancelNew()">Cancel</Button>
+              <Button v-else type="button" variant="ghost" size="sm" data-testid="skills-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
+              <Button type="button" size="sm" data-testid="skills-save" :disabled="saveDisabled" @click="save">{{ store.saving ? "Saving…" : store.creating ? "Create" : "Save" }}</Button>
+              <Button v-if="!store.creating" type="button" variant="destructive" size="sm" data-testid="skills-uninstall" @click="uninstall">Uninstall</Button>
             </div>
           </header>
           <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
@@ -146,7 +155,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                 </aside>
                 <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">
                   <div class="mx-auto w-full max-w-3xl" data-testid="skills-editor">
-                    <MarkdownBodyEditor :body="store.draftBody" :original="store.doc.body" kind="markdown" :rich="true" @change="store.setBody($event.body)" />
+                    <MarkdownBodyEditor :body="store.draftBody" :original="store.creating ? '' : (store.doc?.body ?? '')" kind="markdown" :rich="true" @change="store.setBody($event.body)" />
                   </div>
                 </div>
               </div>

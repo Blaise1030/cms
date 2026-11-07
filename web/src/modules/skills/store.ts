@@ -23,14 +23,17 @@ export const useSkillsStore = defineStore("skills", () => {
   const draftName = ref("");
   const draftDescription = ref("");
   const draftBody = ref("");
+  /** A brand-new skill is being authored in the editor; nothing is on disk yet. */
+  const creating = ref(false);
+  const newScope = ref<SkillScope>("project");
   const loading = ref(false);
   const saving = ref(false);
   const error = ref<string | null>(null);
   const conflict = ref<SkillConflict | null>(null);
   /** The save was refused because the project is on main; waiting for a change to be created. */
   const needsChange = ref(false);
-  /** The mutation to retry once Create Change finishes (`save` or `uninstall`). */
-  const pendingAction = ref<"save" | "uninstall" | null>(null);
+  /** The mutation to retry once Create Change finishes. */
+  const pendingAction = ref<"save" | "uninstall" | "create" | null>(null);
   /** The skill changed on disk while the draft was being edited. */
   const changedOnDisk = ref(false);
   /** The daemon could not read the skill's front matter; the message says why. */
@@ -40,6 +43,9 @@ export const useSkillsStore = defineStore("skills", () => {
   let request = 0;
 
   const dirty = computed(() => {
+    if (creating.value) {
+      return !!(draftName.value.trim() || draftDescription.value.trim() || draftBody.value.trim());
+    }
     const d = doc.value;
     if (!d) return false;
     return draftName.value !== d.name || draftDescription.value !== d.description || draftBody.value !== d.body;
@@ -70,6 +76,23 @@ export const useSkillsStore = defineStore("skills", () => {
   function setName(name: string) { draftName.value = name; }
   function setDescription(description: string) { draftDescription.value = description; }
   function setBody(body: string) { draftBody.value = body; }
+
+  /** Start a brand-new skill in the outer editor; it is not written until `create`. */
+  function startNew(scope: SkillScope): boolean {
+    if (!projectId.value) return false;
+    if (!canLeave()) return false;
+    ++request; ++generation; saving.value = false;
+    selected.value = null; doc.value = null; resetDrafts(null); changedOnDisk.value = false; clearSaveState();
+    creating.value = true;
+    newScope.value = scope;
+    return true;
+  }
+
+  function cancelNew() {
+    creating.value = false;
+    resetDrafts(null);
+    clearSaveState();
+  }
 
   /** Re-read the list (and the open skill). A draft is never replaced; it is flagged when the file is no longer the one it started from. */
   async function reload() {
@@ -122,6 +145,7 @@ export const useSkillsStore = defineStore("skills", () => {
     ++request; ++generation; saving.value = false;
     projectId.value = id; branch.value = null; list.value = []; catalog.value = [];
     selected.value = null; doc.value = null; resetDrafts(null); changedOnDisk.value = false; clearSaveState();
+    creating.value = false;
     await readBranch(id);
     await reload();
   }
@@ -136,7 +160,8 @@ export const useSkillsStore = defineStore("skills", () => {
 
   /** Select a skill to edit, loading its body. */
   async function select(id: string, scope: SkillScope) {
-    if (!canLeave()) return;
+    // Creating is an internal transition (install selects its own result); no discard prompt.
+    if (!creating.value && !canLeave()) return;
     const version = ++request; ++generation; saving.value = false;
     selected.value = { id, scope };
     doc.value = null; resetDrafts(null); changedOnDisk.value = false; clearSaveState();
@@ -151,6 +176,14 @@ export const useSkillsStore = defineStore("skills", () => {
   }
 
   function canLeave() {
+    if (creating.value) {
+      if (!dirty.value) { creating.value = false; resetDrafts(null); return true; }
+      if (!window.confirm("Discard this new skill?")) return false;
+      creating.value = false;
+      resetDrafts(null);
+      clearSaveState();
+      return true;
+    }
     if (!dirty.value) return true;
     if (!window.confirm("Discard unsaved skill changes?")) return false;
     resetDrafts(doc.value);
@@ -158,6 +191,7 @@ export const useSkillsStore = defineStore("skills", () => {
   }
   /** Put the draft back to the loaded file; a file known to have changed on disk is re-read. */
   function discard() {
+    if (creating.value) { cancelNew(); return; }
     const stale = changedOnDisk.value;
     resetDrafts(doc.value); changedOnDisk.value = false; clearSaveState();
     if (stale) void reload();
@@ -210,6 +244,12 @@ export const useSkillsStore = defineStore("skills", () => {
    * flight for this skill is shared, not repeated. Throws after recording the failure, the draft kept.
    */
   async function save(): Promise<SkillDoc> {
+    if (creating.value) {
+      await create();
+      const saved = doc.value;
+      if (!saved) throw new Error("The new skill could not be opened");
+      return saved;
+    }
     const d = doc.value;
     if (!d) throw new Error("No skill is open");
     if (flight?.generation === generation) return flight.promise;
@@ -218,13 +258,35 @@ export const useSkillsStore = defineStore("skills", () => {
     flight = mine;
     try { return await mine.promise; } finally { if (flight === mine) flight = null; }
   }
-  /** After Create Change from main: retry the refused mutation (save or uninstall) on the new branch. */
+  /** Write the new skill: install a blank package, then save the instructions typed in the editor. */
+  async function create(): Promise<SkillMeta> {
+    if (!creating.value) throw new Error("No new skill is open");
+    const name = draftName.value.trim();
+    const description = draftDescription.value.trim();
+    if (!name || !description) throw new Error("Name and description are required");
+    const body = draftBody.value;
+    const scope = newScope.value;
+    try {
+      const meta = await install(scope, { blank: { name, description } });
+      creating.value = false;
+      if (body.trim()) {
+        setBody(body);
+        await save();
+      }
+      return meta;
+    } catch (err) {
+      if (needsChange.value) pendingAction.value = "create";
+      throw err;
+    }
+  }
+  /** After Create Change from main: retry the refused mutation (save, create, or uninstall). */
   function resumeSave(nextBranch: string) {
     needsChange.value = false;
     branch.value = nextBranch;
     const action = pendingAction.value;
     pendingAction.value = null;
     if (action === "uninstall") return uninstall();
+    if (action === "create") return create();
     if (action === "save") return save();
   }
 
@@ -271,7 +333,9 @@ export const useSkillsStore = defineStore("skills", () => {
   onScopeDispose(() => offs.forEach(off => off()));
 
   return {
-    projectId, branch, list, catalog, selected, doc, draftName, draftDescription, draftBody, dirty, loading, saving, error, conflict, needsChange, changedOnDisk, invalid, invalidSource,
-    open, select, setName, setDescription, setBody, save, resumeSave, discard, reloadFromDisk, install, uninstall, reload, refreshForBranch, canLeave,
+    projectId, branch, list, catalog, selected, doc, draftName, draftDescription, draftBody, creating, newScope,
+    dirty, loading, saving, error, conflict, needsChange, changedOnDisk, invalid, invalidSource,
+    open, select, setName, setDescription, setBody, startNew, cancelNew, create, save, resumeSave, discard,
+    reloadFromDisk, install, uninstall, reload, refreshForBranch, canLeave,
   };
 });
