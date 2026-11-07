@@ -96,7 +96,7 @@ function onFile(event: Event) {
   <Dialog v-model:open="open">
     <DialogContent
       :show-close-button="false"
-      class="max-h-[94vh] min-h-[560px] gap-6 overflow-y-auto p-6 sm:max-w-5xl sm:p-8"
+      class="max-h-[94vh] min-h-[420px] gap-4 overflow-y-auto p-5 sm:max-w-5xl sm:p-6"
       data-testid="install-skill-dialog"
     >
       <DialogHeader class="sr-only">
@@ -146,7 +146,7 @@ function onFile(event: Event) {
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap items-center gap-3">
+        <div class="mt-3 flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground text-sm">Install into</span>
           <div class="flex shrink-0 items-center gap-2">
             <span
@@ -174,9 +174,9 @@ function onFile(event: Event) {
           {{ error }}
         </p>
 
-        <TabsContent value="catalog" class="mt-6 min-w-0">
-          <h3 class="px-3 text-base font-semibold">Built-in</h3>
-          <div class="mt-3 grid gap-x-10 gap-y-3 sm:grid-cols-2">
+        <TabsContent value="catalog" class="mt-4 min-w-0">
+          <h3 class="px-2.5 text-sm font-semibold">Built-in</h3>
+          <div class="mt-2 grid gap-x-8 gap-y-1 sm:grid-cols-2">
             <button
               v-for="item in visibleCatalog"
               :key="item.id"
@@ -185,24 +185,24 @@ function onFile(event: Event) {
               :title="`Install ${item.name}`"
               data-testid="install-catalog-install"
               :data-skill-id="item.id"
-              class="group hover:bg-muted/50 flex min-w-0 items-center gap-4 rounded-xl p-3 text-left transition-colors disabled:cursor-default disabled:hover:bg-transparent"
+              class="group hover:bg-muted/50 flex min-w-0 items-center gap-3 rounded-lg p-2.5 text-left transition-colors disabled:cursor-default disabled:hover:bg-transparent"
               @click="install({ catalog: { id: item.id } })"
             >
               <span
-                class="flex size-12 shrink-0 items-center justify-center rounded-xl text-white"
+                class="flex size-10 shrink-0 items-center justify-center rounded-lg text-white"
                 :class="catalogStyle(item.id).color"
               >
-                <component :is="catalogStyle(item.id).icon" class="size-6" aria-hidden="true" />
+                <component :is="catalogStyle(item.id).icon" class="size-5" aria-hidden="true" />
               </span>
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-[15px] font-semibold">{{ item.name }}</span>
-                <span class="text-muted-foreground block truncate text-sm">{{ item.description }}</span>
+                <span class="block truncate text-sm font-semibold">{{ item.name }}</span>
+                <span class="text-muted-foreground block truncate text-xs">{{ item.description }}</span>
               </span>
               <span
                 v-if="installedInScope(item)"
-                class="text-muted-foreground flex shrink-0 items-center gap-1 text-sm"
+                class="text-muted-foreground flex shrink-0 items-center gap-1 text-xs"
               >
-                <Check class="size-4" aria-hidden="true" /> Installed
+                <Check class="size-3.5" aria-hidden="true" /> Installed
               </span>
               <Download
                 v-else
@@ -222,7 +222,7 @@ function onFile(event: Event) {
           </div>
         </TabsContent>
 
-        <TabsContent value="import" class="mt-6 grid min-w-0 gap-4 sm:grid-cols-2">
+        <TabsContent value="import" class="mt-4 grid min-w-0 gap-4 sm:grid-cols-2">
           <div class="rounded-xl border p-5">
             <Label for="install-import-file" class="text-sm font-medium">Import a SKILL.md</Label>
             <p class="text-muted-foreground mt-1 text-sm">
