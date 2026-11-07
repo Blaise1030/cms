@@ -71,7 +71,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                   v-for="m in store.list"
                   :key="`${m.id}:${m.scope}`"
                   type="button"
-                  class="group flex min-w-0 flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent data-[active=true]:bg-card data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-sm data-[active=true]:btn-raised-soft data-[active=true]:hover:bg-card"
+                  class="group flex min-w-0 flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent data-[active=true]:bg-background data-[active=true]:text-sidebar-accent-foreground data-[active=true]:btn-raised-soft data-[active=true]:hover:bg-background"
                   :data-active="isSelected(m)"
                   :aria-current="isSelected(m) ? 'page' : undefined"
                   data-testid="skills-sidebar-row"

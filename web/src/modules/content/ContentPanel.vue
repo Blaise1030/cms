@@ -271,9 +271,9 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
 /** Same as App Settings sidebar nav (no primary tint — that belongs on the icon rail). */
 const navItem = "h-9 rounded-lg px-2.5 text-[13px]";
 const navActive = [
-  "font-medium shadow-sm btn-raised-soft",
-  "data-[active=true]:bg-card data-[active=true]:text-sidebar-accent-foreground",
-  "data-[active=true]:hover:bg-card",
+  "font-medium btn-raised-soft",
+  "data-[active=true]:bg-background data-[active=true]:text-sidebar-accent-foreground",
+  "data-[active=true]:hover:bg-background",
 ].join(" ");
 /** Same kind glyphs as the entry list, so a collection's type is visible before you open it. */
 const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as const;
