@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change, SkillMeta } from "@/core/types";
@@ -59,11 +59,6 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 py-2">
             <SidebarGroupContent>
-              <div v-if="store.list.length" class="px-2 pb-2">
-                <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" data-testid="skills-install" @click="installOpen = true">
-                  <Plus class="size-4" aria-hidden="true" /> Install skills
-                </Button>
-              </div>
               <nav data-testid="skills-list" aria-label="Installed skills" class="flex flex-col gap-0.5">
                 <button
                   v-for="m in store.list"
@@ -88,6 +83,11 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarFooter v-if="store.list.length" class="px-2 pb-2">
+          <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" data-testid="skills-install" @click="installOpen = true">
+            <Plus class="size-4" aria-hidden="true" /> Install skills
+          </Button>
+        </SidebarFooter>
       </Sidebar>
       </ResizablePanel>
       <ResizableHandle with-handle class="bg-transparent" />
