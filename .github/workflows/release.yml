@@ -191,7 +191,7 @@ jobs:
         run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }}
       - name: Build (unsigned)
         if: vars.DESKTOP_UNSIGNED == 'true'
-        run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }}
+        run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - name: Verify signature and notarization
         if: vars.DESKTOP_UNSIGNED != 'true'
         run: |
@@ -200,6 +200,8 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
       - name: Package
+        env:
+          DESKTOP_UNSIGNED: ${{ vars.DESKTOP_UNSIGNED }}
         run: |
           bundle=src-tauri/target/${{ matrix.target }}/release/bundle
           name=orso-${{ needs.check.outputs.version }}-${{ matrix.arch }}
@@ -207,7 +209,7 @@ jobs:
           dmgs=("$bundle"/dmg/*.dmg)
           [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
           cp "${dmgs[0]}" "desktop/$name.dmg"
-          if [ "${{ vars.DESKTOP_UNSIGNED }}" != "true" ]; then
+          if [ "$DESKTOP_UNSIGNED" != "true" ]; then
             cp "$bundle/macos/orso.app.tar.gz" "desktop/$name.app.tar.gz"
             cp "$bundle/macos/orso.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
           fi
