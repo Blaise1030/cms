@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change, SkillMeta } from "@/core/types";
 import { useSkillsStore } from "./store";
@@ -41,12 +41,6 @@ function beforeUnload(event: BeforeUnloadEvent) { if (store.dirty) { event.preve
 onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
 
-const projectSkills = computed(() => store.list.filter(m => m.scope === "project"));
-const globalSkills = computed(() => store.list.filter(m => m.scope === "global"));
-const groups = computed(() => [
-  { label: "This project", scope: "project" as const, items: projectSkills.value },
-  { label: "Global", scope: "global" as const, items: globalSkills.value },
-]);
 const isSelected = (m: SkillMeta) => store.selected?.id === m.id && store.selected?.scope === m.scope;
 /** Project saves are change-gated; global saves only need a dirty draft. */
 const saveDisabled = computed(() => !store.dirty || store.saving || (store.doc?.scope === "project" && store.needsChange));
@@ -59,12 +53,11 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
     <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
       <Sidebar data-testid="skills-sidebar" collapsible="none" class="h-full min-h-0 w-64 min-w-0 shrink-0 bg-transparent">
         <SidebarContent class="overflow-hidden">
-          <SidebarGroup v-for="group in groups" :key="group.scope" class="min-h-0 py-2">
-            <SidebarGroupLabel>{{ group.label }}</SidebarGroupLabel>
+          <SidebarGroup class="min-h-0 py-2">
             <SidebarGroupContent>
-              <nav :data-testid="`skills-group-${group.scope}`" :aria-label="group.label" class="flex flex-col gap-0.5">
+              <nav data-testid="skills-list" aria-label="Installed skills" class="flex flex-col gap-0.5">
                 <button
-                  v-for="m in group.items"
+                  v-for="m in store.list"
                   :key="`${m.id}:${m.scope}`"
                   type="button"
                   class="group flex min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent/60 focus-visible:bg-accent"
@@ -81,7 +74,7 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
                   </span>
                   <span class="truncate text-xs text-muted-foreground">{{ m.description }}</span>
                 </button>
-                <p v-if="!group.items.length" class="px-2 py-1.5 text-xs text-muted-foreground">None installed</p>
+                <p v-if="!store.list.length" class="px-2 py-1.5 text-xs text-muted-foreground">None installed</p>
               </nav>
             </SidebarGroupContent>
           </SidebarGroup>
