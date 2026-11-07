@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, useSlots, watch } from "vue";
+import { nextTick, ref, useSlots, watch } from "vue";
 import { BotMessageSquare } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +24,24 @@ const macDesktop = isMacDesktop();
 const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7 fullscreen:pl-3" : "pr-3 pl-20 fullscreen:pl-3";
 
 const chatPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
+const workspacePanel = ref<{ getSize: () => number; resize: (size: number) => void } | null>(null);
+/** The workspace's split before a page without chat takes the full width. */
+let workspaceSize = 65;
 const chatOpen = ref(true);
+
+// Pages without an agent drop the chat column; a saved 65/35 split would leave its space empty.
+watch(
+  () => props.showChat,
+  (show, was) => {
+    if (!workspacePanel.value) return;
+    if (!show) {
+      workspaceSize = workspacePanel.value.getSize();
+      workspacePanel.value.resize(100);
+    } else if (was === false) {
+      void nextTick(() => workspacePanel.value?.resize(workspaceSize));
+    }
+  },
+);
 function toggleChat() {
   if (chatOpen.value) chatPanel.value?.collapse();
   else chatPanel.value?.expand();
@@ -55,6 +72,7 @@ watch(
       >
         <ResizablePanel
           id="workspace"
+          ref="workspacePanel"
           :default-size="showChat ? 65 : 100"
           :min-size="showChat ? 30 : 100"
         >
