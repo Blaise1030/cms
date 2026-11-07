@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
 import { Check, Download, Palette, Search, Sparkles } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -198,12 +199,13 @@ function onFile(event: Event) {
                 <span class="block truncate text-sm font-semibold">{{ item.name }}</span>
                 <span class="text-muted-foreground block truncate text-xs">{{ item.description }}</span>
               </span>
-              <span
+              <Badge
                 v-if="installedInScope(item)"
-                class="text-muted-foreground flex shrink-0 items-center gap-1 text-xs"
+                variant="secondary"
+                class="shrink-0 gap-1 text-xs"
               >
                 <Check class="size-3.5" aria-hidden="true" /> Installed
-              </span>
+              </Badge>
               <Download
                 v-else
                 class="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
