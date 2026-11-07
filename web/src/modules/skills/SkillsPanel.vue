@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Sparkles } from "@lucide/vue";
+import { Plus, Sparkles } from "@lucide/vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,11 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
         <SidebarContent class="overflow-hidden">
           <SidebarGroup class="min-h-0 py-2">
             <SidebarGroupContent>
+              <div v-if="store.list.length" class="px-2 pb-2">
+                <Button type="button" variant="outline" size="sm" class="w-full justify-start gap-2" data-testid="skills-install" @click="installOpen = true">
+                  <Plus class="size-4" aria-hidden="true" /> Install…
+                </Button>
+              </div>
               <nav data-testid="skills-list" aria-label="Installed skills" class="flex flex-col gap-0.5">
                 <button
                   v-for="m in store.list"
@@ -107,7 +112,6 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
             <h2 class="truncate px-1 text-sm font-medium">{{ store.doc.name }}</h2>
             <p class="truncate text-xs text-muted-foreground" data-testid="skills-path" :title="store.doc.path">{{ store.doc.path }}</p>
             <div class="ml-auto flex shrink-0 items-center gap-2">
-              <Button type="button" variant="outline" size="sm" data-testid="skills-install" @click="installOpen = true">Install…</Button>
               <Button v-if="store.selected?.scope === 'global'" type="button" variant="secondary" size="sm" data-testid="skills-duplicate" @click="duplicateToProject">Duplicate to project</Button>
               <Button type="button" variant="ghost" size="sm" data-testid="skills-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
               <Button type="button" size="sm" data-testid="skills-save" :disabled="saveDisabled" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
@@ -160,7 +164,6 @@ function select(m: SkillMeta) { void store.select(m.id, m.scope); }
         <div v-else class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="skills-no-selection">
           <Sparkles class="size-8 opacity-50" aria-hidden="true" />
           <p>Select a skill or install one.</p>
-          <Button type="button" data-testid="skills-install" @click="installOpen = true">Install…</Button>
         </div>
 
         <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
