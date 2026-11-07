@@ -1,17 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
-import { Palette, Search, Sparkles } from "@lucide/vue";
+import { Check, Download, Palette, Search, Sparkles } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -29,14 +21,29 @@ const store = useSkillsStore();
 
 const segment = ref<"catalog" | "import">("catalog");
 const scope = ref<SkillScope>("project");
+const query = ref("");
 const skillMd = ref("");
 const fileName = ref("");
 const blankName = ref("");
 const blankDescription = ref("");
 
 const error = computed(() => store.error ?? store.conflict?.message ?? null);
-const CATALOG_ICON: Record<string, Component> = { seo: Search, design: Palette };
-const catalogIcon = (id: string) => CATALOG_ICON[id] ?? Sparkles;
+
+/** Each catalog skill gets a colorful tile, like an app icon. */
+const CATALOG_STYLE: Record<string, { icon: Component; color: string }> = {
+  seo: { icon: Search, color: "bg-teal-600" },
+  design: { icon: Palette, color: "bg-blue-600" },
+};
+const catalogStyle = (id: string) =>
+  CATALOG_STYLE[id] ?? { icon: Sparkles, color: "bg-slate-600" };
+
+const visibleCatalog = computed(() => {
+  const needle = query.value.trim().toLowerCase();
+  if (!needle) return store.catalog;
+  return store.catalog.filter(item =>
+    `${item.name} ${item.description}`.toLowerCase().includes(needle),
+  );
+});
 
 watch(open, (isOpen) => {
   if (!isOpen) return;
@@ -45,6 +52,7 @@ watch(open, (isOpen) => {
   store.conflict = null;
   segment.value = "catalog";
   scope.value = "project";
+  query.value = "";
   skillMd.value = "";
   fileName.value = "";
   blankName.value = "";
@@ -66,6 +74,11 @@ async function install(source: SkillSource) {
   }
 }
 
+/** "New skill" jumps to the blank form. */
+function newSkill() {
+  segment.value = "import";
+}
+
 function onFile(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -80,16 +93,50 @@ function onFile(event: Event) {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-xl" data-testid="install-skill-dialog">
-      <DialogHeader>
+    <DialogContent
+      class="max-h-[86vh] min-h-[560px] gap-6 overflow-y-auto p-6 sm:max-w-5xl sm:p-8"
+      data-testid="install-skill-dialog"
+    >
+      <DialogHeader class="sr-only">
         <DialogTitle>Install skill</DialogTitle>
-        <DialogDescription>
-          Add a built-in skill, or import your own SKILL.md.
-        </DialogDescription>
+        <DialogDescription>Add a built-in skill, import a SKILL.md, or create a blank skill.</DialogDescription>
       </DialogHeader>
 
-      <div class="grid min-w-0 gap-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
+      <Tabs v-model="segment" class="min-w-0">
+        <div class="flex flex-wrap items-center gap-3">
+          <TabsList class="h-10 p-1">
+            <TabsTrigger value="catalog" class="px-4 text-[15px]" data-testid="install-segment-catalog">
+              Catalog
+            </TabsTrigger>
+            <TabsTrigger value="import" class="px-4 text-[15px]" data-testid="install-segment-import">
+              Import
+            </TabsTrigger>
+          </TabsList>
+
+          <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+            <InputGroup class="h-9 w-full rounded-full sm:w-64">
+              <InputGroupAddon align="inline-start">
+                <Search class="size-4 opacity-50" aria-hidden="true" />
+              </InputGroupAddon>
+              <InputGroupInput
+                v-model="query"
+                placeholder="Search…"
+                aria-label="Search skills"
+                data-testid="install-search"
+              />
+            </InputGroup>
+            <Button
+              type="button"
+              class="rounded-full px-5"
+              data-testid="install-new"
+              @click="newSkill"
+            >
+              New skill
+            </Button>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground text-sm">Install into</span>
           <div class="bg-muted/40 inline-flex shrink-0 rounded-lg border p-0.5" role="group" aria-label="Install scope">
             <button
@@ -119,118 +166,118 @@ function onFile(event: Event) {
           {{ error }}
         </p>
 
-        <Tabs v-model="segment" class="min-w-0">
-          <TabsList>
-            <TabsTrigger value="catalog" data-testid="install-segment-catalog">Catalog</TabsTrigger>
-            <TabsTrigger value="import" data-testid="install-segment-import">Import</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="catalog" class="min-w-0">
-            <div class="max-h-[45vh] overflow-y-auto pr-1">
-              <ItemGroup class="gap-2">
-                <Item
-                  v-for="item in store.catalog"
-                  :key="item.id"
-                  variant="outline"
-                  size="sm"
-                  data-testid="install-catalog-item"
-                  :data-skill-id="item.id"
-                  class="min-w-0"
-                >
-                  <ItemMedia variant="icon">
-                    <component :is="catalogIcon(item.id)" aria-hidden="true" />
-                  </ItemMedia>
-                  <ItemContent class="min-w-0">
-                    <ItemTitle>{{ item.name }}</ItemTitle>
-                    <ItemDescription>{{ item.description }}</ItemDescription>
-                  </ItemContent>
-                  <ItemActions class="shrink-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      :disabled="installedInScope(item) || store.saving"
-                      data-testid="install-catalog-install"
-                      :data-skill-id="item.id"
-                      @click="install({ catalog: { id: item.id } })"
-                    >
-                      {{ installedInScope(item) ? "Installed" : "Install" }}
-                    </Button>
-                  </ItemActions>
-                </Item>
-              </ItemGroup>
-              <p
-                v-if="!store.catalog.length"
-                class="text-muted-foreground py-2 text-xs"
-                data-testid="install-catalog-empty"
+        <TabsContent value="catalog" class="mt-6 min-w-0">
+          <h3 class="text-base font-semibold">Built-in</h3>
+          <div class="mt-3 grid gap-x-10 gap-y-1 sm:grid-cols-2">
+            <button
+              v-for="item in visibleCatalog"
+              :key="item.id"
+              type="button"
+              :disabled="installedInScope(item) || store.saving"
+              :title="`Install ${item.name}`"
+              data-testid="install-catalog-install"
+              :data-skill-id="item.id"
+              class="group hover:bg-muted/60 flex min-w-0 items-center gap-4 rounded-xl p-3 text-left transition-colors disabled:cursor-default disabled:hover:bg-transparent"
+              @click="install({ catalog: { id: item.id } })"
+            >
+              <span
+                class="flex size-12 shrink-0 items-center justify-center rounded-xl text-white"
+                :class="catalogStyle(item.id).color"
               >
-                {{ store.loading ? "Loading catalog…" : "No catalog skills available." }}
-              </p>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="import" class="grid min-w-0 gap-4">
-            <div class="rounded-lg border p-4">
-              <Label for="install-import-file" class="text-sm font-medium">Import a SKILL.md</Label>
-              <p class="text-muted-foreground mt-1 text-xs">
-                A Markdown file with name and description front matter.
-              </p>
-              <input
-                id="install-import-file"
-                type="file"
-                accept=".md,text/markdown"
-                data-testid="install-import-file"
-                class="text-muted-foreground mt-3 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-secondary-foreground"
-                @change="onFile"
+                <component :is="catalogStyle(item.id).icon" class="size-6" aria-hidden="true" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-[15px] font-semibold">{{ item.name }}</span>
+                <span class="text-muted-foreground block truncate text-sm">{{ item.description }}</span>
+              </span>
+              <span
+                v-if="installedInScope(item)"
+                class="text-muted-foreground flex shrink-0 items-center gap-1 text-sm"
+              >
+                <Check class="size-4" aria-hidden="true" /> Installed
+              </span>
+              <Download
+                v-else
+                class="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
+                aria-hidden="true"
               />
-              <p v-if="fileName" class="text-muted-foreground mt-2 truncate text-xs" data-testid="install-import-file-name">
-                {{ fileName }}
-              </p>
+            </button>
+            <p
+              v-if="!visibleCatalog.length"
+              class="text-muted-foreground py-2 text-sm"
+              data-testid="install-catalog-empty"
+            >
+              {{ query.trim()
+                ? "No skills match your search."
+                : store.loading ? "Loading catalog…" : "No catalog skills available." }}
+            </p>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="import" class="mt-6 grid min-w-0 gap-4 sm:grid-cols-2">
+          <div class="rounded-xl border p-5">
+            <Label for="install-import-file" class="text-sm font-medium">Import a SKILL.md</Label>
+            <p class="text-muted-foreground mt-1 text-sm">
+              A Markdown file with name and description front matter.
+            </p>
+            <input
+              id="install-import-file"
+              type="file"
+              accept=".md,text/markdown"
+              data-testid="install-import-file"
+              class="text-muted-foreground mt-4 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-secondary-foreground"
+              @change="onFile"
+            />
+            <p v-if="fileName" class="text-muted-foreground mt-2 truncate text-xs" data-testid="install-import-file-name">
+              {{ fileName }}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              class="mt-4"
+              :disabled="!skillMd || store.saving"
+              data-testid="install-import-install"
+              @click="install({ import: { skillMd } })"
+            >
+              Install
+            </Button>
+          </div>
+
+          <div class="rounded-xl border p-5">
+            <p class="flex items-center gap-1.5 text-sm font-medium">
+              <Sparkles class="size-3.5" aria-hidden="true" /> Create a blank skill
+            </p>
+            <p class="text-muted-foreground mt-1 text-sm">
+              Start with a name and description, then write the instructions.
+            </p>
+            <div class="mt-4 grid gap-2">
+              <Input
+                v-model="blankName"
+                placeholder="Name"
+                data-testid="install-blank-name"
+                class="h-8"
+              />
+              <Input
+                v-model="blankDescription"
+                placeholder="Description"
+                data-testid="install-blank-description"
+                class="h-8"
+              />
               <Button
                 type="button"
+                variant="outline"
                 size="sm"
-                class="mt-3"
-                :disabled="!skillMd || store.saving"
-                data-testid="install-import-install"
-                @click="install({ import: { skillMd } })"
+                class="mt-1 self-start"
+                :disabled="!blankName.trim() || !blankDescription.trim() || store.saving"
+                data-testid="install-blank-create"
+                @click="install({ blank: { name: blankName.trim(), description: blankDescription.trim() } })"
               >
-                Install
+                Create blank
               </Button>
             </div>
-
-            <div class="rounded-lg border p-4">
-              <p class="mb-3 flex items-center gap-1.5 text-sm font-medium">
-                <Sparkles class="size-3.5" aria-hidden="true" /> Create a blank skill
-              </p>
-              <div class="grid gap-2">
-                <Input
-                  v-model="blankName"
-                  placeholder="Name"
-                  data-testid="install-blank-name"
-                  class="h-8"
-                />
-                <Input
-                  v-model="blankDescription"
-                  placeholder="Description"
-                  data-testid="install-blank-description"
-                  class="h-8"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  class="self-start"
-                  :disabled="!blankName.trim() || !blankDescription.trim() || store.saving"
-                  data-testid="install-blank-create"
-                  @click="install({ blank: { name: blankName.trim(), description: blankDescription.trim() } })"
-                >
-                  Create blank
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </DialogContent>
   </Dialog>
 </template>

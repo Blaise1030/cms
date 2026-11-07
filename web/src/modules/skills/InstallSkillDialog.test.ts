@@ -235,6 +235,32 @@ describe("InstallSkillDialog", () => {
     expect($('[data-testid="install-catalog-empty"]')!.textContent).toContain("No catalog skills available");
   });
 
+  it("filters the catalog with the search field", async () => {
+    await setup();
+    mountDialog();
+    await flushPromises();
+
+    const search = $<HTMLInputElement>('[data-testid="install-search"]')!;
+    search.value = "Design";
+    search.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    expect(installButton("seo")).toBeNull();
+    expect(installButton("design")).not.toBeNull();
+  });
+
+  it("New skill opens the blank form", async () => {
+    await setup();
+    mountDialog();
+    await flushPromises();
+
+    $<HTMLButtonElement>('[data-testid="install-new"]')!.click();
+    await flushPromises();
+
+    expect($('[data-testid="install-blank-name"]')).not.toBeNull();
+    expect($('[data-testid="install-blank-description"]')).not.toBeNull();
+  });
+
   it("clears a stale error when the dialog reopens", async () => {
     const { store } = await setup();
     const w = mount(InstallSkillDialog, { props: { open: false }, attachTo: document.body });
