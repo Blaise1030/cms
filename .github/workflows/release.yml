@@ -125,8 +125,8 @@ jobs:
           - { target: x86_64-apple-darwin, arch: x86_64 }
     runs-on: macos-latest
     steps:
-      # Unsigned or un-notarized builds are never shipped.
       - name: Require signing and notarization secrets
+        if: vars.DESKTOP_UNSIGNED != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -146,6 +146,9 @@ jobs:
             echo "::error::Missing secrets:$missing (see docs/desktop-release.md)"
             exit 1
           fi
+      - name: Unsigned desktop release notice
+        if: vars.DESKTOP_UNSIGNED == 'true'
+        run: echo "DESKTOP_UNSIGNED=true; shipping unsigned DMGs"
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -175,6 +178,7 @@ jobs:
       - run: pnpm --prefix src-tauri install --frozen-lockfile
       # The app version comes from package.json (tauri.conf.json points at it).
       - name: Build, sign and notarize
+        if: vars.DESKTOP_UNSIGNED != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -185,13 +189,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }}
+      - name: Build (unsigned)
+        if: vars.DESKTOP_UNSIGNED == 'true'
+        run: pnpm --prefix src-tauri tauri build --ci --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - name: Verify signature and notarization
+        if: vars.DESKTOP_UNSIGNED != 'true'
         run: |
           app=src-tauri/target/${{ matrix.target }}/release/bundle/macos/orso.app
           codesign --verify --deep --strict --verbose=2 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=2 "$app"
       - name: Package
+        env:
+          DESKTOP_UNSIGNED: ${{ vars.DESKTOP_UNSIGNED }}
         run: |
           bundle=src-tauri/target/${{ matrix.target }}/release/bundle
           name=orso-${{ needs.check.outputs.version }}-${{ matrix.arch }}
@@ -199,8 +209,10 @@ jobs:
           dmgs=("$bundle"/dmg/*.dmg)
           [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
           cp "${dmgs[0]}" "desktop/$name.dmg"
-          cp "$bundle/macos/orso.app.tar.gz" "desktop/$name.app.tar.gz"
-          cp "$bundle/macos/orso.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
+          if [ "$DESKTOP_UNSIGNED" != "true" ]; then
+            cp "$bundle/macos/orso.app.tar.gz" "desktop/$name.app.tar.gz"
+            cp "$bundle/macos/orso.app.tar.gz.sig" "desktop/$name.app.tar.gz.sig"
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
@@ -220,6 +232,7 @@ jobs:
           merge-multiple: true
       # The desktop app's updater reads releases/latest/download/latest.json.
       - name: Write the desktop updater manifest
+        if: vars.DESKTOP_UNSIGNED != 'true'
         env:
           VERSION: ${{ needs.check.outputs.version }}
           BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.check.outputs.version }}
