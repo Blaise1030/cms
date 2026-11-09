@@ -1,0 +1,1 @@
+Can we please ensure the dameon is turned on and off together with the app
