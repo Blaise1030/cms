@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M6Z1N5C73GDKVVPRVW5CGYFG",
+  "session_id": "335ab30f-0e31-443e-bcad-95a44da5a3c3",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-09T02:19:35.890552Z",
+  "branch": "feat/merge-onboarding-runtimes",
+  "checkpoints_count": 13,
+  "save_step_count": 2,
+  "files_touched": [
+    "src/runtime/archive.rs"
+  ],
+  "agent": "Cursor",
+  "model": "default",
+  "turn_id": "913c61cd5d51",
+  "checkpoint_transcript_start": 51,
+  "transcript_lines_at_start": 51,
+  "compact_transcript_start": 16,
+  "token_usage": {
+    "input_tokens": 317999,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 7309568,
+    "output_tokens": 23757,
+    "api_call_count": 6
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 20
+  }
+}

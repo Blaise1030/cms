@@ -1,0 +1,29 @@
+yes
+
+---
+
+A
+
+---
+
+can we make it a desktop app instaed ? not a cli
+
+---
+
+'/var/folders/bk/vm0wjmvn4rx1drzkrkqllr_h0000gn/T/TemporaryItems/NSIRD_screencaptureui_4tu2EZ/Screenshot 2026-11-08 at 11.29.30 PM.png'
+
+---
+
+'/var/folders/bk/vm0wjmvn4rx1drzkrkqllr_h0000gn/T/TemporaryItems/NSIRD_screencaptureui_4tu2EZ/Screenshot 2026-11-08 at 11.29.30 PM.png' I downloaded the .tar.gx
+
+---
+
+Can you check for any un release change on my localy branch ?
+
+---
+
+They should be merged too
+
+---
+
+Merged all and a new release ?
