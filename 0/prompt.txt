@@ -1,0 +1,21 @@
+Can we please ensure the dameon is turned on and off together with the app
+
+---
+
+How to open with trusted permissions
+
+---
+
+2 issues, the onboarding view seems to keep on showing, the chat agent position setting seeems to be gone. where the chat can be opened from the bottom
+
+---
+
+'/Users/blaise/Desktop/Screenshot 2026-11-09 at 1.18.12 PM.png' This should not be expected
+
+---
+
+Ask you where is the differnet agent view appearance mode ?
+
+---
+
+Sounds good, can you commit and release this as a new versoin ?
