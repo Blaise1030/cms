@@ -373,10 +373,8 @@ impl<'a> Budget<'a> {
             }
             set_mode(&path, 0o755)?;
         }
-        for dir in [dest] {
-            if !dir.is_dir() {
-                return Err(RuntimeError::Archive("install directory is missing".into()));
-            }
+        if !dest.is_dir() {
+            return Err(RuntimeError::Archive("install directory is missing".into()));
         }
         Ok(())
     }

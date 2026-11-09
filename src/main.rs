@@ -16,6 +16,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // Serve carries many clap Option fields; Ctl/GitShim stay small.
 enum Command {
     /// Run the orso daemon.
     Serve {
