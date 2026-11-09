@@ -8,8 +8,8 @@ const complete: SetupStatus = {
   gh: true,
   githubSignedIn: true,
   providers: [
-    { id: "cursor", name: "Cursor CLI", available: false },
-    { id: "claude", name: "Claude Code", available: true },
+    { id: "cursor", name: "Cursor", available: true, chatReady: false },
+    { id: "claude", name: "Claude", available: true, chatReady: true },
   ],
   projectsDir: "/p",
 };
@@ -25,9 +25,22 @@ describe("setupIncomplete", () => {
     ["git", { git: false }],
     ["gh", { gh: false }],
     ["GitHub sign-in", { githubSignedIn: false }],
-    ["an agent", { providers: complete.providers.map((p) => ({ ...p, available: false })) }],
+    ["a chat-ready assistant", { providers: complete.providers.map((p) => ({ ...p, chatReady: false })) }],
   ])("is true without %s", (_, patch) => {
     expect(setupIncomplete({ ...complete, ...patch })).toBe(true);
+  });
+
+  it("counts chat-ready assistants rather than installed copies", () => {
+    // Available but not signed in is not enough to chat.
+    expect(setupIncomplete({ ...complete, providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }] })).toBe(true);
+    // Chat-ready is enough even when the daemon marks the copy unavailable.
+    expect(setupIncomplete({ ...complete, providers: [{ id: "opencode", name: "OpenCode", available: false, chatReady: true }] })).toBe(false);
+  });
+
+  it("waits for the site builder when a daemon reports it", () => {
+    const node = { phase: "downloading" as const, version: null, source: null, progress: 40, message: null };
+    expect(setupIncomplete({ ...complete, node })).toBe(true);
+    expect(setupIncomplete({ ...complete, node: { ...node, phase: "ready", progress: null } })).toBe(false);
   });
 });
 

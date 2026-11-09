@@ -119,9 +119,11 @@ fn known_provider(state: &AppState, id: &str) -> Result<bool, ApiError> {
     Ok(acp_argv_for(state, id)?.is_some())
 }
 
-/// ACP argv for `provider_id`: the test/env override first, then the provider
-/// registry (`agents.json` or the built-in defaults). `None` when the provider
-/// has no ACP command.
+/// ACP argv for `provider_id`: the test/env override first, then explicit
+/// `agents.json` entries, then the managed runtime, then a system CLI. Claude
+/// and Codex only fall back to `npx` when an override asks for it: an adapter
+/// that is not installed leaves chat unready rather than running an unpinned
+/// package.
 pub(crate) fn acp_argv_for(
     state: &AppState,
     provider_id: &str,
@@ -129,11 +131,74 @@ pub(crate) fn acp_argv_for(
     if let Some(argv) = providers::acp_argv(provider_id) {
         return Ok(Some(argv));
     }
+    if let Some(acp) = state.resolver.acp(provider_id) {
+        let unpinned_adapter = matches!(provider_id, "claude" | "codex")
+            && acp.source == crate::runtime::AcpSource::System;
+        if !unpinned_adapter {
+            return Ok(Some(acp.argv));
+        }
+    }
+    if crate::runtime::RuntimeId::from_provider(provider_id).is_some() {
+        // A built-in provider with no managed copy and no explicit override is
+        // not chat-ready; never silently run an unpinned npx adapter.
+        return Ok(None);
+    }
     Ok(providers::load(state.config.agents_config.as_deref())?
         .into_iter()
         .find(|p| p.id == provider_id)
         .map(|p| p.acp)
         .filter(|argv| !argv.is_empty()))
+}
+
+/// Whether an explicit `agents.json`/environment override supplies this
+/// provider's ACP command.
+pub(crate) fn has_explicit_acp(state: &AppState, provider_id: &str) -> bool {
+    providers::acp_argv(provider_id).is_some()
+        || matches!(
+            state.resolver.acp(provider_id).map(|acp| acp.source),
+            Some(crate::runtime::AcpSource::Env) | Some(crate::runtime::AcpSource::AgentsConfig)
+        )
+}
+
+/// A plain reason for a missing ACP command, including the state of the
+/// managed Claude/Codex adapter. `None` means an ACP command was found.
+pub(crate) fn acp_unavailable_reason(state: &AppState, provider_id: &str) -> Option<String> {
+    if acp_argv_for(state, provider_id).ok().flatten().is_some() {
+        return None;
+    }
+    let name = providers::display_name(provider_id);
+    let Some(runtime) = crate::runtime::RuntimeId::from_provider(provider_id) else {
+        return Some(format!("Chat isn't set up for {name} yet."));
+    };
+    if has_explicit_acp(state, provider_id) {
+        return Some(format!("Chat isn't set up for {name} yet."));
+    }
+    if !matches!(
+        runtime,
+        crate::runtime::RuntimeId::Claude | crate::runtime::RuntimeId::Codex
+    ) {
+        return Some(format!("Chat isn't set up for {name} yet."));
+    }
+    // The adapter runs on the managed Node and can drive either a managed or a
+    // user-installed CLI, so a resolvable provider is enough to finish setup.
+    if state.resolver.resolve(provider_id).is_err() {
+        return Some(format!("Download {name} to finish setting up chat."));
+    }
+    Some(match state.runtimes.adapter_state(runtime) {
+        crate::runtime::AdapterState::Installing => {
+            format!("Getting chat with {name} ready…")
+        }
+        crate::runtime::AdapterState::Failed { message } => message,
+        crate::runtime::AdapterState::Missing if state.runtimes.adapter_needs_node(runtime) => {
+            format!("Set up the site builder to finish chat with {name}.")
+        }
+        crate::runtime::AdapterState::Missing => {
+            format!("Getting chat with {name} ready…")
+        }
+        crate::runtime::AdapterState::Ready { .. } | crate::runtime::AdapterState::NotNeeded => {
+            format!("Chat with {name} is not ready yet.")
+        }
+    })
 }
 
 /// Spawn the chat's ACP process with `session/new` (not a terminal `AgentSession`).
@@ -145,7 +210,9 @@ pub(crate) async fn ensure_agent(
     record: &SessionRecord,
 ) -> Result<(), ApiError> {
     let argv = acp_argv_for(state, &record.provider)?.ok_or_else(|| {
-        ApiError::badreq(format!("provider {} has no ACP command", record.provider))
+        let reason = acp_unavailable_reason(state, &record.provider)
+            .unwrap_or_else(|| format!("Chat isn't set up for {} yet.", record.provider));
+        ApiError::badreq(reason)
     })?;
     let env = agent_env(state, project);
     let env: Vec<(&str, &str)> = env
@@ -168,8 +235,10 @@ pub(crate) async fn ensure_agent(
 }
 
 /// The agent-facing environment a chat process gets: `orso ctl` reaches the
-/// daemon with the chat's hook token (added by [`ChatManager::start`]), the git
-/// shim leads `PATH`, and `ORSO_REAL_GIT` names the real git.
+/// daemon with the chat's hook token (added by [`ChatManager::start`]), `PATH`
+/// puts the git shim, managed Node and managed provider bins before the login
+/// shell and daemon paths, and the Claude/Codex adapters are pointed at the
+/// managed binaries.
 pub fn agent_env(state: &AppState, project: &str) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = vec![
         (
@@ -188,11 +257,23 @@ pub fn agent_env(state: &AppState, project: &str) -> Vec<(String, String)> {
                 .into_owned(),
         ),
     ];
-    if let Some(shim) = crate::git_shim::ensure_shim_dir(&state.config) {
-        let own = std::env::var_os("PATH").unwrap_or_default();
-        let dirs = std::iter::once(shim).chain(std::env::split_paths(&own));
-        if let Ok(path) = std::env::join_paths(dirs) {
-            env.push(("PATH".into(), path.to_string_lossy().into_owned()));
+    // Always set PATH, even when the git shim is unavailable: a Finder-launched
+    // app otherwise has launchd's minimal PATH for chat subprocesses.
+    let path = state.resolver.child_path(None);
+    if !path.is_empty() {
+        env.push(("PATH".into(), path.to_string_lossy().into_owned()));
+    }
+    for (provider, key) in [
+        ("claude", "CLAUDE_CODE_EXECUTABLE"),
+        ("codex", "CODEX_PATH"),
+    ] {
+        if let Ok(resolved) = state.resolver.resolve(provider) {
+            if resolved.managed {
+                env.push((
+                    key.into(),
+                    resolved.executable.to_string_lossy().into_owned(),
+                ));
+            }
         }
     }
     env

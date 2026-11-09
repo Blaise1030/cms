@@ -12,11 +12,14 @@ import ChatMessage from "./ChatMessage.vue";
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
-async function render(parts: unknown[], role: UIMessage["role"] = "assistant") {
+async function render(parts: unknown[], role: UIMessage["role"] = "assistant", provider = "claude") {
   api = { restoreCheckpoint: vi.fn(async () => ({ restored: "abc1234def" })) };
   h.daemon = createFakeDaemon(api);
   const message = { id: "m1", role, parts } as UIMessage;
-  const w = mount(ChatMessage, { props: { projectId: "p", message }, attachTo: document.body });
+  const w = mount(ChatMessage, {
+    props: { projectId: "p", message, provider },
+    attachTo: document.body,
+  });
   await flushPromises();
   return w;
 }
@@ -285,13 +288,39 @@ describe("ChatMessage", () => {
   });
 
   it.each([
-    ["login", "Log in to Claude"],
-    ["not_installed", "Claude isn't installed"],
-    ["failed", "exit 1"],
-  ])("shows only the message for a %s agent error", async (code, message) => {
-    const w = await render([{ type: "data-agent-error", data: { code, message } }]);
-    expect(w.find("[role='alert']").text()).toBe(message);
-    expect(w.find("button").exists()).toBe(false);
+    ["not_installed", "Claude isn't installed", "Your assistant isn’t set up", "assistant-error-setup", "setup", "Set up"],
+    ["login", "Log in to Claude", "Your assistant needs you to sign in", "assistant-error-sign-in", "signIn", "Sign in"],
+    ["failed", "exit 1", "Your assistant ran into a problem", "assistant-error-retry", "retry", "Try again"],
+  ])(
+    "offers recovery for a %s assistant error",
+    async (code, message, title, testId, action, label) => {
+      const w = await render([{ type: "data-agent-error", data: { code, message } }]);
+      const card = w.find("[data-testid='assistant-error']");
+      expect(card.find("[data-testid='assistant-error-message']").text()).toBe(title);
+      const button = card.find<HTMLButtonElement>(`[data-testid='${testId}']`);
+      expect(button.text()).toBe(label);
+      await button.trigger("click");
+      expect(w.emitted("assistantAction")).toEqual([[{ action, provider: "claude" }]]);
+      w.unmount();
+    },
+  );
+
+  it("keeps a failed assistant error's message behind details", async () => {
+    const w = await render([
+      { type: "data-agent-error", data: { code: "failed", message: "exit 1: unexpected end of JSON" } },
+    ]);
+    expect(w.text()).toContain("Your assistant ran into a problem");
+    expect(w.find("[data-testid='assistant-error-details']").text()).toContain("unexpected end of JSON");
+    w.unmount();
+  });
+
+  it("hides a missing-binary message behind the setup card", async () => {
+    const w = await render([
+      { type: "data-agent-error", data: { code: "not_installed", message: "spawn claude ENOENT" } },
+    ]);
+    expect(w.text()).toContain("Your assistant isn’t set up");
+    expect(w.text()).not.toContain("claude");
+    expect(w.text()).not.toContain("ENOENT");
     w.unmount();
   });
 });

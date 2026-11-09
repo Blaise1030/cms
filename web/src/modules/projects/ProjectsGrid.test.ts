@@ -11,6 +11,8 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { useGithubStore } from "@/modules/github/store";
+import AssistantDialog from "@/modules/assistant/AssistantDialog.vue";
+import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import ProjectsGrid from "./ProjectsGrid.vue";
 
 const p = (id: string, devserver: Project["devserver"]): Project => ({
@@ -54,10 +56,19 @@ async function chooseDelete(w: ReturnType<typeof mountGrid>, name: string) {
 
 beforeEach(() => {
   localStorage.clear();
+  assistantDialogOpen.value = false;
   api = {
     listProjects: vi.fn(async () => [p("a", "ready"), p("b", "crashed")]),
     createProject: vi.fn(async (name: string) => ({ ...p("new", "starting"), name })),
     deleteProject: vi.fn(async (id: string) => ({ deleted: id })),
+    setupStatus: vi.fn(async () => ({
+      git: true,
+      gh: true,
+      githubSignedIn: true,
+      providers: [],
+      projectsDir: "/p",
+    })),
+    setupRuntimes: vi.fn(async () => ({ providers: [] })),
   };
 });
 afterEach(() => {
@@ -71,7 +82,7 @@ describe("ProjectsGrid", () => {
     const brand = w.get("[data-testid='home-brand']");
     expect(brand.get("[data-testid='home-logo']").classes()).toContain("size-7");
     expect(brand.get("h1").text()).toBe("orso");
-    expect(brand.get("p").text()).toBe("Build and edit your sites with an AI agent");
+    expect(brand.get("p").text()).toBe("Build and edit your sites with your assistant");
     expect(brand.element.nextElementSibling?.querySelector("h2")?.textContent).toBe("Recent");
     const header = w.get("[data-testid='page-header']");
     expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
@@ -188,6 +199,23 @@ describe("ProjectsGrid", () => {
     const link = document.body.querySelector<HTMLAnchorElement>("[data-testid='invite-collaborators-link']");
     expect(link?.getAttribute("href")).toBe("https://github.com/acme/site/settings/access");
     w.unmount();
+  });
+
+  it("opens assistant setup from the header", async () => {
+    const w = mountGrid();
+    await flushPromises();
+    const dialog = mount(AssistantDialog, { attachTo: document.body });
+    try {
+      expect(document.body.textContent).not.toContain("Set up your assistant");
+      await w.get("[data-testid='open-assistant']").trigger("click");
+      await flushPromises();
+      expect(assistantDialogOpen.value).toBe(true);
+      const content = document.body.querySelector("[data-testid='assistant-dialog']");
+      expect(content?.textContent).toContain("Set up your assistant");
+    } finally {
+      dialog.unmount();
+      w.unmount();
+    }
   });
 
   it("keeps the header draggable only on desktop", async () => {

@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { useDaemon } from "@/core/daemon";
 import type { SetupStatus } from "@/core/types";
 import { useTheme } from "@/lib/theme";
+import AssistantDialog from "@/modules/assistant/AssistantDialog.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 
 const daemon = useDaemon();
@@ -96,6 +97,7 @@ onBeforeUnmount(() => {
   <div v-else class="bg-background text-foreground h-svh overflow-hidden">
     <RouterView />
     <CommandPalette />
+    <AssistantDialog />
     <UpdateNotice />
     <Toaster :theme="theme.resolved.value" />
   </div>

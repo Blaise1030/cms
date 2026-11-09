@@ -16,7 +16,7 @@ const complete: SetupStatus = {
   git: true,
   gh: true,
   githubSignedIn: true,
-  providers: [{ id: "claude", name: "Claude Code", available: true }],
+  providers: [{ id: "claude", name: "Claude", available: true, chatReady: true }],
   projectsDir: "/p",
 };
 
@@ -33,7 +33,7 @@ function mountWith(status: SetupStatus | (() => Promise<SetupStatus>)) {
   };
   setActivePinia(createPinia());
   const w = mount(App, {
-    global: { stubs: { RouterView: { template: "<main data-testid='shell' />" }, CommandPalette: true, Toaster: true } },
+    global: { stubs: { RouterView: { template: "<main data-testid='shell' />" }, CommandPalette: true, AssistantDialog: true, Toaster: true } },
   });
   return { w, setupStatus };
 }
@@ -44,6 +44,16 @@ afterEach(() => localStorage.clear());
 describe("App setup gate", () => {
   it("shows the setup check when something is missing", async () => {
     const { w } = mountWith({ ...complete, gh: false });
+    await flushPromises();
+    expect(w.find("[data-testid='setup-check']").exists()).toBe(true);
+    expect(w.find("[data-testid='shell']").exists()).toBe(false);
+  });
+
+  it("shows the setup check when an assistant is installed but not ready to chat", async () => {
+    const { w } = mountWith({
+      ...complete,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
     await flushPromises();
     expect(w.find("[data-testid='setup-check']").exists()).toBe(true);
     expect(w.find("[data-testid='shell']").exists()).toBe(false);
@@ -94,7 +104,7 @@ describe("App setup gate", () => {
   it("remembers the dismissal and opens the shell", async () => {
     const { w } = mountWith({ ...complete, gh: false });
     await flushPromises();
-    await w.find("[data-testid='setup-continue']").trigger("click");
+    await w.find("[data-testid='onboarding-skip']").trigger("click");
     await flushPromises();
     expect(w.find("[data-testid='shell']").exists()).toBe(true);
     expect(localStorage.length).toBe(1);

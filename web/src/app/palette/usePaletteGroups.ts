@@ -1,7 +1,7 @@
 import { computed, shallowRef, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Sun, VolumeOff,
+  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Sun, VolumeOff,
 } from "@lucide/vue";
 import { useDaemon } from "@/core/daemon";
 import type { ContentEntrySummary } from "@/core/types";
@@ -31,7 +31,7 @@ function splitPath(path: string) {
 }
 
 /** The palette's command groups for the current route; pages the palette itself owns go through `ui`. */
-export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): void }) {
+export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): void; showAssistant(): void }) {
   const router = useRouter();
   const route = useRoute();
   const daemon = useDaemon();
@@ -117,6 +117,13 @@ export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): voi
         });
       }
     }
+
+    out.push({
+      heading: "Assistant",
+      items: [
+        { id: "action:assistant-setup", label: "Set up your assistant", icon: BotMessageSquare, run: ui.showAssistant },
+      ],
+    });
 
     out.push({
       heading: "Theme",

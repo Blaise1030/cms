@@ -20,6 +20,7 @@ import {
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { Message, MessageContent } from "@/components/ui/message";
 import {
@@ -49,7 +50,15 @@ import {
 } from "./parts";
 import { segmentReferences } from "./references";
 
-const props = defineProps<{ projectId: string; message: UIMessage }>();
+const props = defineProps<{
+  projectId: string;
+  message: UIMessage;
+  /** The assistant behind the open chat; named by recovery actions. */
+  provider?: string | null;
+}>();
+const emit = defineEmits<{
+  assistantAction: [{ action: "setup" | "signIn" | "retry"; provider: string }];
+}>();
 const daemon = useDaemon();
 
 /** The user's text parts, with the attachment paths ChatPanel appended split back out. */
@@ -81,6 +90,17 @@ const toolArgs = (part: DynamicToolUIPart) => {
 
 const checkpoint = (data: unknown) => data as CheckpointData;
 const agentError = (data: unknown) => data as AgentErrorData;
+
+/** The card's plain-language headline; the daemon's raw message stays in details. */
+const ERROR_TITLE: Record<AgentErrorData["code"], string> = {
+  not_installed: "Your assistant isn’t set up",
+  login: "Your assistant needs you to sign in",
+  failed: "Your assistant ran into a problem",
+};
+
+function act(action: "setup" | "signIn" | "retry", data: unknown) {
+  emit("assistantAction", { action, provider: agentError(data).provider ?? props.provider ?? "" });
+}
 </script>
 
 <template>
@@ -203,9 +223,46 @@ const agentError = (data: unknown) => data as AgentErrorData;
           </p>
         </template>
 
-        <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive">
+        <Alert v-else-if="group.part.type === 'data-agent-error'" variant="destructive" data-testid="assistant-error">
           <CircleAlert />
-          <AlertDescription>{{ agentError(group.part.data).message }}</AlertDescription>
+          <AlertDescription class="flex flex-col items-start gap-2">
+            <span data-testid="assistant-error-message">{{ ERROR_TITLE[agentError(group.part.data).code] }}</span>
+            <Button
+              v-if="agentError(group.part.data).code === 'failed'"
+              size="sm"
+              variant="outline"
+              data-testid="assistant-error-retry"
+              @click="act('retry', group.part.data)"
+            >
+              Try again
+            </Button>
+            <Button
+              v-else-if="agentError(group.part.data).code === 'login'"
+              size="sm"
+              variant="outline"
+              data-testid="assistant-error-sign-in"
+              @click="act('signIn', group.part.data)"
+            >
+              Sign in
+            </Button>
+            <Button
+              v-else
+              size="sm"
+              variant="outline"
+              data-testid="assistant-error-setup"
+              @click="act('setup', group.part.data)"
+            >
+              Set up
+            </Button>
+            <details
+              v-if="agentError(group.part.data).code === 'failed'"
+              data-testid="assistant-error-details"
+              class="text-xs"
+            >
+              <summary class="cursor-pointer">Details</summary>
+              <p class="mt-1 break-words opacity-90">{{ agentError(group.part.data).message }}</p>
+            </details>
+          </AlertDescription>
         </Alert>
       </template>
     </MessageContent>

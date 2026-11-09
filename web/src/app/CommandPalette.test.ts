@@ -10,6 +10,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 import CommandPalette from "./CommandPalette.vue";
+import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import { useProjectsStore } from "@/modules/projects/store";
 
 const empty = { render: () => null };
@@ -58,6 +59,7 @@ async function type(text: string) {
 
 beforeEach(() => {
   localStorage.clear();
+  assistantDialogOpen.value = false;
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 });
 
@@ -115,4 +117,14 @@ it("switches the theme", async () => {
   await flushPromises();
   expect(document.documentElement.classList.contains("dark")).toBe(true);
   expect(localStorage.getItem("orso.theme")).toBe("dark");
+});
+
+it("offers assistant setup and opens the dialog", async () => {
+  await setup("/");
+  press({ ctrlKey: true, metaKey: true });
+  await flushPromises();
+  expect(item("action:assistant-setup")?.textContent).toContain("Set up your assistant");
+  item("action:assistant-setup")!.click();
+  await flushPromises();
+  expect(assistantDialogOpen.value).toBe(true);
 });

@@ -56,6 +56,8 @@ export interface CheckpointData {
 export interface AgentErrorData {
   code: "login" | "not_installed" | "failed";
   message: string;
+  /** Which assistant failed, when the transcript knows it. */
+  provider?: string;
 }
 
 const basename = (path = "") => path.split("/").pop() || path;

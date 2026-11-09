@@ -1,7 +1,8 @@
 //! Shared application state.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::ffi::OsString;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 
 use serde_json::json;
@@ -15,8 +16,11 @@ use crate::devserver::{DevServerManager, DevServerOptions};
 use crate::error::ApiError;
 use crate::events::EventBus;
 use crate::github::GithubAuth;
+use crate::http::setup::SetupProbes;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::{DevserverStatus, ProjectRegistry};
+use crate::runtime::login::LoginManager;
+use crate::runtime::{LockFile, RuntimeManager, RuntimeResolver, RuntimeTarget};
 use crate::watch::WatchManager;
 
 #[derive(Clone)]
@@ -42,6 +46,69 @@ pub struct AppState {
     pub conflict_updates: Arc<Mutex<()>>,
     /// Projects whose Get latest skipped the checked-out change while an agent was live.
     pub pending_latest: Arc<std::sync::Mutex<HashSet<String>>>,
+    /// Managed Node / assistant downloads and the site builder's Node.
+    pub runtimes: Arc<RuntimeManager>,
+    /// The platform target this build can install, when supported.
+    pub runtime_target: Option<RuntimeTarget>,
+    /// Managed-first provider and `PATH` resolution for chat and site builds.
+    pub resolver: Arc<RuntimeResolver>,
+    /// Provider sign-in flows.
+    pub logins: Arc<LoginManager>,
+    /// Short cache for provider auth/version probes.
+    pub setup_probes: Arc<SetupProbes>,
+}
+
+fn git_shim_dir(config: &Config) -> Option<std::path::PathBuf> {
+    crate::git_shim::ensure_shim_dir(config)
+}
+
+fn cached_login_path() -> OsString {
+    static LOGIN_PATH: OnceLock<OsString> = OnceLock::new();
+    LOGIN_PATH
+        .get_or_init(crate::runtime::resolve::login_shell_path)
+        .clone()
+}
+
+fn runtime_lock(config: &Config) -> LockFile {
+    if let Some(path) = &config.runtime_lock {
+        match LockFile::load(path) {
+            Ok(lock) => return lock,
+            Err(error) => eprintln!("orso: {error}; using the built-in runtime list"),
+        }
+    }
+    match LockFile::parse(include_str!("../agent-runtime.lock.json")) {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("orso: {error}; managed assistants are unavailable");
+            LockFile {
+                schema_version: 1,
+                runtimes: Default::default(),
+                acp: Default::default(),
+            }
+        }
+    }
+}
+
+/// Forward `setup.runtime` events onto `WS /ws/events` as the flat shape the web app reads.
+fn bridge_runtime_events(runtimes: &RuntimeManager, events: &EventBus) {
+    let mut rx = runtimes.subscribe();
+    let events = events.clone();
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Ok(value) = serde_json::to_value(&event) {
+                        events.emit(crate::runtime::manager::RUNTIME_EVENT, value);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// How long a content save waits for a `Starting` preview to become ready.
@@ -117,7 +184,31 @@ impl AppState {
 
     /// Full control over scaffolding and dev-server supervision (tests).
     pub fn with_options(config: Config, install: bool, devserver: DevServerOptions) -> Self {
-        let projects = ProjectRegistry::open(config.projects_dir.clone(), install);
+        let current_target = RuntimeTarget::current();
+        let target = current_target.unwrap_or(RuntimeTarget::DarwinArm64);
+        let lock = runtime_lock(&config);
+        let mut runtimes = RuntimeManager::new(config.runtime_dir.clone(), lock.clone(), target);
+        if let Some(base_url) = config.runtime_base_url.clone() {
+            runtimes = runtimes.with_base_url(base_url);
+        }
+
+        let mut resolver = RuntimeResolver::new(config.runtime_dir.clone(), lock, target)
+            .with_login_shell_path(cached_login_path())
+            .with_daemon_path(std::env::var_os("PATH").unwrap_or_default())
+            .with_git_shim(git_shim_dir(&config));
+        match crate::providers::load(config.agents_config.as_deref()) {
+            Ok(providers) => resolver = resolver.with_providers(providers),
+            Err(error) => eprintln!("orso: {}", error.message),
+        }
+        if let Ok(overrides) = crate::providers::acp_overrides(config.agents_config.as_deref()) {
+            resolver = resolver.with_agents_acp(overrides);
+        }
+        let node_path = resolver.child_path(None);
+        let resolver = Arc::new(resolver);
+
+        let projects = ProjectRegistry::open(config.projects_dir.clone(), install)
+            .with_install_path(node_path.clone());
+        let devserver = devserver.with_path(node_path);
         let github = Arc::new(GithubAuth::open(
             config.github.clone(),
             &config.projects_dir.join(crate::projects::STATE_DIR),
@@ -133,6 +224,8 @@ impl AppState {
             devserver,
         ));
         let watchers = Arc::new(WatchManager::new(events.clone()));
+        let logins = Arc::new(LoginManager::new((*resolver).clone()));
+        bridge_runtime_events(&runtimes, &events);
         let state = Self {
             config,
             projects,
@@ -146,6 +239,11 @@ impl AppState {
             conflict_previews: Arc::new(ConflictPreviewManager::new()),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
+            runtimes: Arc::new(runtimes),
+            runtime_target: current_target,
+            resolver,
+            logins,
+            setup_probes: Arc::new(SetupProbes::default()),
         };
         state.wire_chat_turn_end();
         state

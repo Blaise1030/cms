@@ -182,6 +182,42 @@ pub fn load(path: Option<&Path>) -> Result<Vec<Provider>, ApiError> {
     }
 }
 
+/// The explicit `acp` arrays in `agents.json`. Built-in defaults are not
+/// overrides, so they never outrank a managed runtime.
+pub fn acp_overrides(path: Option<&Path>) -> Result<crate::runtime::AgentAcpOverrides, ApiError> {
+    let mut overrides = crate::runtime::AgentAcpOverrides::new();
+    let Some(path) = path else {
+        return Ok(overrides);
+    };
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(overrides),
+        Err(e) => {
+            return Err(ApiError::agent(format!(
+                "cannot read {}: {e}",
+                path.display()
+            )))
+        }
+    };
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| ApiError::agent(format!("invalid {}: {e}", path.display())))?;
+    let Some(entries) = value.as_object() else {
+        return Ok(overrides);
+    };
+    for (id, entry) in entries {
+        let Some(fields) = entry.as_object() else {
+            continue;
+        };
+        let Some(acp) = fields.get("acp") else {
+            continue;
+        };
+        let argv = argv(id, acp)
+            .map_err(|e| ApiError::agent(format!("invalid {}: {e}", path.display())))?;
+        overrides.insert(id.clone(), argv);
+    }
+    Ok(overrides)
+}
+
 /// Parse the JSON registry (see module docs). Each value is either the command
 /// array (legacy shape) or `{ "command"?: [...], "acp"?: [...] }`; omitted
 /// `acp` falls back to the built-in ACP command for a known id.

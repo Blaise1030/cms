@@ -25,7 +25,7 @@ const DIVERGED =
   "Your copy of the live site has edits that are not on GitHub, so it was left as is. Ask a developer to bring it back in line with GitHub.";
 
 function skippedNote(result: ChangesUpdate): string | undefined {
-  return result.skipped ? "Your current change will update when the agent finishes." : undefined;
+  return result.skipped ? "Your current change will update when your assistant finishes." : undefined;
 }
 
 export function report(result: ChangesUpdate) {

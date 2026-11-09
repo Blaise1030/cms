@@ -89,8 +89,8 @@ function confirmDelete() {
       <AlertDialogHeader>
         <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
         <AlertDialogDescription>
-          “{{ pendingDelete && titleOf(pendingDelete) }}” and its messages will be removed. Changes the agent
-          made to your site stay.
+          “{{ pendingDelete && titleOf(pendingDelete) }}” and its messages will be removed. Changes your
+          assistant made to your site stay.
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
