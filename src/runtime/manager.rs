@@ -1349,7 +1349,18 @@ mod tests {
             let manager = manager.clone();
             async move { manager.download(RuntimeId::OpenCode).await }
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Wait until the first download is in flight — a fixed sleep races on fast CI.
+        for _ in 0..200 {
+            if manager.phase(RuntimeId::OpenCode).unwrap().kind == RuntimePhaseKind::Downloading {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            manager.phase(RuntimeId::OpenCode).unwrap().kind,
+            RuntimePhaseKind::Downloading,
+            "first download never entered Downloading"
+        );
         let busy = manager.download(RuntimeId::OpenCode).await.unwrap_err();
         assert!(matches!(busy, RuntimeError::Busy(RuntimeId::OpenCode)));
         manager.cancel(RuntimeId::OpenCode).unwrap();
