@@ -1,5 +1,11 @@
 //! `/api/setup/*`: status shape, runtime download/cancel/retry, events,
 //! OpenCode readiness while signed out, provider verify, and sign-in.
+//!
+//! Managed agent downloads are macOS-only (`RuntimeTarget::current()`), so this
+//! suite is compiled only on Darwin. Linux CI still exercises the rest of the
+//! daemon tests.
+
+#![cfg(target_os = "macos")]
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
