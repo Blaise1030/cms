@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.1
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.0...v0.1.1)
+
+### Features
+
+- **setup:** Managed agent runtimes with OpenCode default ([bf03245](https://github.com/Blaise1030/CMS/commit/bf03245))
+- **onboarding:** Three-step setup wizard ([3512994](https://github.com/Blaise1030/CMS/commit/3512994))
+
+### Fixes
+
+- **runtime:** Clear clippy blockers for onboarding merge ([b7c2a0c](https://github.com/Blaise1030/CMS/commit/b7c2a0c))
+
 ## v0.1.0
 
 
