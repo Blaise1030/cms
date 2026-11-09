@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.2
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.1...v0.1.2)
+
+### Features
+
+- **settings:** Restore app settings and floating/bottom agent panel layout
+
+### Fixes
+
+- **desktop:** Quit when the main window closes so the daemon stops with the app
+- **setup:** Persist onboarding dismiss across relaunches and skip finished steps
+
 ## v0.1.1
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.0...v0.1.1)
