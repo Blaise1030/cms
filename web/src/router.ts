@@ -5,10 +5,22 @@ import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
 import ContentPanel from "@/modules/content/ContentPanel.vue";
 import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
+import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
 export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
+
+/** App-level settings tabs, kept in the URL so a section can be linked to directly. */
+export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
+
+export const APP_SETTINGS_TABS: readonly AppSettingsTab[] = [
+  "assistant",
+  "builder",
+  "github",
+  "appearance",
+  "about",
+];
 
 const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };
 
@@ -16,6 +28,7 @@ const ProjectPreviewPage = { name: "ProjectPreviewPage", render: () => null };
 // `SPA_ROUTE_PREFIXES` in src/static.rs), so deep links and reloads work.
 export const routes: RouteRecordRaw[] = [
   { path: "/", name: "home", component: HomePage },
+  { path: "/settings", name: "app-settings", component: AppSettingsPage },
   {
     path: "/p/:id",
     component: ProjectPage,
@@ -64,6 +77,10 @@ export const routes: RouteRecordRaw[] = [
 
 export function projectPath(id: string, tab: ProjectTab = "preview") {
   return `/p/${encodeURIComponent(id)}/${tab}`;
+}
+
+export function settingsPath(tab: AppSettingsTab = "assistant") {
+  return `/settings?tab=${tab}`;
 }
 
 /** Each segment is encoded but the slashes are kept, so nested paths read naturally in the URL. */

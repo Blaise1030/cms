@@ -86,12 +86,22 @@ const testId = (w: ReturnType<typeof mount>, id: string) =>
   w.get(`[data-testid='${id}']`);
 
 async function toSite(w: ReturnType<typeof mount>) {
+  await flushPromises();
+  if (w.find("[data-testid='onboarding-step-site']").exists()) return;
+  if (w.find("[data-testid='onboarding-step-github']").exists()) {
+    await testId(w, "onboarding-dot-2").trigger("click");
+    await flushPromises();
+    return;
+  }
   await testId(w, "onboarding-setup-opencode").trigger("click");
   await flushPromises();
 }
 
 async function toGithub(w: ReturnType<typeof mount>) {
+  await flushPromises();
+  if (w.find("[data-testid='onboarding-step-github']").exists()) return;
   await toSite(w);
+  if (w.find("[data-testid='onboarding-step-github']").exists()) return;
   await testId(w, "onboarding-next").trigger("click");
   await flushPromises();
 }
@@ -148,6 +158,11 @@ describe("onboarding step 1: assistant", () => {
         ],
       }),
     );
+    await flushPromises();
+
+    // Already connected → wizard skips past the assistant step; jump back to pick another.
+    expect(w.find("[data-testid='onboarding-step-assistant']").exists()).toBe(false);
+    await testId(w, "onboarding-dot-1").trigger("click");
     await flushPromises();
 
     const existing = testId(w, "onboarding-existing-claude");
@@ -238,7 +253,7 @@ describe("onboarding step 1: assistant", () => {
       { signInProvider },
       status({
         providers: [
-          provider("opencode", { freeModels: true, signedIn: null }),
+          freshProvider("opencode"),
           provider("claude", { signedIn: false, chatReady: false }),
         ],
       }),
@@ -261,11 +276,24 @@ describe("onboarding step 1: assistant", () => {
     const w = mountCheck();
     await flushPromises();
 
-    expect(testId(w, "onboarding-setup-opencode").text()).toContain("Continue");
-    expect(testId(w, "onboarding-next").attributes("disabled")).toBeUndefined();
-    await toSite(w);
+    // Assistant + site builder are already ready in the default fixture → GitHub step.
+    expect(w.find("[data-testid='onboarding-step-github']").exists()).toBe(true);
+    expect(w.find("[data-testid='onboarding-step-assistant']").exists()).toBe(false);
+  });
+
+  it("skips the assistant step when OpenCode is already connected", async () => {
+    const w = mountCheck(
+      {},
+      status({
+        providers: [provider("opencode", { freeModels: true, signedIn: null })],
+        node: notDownloaded(),
+      }),
+    );
+    await flushPromises();
+
     expect(w.find("[data-testid='onboarding-step-site']").exists()).toBe(true);
     expect(w.find("[data-testid='onboarding-step-assistant']").exists()).toBe(false);
+    expect(w.text()).toContain("Add the site builder.");
   });
 
   it("skips setup and rechecks", async () => {
@@ -283,7 +311,7 @@ describe("onboarding step 1: assistant", () => {
     next = status();
     await testId(w, "setup-recheck").trigger("click");
     await flushPromises();
-    expect(testId(w, "onboarding-setup-opencode").text()).toContain("Continue");
+    expect(w.find("[data-testid='onboarding-step-github']").exists()).toBe(true);
 
     await testId(w, "onboarding-skip").trigger("click");
     expect(w.emitted("continue")).toHaveLength(1);

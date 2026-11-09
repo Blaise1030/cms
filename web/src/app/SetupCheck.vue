@@ -36,6 +36,7 @@ import SignInPanel from "@/modules/assistant/SignInPanel.vue";
 import { useAssistantStore } from "@/modules/assistant/store";
 import DeviceCodeDialog from "@/modules/github/DeviceCodeDialog.vue";
 import { useGithubStore } from "@/modules/github/store";
+import { onboardingStartStep } from "@/app/setup";
 
 /** `initial`: a status the caller already fetched; without it the check fetches its own. */
 const props = defineProps<{ initial?: SetupStatus }>();
@@ -269,13 +270,45 @@ watch(
   },
 );
 
+/** Prefer the live assistant snapshot; fall back to the status the shell already fetched. */
+function resolveSiteReady(): boolean {
+  const node = assistant.node ?? status.value?.node ?? null;
+  if (node == null) {
+    // No status yet: stay put. Status without node: older daemon, site builder not required.
+    return status.value != null;
+  }
+  return node.phase === "ready" || node.phase === "updateAvailable";
+}
+
+/** Skip finished steps so a Connected assistant does not reopen on step 1. */
+function syncStartStep() {
+  const chatReady =
+    cards.value.some((row) => row.chatReady) ||
+    status.value?.providers.some((provider) => provider.chatReady) === true;
+  const target = onboardingStartStep({ chatReady, siteReady: resolveSiteReady() });
+  if (target > step.value) step.value = target;
+  if (chatReady) {
+    const ready =
+      cards.value.find((row) => row.chatReady) ??
+      status.value?.providers.find((provider) => provider.chatReady);
+    if (ready) selectedId.value = ready.id;
+  }
+}
+
+watch([() => assistant.providers, () => assistant.node, status], syncStartStep, { deep: true });
+
 onMounted(() => {
   if (!status.value) {
-    void recheck();
+    void recheck().finally(syncStartStep);
   } else if (!assistant.snapshot) {
-    void assistant.load().catch(() => {
-      // The step falls back to an empty assistant list; Skip setup stays available.
-    });
+    void assistant
+      .load()
+      .catch(() => {
+        // The step falls back to an empty assistant list; Skip setup stays available.
+      })
+      .finally(syncStartStep);
+  } else {
+    syncStartStep();
   }
   gh.load().catch(() => {
     // Without GitHub status the account row keeps the manual sign-in hint.

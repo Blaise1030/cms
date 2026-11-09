@@ -61,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/github/signout", post(github::sign_out))
         .route("/api/github/repos", get(github::repos))
         .route("/api/setup/status", get(setup::status))
+        .route("/api/setup/dismiss", post(setup::dismiss))
         .route("/api/setup/runtimes", get(setup::runtimes))
         .route("/api/setup/runtimes/{id}/download", post(setup::download))
         .route("/api/setup/runtimes/{id}/cancel", post(setup::cancel))

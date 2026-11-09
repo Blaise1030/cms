@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
 import type { SetupStatus } from "@/core/types";
-import { dismissSetup, setupDismissed, setupIncomplete } from "./setup";
+import { dismissSetup, onboardingStartStep, setupDismissed, setupIncomplete } from "./setup";
 
 const complete: SetupStatus = {
   git: true,
@@ -17,30 +17,53 @@ const complete: SetupStatus = {
 afterEach(() => localStorage.clear());
 
 describe("setupIncomplete", () => {
-  it("is false when everything is ready", () => {
+  it("is false when a chat-ready assistant is present", () => {
     expect(setupIncomplete(complete)).toBe(false);
   });
 
-  it.each([
-    ["git", { git: false }],
-    ["gh", { gh: false }],
-    ["GitHub sign-in", { githubSignedIn: false }],
-    ["a chat-ready assistant", { providers: complete.providers.map((p) => ({ ...p, chatReady: false })) }],
-  ])("is true without %s", (_, patch) => {
-    expect(setupIncomplete({ ...complete, ...patch })).toBe(true);
+  it("does not block on optional GitHub pieces", () => {
+    expect(setupIncomplete({ ...complete, git: false, gh: false, githubSignedIn: false })).toBe(false);
+  });
+
+  it("is true without a chat-ready assistant", () => {
+    expect(
+      setupIncomplete({
+        ...complete,
+        providers: complete.providers.map((p) => ({ ...p, chatReady: false })),
+      }),
+    ).toBe(true);
   });
 
   it("counts chat-ready assistants rather than installed copies", () => {
-    // Available but not signed in is not enough to chat.
-    expect(setupIncomplete({ ...complete, providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }] })).toBe(true);
-    // Chat-ready is enough even when the daemon marks the copy unavailable.
-    expect(setupIncomplete({ ...complete, providers: [{ id: "opencode", name: "OpenCode", available: false, chatReady: true }] })).toBe(false);
+    expect(
+      setupIncomplete({
+        ...complete,
+        providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+      }),
+    ).toBe(true);
+    expect(
+      setupIncomplete({
+        ...complete,
+        providers: [{ id: "opencode", name: "OpenCode", available: false, chatReady: true }],
+      }),
+    ).toBe(false);
   });
 
   it("waits for the site builder when a daemon reports it", () => {
     const node = { phase: "downloading" as const, version: null, source: null, progress: 40, message: null };
     expect(setupIncomplete({ ...complete, node })).toBe(true);
     expect(setupIncomplete({ ...complete, node: { ...node, phase: "ready", progress: null } })).toBe(false);
+    expect(setupIncomplete({ ...complete, node: { ...node, phase: "updateAvailable", progress: null } })).toBe(
+      false,
+    );
+  });
+});
+
+describe("onboardingStartStep", () => {
+  it("opens the first unfinished step", () => {
+    expect(onboardingStartStep({ chatReady: false, siteReady: false })).toBe(1);
+    expect(onboardingStartStep({ chatReady: true, siteReady: false })).toBe(2);
+    expect(onboardingStartStep({ chatReady: true, siteReady: true })).toBe(3);
   });
 });
 

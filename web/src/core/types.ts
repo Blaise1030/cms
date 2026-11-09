@@ -502,6 +502,8 @@ export interface SetupStatus {
   node?: RuntimeStatus;
   providers: SetupProvider[];
   projectsDir: string;
+  /** Daemon-backed dismiss flag (survives ephemeral UI origins). */
+  setupDismissed?: boolean;
 }
 
 /** `GET /api/setup/runtimes`: the assistant and site-builder download snapshot. */

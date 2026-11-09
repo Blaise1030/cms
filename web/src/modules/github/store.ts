@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
-import type { DeviceStart, GithubRepo, GithubStatus, GithubUser } from "@/core/types";
+import type { DeviceStart, GithubRepo, GithubStatus, GithubUser, SetupStatus } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 
 export const useGithubStore = defineStore("github", () => {
@@ -11,6 +11,10 @@ export const useGithubStore = defineStore("github", () => {
   const deviceFlow = ref(false);
   const source = ref<GithubStatus["source"]>(null);
   const user = ref<GithubUser | null>(null);
+  /** Cached `GET /api/setup/status` for the GitHub settings page. */
+  const setup = ref<SetupStatus | null>(null);
+  /** True after a failed `loadSetup`; cleared on the next successful fetch. */
+  const setupError = ref(false);
   /** The code being shown while the user approves it on github.com. */
   const device = ref<DeviceStart | null>(null);
   const error = ref<string | null>(null);
@@ -27,6 +31,22 @@ export const useGithubStore = defineStore("github", () => {
     deviceFlow.value = s.deviceFlow;
     source.value = s.source;
     user.value = s.user;
+  }
+
+  /** Fetch setup prerequisites and the GitHub account; keeps the last good setup on failure. */
+  async function loadSetup() {
+    try {
+      const [next] = await Promise.all([
+        daemon.api.setupStatus(),
+        load().catch(() => {
+          // Without GitHub status the account row keeps the manual sign-in hint.
+        }),
+      ]);
+      setup.value = next;
+      setupError.value = false;
+    } catch {
+      setupError.value = true;
+    }
   }
 
   function stopTimer() {
@@ -119,5 +139,22 @@ export const useGithubStore = defineStore("github", () => {
     }
   }
 
-  return { configured, deviceFlow, source, user, device, error, repos, reposLoading, load, signIn, cancel, signOut, loadRepos };
+  return {
+    configured,
+    deviceFlow,
+    source,
+    user,
+    setup,
+    setupError,
+    device,
+    error,
+    repos,
+    reposLoading,
+    load,
+    loadSetup,
+    signIn,
+    cancel,
+    signOut,
+    loadRepos,
+  };
 });

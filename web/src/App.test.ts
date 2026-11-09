@@ -25,6 +25,7 @@ function mountWith(status: SetupStatus | (() => Promise<SetupStatus>)) {
   h.daemon = {
     ...createFakeDaemon({
       setupStatus,
+      dismissSetup: vi.fn(async () => ({ dismissed: true as const })),
       githubStatus: vi.fn(async () => ({ configured: false, deviceFlow: false, source: null, user: null })),
     }),
     reason: ref(null),
@@ -42,11 +43,32 @@ enableAutoUnmount(afterEach);
 afterEach(() => localStorage.clear());
 
 describe("App setup gate", () => {
-  it("shows the setup check when something is missing", async () => {
-    const { w } = mountWith({ ...complete, gh: false });
+  it("shows the setup check when something required is missing", async () => {
+    const { w } = mountWith({
+      ...complete,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
     await flushPromises();
     expect(w.find("[data-testid='setup-check']").exists()).toBe(true);
     expect(w.find("[data-testid='shell']").exists()).toBe(false);
+  });
+
+  it("opens the shell when only optional GitHub pieces are missing", async () => {
+    const { w } = mountWith({ ...complete, gh: false, githubSignedIn: false });
+    await flushPromises();
+    expect(w.find("[data-testid='setup-check']").exists()).toBe(false);
+    expect(w.find("[data-testid='shell']").exists()).toBe(true);
+  });
+
+  it("honors a daemon-backed dismiss even when setup is still incomplete", async () => {
+    const { w } = mountWith({
+      ...complete,
+      setupDismissed: true,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='setup-check']").exists()).toBe(false);
+    expect(w.find("[data-testid='shell']").exists()).toBe(true);
   });
 
   it("shows the setup check when an assistant is installed but not ready to chat", async () => {
@@ -96,13 +118,19 @@ describe("App setup gate", () => {
 
   it("opens the shell immediately once dismissed", () => {
     dismissSetup();
-    const { w, setupStatus } = mountWith({ ...complete, gh: false });
+    const { w, setupStatus } = mountWith({
+      ...complete,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
     expect(w.find("[data-testid='shell']").exists()).toBe(true);
     expect(setupStatus).not.toHaveBeenCalled();
   });
 
   it("remembers the dismissal and opens the shell", async () => {
-    const { w } = mountWith({ ...complete, gh: false });
+    const { w } = mountWith({
+      ...complete,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
     await flushPromises();
     await w.find("[data-testid='onboarding-skip']").trigger("click");
     await flushPromises();

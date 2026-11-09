@@ -1,7 +1,7 @@
 import { computed, shallowRef, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Sun, VolumeOff,
+  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Settings, Sun, VolumeOff,
 } from "@lucide/vue";
 import { useDaemon } from "@/core/daemon";
 import type { ContentEntrySummary } from "@/core/types";
@@ -10,7 +10,7 @@ import { SOUND_PACKS, useTypingSound, type SoundPack, type TypingSoundSetting } 
 import { getLatest } from "@/modules/changes/getLatest";
 import { useFilesStore } from "@/modules/files/store";
 import { useProjectsStore } from "@/modules/projects/store";
-import { codePath, contentPath, projectPath, type ProjectTab } from "@/router";
+import { codePath, contentPath, projectPath, settingsPath, type ProjectTab } from "@/router";
 import type { PaletteGroup, PaletteItem } from "./filter";
 
 const TABS: { id: ProjectTab; label: string; icon: Component }[] = [
@@ -122,6 +122,14 @@ export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): voi
       heading: "Assistant",
       items: [
         { id: "action:assistant-setup", label: "Set up your assistant", icon: BotMessageSquare, run: ui.showAssistant },
+      ],
+    });
+
+    out.push({
+      heading: "Settings",
+      items: [
+        { id: "action:app-settings", label: "App settings", icon: Settings, run: go(settingsPath()) },
+        { id: "action:appearance", label: "Appearance settings", icon: Palette, run: go(settingsPath("appearance")) },
       ],
     });
 

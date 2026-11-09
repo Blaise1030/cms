@@ -21,6 +21,7 @@ pub mod projects;
 pub mod providers;
 pub mod runtime;
 pub mod settings;
+pub mod setup_prefs;
 pub mod shell;
 pub mod state;
 pub mod watch;

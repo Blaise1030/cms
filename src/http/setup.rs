@@ -40,6 +40,8 @@ pub struct SetupStatus {
     node: RuntimeStatus,
     providers: Vec<ProviderStatus>,
     projects_dir: PathBuf,
+    /// True once the user skipped or finished onboarding on this machine.
+    setup_dismissed: bool,
 }
 
 #[derive(Serialize)]
@@ -169,7 +171,15 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatus>, 
         node: node_status(&state),
         providers,
         projects_dir: state.config.projects_dir.clone(),
+        setup_dismissed: crate::setup_prefs::is_dismissed(&crate::setup_prefs::prefs_dir()),
     }))
+}
+
+/// `POST /api/setup/dismiss` → `{ dismissed: true }`. Hides onboarding across relaunches.
+pub async fn dismiss() -> Result<Json<serde_json::Value>, ApiError> {
+    crate::setup_prefs::dismiss(&crate::setup_prefs::prefs_dir())
+        .map_err(|e| ApiError::io(format!("could not save setup dismissal: {e}")))?;
+    Ok(Json(serde_json::json!({ "dismissed": true })))
 }
 
 /// `GET /api/setup/runtimes` → `{ node, providers }`.

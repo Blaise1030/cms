@@ -7,15 +7,21 @@ import PreviewPanel from "@/modules/preview/PreviewPanel.vue";
 import ConflictView from "@/modules/changes/ConflictView.vue";
 import { useChangesStore } from "@/modules/changes/store";
 
-defineProps<{ project: Project }>();
+const props = defineProps<{ project: Project; floatingChat?: boolean }>();
 
 const route = useRoute();
 const tab = computed(() => projectTabFromRoute(route.name));
 const changes = useChangesStore();
+/** Leave room for the floating agent session bar only on pages where the chat is shown. */
+const floatingChrome = computed(() => props.floatingChat === true);
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div
+    class="flex h-full min-h-0 flex-col"
+    :class="floatingChrome ? 'pb-11' : undefined"
+    data-testid="workspace-root"
+  >
     <div class="relative min-h-0 flex-1">
       <!-- The preview stays mounted and laid out so switching tabs does not reload or re-measure it. -->
       <PreviewPanel

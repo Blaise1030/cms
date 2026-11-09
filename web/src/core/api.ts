@@ -252,6 +252,8 @@ export function createApi(
       json<Project>("POST", "/api/github/clone", { body: name ? { repo, name } : { repo } }),
     githubStatus: () => json<GithubStatus>("GET", "/api/github/status"),
     setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
+    /** Persist onboarding dismissal across desktop relaunches. */
+    dismissSetup: () => json<{ dismissed: true }>("POST", "/api/setup/dismiss"),
     /** The assistant + site-builder download snapshot. */
     setupRuntimes: () => json<SetupSnapshot>("GET", "/api/setup/runtimes"),
     downloadRuntime: (id: string) =>

@@ -9,12 +9,14 @@ pub mod supervisor;
 #[cfg(feature = "update-e2e")]
 mod update_e2e;
 mod updater;
+mod window_lifecycle;
 
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 
 use supervisor::Supervisor;
 use updater::Updates;
+use window_lifecycle::{main_window_action, MainWindowAction};
 
 /// Tells pages in the title-bar-less main window to clear the traffic lights and mark drag
 /// regions (`web/src/lib/desktop.ts`). Runs before page scripts, on every navigation.
@@ -66,10 +68,25 @@ pub fn run() {
                     }
                 })
                 .build()?;
-            let resized = window.clone();
+            let main = window.clone();
+            let quit = app.handle().clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::Resized(_) = event {
-                    fullscreen::sync(&resized);
+                // Classification is shared with unit tests so close→quit stays intentional.
+                let action = match event {
+                    WindowEvent::Resized(_) => main_window_action(true, false),
+                    WindowEvent::CloseRequested { .. } => main_window_action(false, true),
+                    _ => main_window_action(false, false),
+                };
+                match (action, event) {
+                    (MainWindowAction::SyncFullscreen, WindowEvent::Resized(_)) => {
+                        fullscreen::sync(&main);
+                    }
+                    (MainWindowAction::QuitApp, WindowEvent::CloseRequested { api, .. }) => {
+                        // Avoid tearing down the window before Exit → daemon shutdown.
+                        api.prevent_close();
+                        quit.exit(0);
+                    }
+                    _ => {}
                 }
             });
             match window.url() {

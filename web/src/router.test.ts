@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { codePath, contentPath, historyPath, projectPath, projectTabFromRoute, routes } from "./router";
+import {
+  codePath,
+  contentPath,
+  historyPath,
+  projectPath,
+  projectTabFromRoute,
+  routes,
+  settingsPath,
+} from "./router";
 
 const router = () => createRouter({ history: createMemoryHistory(), routes });
 
@@ -64,6 +72,16 @@ describe("router", () => {
     expect(r.name).toBe("project-settings");
     expect(r.params.id).toBe("a");
     expect(projectPath("a", "settings")).toBe("/p/a/settings");
+  });
+
+  it("builds app settings links with the section in the query", () => {
+    expect(settingsPath()).toBe("/settings?tab=assistant");
+    expect(settingsPath("builder")).toBe("/settings?tab=builder");
+    expect(settingsPath("about")).toBe("/settings?tab=about");
+    const r = router().resolve(settingsPath("github"));
+    expect(r.name).toBe("app-settings");
+    expect(r.path).toBe("/settings");
+    expect(r.query.tab).toBe("github");
   });
 
   it("redirects unknown paths home", async () => {

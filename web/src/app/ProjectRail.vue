@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { Code, FileText, History, House, MonitorPlay, Palette, Settings } from "@lucide/vue";
+import { Code, Cog, FileText, History, House, MonitorPlay, Palette, Settings } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
@@ -70,6 +70,19 @@ const current = "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 
       </Tooltip>
 
       <div class="mt-auto flex flex-col items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <RouterLink
+              to="/settings"
+              :class="item"
+              aria-label="App settings"
+              data-testid="project-rail-app-settings"
+            >
+              <Cog />
+            </RouterLink>
+          </TooltipTrigger>
+          <TooltipContent side="right">App settings</TooltipContent>
+        </Tooltip>
         <slot name="footer" />
       </div>
     </nav>

@@ -29,7 +29,7 @@ pub fn is_daemon_path(path: &str) -> bool {
 }
 
 /// Client-side route prefixes the SPA owns (deep links fall back to `index.html`).
-const SPA_ROUTE_PREFIXES: [&str; 3] = ["/p/", "/assets/", "/icons/"];
+const SPA_ROUTE_PREFIXES: [&str; 4] = ["/p/", "/settings", "/assets/", "/icons/"];
 
 /// Whether an unauthenticated request may be answered: an explicit allowlist of the public app
 /// shell (static SPA files). The shell holds no secrets and must load without a token (browsers

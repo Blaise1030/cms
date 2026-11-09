@@ -46,7 +46,13 @@ watch(
     daemon.api
       .setupStatus()
       .then((v) => {
-        if (setupPending.value) setup.value = v;
+        if (!setupPending.value) return;
+        setup.value = v;
+        // Daemon-backed dismiss survives ephemeral 127.0.0.1 ports; localStorage may not.
+        if (v.setupDismissed) {
+          dismissSetup();
+          setupSkipped.value = true;
+        }
       }, () => {})
       .finally(() => {
         clearTimeout(setupTimer);
@@ -59,6 +65,9 @@ watch(
 function continueFromSetup() {
   dismissSetup();
   setupSkipped.value = true;
+  void daemon.api.dismissSetup().catch(() => {
+    /* local dismiss still opens the shell this session */
+  });
 }
 
 function retry() {
