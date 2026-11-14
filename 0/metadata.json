@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7CJGPG7ZW96G9AEZBRN223D",
+  "session_id": "6515ddb3-46a1-4cbb-884d-ae6613dd56b4",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T08:24:22.999867Z",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "save_step_count": 6,
+  "files_touched": [
+    "packages/astro/src/checks/audit.js",
+    "packages/astro/test/checks-audit.test.mjs",
+    "templates/astro-marketing/integrations/orso/checks/audit.js"
+  ],
+  "agent": "Cursor",
+  "model": "default",
+  "turn_id": "b7b3536a8d07",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 70980,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10016512,
+    "output_tokens": 19497,
+    "api_call_count": 5
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 28
+  }
+}
