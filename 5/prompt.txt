@@ -1,0 +1,37 @@
+How well does this project works with other deployment method ?
+
+---
+
+So all the URLs are depended on Github Deployments ?
+
+---
+
+Yeap thats what I meant, meaning as long as their deployment methods, sets the environment_url then it would be good right
+
+---
+
+Yeap then that's good, we just need this prompt in the setup guide
+
+---
+
+[Image #1] The header in the main page needs to have gradient fade as well
+
+---
+
+[Image #1] Don't think this is correct
+
+---
+
+[Image #1] The url is wrong here, too
+
+---
+
+We should not edit the target page itself, we need to fix the preview panel right ? to just show the path
+
+---
+
+The image should show the dev server host + path, just the label can just remain the path
+
+---
+
+[Image #1] Lol
