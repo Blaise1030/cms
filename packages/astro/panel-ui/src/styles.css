@@ -1,9 +1,12 @@
 @import "tailwindcss";
 
-/* Same tokens as orso web dark chrome (`web/src/index.css` `.dark`). */
-:host,
-.orso-checks-root {
+/* Isolated in Shadow DOM — tokens match orso web `.dark`. */
+:host {
   color-scheme: dark;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--foreground);
   --background: oklch(0.18 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -19,15 +22,16 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --warning: oklch(0.8 0.14 75);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.6 0.17 260);
   --radius: 0.625rem;
   --raised-gloss: 14%;
   --raised-soft-gloss: 6%;
-  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-  font-size: 0.8125rem;
-  line-height: 1.35;
+}
+
+.orso-checks-root {
   color: var(--foreground);
 }
 

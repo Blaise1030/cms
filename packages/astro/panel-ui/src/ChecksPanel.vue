@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
+import { CircleAlert, TriangleAlert } from "@lucide/vue";
 import Button from "./ui/Button.vue";
 import Badge from "./ui/Badge.vue";
 import Card from "./ui/Card.vue";
@@ -101,13 +102,13 @@ const sorted = computed(() => findings.value);
 
 <template>
   <div
-    class="orso-checks-root pointer-events-auto flex flex-col items-end gap-2"
+    class="pointer-events-auto flex flex-col items-end gap-2"
     :class="{ 'pointer-events-none opacity-35': picking }"
     data-testid="orso-checks-panel"
   >
     <Card
       v-show="open"
-      class="w-[min(22rem,calc(100vw-24px))] max-h-[min(26rem,calc(100vh-80px))] gap-2.5 overflow-hidden rounded-lg py-3 shadow-lg"
+      class="border-border w-[min(22rem,calc(100vw-24px))] max-h-[min(26rem,calc(100vh-80px))] gap-3 overflow-hidden rounded-xl border py-3 shadow-lg"
       data-orso-checks-drawer
     >
       <div class="flex items-center justify-between gap-2 px-3">
@@ -124,17 +125,33 @@ const sorted = computed(() => findings.value);
           No issues found on this page.
         </li>
         <li v-for="f in sorted" :key="`${f.rule}:${f.message}`" :data-rule="f.rule">
-          <Card class="bg-muted/40 gap-0 rounded-lg py-0 shadow-none">
-            <div class="flex items-start gap-2 px-2.5 py-2">
-              <Badge
-                :variant="f.severity === 'error' ? 'destructive' : 'secondary'"
-                class="mt-0.5 shrink-0 uppercase"
+          <Card
+            class="border-border bg-card gap-0 rounded-lg border py-0 shadow-sm"
+          >
+            <div class="flex items-start gap-2.5 px-3 py-2.5">
+              <div
+                class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border"
+                :class="
+                  f.severity === 'error'
+                    ? 'border-destructive/30 bg-destructive/15 text-destructive'
+                    : 'border-[color-mix(in_oklch,var(--warning)_35%,transparent)] bg-[color-mix(in_oklch,var(--warning)_18%,transparent)] text-[color-mix(in_oklch,var(--warning)_90%,white)]'
+                "
+                aria-hidden="true"
               >
-                {{ f.severity }}
-              </Badge>
-              <div class="min-w-0 flex-1 text-sm">
-                <div>{{ f.message }}</div>
-                <div v-if="f.detail" class="text-muted-foreground mt-0.5 text-[0.72rem]">
+                <CircleAlert v-if="f.severity === 'error'" class="size-3.5" />
+                <TriangleAlert v-else class="size-3.5" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="mb-1 flex items-center gap-1.5">
+                  <Badge
+                    :variant="f.severity === 'error' ? 'destructive' : 'secondary'"
+                    class="uppercase"
+                  >
+                    {{ f.severity }}
+                  </Badge>
+                </div>
+                <div class="text-sm leading-snug">{{ f.message }}</div>
+                <div v-if="f.detail" class="text-muted-foreground mt-1 text-[0.72rem]">
                   {{ f.detail }}
                 </div>
               </div>
