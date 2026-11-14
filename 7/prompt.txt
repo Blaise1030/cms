@@ -1,0 +1,45 @@
+What are some gaps that this project needs before it becomes an enterprise ready software /
+
+---
+
+Why are we making it a daemon ?
+
+---
+
+can we move the project to an electron based project ?
+
+---
+
+I am willing to drop the standalone daemon, not sure if it provides much value
+
+---
+
+B
+
+---
+
+Hold on, which is easier to distrubute ?
+
+---
+
+What if we remove the desktop portion of it and make it downloadable from curl ....
+
+---
+
+because I don't need to notorize the app
+
+---
+
+Can we allow the binary to serve the UI via a custom domain like orso.localhost.21312...
+
+---
+
+Will this be secure since it's running on local host
+
+---
+
+Sounds good
+
+---
+
+Can you kill the port at 5173
