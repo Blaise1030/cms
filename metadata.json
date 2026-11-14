@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7CW9XB83AX1F8G97J72AVG2",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 74,
+  "checkpoints_count": 75,
   "files_touched": [
     "web/src/modules/preview/PreviewPanel.vue",
     "web/src/modules/preview/checks/page.ts"
@@ -29,6 +29,13 @@
       "compact_transcript": "/2/transcript.jsonl",
       "content_hash": "/2/content_hash.txt",
       "prompt": "/2/prompt.txt"
+    },
+    {
+      "metadata": "/3/metadata.json",
+      "transcript": "/3/full.jsonl",
+      "compact_transcript": "/3/transcript.jsonl",
+      "content_hash": "/3/content_hash.txt",
+      "prompt": "/3/prompt.txt"
     }
   ],
   "redaction": {
