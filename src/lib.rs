@@ -23,7 +23,6 @@ pub mod runtime;
 pub mod settings;
 pub mod setup_prefs;
 pub mod shell;
-pub mod skills;
 pub mod state;
 pub mod watch;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.

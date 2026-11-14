@@ -1,7 +1,7 @@
 import { computed, shallowRef, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Settings, Sparkles, Sun, VolumeOff,
+  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Settings, Sun, VolumeOff,
 } from "@lucide/vue";
 import { useDaemon } from "@/core/daemon";
 import type { ContentEntrySummary } from "@/core/types";
@@ -17,7 +17,6 @@ const TABS: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "preview", label: "Preview", icon: MonitorPlay },
   { id: "content", label: "Content", icon: FileText },
   { id: "design", label: "Design", icon: Palette },
-  { id: "skills", label: "Skills", icon: Sparkles },
   { id: "code", label: "Code", icon: Code },
   { id: "history", label: "History", icon: History },
 ];

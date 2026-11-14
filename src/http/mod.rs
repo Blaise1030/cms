@@ -16,7 +16,6 @@ pub mod history;
 pub mod projects;
 pub mod settings;
 pub mod setup;
-pub mod skills;
 
 use std::path::PathBuf;
 
@@ -41,16 +40,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/content/entry/rename", post(content::rename))
         .route("/api/content/entry/impact", post(content::impact))
         .route("/api/design", get(design::get).put(design::put))
-        .route("/api/skills", get(skills::list))
-        .route("/api/skills/install", post(skills::install))
-        .route(
-            "/api/skills/settings",
-            get(skills::settings_get).put(skills::settings_put),
-        )
-        .route(
-            "/api/skills/{id}",
-            get(skills::get).put(skills::save).delete(skills::uninstall),
-        )
         .route("/api/settings", get(settings::get).put(settings::put))
         .route("/api/content/history", get(history::list))
         .route("/api/content/history/{sha}", get(history::version))

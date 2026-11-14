@@ -33,7 +33,6 @@ import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
-import { useSkillsStore } from "@/modules/skills/store";
 
 function setup(api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon(api);
@@ -122,7 +121,6 @@ describe("changes store", () => {
     vi.spyOn(useContentStore(), "refreshForBranch").mockRejectedValue(new Error("preview not ready"));
     vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
     vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
-    vi.spyOn(useSkillsStore(), "refreshForBranch").mockResolvedValue();
     const reload = vi.spyOn(usePreviewStore(), "reload");
 
     await store.switchTo("site", "content/alpha");
@@ -138,14 +136,11 @@ describe("changes store", () => {
     });
     vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
     const refreshForBranch = vi.spyOn(useContentStore(), "refreshForBranch").mockResolvedValue();
-    const skillsRefresh = vi.spyOn(useSkillsStore(), "refreshForBranch").mockResolvedValue();
 
     await store.switchTo("site", "content/alpha");
     expect(refreshForBranch).toHaveBeenLastCalledWith("content/alpha");
-    expect(skillsRefresh).toHaveBeenLastCalledWith("content/alpha");
     await store.create("site", "Beta");
     expect(refreshForBranch).toHaveBeenLastCalledWith("content/beta");
-    expect(skillsRefresh).toHaveBeenLastCalledWith("content/beta");
   });
 
   it("switchTo surfaces checkpoint-first errors", async () => {
@@ -307,7 +302,6 @@ describe("changes store", () => {
     vi.spyOn(useFilesStore(), "refresh").mockResolvedValue();
     vi.spyOn(useDesignStore(), "refreshForBranch").mockResolvedValue();
     vi.spyOn(useSettingsStore(), "refreshForBranch").mockResolvedValue();
-    vi.spyOn(useSkillsStore(), "refreshForBranch").mockResolvedValue();
     const preview = usePreviewStore();
     const reload = vi.spyOn(preview, "reload");
 

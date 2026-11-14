@@ -217,11 +217,7 @@ impl AppState {
         let projects = Arc::new(projects);
         let events = EventBus::new();
         let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
-        let chats = Arc::new(ChatManager::new(
-            events.clone(),
-            state_dir,
-            config.projects_dir.clone(),
-        ));
+        let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),

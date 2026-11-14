@@ -357,18 +357,6 @@ pub fn agent_guide() -> String {
     format!("{ORSO_GUIDE}\n\n{GIT_GUIDE}")
 }
 
-/// [`agent_guide`] plus, when the project has installed skills, the skills index appended
-/// after a blank line. Empty when neither root has a skill, so it is safe to use anywhere
-/// a project root is known.
-pub fn guided_prompt(project_root: &Path, global_root: &Path) -> String {
-    let index = crate::skills::skills_index(project_root, global_root);
-    if index.is_empty() {
-        agent_guide()
-    } else {
-        format!("{}\n\n{index}", agent_guide())
-    }
-}
-
 /// Agents that receive [`agent_guide`] and so may start on `main`: they branch before editing.
 /// Claude via `--append-system-prompt`, Codex via `developer_instructions`, Cursor via the
 /// project rule [`write_cursor_rule`] writes, OpenCode via `instructions` in its config dir.
@@ -376,12 +364,12 @@ pub fn gets_git_guide(provider_id: &str) -> bool {
     matches!(provider_id, "claude" | "codex" | "cursor" | "opencode")
 }
 
-/// Where [`write_cursor_rule`] puts [`guided_prompt`], relative to the project.
+/// Where [`write_cursor_rule`] puts [`agent_guide`], relative to the project.
 pub const CURSOR_RULE_PATH: &str = ".cursor/rules/orso-changes.mdc";
 
 /// Cursor CLI has no system-prompt flag but loads `.cursor/rules/*.mdc`: write the guide as
 /// an always-applied rule, and list it in `.git/info/exclude` so it never lands in a commit.
-pub fn write_cursor_rule(project_dir: &Path, global_root: &Path) -> std::io::Result<()> {
+pub fn write_cursor_rule(project_dir: &Path) -> std::io::Result<()> {
     let rule = project_dir.join(CURSOR_RULE_PATH);
     if let Some(parent) = rule.parent() {
         std::fs::create_dir_all(parent)?;
@@ -391,7 +379,7 @@ pub fn write_cursor_rule(project_dir: &Path, global_root: &Path) -> std::io::Res
         format!(
             "---\ndescription: How to work in this app: changes, checks, and syncing\n\
              alwaysApply: true\n---\n{}\n",
-            guided_prompt(project_dir, global_root)
+            agent_guide()
         ),
     )?;
     let git = project_dir.join(".git");
@@ -884,69 +872,20 @@ mod tests {
         assert!(!gets_git_guide("fake"));
     }
 
-    fn skill_md(name: &str, description: &str) -> String {
-        format!("---\nname: {name}\ndescription: {description}\n---\nbody\n")
-    }
-
-    fn install_skill(project: &Path, id: &str, name: &str, description: &str) {
-        let skill_dir = project.join(crate::skills::PROJECT_SKILLS_REL).join(id);
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(skill_dir.join("SKILL.md"), skill_md(name, description)).unwrap();
-    }
-
-    #[test]
-    fn guided_prompt_appends_the_installed_skills_index() {
-        let tmp = tempfile::tempdir().unwrap();
-        let project = tmp.path().join("proj");
-        let global = tmp.path().join("glob");
-        install_skill(&project, "seo", "SEO", "SEO guidance");
-
-        let prompt = guided_prompt(&project, &global);
-        assert!(
-            prompt.starts_with(&agent_guide()),
-            "prompt must lead with agent_guide"
-        );
-        assert!(prompt.contains("## Installed skills"));
-        assert!(prompt.contains("**seo** (project): SEO guidance"));
-    }
-
-    #[test]
-    fn guided_prompt_without_skills_equals_agent_guide() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(
-            guided_prompt(&tmp.path().join("proj"), &tmp.path().join("glob")),
-            agent_guide()
-        );
-    }
-
     #[test]
     fn cursor_rule_is_written_and_git_excluded_once() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".git/info")).unwrap();
         std::fs::write(dir.path().join(".git/info/exclude"), "# keep\n*.log").unwrap();
-        write_cursor_rule(dir.path(), &dir.path().join("glob")).unwrap();
-        write_cursor_rule(dir.path(), &dir.path().join("glob")).unwrap();
+        write_cursor_rule(dir.path()).unwrap();
+        write_cursor_rule(dir.path()).unwrap();
 
         let rule = std::fs::read_to_string(dir.path().join(CURSOR_RULE_PATH)).unwrap();
         assert!(rule.starts_with("---\n"), "{rule}");
         assert!(rule.contains("alwaysApply: true"), "{rule}");
         assert!(rule.contains(&agent_guide()));
-        assert!(!rule.contains("## Installed skills"), "{rule}");
         let exclude = std::fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
         assert_eq!(exclude, format!("# keep\n*.log\n/{CURSOR_RULE_PATH}\n"));
-    }
-
-    #[test]
-    fn cursor_rule_contains_installed_skills_heading_when_a_skill_exists() {
-        let tmp = tempfile::tempdir().unwrap();
-        let project = tmp.path().join("proj");
-        let global = tmp.path().join("glob");
-        install_skill(&project, "seo", "SEO", "SEO guidance");
-
-        write_cursor_rule(&project, &global).unwrap();
-        let rule = std::fs::read_to_string(project.join(CURSOR_RULE_PATH)).unwrap();
-        assert!(rule.contains("## Installed skills"), "{rule}");
-        assert!(rule.contains("**seo** (project): SEO guidance"), "{rule}");
     }
 
     #[test]

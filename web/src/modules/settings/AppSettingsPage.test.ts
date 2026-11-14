@@ -133,7 +133,7 @@ describe("AppSettingsPage", () => {
     expect(w.get("[data-testid='app-settings-search-hint']").text()).toContain("⌘F");
     expect(w.get("[data-testid='app-settings-nav']").text()).toContain("Setup");
     expect(w.get("[data-testid='app-settings-nav']").text()).toContain("Preferences");
-    expect(w.findAll("[data-testid^='app-settings-tab-']")).toHaveLength(6);
+    expect(w.findAll("[data-testid^='app-settings-tab-']")).toHaveLength(5);
     expect(w.find("[data-testid='app-settings-tab-about']").exists()).toBe(true);
     expect(w.find("[data-testid='app-settings-account']").exists()).toBe(true);
   });
@@ -168,10 +168,6 @@ describe("AppSettingsPage", () => {
     await openTab(w, "appearance");
     expect(router.currentRoute.value.query.tab).toBe("appearance");
     expect(w.find("[data-testid='appearance-settings']").exists()).toBe(true);
-
-    await openTab(w, "skills");
-    expect(router.currentRoute.value.query.tab).toBe("skills");
-    expect(w.find("[data-testid='skills-settings']").exists()).toBe(true);
 
     await openTab(w, "about");
     expect(router.currentRoute.value.query.tab).toBe("about");
