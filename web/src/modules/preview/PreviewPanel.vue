@@ -127,7 +127,6 @@ const LABEL: Record<DevserverState, string> = {
 
 // --- Browser shell ---------------------------------------------------------------------------
 
-const shell = ref<HTMLElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const history = useFrameHistory();
 /** The last path the frame showed, per project, so the preview reopens where the user left it. */
@@ -451,7 +450,7 @@ function openExternal() {
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
-    <div ref="shell" data-testid="preview-shell" :class="shellClass">
+    <div data-testid="preview-shell" :class="shellClass">
       <TooltipProvider>
         <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
           <Tooltip>

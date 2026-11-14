@@ -1,6 +1,7 @@
 // Test-only stand-in for `useDaemon()`: API methods are vi.fn stubs supplied by the test,
 // and `emit()` pushes a wire event to whatever the store subscribed.
 import { ref } from "vue";
+import type { DaemonConfig } from "@/core/config";
 import type { DaemonEvent, DaemonEventType } from "@/core/types";
 
 export function createFakeDaemon(api: Record<string, unknown> = {}) {
@@ -14,7 +15,7 @@ export function createFakeDaemon(api: Record<string, unknown> = {}) {
       changesSyncNeeded: async () => true,
       ...api,
     },
-    config: ref({ origin: "http://127.0.0.1:7800" }),
+    config: ref<DaemonConfig>({ origin: "http://127.0.0.1:7800" }),
     status: ref("open"),
     on(type: DaemonEventType, handler: (e: never) => void) {
       let set = handlers.get(type);

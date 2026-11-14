@@ -267,58 +267,35 @@ export function auditPage(doc: ParentNode, { path }: { path: string }): Finding[
   return findings;
 }
 
-/**
- * @param {unknown[]} blocks
- */
-function hasUsefulJsonLdType(blocks) {
+function hasUsefulJsonLdType(blocks: unknown[]) {
   for (const block of blocks) {
     if (jsonLdHasAllowlistedType(block)) return true;
   }
   return false;
 }
 
-/**
- * @param {unknown[]} blocks
- * @param {string} type
- */
-function jsonLdHasType(blocks, type) {
+function jsonLdHasType(blocks: unknown[], type: string) {
   for (const block of blocks) {
     if (nodeHasType(block, type)) return true;
   }
   return false;
 }
 
-/**
- * @param {unknown} node
- */
-function jsonLdHasAllowlistedType(node) {
+function jsonLdHasAllowlistedType(node: unknown) {
   return collectTypes(node).some((t) => JSON_LD_TYPES.has(t));
 }
 
-/**
- * @param {unknown} node
- * @param {string} type
- */
-function nodeHasType(node, type) {
+function nodeHasType(node: unknown, type: string) {
   return collectTypes(node).includes(type);
 }
 
-/**
- * @param {unknown} node
- * @returns {string[]}
- */
-function collectTypes(node) {
-  /** @type {string[]} */
-  const types = [];
+function collectTypes(node: unknown): string[] {
+  const types: string[] = [];
   walkJsonLd(node, types);
   return types;
 }
 
-/**
- * @param {unknown} node
- * @param {string[]} types
- */
-function walkJsonLd(node, types) {
+function walkJsonLd(node: unknown, types: string[]) {
   if (node == null || typeof node !== "object") return;
 
   if (Array.isArray(node)) {
@@ -326,8 +303,7 @@ function walkJsonLd(node, types) {
     return;
   }
 
-  /** @type {Record<string, unknown>} */
-  const obj = /** @type {Record<string, unknown>} */ (node);
+  const obj = node as Record<string, unknown>;
 
   const atType = obj["@type"];
   if (typeof atType === "string") {
