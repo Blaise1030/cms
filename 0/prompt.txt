@@ -1,0 +1,25 @@
+Are we able to create in the preview module, like check SEO and AEO items on the html, performance, anything, suggest some items to see too
+
+---
+
+Are there any existing astro plugins for this
+
+---
+
+Should orso own it or others should
+
+---
+
+I wanted it for both writer in the app as well as the pipline itself, ideal/var/folders/bk/vm0wjmvn4rx1drzkrkqllr_h0000gn/T/TemporaryItems/NSIRD_screencaptureui_zF1kAf/Screenshot\ 2026-11-14\ at\ 3.36.42 PM.png when the preview got published, there are some CI results for the user to see too, so ideally the rules are consistent and same,
+
+---
+
+The CI checks live in the orso plugin, the perfomrance panel also lives in the rendered astro app
+
+---
+
+Only the inpage panel in the previrw
+
+---
+
+Sounds good
