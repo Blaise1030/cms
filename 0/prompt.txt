@@ -1,0 +1,81 @@
+[Image #1] Chagne the backbutotn from the content editor to secondary button
+
+---
+
+Can keep the default as the default size
+
+---
+
+[Image #1] All buttons in this row to be the same size, default size
+
+---
+
+Sorry change back to size-8, infact change the button component
+
+---
+
+Change icon to size-8, default size go to size-7 too
+
+---
+
+Change icon to size-7, default size go to size-7 too
+
+---
+
+[Image #1] There is this border on the left, can we not have it ?
+
+---
+
+[Image #1] Change the icon beside refresh to chevrons-right
+
+---
+
+[Image #1] Can the sidebar border be using border-border and make it resizable
+
+---
+
+[Image #1] Also, fields are not showing
+
+---
+
+[Image #1] Can we have some padding around the setting sidebar
+
+---
+
+[Image #1] Could we reference the styl of the sidebar like content collection,
+
+---
+
+[Image #1] Reduce the height fo the sidebar button
+
+---
+
+[Image #1] Same here
+
+---
+
+[Image #1] need gap between the selected items
+
+---
+
+[Image #1] Move back to app to the top of the sideabr
+
+---
+
+[Image #1] Reduce the border of the start icons, cards reduce the broder widht and shadow
+
+---
+
+[Image #1] Make these solid icons
+
+---
+
+[Image #1] Add padding on left and right of the sidebar
+
+---
+
+[Image #1] Now this is bad, we still need some shadow
+
+---
+
+[Image #1] What the fuck
