@@ -117,6 +117,9 @@ function normalizePathForCheck(href) {
   const bare = href.split("#")[0].split("?")[0].trim();
   if (!bare || bare === "/") return "/";
   let path = bare.startsWith("/") ? bare : `/${bare}`;
+  if (path.endsWith(".html/")) path = path.slice(0, -1);
+  const last = path.split("/").pop() ?? "";
+  if (last.includes(".")) return path;
   if (!path.endsWith("/")) path += "/";
   return path;
 }
@@ -126,8 +129,32 @@ function normalizePathForCheck(href) {
  * @param {Set<string>} files
  */
 function existsAsPage(path, files) {
-  if (files.has(path)) return true;
-  if (path.endsWith("/") && files.has(path.slice(0, -1))) return true;
-  if (!path.endsWith("/") && files.has(`${path}/`)) return true;
+  for (const candidate of linkTargetCandidates(path)) {
+    if (files.has(candidate)) return true;
+  }
   return false;
+}
+
+/**
+ * @param {string} path
+ * @returns {string[]}
+ */
+function linkTargetCandidates(path) {
+  /** @type {string[]} */
+  const out = [path];
+  if (path.endsWith("/")) {
+    out.push(path.slice(0, -1));
+    const stem = path.slice(0, -1);
+    if (stem) out.push(`${stem}.html`);
+  } else {
+    out.push(`${path}/`);
+    if (path.endsWith(".html")) {
+      const stem = path.slice(0, -".html".length);
+      out.push(`${stem}/`);
+      if (stem) out.push(stem);
+    } else if (!path.includes(".")) {
+      out.push(`${path}.html`);
+    }
+  }
+  return out;
 }

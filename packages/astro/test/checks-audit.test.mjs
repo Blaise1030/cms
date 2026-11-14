@@ -76,6 +76,52 @@ test("auditDist with base: prefixed href to existing page is not broken-link", a
   }
 });
 
+test("auditDist: missing robots.txt and sitemap.xml yields site warnings", async () => {
+  const dir = await fixtureDir(async (root) => {
+    await writeFile(join(root, "index.html"), goodPage());
+  });
+
+  try {
+    const { findings } = await auditDist(dir);
+    assert.ok(findings.some((f) => f.rule === "robots-missing" && f.page === "/"));
+    assert.ok(findings.some((f) => f.rule === "sitemap-missing" && f.page === "/"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("auditDist: link to existing non-HTML asset is not broken-link", async () => {
+  const dir = await fixtureDir(async (root) => {
+    await writeFile(join(root, "index.html"), goodPage('<a href="/logo.png">logo</a>'));
+    await writeFile(join(root, "logo.png"), "PNG");
+  });
+
+  try {
+    const { findings } = await auditDist(dir);
+    assert.equal(findings.some((f) => f.rule === "broken-link"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("auditDist: /about.html href resolves to about/index.html output", async () => {
+  const dir = await fixtureDir(async (root) => {
+    await writeFile(
+      join(root, "index.html"),
+      goodPage('<a href="/about.html">about</a>'),
+    );
+    await mkdir(join(root, "about"), { recursive: true });
+    await writeFile(join(root, "about", "index.html"), goodPage("<p>About</p>", "<title>About</title>"));
+  });
+
+  try {
+    const { findings } = await auditDist(dir);
+    assert.equal(findings.some((f) => f.rule === "broken-link"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("formatReport: returns non-empty string for findings", () => {
   const text = formatReport([
     { rule: "description-missing", severity: "warning", page: "/pricing/", message: "This page has no description." },

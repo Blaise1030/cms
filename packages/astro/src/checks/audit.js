@@ -16,6 +16,11 @@ export async function auditDist(dir, opts = {}) {
 
   /** @type {Set<string>} */
   const files = new Set();
+  for (const abs of await walkOutputFiles(dir)) {
+    const rel = relative(dir, abs).replace(/\\/g, "/");
+    addDistOutputPaths(rel, files);
+  }
+
   /** @type {{ path: string, title?: string, description?: string }[]} */
   const pages = [];
   /** @type {import("./findings.js").Finding[]} */
@@ -26,7 +31,6 @@ export async function auditDist(dir, opts = {}) {
   for (const abs of htmlFiles) {
     const rel = relative(dir, abs).replace(/\\/g, "/");
     const path = filePathToUrlPath(rel);
-    files.add(path);
 
     const html = await readFile(abs, "utf8");
     const { document } = parseHTML(html);
@@ -46,15 +50,6 @@ export async function auditDist(dir, opts = {}) {
     }
   }
 
-  for (const name of ["robots.txt", "sitemap.xml"]) {
-    try {
-      await readFile(join(dir, name));
-      files.add(`/${name}`);
-    } catch {
-      // absent — auditSite reports missing
-    }
-  }
-
   const siteFindings = auditSite({ pages, files, internalLinks });
 
   return {
@@ -68,6 +63,15 @@ export async function auditDist(dir, opts = {}) {
  * @returns {Promise<string[]>}
  */
 async function walkHtml(dir) {
+  const all = await walkOutputFiles(dir);
+  return all.filter((abs) => abs.replace(/\\/g, "/").endsWith(".html"));
+}
+
+/**
+ * @param {string} dir
+ * @returns {Promise<string[]>}
+ */
+async function walkOutputFiles(dir) {
   /** @type {string[]} */
   const out = [];
   async function walk(current) {
@@ -75,11 +79,34 @@ async function walkHtml(dir) {
     for (const ent of entries) {
       const p = join(current, ent.name);
       if (ent.isDirectory()) await walk(p);
-      else if (ent.name.endsWith(".html")) out.push(p);
+      else out.push(p);
     }
   }
   await walk(dir);
   return out;
+}
+
+/**
+ * @param {string} rel
+ * @param {Set<string>} files
+ */
+function addDistOutputPaths(rel, files) {
+  files.add(`/${rel}`);
+  if (rel === "index.html") {
+    files.add("/");
+    return;
+  }
+  if (rel.endsWith("/index.html")) {
+    const prefix = rel.slice(0, -"index.html".length);
+    files.add(`/${prefix}`);
+    const stem = prefix.replace(/\/$/, "");
+    if (stem) files.add(`/${stem}.html`);
+    return;
+  }
+  if (rel.endsWith(".html")) {
+    const stem = rel.slice(0, -".html".length);
+    files.add(`/${stem}/`);
+  }
 }
 
 /**
@@ -138,7 +165,10 @@ function resolveInternalHref(href, fromPage, base) {
     pathname = new URL(stripped, `https://orso.local${from}`).pathname;
   }
 
+  if (pathname.endsWith(".html/")) pathname = pathname.slice(0, -1);
   if (pathname === "/") return "/";
+  const last = pathname.split("/").pop() ?? "";
+  if (last.includes(".")) return pathname;
   if (!pathname.endsWith("/")) pathname += "/";
   return pathname;
 }

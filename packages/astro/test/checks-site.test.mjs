@@ -62,6 +62,24 @@ test("robots and sitemap present: no site file findings", () => {
   assert.equal(findings.some((f) => f.rule === "sitemap-missing"), false);
 });
 
+test("broken-link: existing asset path is not broken", () => {
+  const findings = site({
+    pages: [{ path: "/", title: "T" }],
+    files: ["/", "/logo.png"],
+    internalLinks: [{ from: "/", href: "/logo.png" }],
+  });
+  assert.equal(findings.some((f) => f.rule === "broken-link"), false);
+});
+
+test("broken-link: /about.html matches /about/ in files", () => {
+  const findings = site({
+    pages: [{ path: "/", title: "T" }],
+    files: ["/", "/about/", "/about/index.html"],
+    internalLinks: [{ from: "/", href: "/about.html" }],
+  });
+  assert.equal(findings.some((f) => f.rule === "broken-link"), false);
+});
+
 test("broken-link: internal href not in files", () => {
   const findings = site({
     pages: [{ path: "/", title: "T" }],
