@@ -114,7 +114,7 @@ function errorMessage(error) {
  * One manifest entry for a collection. A schema-function failure is recorded
  * on that collection only, so one broken schema never hides the others.
  */
-async function describeCollection(name, definition, schemas) {
+async function describeCollection(name, definition, schemas, { hasPreviewPath = false } = {}) {
   const meta = definition?.loader?.[GLOB_META] ?? null;
   const entry = {
     name,
@@ -123,6 +123,7 @@ async function describeCollection(name, definition, schemas) {
     singleton: typeof meta?.singleton === "string" ? meta.singleton : null,
     supportedForEditing: false,
     reason: null,
+    hasPreviewPath: hasPreviewPath === true,
     fields: null,
   };
 
@@ -157,7 +158,7 @@ async function describeCollection(name, definition, schemas) {
  * A module that cannot be imported, or one that does not export a `collections`
  * object, throws so the caller can keep the previous manifest.
  */
-export async function loadContent({ runner, configPath } = {}) {
+export async function loadContent({ runner, configPath, hasPreviewPath = {} } = {}) {
   const schemas = new Map();
   if (!configPath) return { manifest: { version: 1, collections: [] }, schemas };
 
@@ -169,7 +170,11 @@ export async function loadContent({ runner, configPath } = {}) {
 
   const entries = [];
   for (const [name, definition] of Object.entries(collections)) {
-    entries.push(await describeCollection(name, definition, schemas));
+    entries.push(
+      await describeCollection(name, definition, schemas, {
+        hasPreviewPath: hasPreviewPath[name] === true,
+      }),
+    );
   }
   return { manifest: { version: 1, collections: entries }, schemas };
 }

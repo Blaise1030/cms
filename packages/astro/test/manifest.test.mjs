@@ -45,7 +45,12 @@ const helpDocsCollection = {
 
 async function loadCollections(collections, extra = {}) {
   const runner = fakeRunner({ collections });
-  const result = await loadContent({ runner, configPath: CONFIG });
+  const { hasPreviewPath, ...loadOpts } = extra;
+  const result = await loadContent({
+    runner,
+    configPath: CONFIG,
+    ...(hasPreviewPath !== undefined ? { hasPreviewPath } : {}),
+  });
   return { ...result, runner, ...extra };
 }
 
@@ -230,6 +235,7 @@ test.describe("loadContent", () => {
     assert.deepEqual(manifest.collections.map(({ singleton }) => singleton), [null, null]);
     assert.deepEqual(manifest.collections.map(({ supportedForEditing }) => supportedForEditing), [true, true]);
     assert.deepEqual(manifest.collections.map(({ reason }) => reason), [null, null]);
+    assert.deepEqual(manifest.collections.map(({ hasPreviewPath }) => hasPreviewPath), [false, false]);
 
     assert.ok(schemas instanceof Map);
     assert.equal(schemas.size, 2);
@@ -283,6 +289,7 @@ test.describe("loadContent", () => {
       singleton: "home",
       supportedForEditing: true,
       reason: null,
+      hasPreviewPath: false,
       fields: {
         type: "object",
         required: true,
@@ -306,12 +313,38 @@ test.describe("loadContent", () => {
       singleton: null,
       supportedForEditing: false,
       reason: "Collection does not use orsoGlob",
+      hasPreviewPath: false,
       fields: {
         type: "object",
         required: true,
         properties: { title: { type: "string", required: true } },
       },
     });
+  });
+
+  test("sets hasPreviewPath from loadContent options and serializes in writeManifest", async () => {
+    const { manifest } = await loadCollections(
+      { blog: blogCollection(), helpDocs: helpDocsCollection },
+      { hasPreviewPath: { blog: true, helpDocs: false } },
+    );
+    assert.deepEqual(
+      manifest.collections.map(({ name, hasPreviewPath }) => ({ name, hasPreviewPath })),
+      [
+        { name: "blog", hasPreviewPath: true },
+        { name: "helpDocs", hasPreviewPath: false },
+      ],
+    );
+
+    const root = await mkdtemp(join(tmpdir(), "orso-manifest-preview-"));
+    try {
+      writeManifest(root, manifest);
+      const written = JSON.parse(await readFile(join(root, ".astro", "orso-content.json"), "utf8"));
+      assert.equal(written.collections[0].hasPreviewPath, true);
+      assert.equal(written.collections[1].hasPreviewPath, false);
+      assert.equal("previewPath" in (written.collections[0] ?? {}), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("marks an unsafe base read-only", async () => {
