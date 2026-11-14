@@ -6,8 +6,10 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
-const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
+import { usePreviewStore } from "@/modules/preview/store";
+const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
+vi.mock("vue-sonner", () => ({ toast: { warning: vi.fn(), success: vi.fn(), error: h.toastError } }));
 import { REFRESH_DELAY_MS, useContentStore } from "./store";
 beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -24,7 +26,9 @@ async function setup(api: Record<string, unknown> = {}, start = "/p/p/content") 
   ...api,
  });
  setActivePinia(createPinia());
- return mount(RouterView, {global:{plugins:[await contentRouter(start)]}});
+ const router = await contentRouter(start);
+ await router.addRoute({ path: "/p/:id/preview", name: "project-preview", component: { template: "<p>Preview</p>" } });
+ return mount(RouterView, { global: { plugins: [router] } });
 }
 it("lists collections, then entries, then opens the editor", async () => {
  const w = await setup(); await flushPromises();
@@ -269,6 +273,52 @@ it("explains an empty catalog: the site needs the orso-astro integration", async
  expect(listed.find('[data-testid="content-empty-catalog"]').exists()).toBe(false);
  listed.unmount();
 });
+const blogPreview = { ...blog, hasPreviewPath: true };
+
+it("hides Open in preview when the collection has no previewPath flag", async () => {
+ const w = await setup({}, "/p/p/content/blog/welcome"); await flushPromises();
+ expect(w.find('[data-testid="content-open-preview"]').exists()).toBe(false);
+ w.unmount();
+});
+
+it("hides Open in preview while the preview is not ready", async () => {
+ const w = await setup({
+  listContentCollections: async () => [{ ...blogPreview, editable: false, reason: "Start the preview to edit content" }],
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ expect(w.find('[data-testid="content-open-preview"]').exists()).toBe(false);
+ w.unmount();
+});
+
+it("resolves the preview path and navigates to Preview when ready", async () => {
+ const resolveContentPreviewPath = vi.fn(async () => ({ path: "/blog/welcome/" }));
+ const w = await setup({
+  listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
+  resolveContentPreviewPath,
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ const preview = usePreviewStore();
+ preview.setFramePath("p", "/other/");
+ await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
+ expect(resolveContentPreviewPath).toHaveBeenCalledWith("p", "blog", "welcome");
+ expect(preview.framePathFor("p")).toBe("/blog/welcome/");
+ expect(w.vm.$route.path).toBe("/p/p/preview");
+ w.unmount();
+});
+
+it("toasts on preview-path failure without changing the frame path", async () => {
+ const resolveContentPreviewPath = vi.fn(async () => { throw new ApiError("UNKNOWN", "preview path failed", 502); });
+ const w = await setup({
+  listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
+  resolveContentPreviewPath,
+ }, "/p/p/content/blog/welcome"); await flushPromises();
+ const preview = usePreviewStore();
+ preview.setFramePath("p", "/kept/");
+ await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
+ expect(h.toastError).toHaveBeenCalledWith("preview path failed");
+ expect(preview.framePathFor("p")).toBe("/kept/");
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
+ w.unmount();
+});
+
 it("clears the previous project's catalog while the next project loads", async () => {
  const w = await setup(); await flushPromises(); const store = useContentStore();
  const opening = store.open("other");

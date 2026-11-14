@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
+import { ChevronLeft, ExternalLink, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
+import { usePreviewStore } from "@/modules/preview/store";
+import { openInPreview } from "./openInPreview";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -35,6 +37,7 @@ const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEdit
 const props = defineProps<{projectId: string; collection?: string; entry?: string}>();
 const store = useContentStore();
 const router = useRouter();
+const preview = usePreviewStore();
 const changes = useChangesStore();
 const daemon = useDaemon();
 // Images inserted by the form or body editor stay pending in the draft until Save.
@@ -60,6 +63,23 @@ function removable(collection: string) {
   return !store.collections.find(x => x.name === collection)?.singleton;
 }
 const canRemove = computed(() => !!store.entry && !store.creating && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
+const openEntryCollection = computed(() => store.collections.find(c => c.name === store.entry?.collection));
+const canOpenInPreview = computed(() => {
+  const c = openEntryCollection.value;
+  return !!store.entry && c?.hasPreviewPath === true && c.editable;
+});
+function previewEntry() {
+  const e = store.entry;
+  if (!e || !canOpenInPreview.value) return;
+  void openInPreview({
+    projectId: props.projectId,
+    collection: e.collection,
+    id: e.id,
+    resolve: daemon.api.resolveContentPreviewPath,
+    preview,
+    router,
+  });
+}
 const lifecycleOpen = computed({
   // Hidden while waiting for Create Change so the form's prompt is reachable.
   get: () => !!store.lifecycle && !store.needsChange,
@@ -341,6 +361,10 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
           </div>
           <div class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="wordCount !== null" class="hidden px-2 text-xs text-muted-foreground @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
+            <Button v-if="canOpenInPreview" type="button" variant="ghost" size="sm" class="hidden h-8 gap-1.5 px-2 text-muted-foreground @md/inset:inline-flex" data-testid="content-open-preview" @click="previewEntry">
+              <ExternalLink class="size-4" aria-hidden="true" />
+              Open in preview
+            </Button>
             <template v-if="canRemove">
               <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
             </template>

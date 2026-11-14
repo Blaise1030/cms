@@ -203,6 +203,8 @@ export function createApi(
       (await json<{entries: ContentEntrySummary[]}>("GET", "/api/content/entries", {query:{project,collection}})).entries,
     contentEntry: (project: string, collection: string, id: string) =>
       json<ContentEntry>("GET", "/api/content/entry", {query:{project,collection,id}}),
+    resolveContentPreviewPath: (project: string, collection: string, id: string) =>
+      json<{ path: string }>("POST", "/api/content/preview-path", { body: { project, collection, id } }),
     contentHistory: async (project: string, collection: string, id: string): Promise<FileVersion[]> =>
       (await json<{versions: FileVersion[]}>("GET", "/api/content/history", {query:{project,collection,id}})).versions,
     /** 404 when `sha` is no longer in the entry's history. */
