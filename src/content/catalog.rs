@@ -23,6 +23,9 @@ pub struct ContentCollection {
     pub supported_for_editing: bool,
     #[serde(default)]
     pub reason: Option<String>,
+    /// Manifest flag only; the `previewPath` function stays on the running preview.
+    #[serde(default, rename = "hasPreviewPath")]
+    pub has_preview_path: bool,
     #[serde(default)]
     pub fields: Value,
 }

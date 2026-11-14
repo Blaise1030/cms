@@ -155,6 +155,41 @@ function validate(request, entry) {
   return { status: 200, body: { valid: false, fields, errors: issuesOf(result.error) } };
 }
 
+/** Resolve a site-relative preview URL from the runtime previewPath map (not manifest editing support). */
+function previewPath(request, previewPaths) {
+  if (typeof request.id !== "string" || request.id === "") throw new BadRequestError("id must be a non-empty string");
+  const { fields } = request;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new BadRequestError("fields must be an object");
+
+  const fn = previewPaths.get(request.collection);
+  if (typeof fn !== "function") {
+    throw new HttpError(404, {
+      error: "no_preview_path",
+      message: `Collection "${request.collection}" has no previewPath`,
+    });
+  }
+
+  let path;
+  try {
+    path = fn({ ...fields, slug: request.id });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "previewPath failed";
+    throw new HttpError(400, { error: "preview_path_failed", message });
+  }
+
+  if (typeof path !== "string") {
+    throw new HttpError(400, { error: "preview_path_failed", message: "previewPath must return a string" });
+  }
+  path = path.trim();
+  if (path === "" || !path.startsWith("/")) {
+    throw new HttpError(400, {
+      error: "preview_path_failed",
+      message: "previewPath must return a non-empty path starting with /",
+    });
+  }
+  return { status: 200, body: { path } };
+}
+
 /** A partial top-level update applied to the source without reformatting it. */
 function patch(request, entry) {
   if (typeof request.source !== "string") throw new BadRequestError("source must be a string");
@@ -165,10 +200,11 @@ function patch(request, entry) {
   return { status: 200, body: { source } };
 }
 
-function operation(request, lookup) {
+function operation(request, lookup, previewPaths) {
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new BadRequestError("Request body must be a JSON object");
   if (typeof request.collection !== "string" || request.collection === "") throw new BadRequestError("collection must be a non-empty string");
-  if (request.op !== "validate" && request.op !== "patch") throw new BadRequestError('op must be "validate" or "patch"');
+  if (request.op === "previewPath") return previewPath(request, previewPaths);
+  if (request.op !== "validate" && request.op !== "patch") throw new BadRequestError('op must be "validate", "patch", or "previewPath"');
   const entry = requireEntry(request.collection, lookup);
   return request.op === "validate" ? validate(request, entry) : patch(request, entry);
 }
@@ -183,8 +219,9 @@ function operation(request, lookup) {
  * types, wrong tokens, oversized bodies and non-POST methods, sends no CORS
  * headers and never logs the token or the request body.
  */
-export function createEndpoint({ token, lookup } = {}) {
+export function createEndpoint({ token, lookup, previewPaths } = {}) {
   if (typeof lookup !== "function") throw new TypeError("createEndpoint: lookup must be a function");
+  const paths = previewPaths instanceof Map ? previewPaths : new Map();
 
   return async function orsoEndpoint(req, res, next) {
     let pathname;
@@ -232,7 +269,7 @@ export function createEndpoint({ token, lookup } = {}) {
     }
 
     try {
-      const { status, body } = operation(request, lookup);
+      const { status, body } = operation(request, lookup, paths);
       return send(res, status, body);
     } catch (error) {
       if (error instanceof SchemaIssuesError) return send(res, 422, { error: "invalid_schema", issues: issuesOf(error) });

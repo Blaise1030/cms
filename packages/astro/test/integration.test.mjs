@@ -31,6 +31,36 @@ test("astro:config:setup injects the preview bridge and checks panel during dev"
   assert.match(injected[1].content, /panel\/panel\.js/);
 });
 
+test("astro:config:setup does not register the collections virtual plugin without collections", () => {
+  const configs = [];
+  const { hooks } = orso();
+  hooks["astro:config:setup"]({
+    command: "dev",
+    updateConfig: (patch) => configs.push(patch),
+    logger,
+    injectScript: noop,
+  });
+  assert.equal(configs.length, 0);
+});
+
+test("astro:config:setup registers the collections virtual plugin when collections are provided", () => {
+  const configs = [];
+  const integration = orso({
+    collections: {
+      blog: { collection: { loader: {}, schema: () => null } },
+    },
+  });
+  integration.hooks["astro:config:setup"]({
+    command: "dev",
+    updateConfig: (patch) => configs.push(patch),
+    logger,
+    injectScript: noop,
+  });
+  assert.equal(configs.length, 1);
+  const plugin = configs[0].vite.plugins[0];
+  assert.equal(plugin.name, "orso-virtual-collections");
+});
+
 test("astro:config:setup leaves builds alone", () => {
   const injected = [];
   const { hooks } = orso();

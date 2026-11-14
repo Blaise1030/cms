@@ -1,7 +1,7 @@
 use super::{project_dir, query_or_badreq};
 use crate::content::catalog;
 use crate::content::images::{self, ImageMeta, Upload};
-use crate::content::integration::PREVIEW_REASON;
+use crate::content::integration::{self, PREVIEW_REASON};
 use crate::content::mutation::{self, DeleteEntry, RenameEntry, SaveEntry, SaveTarget};
 use crate::{error::ApiError, state::AppState};
 use axum::body::Bytes;
@@ -249,6 +249,22 @@ struct DeleteBody {
     id: String,
     branch: String,
     hash: String,
+}
+/// `POST /api/content/preview-path` resolves the entry's site-relative preview path.
+pub async fn preview_path(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let b: EntryRef = parse(&body, "project, collection, id")?;
+    let root = project_dir(&state, &b.project).await?;
+    let entry = catalog::read_entry(&root, &b.collection, &b.id).await?;
+    let endpoint = state
+        .content_endpoint(&b.project)
+        .await?
+        .ok_or_else(|| ApiError::devserver(PREVIEW_REASON))?;
+    let fields = entry.fields.as_object().cloned().unwrap_or_default();
+    let path = integration::preview_path(&endpoint, &b.collection, &b.id, &fields).await?;
+    Ok(Json(json!({ "path": path })))
 }
 /// `POST /api/content/entry/impact` is the dry run for a rename or delete confirmation.
 pub async fn impact(

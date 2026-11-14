@@ -55,19 +55,52 @@ export default defineConfig({
 });
 ```
 
-`src/content.config.ts`:
+### `orso({ collections })` and `virtual:orso/collections`
+
+Pass collection definitions (and optional `previewPath` handlers) from `astro.config.mjs`:
+
+```js
+import { orso } from "./integrations/orso/index.js";
+import { marketingCollections } from "./integrations/orso/marketing.js";
+
+export default defineConfig({
+  integrations: [orso({ collections: marketingCollections })],
+});
+```
+
+`src/content.config.ts` only re-exports the virtual module:
+
+```ts
+export { collections } from "virtual:orso/collections";
+```
+
+`integrations/orso/marketing.js` (synced from this package) exports `marketingCollections` for
+the Astro marketing template (`blog` and `helpDocs` with site-relative `previewPath` helpers).
+Custom sites can define their own `collections` object with the same `{ collection, previewPath? }`
+shape.
+
+`previewPath(ctx)` receives one object and must return a site-relative path with a leading `/`
+(for example `/blog/welcome/`):
+
+- `ctx.slug` is always the entry id. It replaces a stored field named `slug`.
+- Every other key is a top-level stored field.
+- Reference fields are the stored entry ids, not resolved entries.
+
+Collections that define `previewPath` are flagged `hasPreviewPath: true` on the manifest.
+The editor can open those entries in preview even when the collection is read-only.
+
+For ad-hoc collections without the preset, define them inline and pass them to `orso()`:
 
 ```ts
 import { defineCollection } from "astro:content";
 import { orsoGlob } from "../integrations/orso/index.js";
 import { z } from "astro/zod";
 
-export const collections = {
-  blog: defineCollection({
-    loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
-    schema: z.object({ title: z.string() }),
-  }),
-};
+// astro.config.mjs — orso({ collections: { blog: { collection: blog, previewPath: ... } } })
+const blog = defineCollection({
+  loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
+  schema: z.object({ title: z.string() }),
+});
 ```
 
 ### `orsoGlob({ base, pattern, kind?, singleton?, ...options })`
@@ -116,6 +149,7 @@ is gitignored with the rest of `.astro/`):
       "singleton": null,
       "supportedForEditing": true,
       "reason": null,
+      "hasPreviewPath": true,
       "fields": { "type": "object", "required": true, "properties": {} }
     }
   ]
@@ -128,9 +162,11 @@ read-only, because its base and pattern cannot be recovered.
 ## Dev-only endpoint
 
 With `ORSO_CONTENT_TOKEN` set, the dev server mounts `POST /__orso`. The endpoint is
-loopback-only, takes a JSON body of at most 2 MiB, and answers the `validate` and `patch`
-operations with a constant-time token comparison. Patches are
+loopback-only, takes a JSON body of at most 2 MiB, and answers the `validate`, `patch`,
+and `previewPath` operations with a constant-time token comparison. Patches are
 source-preserving: the bytes the editor did not change are kept as they were.
+`previewPath` calls the collection's handler with the ctx above and returns
+`{ "path": "/blog/welcome/" }`. It does not require the collection to be editable.
 
 ## Tests
 

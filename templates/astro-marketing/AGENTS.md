@@ -4,7 +4,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 ## Content model
 
-- `src/content.config.ts` defines the collections and their schemas inline. Loaders import `orsoGlob` from `../integrations/orso/index.js`, and `astro.config.mjs` registers `orso()` imported from `./integrations/orso/index.js`. `integrations/orso/` is a generated copy of `packages/astro/src` (do not edit it; scaffolding overwrites it). `yaml`, `js-yaml`, and `jsonc-parser` are project dependencies; there is no `orso-astro` package. Collections:
+- Collection schemas and loaders live in `integrations/orso/marketing.js` as `marketingCollections` (generated from `packages/astro/src`; do not edit the copy). `astro.config.mjs` imports `orso` and `marketingCollections` from `./integrations/orso/` and passes them to `orso({ collections: marketingCollections })`; `src/content.config.ts` re-exports `collections` from `virtual:orso/collections`. `yaml`, `js-yaml`, `jsonc-parser`, and `linkedom` are project dependencies; there is no `orso-astro` npm package. Collections:
   - `blog` ← `src/content/blog/en/*.md`: `title`, `description`, `pubDate` (`YYYY-MM-DD`), optional `coverImage` + `coverAlt`, `tags[]`, `relatedPosts[]`.
   - `helpDocs` ← `src/content/helpDocs/en/*.md`: `title`, `description`, `section`, `order`.
 

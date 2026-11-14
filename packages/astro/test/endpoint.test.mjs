@@ -45,7 +45,16 @@ const collections = {
 
 const lookup = (name) => collections[name];
 
-const endpoint = createEndpoint({ token: TOKEN, lookup });
+const previewPaths = new Map([
+  ["blog", ({ slug, relatedPosts }) => `/blog/${slug}/${relatedPosts?.[0] ? `?ref=${relatedPosts[0]}` : ""}`],
+  ["readOnly", ({ slug }) => `/read-only/${slug}/`],
+  ["emptyPreview", () => ""],
+  ["throwsPreview", () => {
+    throw new Error("preview exploded");
+  }],
+]);
+
+const endpoint = createEndpoint({ token: TOKEN, lookup, previewPaths });
 let lastRequestHeaders;
 const server = http.createServer((req, res) => {
   lastRequestHeaders = req.headers;
@@ -395,4 +404,76 @@ test("endpoint fails closed when the server has no token", async () => {
   const { req, res } = fakeExchange({ remoteAddress: "127.0.0.1", headers: { "content-type": "application/json", "x-orso-content-token": "anything" } });
   createEndpoint({ token: "", lookup })(req, res, () => assert.fail("must not call next()"));
   assert.equal(res.statusCode, 401);
+});
+
+test("endpoint previewPath returns a site-relative path with slug and reference ids in ctx", async () => {
+  const { status, body } = await json(
+    await post({
+      op: "previewPath",
+      collection: "blog",
+      id: "welcome",
+      fields: { title: "Hi", relatedPosts: ["other-post-id"] },
+    }),
+  );
+  assert.equal(status, 200);
+  assert.equal(body.path, "/blog/welcome/?ref=other-post-id");
+});
+
+test("endpoint previewPath keeps slug as entry id when fields include slug", async () => {
+  const { status, body } = await json(
+    await post({
+      op: "previewPath",
+      collection: "blog",
+      id: "welcome",
+      fields: { slug: "spoofed" },
+    }),
+  );
+  assert.equal(status, 200);
+  assert.equal(body.path, "/blog/welcome/");
+});
+
+test("endpoint previewPath works for collections not supported for editing", async () => {
+  const { status, body } = await json(
+    await post({ op: "previewPath", collection: "readOnly", id: "doc", fields: {} }),
+  );
+  assert.equal(status, 200);
+  assert.equal(body.path, "/read-only/doc/");
+});
+
+test("endpoint previewPath maps function throws to preview_path_failed", async () => {
+  const { status, body } = await json(
+    await post({ op: "previewPath", collection: "throwsPreview", id: "x", fields: {} }),
+  );
+  assert.equal(status, 400);
+  assert.deepEqual(body, { error: "preview_path_failed", message: "preview exploded" });
+});
+
+test("endpoint previewPath rejects empty or invalid path returns", async () => {
+  const { status, body } = await json(
+    await post({ op: "previewPath", collection: "emptyPreview", id: "x", fields: {} }),
+  );
+  assert.equal(status, 400);
+  assert.equal(body.error, "preview_path_failed");
+  assert.ok(typeof body.message === "string" && body.message.length > 0);
+});
+
+test("endpoint previewPath returns 404 when the collection has no previewPath", async () => {
+  const { status, body } = await json(
+    await post({ op: "previewPath", collection: "helpDocs", id: "x", fields: {} }),
+  );
+  assert.equal(status, 404);
+  assert.equal(body.error, "no_preview_path");
+  assert.match(body.message, /helpDocs/);
+});
+
+test("endpoint previewPath rejects malformed requests with bad_request", async () => {
+  for (const request of [
+    { op: "previewPath", collection: "blog", fields: {} },
+    { op: "previewPath", collection: "blog", id: "", fields: {} },
+    { op: "previewPath", collection: "blog", id: "x", fields: [] },
+  ]) {
+    const { status, body } = await json(await post(request));
+    assert.equal(status, 400, JSON.stringify(request));
+    assert.equal(body.error, "bad_request");
+  }
 });
