@@ -6,7 +6,6 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
-import { usePreviewStore } from "@/modules/preview/store";
 import { useProjectsStore } from "@/modules/projects/store";
 import type { Project } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn() }));
@@ -34,15 +33,20 @@ async function setup(api: Record<string, unknown> = {}, start = "/p/p/content") 
 }
 it("lists collections, then entries, then opens the editor", async () => {
  const w = await setup(); await flushPromises();
- expect(w.find('[data-testid="content-entry-list"]').exists()).toBe(false);
- expect(w.text()).toContain("Choose a collection.");
- await w.get('[data-collection-name="blog"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/blog");
  expect(w.get('[data-testid="content-entry-list"]').text()).toContain("Blog");
+ expect(w.get('[data-collection-name="blog"]').attributes("aria-current")).toBe("page");
  await w.get('[data-entry-id="welcome"]').trigger("click"); await flushPromises();
  expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
  expect(w.get('[data-testid="content-entry-title"]').text()).toBe("Welcome");
  expect(w.find('[data-testid="content-collections"]').exists()).toBe(false);
+ w.unmount();
+});
+it("selects the first collection when entering content with none chosen", async () => {
+ const help = { ...blog, name: "helpDocs" };
+ const w = await setup({ listContentCollections: async () => [help, blog] }); await flushPromises();
+ expect(w.vm.$route.path).toBe("/p/p/content/helpDocs");
+ expect(w.get('[data-collection-name="helpDocs"]').attributes("aria-current")).toBe("page");
  w.unmount();
 });
 it("returns to the list from the editor", async () => {
@@ -200,7 +204,7 @@ it("blocks leaving the Content tab until a dirty draft is discarded", async () =
  await store.selectCollection("blog"); await store.selectEntry("welcome"); store.draftSource = "Draft";
  vi.stubGlobal("confirm", vi.fn(() => false));
  await w.vm.$router.push("/other");
- expect(w.vm.$route.path).toBe("/p/p/content"); expect(store.draftSource).toBe("Draft");
+ expect(w.vm.$route.path).toBe("/p/p/content/blog"); expect(store.draftSource).toBe("Draft");
  vi.stubGlobal("confirm", vi.fn(() => true));
  await w.vm.$router.push("/other"); expect(w.vm.$route.path).toBe("/other");
  expect(store.dirty).toBe(false); expect(store.draftSource).toBe("Original");
@@ -286,63 +290,64 @@ it("hides Open in preview when the collection has no previewPath flag", async ()
  w.unmount();
 });
 
-it("hides Open in preview while the preview is not ready", async () => {
+it("disables Open in preview while the preview is not ready", async () => {
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
- expect(w.find('[data-testid="content-open-preview"]').exists()).toBe(true);
+ expect(w.get('[data-testid="content-open-preview"]').attributes("disabled")).toBeUndefined();
  withDevserver("crashed"); await flushPromises();
- expect(w.find('[data-testid="content-open-preview"]').exists()).toBe(false);
+ expect(w.get('[data-testid="content-open-preview"]').attributes("disabled")).toBeDefined();
  w.unmount();
 });
 
-it("opens a read-only collection in preview when the dev server is ready", async () => {
+it("opens a read-only collection in a new tab when the dev server is ready", async () => {
  const resolveContentPreviewPath = vi.fn(async () => ({ path: "/blog/welcome/" }));
+ const open = vi.spyOn(window, "open").mockReturnValue(null);
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: false, supportedForEditing: true, reason: "This collection is read-only" }],
   resolveContentPreviewPath,
+  previewUrl: (id: string) => `http://daemon.test/preview/${id}/`,
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
  expect(resolveContentPreviewPath).toHaveBeenCalledWith("p", "blog", "welcome");
- expect(w.vm.$route.path).toBe("/p/p/preview");
+ expect(open).toHaveBeenCalledWith("http://daemon.test/preview/p/blog/welcome/", "_blank", "noopener");
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
+ open.mockRestore();
  w.unmount();
 });
 
-it("resolves the preview path and navigates to Preview when ready", async () => {
+it("resolves the preview path and opens it in a new tab when ready", async () => {
  const resolveContentPreviewPath = vi.fn(async () => ({ path: "/blog/welcome/" }));
+ const open = vi.spyOn(window, "open").mockReturnValue(null);
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
   resolveContentPreviewPath,
+  previewUrl: (id: string) => `http://daemon.test/preview/${id}/`,
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
- const preview = usePreviewStore();
- preview.setFramePath("p", "/other/");
- const nonce = preview.navigateNonce;
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
  expect(resolveContentPreviewPath).toHaveBeenCalledWith("p", "blog", "welcome");
- expect(preview.framePathFor("p")).toBe("/blog/welcome/");
- expect(preview.navigateNonce).toBe(nonce + 1);
- expect(w.vm.$route.path).toBe("/p/p/preview");
+ expect(open).toHaveBeenCalledWith("http://daemon.test/preview/p/blog/welcome/", "_blank", "noopener");
+ expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
+ open.mockRestore();
  w.unmount();
 });
 
-it("toasts on preview-path failure without changing the frame path", async () => {
+it("toasts on preview-path failure without opening a tab", async () => {
  const resolveContentPreviewPath = vi.fn(async () => { throw new ApiError("UNKNOWN", "preview path failed", 502); });
+ const open = vi.spyOn(window, "open").mockReturnValue(null);
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
   resolveContentPreviewPath,
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
- const preview = usePreviewStore();
- preview.setFramePath("p", "/kept/");
- const nonce = preview.navigateNonce;
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
  expect(h.toastError).toHaveBeenCalledWith("preview path failed");
- expect(preview.framePathFor("p")).toBe("/kept/");
- expect(preview.navigateNonce).toBe(nonce);
+ expect(open).not.toHaveBeenCalled();
  expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
+ open.mockRestore();
  w.unmount();
 });
 

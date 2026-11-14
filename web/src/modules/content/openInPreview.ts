@@ -1,21 +1,20 @@
 import { toast } from "vue-sonner";
-import type { Router } from "vue-router";
-import { errorMessage } from "@orso/utils";
-import { projectPath } from "@/router";
-import type { usePreviewStore } from "@/modules/preview/store";
+import { errorMessage, frameHref } from "@orso/utils";
 
+/** Resolve the entry's site path and open the live preview URL in a new tab. */
 export async function openInPreview(opts: {
   projectId: string;
   collection: string;
   id: string;
   resolve: (project: string, collection: string, id: string) => Promise<{ path: string }>;
-  preview: ReturnType<typeof usePreviewStore>;
-  router: Router;
+  /** Project preview origin, e.g. `{origin}/preview/{id}/`. */
+  previewBaseUrl: string;
+  open?: (url: string, target?: string, features?: string) => Window | null;
 }) {
   try {
     const { path } = await opts.resolve(opts.projectId, opts.collection, opts.id);
-    opts.preview.openPath(opts.projectId, path);
-    await opts.router.push(projectPath(opts.projectId, "preview"));
+    const href = new URL(frameHref(path, new URL(opts.previewBaseUrl).pathname), opts.previewBaseUrl).href;
+    (opts.open ?? window.open)(href, "_blank", "noopener");
   } catch (e) {
     toast.error(errorMessage(e));
   }

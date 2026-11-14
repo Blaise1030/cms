@@ -5,7 +5,6 @@ import { ChevronLeft, ExternalLink, FileJson, FileText, PanelLeft, PanelRight, S
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
-import { usePreviewStore } from "@/modules/preview/store";
 import { useProjectsStore } from "@/modules/projects/store";
 import { openInPreview } from "./openInPreview";
 import { Button } from "@/components/ui/button";
@@ -49,10 +48,9 @@ const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEdit
 const props = defineProps<{projectId: string; collection?: string; entry?: string}>();
 const store = useContentStore();
 const router = useRouter();
-const preview = usePreviewStore();
 const projects = useProjectsStore();
-const changes = useChangesStore();
 const daemon = useDaemon();
+const changes = useChangesStore();
 // Images inserted by the form or body editor stay pending in the draft until Save.
 provide(IMAGE_REGISTRY, { add: image => store.addImage(image), resolve: src => resolveImage(src) });
 provide(REFERENCE_ENTRIES, { entries: collection => store.referenceEntries[collection], load: collection => void store.loadReferenceEntries(collection) });
@@ -92,8 +90,7 @@ function previewEntry() {
     collection: e.collection,
     id: e.id,
     resolve: daemon.api.resolveContentPreviewPath,
-    preview,
-    router,
+    previewBaseUrl: daemon.api.previewUrl(props.projectId),
   });
 }
 const lifecycleOpen = computed({
@@ -199,8 +196,15 @@ watch(() => store.collections, collections => {
   }
   reportedInvalid = key;
 });
+/** Open the first listed collection when the catalog arrives with nothing selected. */
+function selectDefaultCollection(collections: ContentCollection[]) {
+  if (props.collection || props.entry || store.selectedCollection) return;
+  const first = collections[0];
+  if (first) void router.replace(contentPath(props.projectId, first.name, first.singleton ?? undefined));
+}
 /** A deep link to a singleton collection has no list to show: send it to its one entry. */
 watch(validCollections, collections => {
+  selectDefaultCollection(collections);
   const name = props.collection;
   if (!name || props.entry) return;
   const singleton = collections.find(c => c.name === name)?.singleton;
@@ -229,11 +233,15 @@ function rowActions(id: string): EntryAction[] {
     },
   });
 }
-/** The URL names the open collection and entry; without one, the last collection's list comes back. */
+/** The URL names the open collection and entry; without one, restore the last list or open the first. */
 async function follow(collection?: string, id?: string) {
   if (!collection) {
     const remembered = store.selectedCollection;
-    if (store.projectId === props.projectId && remembered && !singletonOf(remembered)) void router.replace(contentPath(props.projectId, remembered));
+    if (store.projectId === props.projectId && remembered && !singletonOf(remembered)) {
+      void router.replace(contentPath(props.projectId, remembered));
+      return;
+    }
+    selectDefaultCollection(validCollections.value);
     return;
   }
   if (!id && singletonOf(collection)) { void router.replace(contentPath(props.projectId, collection, singletonOf(collection)!)); return; }
@@ -367,7 +375,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
         </div>
         <p v-if="store.error" role="alert" class="px-4 pb-2 text-sm text-destructive">{{ store.error }}</p>
         <section v-if="store.needsChange" role="alert" class="mx-4 mb-2 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-          <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
+          <p>Content cannot be edited on the live site. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
           <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
         </section>
         <EntryList
@@ -405,9 +413,18 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
           </div>
           <div class="ml-auto flex shrink-0 items-center gap-1">
             <span v-if="wordCount !== null" class="hidden px-2 text-xs text-muted-foreground @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
-            <Button v-if="canOpenInPreview" type="button" variant="ghost" size="sm" class="hidden h-8 gap-1.5 px-2 text-muted-foreground @md/inset:inline-flex" data-testid="content-open-preview" @click="previewEntry">
+            <Button
+              v-if="openEntryCollection?.hasPreviewPath === true"
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="content-open-preview"
+              :title="previewReady ? 'Open in new tab' : 'Start the preview to open this entry'"
+              :disabled="!previewReady || !store.entry"
+              @click="previewEntry"
+            >
               <ExternalLink class="size-4" aria-hidden="true" />
-              Open in preview
+              Open preview
             </Button>
             <template v-if="canRemove">
               <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
@@ -424,7 +441,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
         <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
         <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
         <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-          <p>Content cannot be edited on main. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
+          <p>Content cannot be edited on the live site. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
           <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
         </section>
         <p v-if="store.entry && store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
