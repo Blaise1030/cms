@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7CW0QKJBYBBZEX38AZW30BN",
+  "session_id": "6140e387-c222-4d5b-94dd-42e38e8d8fdb",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T11:10:25.552645Z",
+  "branch": "main",
+  "checkpoints_count": 7,
+  "save_step_count": 1,
+  "files_touched": [
+    ".github/workflows/release.yml",
+    "docs/desktop-release.md",
+    "docs/launch/briefs/001-windows-build.md",
+    "docs/launch/briefs/002-landing-page.md",
+    "docs/launch/launch-gate.md",
+    "skills-lock.json",
+    "src/config.rs",
+    "src/main.rs",
+    "web/src/app/Workspace.vue",
+    "web/src/index.css",
+    "web/src/modules/changes/GetLatestButton.test.ts",
+    "web/src/modules/changes/GetLatestButton.vue",
+    "web/src/modules/chat/AgentPanel.test.ts"
+  ],
+  "agent": "Cursor",
+  "model": "default",
+  "turn_id": "30082fb2fddc",
+  "compact_transcript_start": 0,
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 7
+  }
+}
