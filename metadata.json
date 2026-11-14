@@ -3,8 +3,11 @@
   "checkpoint_id": "01M7CJ1B8150Q1HD92KXFF2XBM",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 48,
+  "checkpoints_count": 50,
   "files_touched": [
+    "src/http/mod.rs",
+    "web/src/core/api.ts",
+    "web/src/core/types.ts",
     "web/src/modules/content/ContentPanel.test.ts",
     "web/src/modules/content/ContentPanel.vue",
     "web/src/modules/preview/PreviewPanel.vue"
@@ -44,6 +47,13 @@
       "compact_transcript": "/4/transcript.jsonl",
       "content_hash": "/4/content_hash.txt",
       "prompt": "/4/prompt.txt"
+    },
+    {
+      "metadata": "/5/metadata.json",
+      "transcript": "/5/full.jsonl",
+      "compact_transcript": "/5/transcript.jsonl",
+      "content_hash": "/5/content_hash.txt",
+      "prompt": "/5/prompt.txt"
     }
   ],
   "token_usage": {
