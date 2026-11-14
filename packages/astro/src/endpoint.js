@@ -171,7 +171,7 @@ function previewPath(request, previewPaths) {
 
   let path;
   try {
-    path = fn({ slug: request.id, ...fields });
+    path = fn({ ...fields, slug: request.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "previewPath failed";
     throw new HttpError(400, { error: "preview_path_failed", message });

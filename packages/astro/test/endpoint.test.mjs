@@ -419,6 +419,19 @@ test("endpoint previewPath returns a site-relative path with slug and reference 
   assert.equal(body.path, "/blog/welcome/?ref=other-post-id");
 });
 
+test("endpoint previewPath keeps slug as entry id when fields include slug", async () => {
+  const { status, body } = await json(
+    await post({
+      op: "previewPath",
+      collection: "blog",
+      id: "welcome",
+      fields: { slug: "spoofed" },
+    }),
+  );
+  assert.equal(status, 200);
+  assert.equal(body.path, "/blog/welcome/");
+});
+
 test("endpoint previewPath works for collections not supported for editing", async () => {
   const { status, body } = await json(
     await post({ op: "previewPath", collection: "readOnly", id: "doc", fields: {} }),
