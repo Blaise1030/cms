@@ -178,7 +178,7 @@ export function orso(options = {}) {
           injectScript("head-inline", PREVIEW_BRIDGE);
           // Vue + shadcn checks panel (built from panel-ui/).
           const panelUrl = new URL("./panel/checks-panel.js", import.meta.url);
-          panelUrl.searchParams.set("v", "vue-shadcn-4");
+          panelUrl.searchParams.set("v", "vue-shadcn-7");
           injectScript("page", `import ${JSON.stringify(panelUrl.href)}`);
         }
 
