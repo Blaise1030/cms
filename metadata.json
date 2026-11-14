@@ -1,0 +1,71 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7CH04CCNT95M5GE35CDWN7K",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/superpowers/plans/2026-11-06-skills-module.md",
+    "docs/superpowers/specs/2026-11-06-skills-module-design.md",
+    "src/chat/manager.rs",
+    "src/http/mod.rs",
+    "src/http/skills.rs",
+    "src/lib.rs",
+    "src/providers.rs",
+    "src/skills/catalog/design/SKILL.md",
+    "src/skills/catalog/seo/SKILL.md",
+    "src/skills/mod.rs",
+    "src/state.rs",
+    "tests/skills.rs",
+    "web/src/app/ProjectPage.vue",
+    "web/src/app/ProjectRail.vue",
+    "web/src/app/palette/usePaletteGroups.ts",
+    "web/src/core/api.ts",
+    "web/src/core/types.ts",
+    "web/src/modules/changes/store.test.ts",
+    "web/src/modules/changes/store.ts",
+    "web/src/modules/chat/pageContext.ts",
+    "web/src/modules/settings/AppSettingsPage.test.ts",
+    "web/src/modules/settings/AppSettingsPage.vue",
+    "web/src/modules/settings/SkillsSettings.test.ts",
+    "web/src/modules/settings/SkillsSettings.vue",
+    "web/src/modules/skills/InstallSkillDialog.test.ts",
+    "web/src/modules/skills/InstallSkillDialog.vue",
+    "web/src/modules/skills/SkillsPanel.test.ts",
+    "web/src/modules/skills/SkillsPanel.vue",
+    "web/src/modules/skills/store.test.ts",
+    "web/src/modules/skills/store.ts",
+    "web/src/router.test.ts",
+    "web/src/router.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28851,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 848384,
+    "output_tokens": 9216,
+    "api_call_count": 2
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
