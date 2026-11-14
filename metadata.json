@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7CM0HGHPH4ZCCRZAWGCRJAC",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 2,
+  "checkpoints_count": 4,
   "files_touched": [
     "web/src/modules/preview/PreviewPanel.vue"
   ],
@@ -21,14 +21,21 @@
       "compact_transcript": "/1/transcript.jsonl",
       "content_hash": "/1/content_hash.txt",
       "prompt": "/1/prompt.txt"
+    },
+    {
+      "metadata": "/2/metadata.json",
+      "transcript": "/2/full.jsonl",
+      "compact_transcript": "/2/transcript.jsonl",
+      "content_hash": "/2/content_hash.txt",
+      "prompt": "/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 70278,
+    "input_tokens": 72333,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 1171328,
-    "output_tokens": 5804,
-    "api_call_count": 2
+    "cache_read_tokens": 1291776,
+    "output_tokens": 7772,
+    "api_call_count": 4
   },
   "redaction": {
     "replacements": 0,
