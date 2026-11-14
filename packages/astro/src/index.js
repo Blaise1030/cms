@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { glob } from "astro/loaders";
 
+import { normalizeCollectionsOption } from "./collections-option.js";
 import { createEndpoint } from "./endpoint.js";
+import { createVirtualCollectionsPlugin } from "./virtual-collections.js";
 import {
   GLOB_META,
   blocked,
@@ -90,7 +92,7 @@ function runnerOf(server) {
  * Load the content config through the server's runner and write the manifest.
  * With `live`, also mount the content endpoint and reload on config changes.
  */
-async function setup({ config, server, logger, live }) {
+async function setup({ config, server, logger, live, hasPreviewPath }) {
   const root = fileURLToPath(config.root);
   const configPath = findContentConfig(fileURLToPath(config.srcDir));
   const runner = runnerOf(server);
@@ -99,7 +101,11 @@ async function setup({ config, server, logger, live }) {
 
   const load = async () => {
     try {
-      const result = await loadContent({ runner, configPath });
+      const result = await loadContent({
+        runner,
+        configPath,
+        ...(hasPreviewPath ? { hasPreviewPath } : {}),
+      });
       writeManifest(root, result.manifest);
       ({ manifest, schemas } = result);
     } catch (error) {
@@ -141,9 +147,18 @@ async function setup({ config, server, logger, live }) {
  * also reloads it when the content config changes and mounts `POST /__orso`
  * when `ORSO_CONTENT_TOKEN` is set. It does nothing during `astro build`.
  */
-export function orso() {
+export function orso(options = {}) {
   let config;
   let command;
+  const collectionsOption = options.collections;
+  let astroCollections = null;
+  let previewPaths = null;
+  let hasPreviewPath = null;
+
+  if (collectionsOption !== undefined) {
+    ({ astroCollections, previewPaths, hasPreviewPath } = normalizeCollectionsOption(collectionsOption));
+  }
+
   return {
     name: "orso-content",
     hooks: {
@@ -153,12 +168,21 @@ export function orso() {
         // The dev UI frames this server directly (so client components hydrate), which
         // makes the frame cross-origin; the bridge keeps picking and appearance working.
         if (command === "dev") injectScript("head-inline", PREVIEW_BRIDGE);
-        if (command !== "sync") return;
-        updateConfig({
-          vite: {
-            plugins: [{ name: "orso-content-sync", configureServer: (server) => setup({ config, server, logger, live: false }) }],
-          },
-        });
+
+        const vitePlugins = [];
+        if (astroCollections) {
+          vitePlugins.push(createVirtualCollectionsPlugin({ astroCollections }));
+        }
+        if (command === "sync") {
+          vitePlugins.push({
+            name: "orso-content-sync",
+            configureServer: (server) =>
+              setup({ config, server, logger, live: false, hasPreviewPath: hasPreviewPath ?? undefined }),
+          });
+        }
+        if (vitePlugins.length > 0) {
+          updateConfig({ vite: { plugins: vitePlugins } });
+        }
       },
       "astro:config:done": ({ config: done }) => {
         config = done;
@@ -166,7 +190,13 @@ export function orso() {
       "astro:server:setup": async ({ server, logger }) => {
         // `astro build --devOutput` and `astro sync` outside production also start a server.
         if (command !== "dev") return;
-        await setup({ config, server, logger, live: true });
+        await setup({
+          config,
+          server,
+          logger,
+          live: true,
+          hasPreviewPath: hasPreviewPath ?? undefined,
+        });
       },
     },
   };
