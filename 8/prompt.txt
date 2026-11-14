@@ -1,0 +1,5 @@
+[Image #1] can we only start the app server when we click open into the first project
+
+---
+
+[Image #1] Remove the assistant button from the project picker page header
