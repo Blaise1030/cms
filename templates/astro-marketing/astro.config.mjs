@@ -2,6 +2,7 @@ import mdx from "@astrojs/mdx";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 import { orso } from "orso-astro";
+import { marketingCollections } from "orso-astro/marketing";
 
 // The orso dev server proxies the site under /preview/{id}/.
 const base = process.env.PUBLIC_BASE ?? "/";
@@ -11,7 +12,7 @@ const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT 
 
 export default defineConfig({
   base,
-  integrations: [mdx(), orso()],
+  integrations: [mdx(), orso({ collections: marketingCollections })],
   vite: {
     plugins: [tailwindcss()],
     server: {

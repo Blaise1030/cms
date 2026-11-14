@@ -42,19 +42,41 @@ export default defineConfig({
 });
 ```
 
-`src/content.config.ts`:
+### `orso({ collections })` and `virtual:orso/collections`
+
+Pass collection definitions (and optional `previewPath` handlers) from `astro.config.mjs`:
+
+```js
+import { orso } from "orso-astro";
+import { marketingCollections } from "orso-astro/marketing";
+
+export default defineConfig({
+  integrations: [orso({ collections: marketingCollections })],
+});
+```
+
+`src/content.config.ts` only re-exports the virtual module:
+
+```ts
+export { collections } from "virtual:orso/collections";
+```
+
+`orso-astro/marketing` exports `marketingCollections` for the Astro marketing template
+(`blog` and `helpDocs` with site-relative `previewPath` helpers). Custom sites can define
+their own `collections` object with the same `{ collection, previewPath? }` shape.
+
+For ad-hoc collections without the preset, define them inline and pass them to `orso()`:
 
 ```ts
 import { defineCollection } from "astro:content";
 import { orsoGlob } from "orso-astro";
 import { z } from "astro/zod";
 
-export const collections = {
-  blog: defineCollection({
-    loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
-    schema: z.object({ title: z.string() }),
-  }),
-};
+// astro.config.mjs — orso({ collections: { blog: { collection: blog, previewPath: ... } } })
+const blog = defineCollection({
+  loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
+  schema: z.object({ title: z.string() }),
+});
 ```
 
 ### `orsoGlob({ base, pattern, kind?, singleton?, ...options })`

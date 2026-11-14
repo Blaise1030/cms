@@ -1,8 +1,10 @@
+import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { glob } from "astro/loaders";
+const require = createRequire(import.meta.url);
+const getAstroGlobLoader = () => require("astro/loaders").glob;
 
 import { normalizeCollectionsOption } from "./collections-option.js";
 import { createEndpoint } from "./endpoint.js";
@@ -49,7 +51,7 @@ export function orsoGlob({ base, pattern, kind, singleton = null, ...options } =
   if (singleton !== null && singleton !== undefined && (typeof singleton !== "string" || singleton.trim() === "")) {
     throw new Error('orsoGlob: "singleton" must be a non-empty string or null');
   }
-  const loader = glob({ base: normalizedBase, pattern: normalizedPattern, ...options });
+  const loader = getAstroGlobLoader()({ base: normalizedBase, pattern: normalizedPattern, ...options });
   Object.defineProperty(loader, GLOB_META, {
     value: Object.freeze({
       base: normalizedBase,

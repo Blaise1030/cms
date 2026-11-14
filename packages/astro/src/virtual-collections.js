@@ -19,6 +19,7 @@ export function createVirtualCollectionsPlugin({ astroCollections } = {}) {
 
   return {
     name: "orso-virtual-collections",
+    enforce: "pre",
     resolveId(id) {
       if (id === VIRTUAL_COLLECTIONS_ID) return RESOLVED_VIRTUAL_COLLECTIONS_ID;
     },
