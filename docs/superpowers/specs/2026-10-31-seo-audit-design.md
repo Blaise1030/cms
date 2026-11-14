@@ -1,8 +1,8 @@
 # SEO audit for the local preview — design
 
 Date: 2026-10-31
-Status: approved design (chat), spec for review
-Scope: `src/seo/`, `src/http/seo.rs`, one daemon route, one web tab. No template change.
+Status: superseded for product UX and ownership — see `2026-11-14-preview-checks-design.md` (rules live in `packages/astro`; writer UI is an in-page preview panel; CI runs on `astro:build:done`). Kept as historical reference for rule copy and severities.
+Scope (original): `src/seo/`, `src/http/seo.rs`, one daemon route, one web tab. No template change.
 
 ## Problem
 
