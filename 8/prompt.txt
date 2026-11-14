@@ -1,0 +1,57 @@
+https://respond.io/ I wanted to migrate this website to use orso, how high is the effort ?
+
+---
+
+https://respond.io/ I wanted to migrate this website to use orso, how high is the effort ?
+
+---
+
+The collections are currently on contentful, builder io, UI on builder io
+
+---
+
+Consider I have an automation to scrape the content from the page itself how would that work ?
+
+---
+
+How many page does the site has ?
+
+---
+
+1,200 pages is not so bad right ?
+
+---
+
+Currently the site is hosted via 3 workers. blog, help and marketing pages
+
+---
+
+So we could migrate module by module right
+
+---
+
+How would we handle lcoalisation in this case ?
+
+---
+
+Would there by duplicated folders in thsi case when I wanted our path to be '/pricng' for default locale, /[lcoale]/pricing
+
+---
+
+So something like an <PricingPage lang={locales} /> <- then we edit the pricing page component
+
+---
+
+Is there a risk where the component breaks this format and fucked up the structure ?
+
+---
+
+No, this is too complex and too restrictive, how does lovable handle this case
+
+---
+
+[Image #1] I realized not all fields here needs to be translated, how would the translation be able to tell what to translate ?
+
+---
+
+Consider I am integrating this with crowdin, how would this model work ?
