@@ -28,7 +28,8 @@ function formatBytes(bytes) {
 }
 
 function mount() {
-  if (document.querySelector(`[data-testid="${ROOT_TEST_ID}"]`)) return;
+  // Replace any prior host so HMR / full reload always picks up new styles.
+  document.querySelectorAll(`[data-testid="${ROOT_TEST_ID}"]`).forEach((el) => el.remove());
 
   const host = document.createElement("div");
   host.dataset.testid = ROOT_TEST_ID;
@@ -43,32 +44,12 @@ function mount() {
   const shadow = host.attachShadow({ mode: "open" });
 
   const style = document.createElement("style");
-  // Tokens mirror orso web chrome (`web/src/index.css` light / `.dark`).
+  // Default to orso app dark chrome (`web/src/index.css` `.dark`). Light only when the
+  // preview is not in dark appearance.
   style.textContent = `
     :host { all: initial; }
     * { box-sizing: border-box; }
     .wrap {
-      --background: oklch(0.98 0 0);
-      --foreground: oklch(0.145 0 0);
-      --card: oklch(1 0 0);
-      --card-foreground: oklch(0.145 0 0);
-      --muted: oklch(0.97 0 0);
-      --muted-foreground: oklch(0.556 0 0);
-      --border: oklch(0.922 0 0);
-      --primary: oklch(0.546 0.215 263);
-      --primary-foreground: oklch(0.985 0 0);
-      --destructive: oklch(0.577 0.245 27.325);
-      --warning: oklch(0.75 0.15 75);
-      --radius: 0.625rem;
-      --shadow: 0 10px 30px oklch(0.145 0 0 / 0.12);
-      color-scheme: light;
-      font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-      font-size: 0.8125rem;
-      line-height: 1.35;
-      color: var(--foreground);
-    }
-    :host-context(html.dark) .wrap,
-    .wrap.dark {
       --background: oklch(0.18 0 0);
       --foreground: oklch(0.985 0 0);
       --card: oklch(0.205 0 0);
@@ -80,8 +61,28 @@ function mount() {
       --primary-foreground: oklch(0.985 0 0);
       --destructive: oklch(0.704 0.191 22.216);
       --warning: oklch(0.8 0.14 75);
+      --radius: 0.625rem;
       --shadow: 0 12px 32px oklch(0 0 0 / 0.45);
       color-scheme: dark;
+      font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+      font-size: 0.8125rem;
+      line-height: 1.35;
+      color: var(--foreground);
+    }
+    .wrap.light {
+      --background: oklch(0.98 0 0);
+      --foreground: oklch(0.145 0 0);
+      --card: oklch(1 0 0);
+      --card-foreground: oklch(0.145 0 0);
+      --muted: oklch(0.97 0 0);
+      --muted-foreground: oklch(0.556 0 0);
+      --border: oklch(0.922 0 0);
+      --primary: oklch(0.546 0.215 263);
+      --primary-foreground: oklch(0.985 0 0);
+      --destructive: oklch(0.577 0.245 27.325);
+      --warning: oklch(0.75 0.15 75);
+      --shadow: 0 10px 30px oklch(0.145 0 0 / 0.12);
+      color-scheme: light;
     }
     button {
       font: inherit;
@@ -178,13 +179,8 @@ function mount() {
       background: color-mix(in oklch, var(--destructive) 85%, black);
     }
     .sev-warning .sev {
-      color: oklch(0.2 0.04 75);
-      background: color-mix(in oklch, var(--warning) 75%, white);
-    }
-    :host-context(html.dark) .sev-warning .sev,
-    .wrap.dark .sev-warning .sev {
-      color: oklch(0.2 0.05 75);
-      background: color-mix(in oklch, var(--warning) 70%, white);
+      color: oklch(0.22 0.05 75);
+      background: color-mix(in oklch, var(--warning) 72%, white);
     }
     .msg { min-width: 0; color: var(--card-foreground); }
     .detail {
@@ -238,7 +234,8 @@ function mount() {
   let ranOnce = false;
 
   function syncAppearance() {
-    wrap.classList.toggle("dark", document.documentElement.classList.contains("dark"));
+    // Orso chrome defaults to dark; only go light when the preview is not dark.
+    wrap.classList.toggle("light", !document.documentElement.classList.contains("dark"));
   }
   syncAppearance();
 
