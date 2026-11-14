@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/api/health", get(health::health))
         .route("/api/content/collections", get(content::collections))
+        .route("/api/content/preview-path", post(content::preview_path))
         .route("/api/content/entries", get(content::entries))
         .route("/api/content/entry/rename", post(content::rename))
         .route("/api/content/entry/impact", post(content::impact))

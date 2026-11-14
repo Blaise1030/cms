@@ -49,6 +49,27 @@ pub async fn patch(
         .ok_or_else(|| ApiError::devserver("The preview returned no patched source"))
 }
 
+/// Ask the running preview for the entry's site-relative path.
+pub async fn preview_path(
+    endpoint: &ContentEndpoint,
+    collection: &str,
+    id: &str,
+    fields: &Map<String, Value>,
+) -> Result<String, ApiError> {
+    let request = json!({
+        "op": "previewPath",
+        "collection": collection,
+        "id": id,
+        "fields": fields,
+    });
+    let response = post(endpoint, &request).await?;
+    serde_json::from_slice::<Value>(&response)
+        .ok()
+        .and_then(|v| v.get("path").and_then(Value::as_str).map(str::to_string))
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| ApiError::devserver("The preview returned no path"))
+}
+
 /// One attempt, no retry: a save must not be applied twice.
 async fn post(endpoint: &ContentEndpoint, request: &Value) -> Result<Vec<u8>, ApiError> {
     let url = loopback_url(&endpoint.url)?;

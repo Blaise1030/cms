@@ -560,6 +560,8 @@ export interface ContentCollection {
   editable: boolean;
   /** False when the integration cannot edit this collection at all; `editable` also drops while the preview is down. */
   supportedForEditing?: boolean;
+  /** True when the live preview can resolve a path. Omitted means false. */
+  hasPreviewPath?: boolean;
   reason: string | null;
   /** Field descriptors projected from the template schema. */
   fields?: FieldDescriptor;

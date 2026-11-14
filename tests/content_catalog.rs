@@ -134,6 +134,34 @@ async fn catalog_under_subfolder_root() {
 }
 
 #[tokio::test]
+async fn has_preview_path_defaults_false_and_passes_through_true() {
+    let temp = tempfile::tempdir().unwrap();
+    let blog = common::manifest_collection(
+        "blog",
+        "src/content/blog/en",
+        "*.md",
+        "markdown",
+        blog_fields(),
+    );
+    let mut help = common::manifest_collection(
+        "helpDocs",
+        "src/content/helpDocs/en",
+        "*.md",
+        "markdown",
+        json!({ "type": "object", "properties": {} }),
+    );
+    help["hasPreviewPath"] = json!(true);
+    manifest(temp.path(), vec![blog, help]);
+
+    let collections = list_collections(temp.path()).await.unwrap();
+    assert!(!collections[0].has_preview_path);
+    assert!(collections[1].has_preview_path);
+    let json = serde_json::to_value(&collections).unwrap();
+    assert_eq!(json[0]["hasPreviewPath"], false);
+    assert_eq!(json[1]["hasPreviewPath"], true);
+}
+
+#[tokio::test]
 async fn missing_manifest_lists_nothing() {
     let temp = tempfile::tempdir().unwrap();
     write(

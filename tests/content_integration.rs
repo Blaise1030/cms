@@ -97,6 +97,32 @@ async fn patch_posts_the_exact_request_and_returns_the_source() {
 }
 
 #[tokio::test]
+async fn preview_path_posts_the_exact_request_and_returns_the_path() {
+    let (endpoint, log) = fake(reply(StatusCode::OK, json!({ "path": "/blog/welcome/" }))).await;
+
+    let path = integration::preview_path(&endpoint, "blog", "welcome", &fields())
+        .await
+        .unwrap();
+    assert_eq!(path, "/blog/welcome/");
+
+    let seen = log.lock().unwrap().clone().unwrap();
+    assert_eq!(seen.method, Method::POST);
+    assert_eq!(seen.uri.path(), "/__orso");
+    assert_eq!(seen.headers["x-orso-content-token"], TOKEN);
+    assert_eq!(seen.headers["content-type"], "application/json");
+    let body: Value = serde_json::from_slice(&seen.body).unwrap();
+    assert_eq!(
+        body,
+        json!({
+            "op": "previewPath",
+            "collection": "blog",
+            "id": "welcome",
+            "fields": { "title": "Next" },
+        })
+    );
+}
+
+#[tokio::test]
 async fn patch_omits_body_when_none() {
     let (endpoint, log) = fake(reply(StatusCode::OK, json!({ "source": "next" }))).await;
 
