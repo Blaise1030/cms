@@ -8,6 +8,8 @@ dest="templates/astro-marketing/integrations/orso"
 src="packages/astro/src"
 
 mkdir -p "$dest"
-for name in index.js manifest.js patch.js endpoint.js bridge.js; do
-  cp "$src/$name" "$dest/$name"
-done
+while IFS= read -r -d '' file; do
+  rel="${file#$src/}"
+  mkdir -p "$dest/$(dirname "$rel")"
+  cp "$file" "$dest/$rel"
+done < <(find "$src" -type f -name '*.js' -print0)

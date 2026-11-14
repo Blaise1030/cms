@@ -26,10 +26,12 @@ import { orsoGlob } from "../integrations/orso/index.js";
 `yaml`, `js-yaml`, and `jsonc-parser` are dependencies of the site. There is no
 `orso-astro` dependency and no `file:packages/astro` path.
 
-Canonical sources stay in `packages/astro/src/`. `just sync-orso-integration` copies them
-into `templates/astro-marketing/integrations/orso/` for in-repo template work. To vendor
-the same files into an existing site, sparse-checkout `packages/astro/src` and copy those
-`.js` files into `integrations/orso/`.
+Canonical sources stay in `packages/astro/src/` (top-level modules plus `checks/` and
+`panel/`). `just sync-orso-integration` copies the full `.js` tree into
+`templates/astro-marketing/integrations/orso/` for in-repo template work. To vendor the same
+files into an existing site, sparse-checkout `packages/astro/src` and copy those `.js`
+files (including subfolders) into `integrations/orso/`. The marketing template needs
+`linkedom` as a dependency for build-time preview checks.
 
 ## Preview bridge
 
