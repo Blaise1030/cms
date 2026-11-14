@@ -309,14 +309,42 @@ mod tests {
         assert!(safe_join(Path::new("/x"), "a/b.txt").is_ok());
     }
 
+    fn collect_js_relative_paths(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_js_relative_paths(&path, base, out)?;
+            } else if path.extension().is_some_and(|ext| ext == "js") {
+                out.push(path.strip_prefix(base).unwrap().to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn template_integrations_orso_matches_packages_astro_src() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        for name in ["index.js", "manifest.js", "patch.js", "endpoint.js", "bridge.js"] {
-            let canonical = std::fs::read(root.join("packages/astro/src").join(name)).unwrap();
-            let templated = std::fs::read(
-                root.join("templates/astro-marketing/integrations/orso").join(name),
+        let canonical_root = root.join("packages/astro/src");
+        let template_root = root.join("templates/astro-marketing/integrations/orso");
+
+        let mut rel_paths = Vec::new();
+        collect_js_relative_paths(&canonical_root, &canonical_root, &mut rel_paths).unwrap();
+        rel_paths.sort();
+
+        for must_have in ["checks/page.js", "panel/panel.js"] {
+            assert!(
+                rel_paths
+                    .iter()
+                    .any(|p| p.to_str() == Some(must_have)),
+                "canonical missing {must_have}"
             );
+        }
+
+        for rel in &rel_paths {
+            let name = rel.to_string_lossy().replace('\\', "/");
+            let canonical = std::fs::read(canonical_root.join(rel)).unwrap();
+            let templated = std::fs::read(template_root.join(rel));
             assert!(
                 templated.as_ref().ok() == Some(&canonical),
                 "{name} missing or drifted; run: just sync-orso-integration"
