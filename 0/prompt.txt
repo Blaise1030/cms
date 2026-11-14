@@ -1,0 +1,29 @@
+Can we make the app a javascript runtime because I wanted to use the eve framework from vercel + ACP connection for development
+
+---
+
+I wanted the agent to be sandboxed to the downlaoded app while they can still keep their existing MCP connections, that they had with claude
+
+---
+
+Can we allow the site to run in a small sandbox currently ?
+
+---
+
+Is this good enought ?
+
+---
+
+I need the processed to be contained in the sandbox
+
+---
+
+3
+
+---
+
+Is this relevant in this discussion ? https://eve.dev/docs/sandbox/just-bash
+
+---
+
+To be honest claude on local machine does not have these kinds of permissions right
