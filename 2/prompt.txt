@@ -1,0 +1,9 @@
+Can we put the toast component to top center ?
+
+---
+
+Can we put the toast component to top center ?
+
+---
+
+[Image #1] and the loader and the title is not cented
