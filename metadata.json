@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7CFT8VGJC1D6TM9G5GQ2BAS",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 10,
+  "checkpoints_count": 35,
   "files_touched": [
     "justfile",
     "src/changes.rs",
@@ -36,14 +36,21 @@
       "compact_transcript": "/1/transcript.jsonl",
       "content_hash": "/1/content_hash.txt",
       "prompt": "/1/prompt.txt"
+    },
+    {
+      "metadata": "/2/metadata.json",
+      "transcript": "/2/full.jsonl",
+      "compact_transcript": "/2/transcript.jsonl",
+      "content_hash": "/2/content_hash.txt",
+      "prompt": "/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 15951,
+    "input_tokens": 104197,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 410112,
-    "output_tokens": 3931,
-    "api_call_count": 7
+    "cache_read_tokens": 1380480,
+    "output_tokens": 17768,
+    "api_call_count": 28
   },
   "redaction": {
     "replacements": 0,

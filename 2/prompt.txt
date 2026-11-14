@@ -1,0 +1,97 @@
+Is this app enterprise ready interms of features ?
+
+---
+
+Is this app enterprise ready interms of features ?
+
+---
+
+https://leerob.com/agents see, this is how cursor is doing this, I wanted to be the management layer for these kinds of project
+
+---
+
+Non dev marketer and writers yes.
+
+---
+
+For blog post, they use via the structure editoring in the UI, and use the chat as well.
+
+---
+
+For landing page, they use the chat and preview only
+
+---
+
+The writer publishes themselves
+
+---
+
+Yes that's the idea
+
+---
+
+How is A and B different ?
+
+---
+
+For B does it means I need to host this app ?
+
+---
+
+Going option 2 seems high effort
+
+---
+
+The issue is that we still need the user to clone the repo to their local device actually
+
+---
+
+So if the user must clone, means that they must have a github account to do so then the access and management should be managed in github itself
+
+---
+
+Yeap that's right, Github is your identity
+
+---
+
+For https://www.cloudflare.com/products/artifacts/, how would that work here ?
+
+---
+
+If I use this, does this means I can manage my own auth layer without github account ?
+
+---
+
+If I use this, does this means I can manage my own auth layer without github account ? Means the user still clones the files to their local machine, and there is a hosted auth solution that handles the identitity
+
+---
+
+Would I still have the benefit of similifying content ops
+
+---
+
+It should simple using cloudflare one
+
+---
+
+Then how would the CI CD pipeline work in this context ?
+
+---
+
+Yes site is a worker
+
+---
+
+Now does the user needs to download the binary still ?
+
+---
+
+So how does the authentication works in this case, is it risky
+
+---
+
+For cloduflare artifacts are the concepts of CI CD ?
+
+---
+
+For cloduflare artifacts are the concepts of pull requests
