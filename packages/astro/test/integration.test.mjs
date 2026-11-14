@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -59,3 +59,73 @@ for (const command of ["build", "preview"]) {
     }
   });
 }
+
+async function distWithBrokenLink() {
+  const dir = await mkdtemp(join(tmpdir(), "orso-build-done-"));
+  await writeFile(
+    join(dir, "index.html"),
+    `<!DOCTYPE html><html lang="en"><head><title>Home</title><meta name="description" content="Welcome."></head><body><a href="/gone/">gone</a></body></html>`,
+  );
+  return dir;
+}
+
+async function distWarningsOnly() {
+  const dir = await mkdtemp(join(tmpdir(), "orso-build-done-"));
+  await writeFile(
+    join(dir, "index.html"),
+    `<!DOCTYPE html><html lang="en"><head><title>Home</title><meta name="description" content="Welcome home."></head><body><h1>Home</h1></body></html>`,
+  );
+  return dir;
+}
+
+test("astro:build:done prints report and fails when dist has errors", async () => {
+  const dir = await distWithBrokenLink();
+  const prevExit = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { hooks } = orso();
+    hooks["astro:config:done"]({ config: { base: "/" } });
+    const logs = [];
+    const buildLogger = { ...logger, info: (msg) => logs.push(msg) };
+
+    await assert.rejects(
+      () =>
+        hooks["astro:build:done"]({
+          dir: pathToFileURL(dir),
+          logger: buildLogger,
+          pages: [],
+          assets: new Map(),
+        }),
+      /Preview checks failed/,
+    );
+
+    assert.equal(process.exitCode, 1);
+    assert.match(logs.join("\n"), /Preview checks/);
+    assert.match(logs.join("\n"), /broken-link|ERROR/i);
+  } finally {
+    process.exitCode = prevExit;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("astro:build:done does not fail on warnings-only findings", async () => {
+  const dir = await distWarningsOnly();
+  const prevExit = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const { hooks } = orso();
+    hooks["astro:config:done"]({ config: { base: "/" } });
+
+    await hooks["astro:build:done"]({
+      dir: pathToFileURL(dir),
+      logger,
+      pages: [],
+      assets: new Map(),
+    });
+
+    assert.notEqual(process.exitCode, 1);
+  } finally {
+    process.exitCode = prevExit;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { glob } from "astro/loaders";
 
+import { auditDist } from "./checks/audit.js";
+import { exitCode, formatReport } from "./checks/report.js";
 import { createEndpoint } from "./endpoint.js";
 import {
   GLOB_META,
@@ -139,7 +141,8 @@ async function setup({ config, server, logger, live }) {
  *
  * `astro dev` and `astro sync` write `.astro/orso-content.json`. The dev server
  * also reloads it when the content config changes and mounts `POST /__orso`
- * when `ORSO_CONTENT_TOKEN` is set. It does nothing during `astro build`.
+ * when `ORSO_CONTENT_TOKEN` is set. On `astro build`, runs preview checks over the
+ * output directory (no script inject).
  */
 export function orso() {
   let config;
@@ -164,9 +167,20 @@ export function orso() {
         config = done;
       },
       "astro:server:setup": async ({ server, logger }) => {
-        // `astro build --devOutput` and `astro sync` outside production also start a server.
+        // `build --devOutput` and `astro sync` outside production also start a server.
         if (command !== "dev") return;
         await setup({ config, server, logger, live: true });
+      },
+      "astro:build:done": async ({ dir, logger }) => {
+        const distPath = fileURLToPath(dir);
+        const base = config?.base;
+        const opts = typeof base === "string" && base !== "" ? { base } : {};
+        const { findings } = await auditDist(distPath, opts);
+        logger.info(formatReport(findings));
+        if (exitCode(findings) === 1) {
+          process.exitCode = 1;
+          throw new Error("Preview checks failed.");
+        }
       },
     },
   };
