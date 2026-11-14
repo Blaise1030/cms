@@ -176,9 +176,9 @@ export function orso(options = {}) {
         // makes the frame cross-origin; the bridge keeps picking and appearance working.
         if (command === "dev") {
           injectScript("head-inline", PREVIEW_BRIDGE);
-          // Cache-bust so preview reloads pick up panel style changes.
-          const panelUrl = new URL("./panel/panel.js", import.meta.url);
-          panelUrl.searchParams.set("v", "orso-chrome-3");
+          // Vue + shadcn checks panel (built from panel-ui/).
+          const panelUrl = new URL("./panel/checks-panel.js", import.meta.url);
+          panelUrl.searchParams.set("v", "vue-shadcn-1");
           injectScript("page", `import ${JSON.stringify(panelUrl.href)}`);
         }
 

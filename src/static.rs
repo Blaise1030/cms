@@ -332,7 +332,7 @@ mod tests {
         collect_js_relative_paths(&canonical_root, &canonical_root, &mut rel_paths).unwrap();
         rel_paths.sort();
 
-        for must_have in ["checks/page.js", "panel/panel.js"] {
+        for must_have in ["checks/page.js", "panel/checks-panel.js"] {
             assert!(
                 rel_paths
                     .iter()

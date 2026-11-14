@@ -28,7 +28,7 @@ test("astro:config:setup injects the preview bridge and checks panel during dev"
   assert.match(injected[0].content, /location\.href/);
   assert.equal(injected[1].stage, "page");
   assert.match(injected[1].content, /^import /);
-  assert.match(injected[1].content, /panel\/panel\.js/);
+  assert.match(injected[1].content, /panel\/checks-panel\.js/);
 });
 
 test("astro:config:setup does not register the collections virtual plugin without collections", () => {

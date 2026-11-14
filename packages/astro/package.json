@@ -8,7 +8,10 @@
     "./marketing": "./src/marketing.js"
   },
   "files": ["src", "README.md"],
-  "scripts": { "test": "node --test test/*.test.mjs" },
+  "scripts": {
+    "build:panel": "npm --prefix panel-ui run build",
+    "test": "npm run build:panel && node --test test/*.test.mjs"
+  },
   "dependencies": {
     "js-yaml": "^4.3.2",
     "jsonc-parser": "^3.3.1",
