@@ -92,7 +92,7 @@ function runnerOf(server) {
  * Load the content config through the server's runner and write the manifest.
  * With `live`, also mount the content endpoint and reload on config changes.
  */
-async function setup({ config, server, logger, live, hasPreviewPath }) {
+async function setup({ config, server, logger, live, hasPreviewPath, previewPaths }) {
   const root = fileURLToPath(config.root);
   const configPath = findContentConfig(fileURLToPath(config.srcDir));
   const runner = runnerOf(server);
@@ -123,7 +123,9 @@ async function setup({ config, server, logger, live, hasPreviewPath }) {
       if (!entry) return undefined;
       return { supportedForEditing: entry.supportedForEditing, kind: entry.kind, reason: entry.reason, schema: schemas.get(name) };
     };
-    server.middlewares.use(createEndpoint({ token, lookup }));
+    server.middlewares.use(
+      createEndpoint({ token, lookup, previewPaths: previewPaths instanceof Map ? previewPaths : new Map() }),
+    );
   }
 
   if (configPath && server.watcher) {
@@ -177,7 +179,14 @@ export function orso(options = {}) {
           vitePlugins.push({
             name: "orso-content-sync",
             configureServer: (server) =>
-              setup({ config, server, logger, live: false, hasPreviewPath: hasPreviewPath ?? undefined }),
+              setup({
+                config,
+                server,
+                logger,
+                live: false,
+                hasPreviewPath: hasPreviewPath ?? undefined,
+                previewPaths: previewPaths ?? undefined,
+              }),
           });
         }
         if (vitePlugins.length > 0) {
@@ -196,6 +205,7 @@ export function orso(options = {}) {
           logger,
           live: true,
           hasPreviewPath: hasPreviewPath ?? undefined,
+          previewPaths: previewPaths ?? undefined,
         });
       },
     },
