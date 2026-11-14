@@ -1,0 +1,69 @@
+In the content preview, [Image #1] how can we set what is the preview path for the content ? so the users can go and visit their website ?
+
+---
+
+In the content preview, [Image #1] how can we set what is the preview path for the content ? so the users can go and visit how their blog looks like in the preview ?
+
+---
+
+Is there some settings we can add ?
+
+---
+
+A
+
+---
+
+Which is better ? orso.json or the C
+
+---
+
+Let's do C
+
+---
+
+There are cases where the reference fields can appear in the slug
+
+---
+
+Just an Idea, should the content collections be defined in the astro integration itself, and the integration just generates the astro content config so there is a single source of truth
+
+---
+
+How about we define the actual astro config typescript in the orso plugin. then it still respects astro in this case
+
+---
+
+Aim for that end state
+
+---
+
+Wait when they need to change the collection then they should just edit from the astro.config.ts orso plugin
+
+---
+
+orso({collections: {blog:<astro content config>, previewPath: ({slug,categories:(reference) ...})=> `/help/{reference}/{slug}`, .... }}). Something like this, and in content.config.ts they just export what ever was being passed into the orso plugin
+
+---
+
+B
+
+---
+
+1 is oka
+
+---
+
+Sounds good
+
+---
+
+Sounds good
+
+---
+
+Sounds good
+
+---
+
+Sounds good
