@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.4
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.3...v0.1.4)
+
+### Fixes
+
+- **web:** Unblock the release build (`vue-tsc` types in Page details)
+
 ## v0.1.3
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.2...v0.1.3)
