@@ -96,7 +96,7 @@ async fn save_through_the_integration(state: &AppState, app: &axum::Router) {
     let dir = project_dir.as_path();
     wait_ready(state, &id).await;
 
-    assert!(dir.join("packages/astro/src/index.js").is_file());
+    assert!(dir.join("integrations/orso/index.js").is_file());
     assert!(dir.join(".astro/orso-content.json").is_file());
 
     let collections = list_collections(dir).await.unwrap();

@@ -31,6 +31,7 @@ async function setup(start: string) {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: empty },
+      { path: "/settings", component: empty },
       { path: "/p/:id/:rest(.*)*", component: empty },
     ],
   });
@@ -81,6 +82,16 @@ it("shows only global groups outside a project", async () => {
   expect(item("action:get-latest")).toBeNull();
   expect(item("project:site")).not.toBeNull();
   expect(item("theme:dark")).not.toBeNull();
+  expect(item("action:app-settings")).not.toBeNull();
+});
+
+it("opens app settings from the root command group", async () => {
+  const { router } = await setup("/");
+  press({ ctrlKey: true, metaKey: true });
+  await flushPromises();
+  item("action:app-settings")!.click();
+  await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/settings");
 });
 
 it("navigates to tabs, entries and files inside a project", async () => {

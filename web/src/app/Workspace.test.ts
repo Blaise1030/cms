@@ -68,4 +68,18 @@ describe("Workspace", () => {
     expect((surface.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
+
+  it("pads the workspace only when the floating chat is shown", async () => {
+    const { w } = await setup("/p/site/preview");
+    expect(w.get("[data-testid='workspace-root']").classes()).not.toContain("pb-11");
+
+    await w.setProps({ floatingChat: true });
+    await flushPromises();
+    expect(w.get("[data-testid='workspace-root']").classes()).toContain("pb-11");
+
+    await w.setProps({ floatingChat: false });
+    await flushPromises();
+    expect(w.get("[data-testid='workspace-root']").classes()).not.toContain("pb-11");
+    w.unmount();
+  });
 });

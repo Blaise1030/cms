@@ -10,6 +10,7 @@ import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
 import { useDesignStore } from "@/modules/design/store";
 import { useSettingsStore } from "@/modules/settings/store";
+import { useSkillsStore } from "@/modules/skills/store";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChatStore } from "@/modules/chat/store";
 
@@ -75,6 +76,8 @@ export const useChangesStore = defineStore("changes", () => {
   const status = ref<PrStatus | null>(null);
   /** The deploy a publish set off; null when none is being watched. */
   const deploy = ref<DeployState | null>(null);
+  /** Production site URL while on `main`; null on a change or when unknown. */
+  const liveUrl = ref<string | null>(null);
   /** Whether Get latest would change anything; null while unknown (the button stays enabled). */
   const syncNeeded = ref<boolean | null>(null);
   const conflictSessions = ref<ConflictSession[]>([]);
@@ -128,6 +131,23 @@ export const useChangesStore = defineStore("changes", () => {
     if (run !== statusRun) return;
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+    }
+  }
+
+  /**
+   * Re-read the production site URL while on `main`. Failures and change branches clear it
+   * so the header link stays hidden rather than pointing at a stale preview.
+   */
+  async function refreshLiveUrl() {
+    const id = projectId.value;
+    if (!id || active.value) {
+      liveUrl.value = null;
+      return;
+    }
+    try {
+      liveUrl.value = await daemon.api.liveSiteUrl(id);
+    } catch {
+      liveUrl.value = null;
     }
   }
 
@@ -199,6 +219,7 @@ export const useChangesStore = defineStore("changes", () => {
       branch ? useContentStore().refreshForBranch(branch) : undefined,
       branch ? useDesignStore().refreshForBranch(branch) : undefined,
       branch ? useSettingsStore().refreshForBranch(branch) : undefined,
+      branch ? useSkillsStore().refreshForBranch(branch) : undefined,
     ]);
     usePreviewStore().reload();
   }
@@ -209,6 +230,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = null;
       prUrl.value = null;
       status.value = null;
+      liveUrl.value = null;
       syncNeeded.value = null;
       protectionHint.value = null;
       items.value = [];
@@ -244,8 +266,12 @@ export const useChangesStore = defineStore("changes", () => {
       if (projectId.value === id) loading.value = false;
     }
     if (projectId.value !== id) return;
-    if (active.value) await refreshStatus();
-    else await refreshSync();
+    if (active.value) {
+      liveUrl.value = null;
+      await refreshStatus();
+    } else {
+      await Promise.all([refreshSync(), refreshLiveUrl()]);
+    }
   }
 
   async function list(id: string) {
@@ -275,6 +301,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = null;
       status.value = null;
+      liveUrl.value = null;
       stopStatusPolling();
       protectionHint.value = null;
       await refreshTreeAndPreview(change.branch);
@@ -314,6 +341,7 @@ export const useChangesStore = defineStore("changes", () => {
       active.value = change;
       prUrl.value = change.prUrl ?? null;
       status.value = null;
+      liveUrl.value = null;
       protectionHint.value = null;
       await refreshTreeAndPreview(change.branch);
       await refreshStatus();
@@ -583,6 +611,52 @@ export const useChangesStore = defineStore("changes", () => {
   }
 
   /**
+   * Return to the live site (`main`). Open changes are kept; a change that is no longer
+   * open (already on `main`) is cleaned up. No-op when already on the live site.
+   */
+  async function goLive(id: string): Promise<void> {
+    const branch = active.value?.branch;
+    if (!branch) return;
+    const previous = items.value;
+    try {
+      await list(id);
+    } catch {
+      // Keep the last known open list when refresh fails.
+      items.value = previous;
+    }
+    const stillOpen = items.value.some((c) => c.branch === branch);
+    if (stillOpen) {
+      switching.value = true;
+      error.value = null;
+      stopStatusPolling();
+      try {
+        await daemon.api.leaveChange(id);
+        projectId.value = id;
+        active.value = null;
+        prUrl.value = null;
+        status.value = null;
+        protectionHint.value = null;
+        await refreshTreeAndPreview("main");
+        void refreshSync();
+        void refreshLiveUrl();
+      } catch (e) {
+        error.value = errorMessage(e);
+        void refreshStatus();
+        throw e;
+      } finally {
+        switching.value = false;
+      }
+      return;
+    }
+    const { mainUpdated } = await cleanup(id, branch);
+    if (!mainUpdated) {
+      toast.warning(
+        "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+      );
+    }
+  }
+
+  /**
    * Clean up a merged change: back on updated `main`, the change gone from the list.
    * `mainUpdated` is false when GitHub couldn't be reached to update `main`.
    */
@@ -603,6 +677,7 @@ export const useChangesStore = defineStore("changes", () => {
       }
       await refreshTreeAndPreview("main");
       void refreshSync();
+      void refreshLiveUrl();
       return { mainUpdated: result.mainUpdated !== false };
     } catch (e) {
       error.value = errorMessage(e);
@@ -703,9 +778,8 @@ export const useChangesStore = defineStore("changes", () => {
 
   /**
    * Publish the change: push it, share it (opening a pull request if it has none), mark it
-   * ready, then merge it on GitHub. The change stays local until the writer uses the Clean up
-   * button. No immediate re-read: GitHub's REST view can lag the merge, so polling resumes
-   * after the usual interval.
+   * ready, merge it on GitHub, then clean up onto updated `main`. Clean up stays available when
+   * the merge happened outside orso, or when this post-publish cleanup fails.
    *
    * Returns `combining` when someone else moved the change first: the combine dialog opens and
    * publishing retries automatically once it succeeds.
@@ -721,20 +795,15 @@ export const useChangesStore = defineStore("changes", () => {
         await startSyncChat(id, result.conflict.sessionId);
         return "combining";
       }
-      const pr = result;
-      if (active.value?.branch === branch) {
-        stopStatusPolling();
-        status.value = pr;
-        if (pr) {
-          prUrl.value = pr.url;
-          pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
-        }
+      const { mainUpdated } = await cleanup(id, branch);
+      if (!mainUpdated) {
+        toast.warning(
+          "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
+        );
       }
-      // The drafts menu drops the published change; the change itself stays until Clean up.
-      await list(id).catch(() => undefined);
-      void refreshSync();
       // The merge is done; the site is rebuilt after it. Claim "live" only once it shipped.
-      if (pr?.mergeSha) trackDeploy(id, pr.mergeSha);
+      const sha = result?.mergeSha;
+      if (sha) trackDeploy(id, sha);
       else toast.info(DEPLOY_UNVERIFIED);
       return "published";
     } catch (e) {
@@ -767,6 +836,7 @@ export const useChangesStore = defineStore("changes", () => {
     needsSignIn,
     status,
     deploy,
+    liveUrl,
     syncNeeded,
     conflictSessions,
     selectedConflictId,
@@ -797,6 +867,7 @@ export const useChangesStore = defineStore("changes", () => {
     combineAgain,
     onSyncChanged,
     share,
+    goLive,
     cleanup,
     markReady,
     publish,

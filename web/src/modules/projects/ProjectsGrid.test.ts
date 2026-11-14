@@ -35,6 +35,7 @@ function mountGrid({ user = null }: { user?: GithubUser | null } = {}) {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div />" } },
+      { path: "/settings", component: { template: "<div />" } },
       { path: "/p/:id/:tab?", component: { template: "<div />" } },
     ],
   });
@@ -216,6 +217,19 @@ describe("ProjectsGrid", () => {
       dialog.unmount();
       w.unmount();
     }
+  });
+
+  it("opens app settings from the header settings pill", async () => {
+    const w = mountGrid();
+    await flushPromises();
+    const pill = w.get("[data-testid='open-settings']");
+    expect(pill.text()).toContain("Settings");
+    expect(pill.attributes("href")).toBe("/settings?tab=assistant");
+    await pill.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/settings");
+    expect(router.currentRoute.value.query.tab).toBe("assistant");
+    w.unmount();
   });
 
   it("keeps the header draggable only on desktop", async () => {

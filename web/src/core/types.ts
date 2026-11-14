@@ -529,6 +529,29 @@ export interface ProviderVerifyResult {
   reason?: string | null;
 }
 
+/** `GET /api/setup/runtimes`: the assistant and site-builder download snapshot. */
+export interface SetupSnapshot {
+  node?: RuntimeStatus;
+  providers: SetupProvider[];
+}
+
+/** `POST /api/setup/providers/{id}/sign-in` (and code/cancel) responses. */
+export interface ProviderSignInState {
+  state: "browser" | "code" | "connected" | "cancelled" | "failed";
+  /** Where to finish signing in, when the flow needs a browser. */
+  url?: string;
+  /** The flow asked for a pasted code. */
+  needsCode?: boolean;
+  /** Plain-language detail for waiting states and failures. */
+  message?: string;
+}
+
+/** `POST /api/setup/providers/{id}/verify`: a temp-session handshake succeeded. */
+export interface ProviderVerifyResult {
+  chatReady: boolean;
+  reason?: string | null;
+}
+
 export interface DeviceStart {
   userCode: string;
   verificationUri: string;
@@ -619,3 +642,35 @@ export interface SettingsDoc {
   exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;
   errors: Record<string, string>;
 }
+
+/** Where a skill is installed: project-scope skills live under the project, global under the shared root. */
+export type SkillScope = "project" | "global";
+/** A parsed, valid skill, enough to list it without loading its body. */
+export interface SkillMeta {
+  id: string; name: string; description: string; scope: SkillScope; path: string;
+}
+/** A fully read skill, including its body and a parse flag for the API layer. */
+export interface SkillDoc {
+  id: string; name: string; description: string; body: string; hash: string; scope: SkillScope;
+  path: string; valid: boolean; error: string | null;
+}
+/** A built-in catalog skill and whether it is installed in each scope. */
+export interface CatalogItem {
+  id: string; name: string; description: string; installedProject: boolean; installedGlobal: boolean;
+}
+/** `GET /api/skills` payload. */
+export interface SkillsList { installed: SkillMeta[]; catalog: CatalogItem[] }
+/** `GET`/`PUT /api/skills/settings`: the configured global root and the default it falls back to. */
+export interface SkillsSettings { globalPath: string; defaultGlobalPath: string }
+/** `PUT /api/skills/:id` body; the id comes from the URL path. */
+export interface SaveSkillRequest {
+  project?: string; branch?: string; scope: SkillScope; name?: string; description?: string; body: string; hash: string;
+}
+/** Where an installed skill comes from (externally tagged, camelCase fields). */
+export type SkillSource =
+  | { catalog: { id: string } }
+  | { import: { skillMd: string; id?: string } }
+  | { blank: { name: string; description: string } }
+  | { copy: { id: string; fromScope: SkillScope } };
+/** `POST /api/skills/install` body. */
+export interface InstallSkillRequest { project?: string; branch?: string; scope: SkillScope; source: SkillSource }

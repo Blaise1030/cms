@@ -134,13 +134,18 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
     };
     let branch = unique_branch(dir, &base).await?;
     if let Err(e) = run(dir, &["checkout", "-b", &branch, start]).await {
-        return Err(if on_main && is_dirty(dir).await? {
-            ApiError::conflict(
-                "Your unsaved edits clash with the latest main — checkpoint or discard them before starting a new change",
-            )
+        // Dirty edits on main that clash with origin/main: start from local main so the
+        // edits are carried. Checkpointing on GitHub `main` is blocked, so refusing here
+        // would leave the writer with no in-app way forward.
+        if on_main && start != "main" && is_dirty(dir).await? {
+            run(dir, &["checkout", "-b", &branch, "main"]).await.map_err(|_| {
+                ApiError::conflict(
+                    "Your unsaved edits conflict with starting a new change — discard them, then try again",
+                )
+            })?;
         } else {
-            e
-        });
+            return Err(e);
+        }
     }
     run(
         dir,
@@ -176,8 +181,15 @@ async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     // Ignore untracked (e.g. `node_modules` / build output from preview); those do not
     // block checkout and are not what "checkpoint first" means.
     if is_dirty(dir).await? {
+        // On `main`, GitHub projects cannot checkpoint — only discard works in-app.
+        // On a change branch, the agent can checkpoint first.
+        let hint = if current_branch(dir).await? == "main" {
+            "discard them"
+        } else {
+            "checkpoint or discard them"
+        };
         return Err(ApiError::conflict(format!(
-            "Uncommitted changes — checkpoint or discard them before {action}"
+            "Uncommitted changes — {hint} before {action}"
         )));
     }
     Ok(())
@@ -416,6 +428,26 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
         title,
         last_edited: None,
     })
+}
+
+/// Check out `main` without deleting the current change branch. No-op when already on `main`.
+/// The working tree must be clean.
+pub async fn leave_to_main(dir: &Path) -> Result<(), ApiError> {
+    let current = run(dir, &["branch", "--show-current"])
+        .await?
+        .trim()
+        .to_string();
+    if current.is_empty() || current == "main" {
+        return Ok(());
+    }
+    ensure_clean(dir, "returning to the live site").await?;
+    run_env(
+        dir,
+        &["checkout", "main"],
+        &[(crate::git_shim::ALLOW_ENV.to_string(), "1".to_string())],
+    )
+    .await?;
+    Ok(())
 }
 
 /// Outcome of [`get_latest`].

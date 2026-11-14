@@ -24,6 +24,15 @@ These are clicks in the app — never do them (or the git equivalent) for them:
 
 When work is ready, tell them it is ready to look at in the **preview**.
 
+## Live and preview links (deploy workflow)
+
+orso shows **Open live site** (on main) and **Open deployed preview** (on a change) from GitHub **Deployments** — CI metadata with an `environment_url`, not the Cloudflare host itself.
+
+- PR deploys must create a deployment for the PR head SHA and set status `success` with the preview URL.
+- Production deploys (`push` to `main`) must create a deployment for that commit (`environment: production`) and set status `success` with the live URL.
+
+If you touch `.github/workflows/deploy.yml`, keep both. Skipping production deployments hides the live-site link until the next successful recorded deploy (orso may still derive a workers.dev URL from a preview as a fallback).
+
 ## Changes (drafts)
 
 A **change** is a draft: git branch `content/<kebab-case-slug>`; title via `git config branch.<branch>.description "<Title>"`.

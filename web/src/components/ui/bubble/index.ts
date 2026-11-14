@@ -7,7 +7,9 @@ export { default as BubbleGroup } from "./BubbleGroup.vue"
 export { default as BubbleReactions } from "./BubbleReactions.vue"
 
 export const bubbleVariants = cva(
-  "gap-1 data-[align=end]:self-end max-w-[80%] data-[variant=ghost]:max-w-full group-data-[align=end]/message:self-end group/bubble relative flex w-fit min-w-0 flex-col",
+  // w-fit without min-w-0: min-w-0 lets flex crumple wrapping text; w-max overflows the
+  // panel and end-alignment clips the left edge. max-w caps long lines.
+  "gap-1 data-[align=end]:self-end max-w-[min(90%,100%)] data-[variant=ghost]:max-w-full group-data-[align=end]/message:self-end group/bubble relative flex w-fit flex-col",
   {
     variants: {
       variant: {

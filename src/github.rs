@@ -394,6 +394,48 @@ fn is_http_url(u: &str) -> bool {
     (lower.starts_with("http://") && u.len() > 7) || (lower.starts_with("https://") && u.len() > 8)
 }
 
+/// Cloudflare Workers preview hosts are `{alias}-{worker}.{account}.workers.dev`. Strip the
+/// alias using the known worker name to recover the production host.
+fn production_url_from_preview(preview: &str, worker: &str) -> Option<String> {
+    if worker.is_empty() || !is_http_url(preview) {
+        return None;
+    }
+    let (scheme, rest) = preview.split_once("://")?;
+    let host = rest.split('/').next().unwrap_or(rest);
+    let needle = format!("-{worker}.");
+    let idx = host.rfind(&needle)?;
+    let prod_host = &host[idx + 1..];
+    if !prod_host.starts_with(&format!("{worker}.")) {
+        return None;
+    }
+    Some(format!("{scheme}://{prod_host}"))
+}
+
+/// `name = "..."` from a project's `wrangler.toml`, when present.
+pub fn worker_name_from_wrangler(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("wrangler.toml")).ok()?;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix("name") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim();
+        let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+        let inner = rest.trim_start_matches(quote).split(quote).next()?;
+        if !inner.is_empty() {
+            return Some(inner.to_string());
+        }
+    }
+    None
+}
+
 fn aggregate_checks(runs: &[ApiCheckRun]) -> ChecksState {
     if runs.is_empty() {
         return ChecksState::None;
@@ -1326,6 +1368,64 @@ impl GithubAuth {
             .get_json(&format!("/repos/{repo}/branches/main"))
             .await?;
         Ok(branch.commit.sha)
+    }
+
+    /// Production site URL. Prefers a successful deployment of GitHub's `main` tip; when the
+    /// template only records PR previews (Cloudflare Workers), derives production from a recent
+    /// preview URL and the project's worker `name`.
+    pub async fn live_url(
+        &self,
+        repo: &str,
+        worker_name: Option<&str>,
+    ) -> Result<Option<String>, ApiError> {
+        match self.main_head(repo).await {
+            Ok(sha) => {
+                if let Some(url) = self.preview_url(repo, &sha).await? {
+                    return Ok(Some(url));
+                }
+            }
+            Err(_) => {}
+        }
+        let Some(worker) = worker_name.filter(|n| !n.is_empty()) else {
+            return Ok(None);
+        };
+        self.live_url_from_previews(repo, worker).await
+    }
+
+    /// Newest successful preview deployment's `environment_url`, rewritten to the production
+    /// host (`{alias}-{worker}.…` → `{worker}.…`).
+    async fn live_url_from_previews(
+        &self,
+        repo: &str,
+        worker: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let deployments: Vec<ApiDeployment> = self
+            .get_json(&format!("/repos/{repo}/deployments?per_page=20"))
+            .await?;
+        for d in deployments {
+            let Ok(statuses) = self
+                .get_json::<Vec<ApiDeploymentStatus>>(&format!(
+                    "/repos/{repo}/deployments/{}/statuses?per_page=1",
+                    d.id
+                ))
+                .await
+            else {
+                continue;
+            };
+            let Some(latest) = statuses.into_iter().next() else {
+                continue;
+            };
+            if latest.state != "success" {
+                continue;
+            }
+            let Some(url) = latest.environment_url.filter(|u| is_http_url(u)) else {
+                continue;
+            };
+            if let Some(prod) = production_url_from_preview(&url, worker) {
+                return Ok(Some(prod));
+            }
+        }
+        Ok(None)
     }
 
     /// Just the [`PrState`] and head of `head_branch`'s pull request (no checks or deployments).
@@ -2722,6 +2822,111 @@ esac"#,
             },
             &dir,
         )
+    }
+
+    #[test]
+    fn production_url_strips_the_preview_alias_using_the_worker_name() {
+        assert_eq!(
+            production_url_from_preview(
+                "https://content-setup-orso-skill-astro-marketing.blaisetiong-dev.workers.dev",
+                "astro-marketing",
+            )
+            .as_deref(),
+            Some("https://astro-marketing.blaisetiong-dev.workers.dev")
+        );
+        assert_eq!(
+            production_url_from_preview("https://other.example.com", "astro-marketing"),
+            None
+        );
+        assert_eq!(
+            production_url_from_preview("javascript:alert(1)", "astro-marketing"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn live_url_is_the_successful_deployment_of_main_tip() {
+        use axum::extract::{Path as AxPath, Query};
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/branches/main",
+                get(|| async {
+                    Json(serde_json::json!({ "name": "main", "commit": { "sha": "mainsha" } }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("sha").map(String::as_str) != Some("mainsha") {
+                        return Json(serde_json::json!([]));
+                    }
+                    Json(serde_json::json!([{ "id": 9, "sha": "mainsha" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(_id): AxPath<u64>| async move {
+                    Json(serde_json::json!([
+                        { "state": "success", "environment_url": "https://acme.pages.dev" }
+                    ]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "liveurl");
+        assert_eq!(
+            auth.live_url("acme/site", None).await.unwrap().as_deref(),
+            Some("https://acme.pages.dev")
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn live_url_derives_production_from_a_preview_when_main_has_none() {
+        use axum::extract::{Path as AxPath, Query};
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/branches/main",
+                get(|| async {
+                    Json(serde_json::json!({ "name": "main", "commit": { "sha": "mainsha" } }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    // Main tip has no deployment; unfiltered list still has PR previews.
+                    if q.get("sha").is_some() {
+                        return Json(serde_json::json!([]));
+                    }
+                    Json(serde_json::json!([{ "id": 1, "sha": "previewsha" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|AxPath(_id): AxPath<u64>| async move {
+                    Json(serde_json::json!([{
+                        "state": "success",
+                        "environment_url": "https://content-seo-astro-marketing.acct.workers.dev"
+                    }]))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "livefrompreview");
+        assert_eq!(
+            auth.live_url("acme/site", Some("astro-marketing"))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("https://astro-marketing.acct.workers.dev")
+        );
+        stop();
     }
 
     #[tokio::test]

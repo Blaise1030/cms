@@ -17,6 +17,13 @@ import {
   type DesignDoc,
   type DesignTokens,
   type SettingsDoc,
+  type SkillScope,
+  type SkillMeta,
+  type SkillDoc,
+  type SkillsList,
+  type SkillsSettings,
+  type SaveSkillRequest,
+  type InstallSkillRequest,
   type FileVersion,
   type Change,
   type ChangesUpdate,
@@ -237,6 +244,19 @@ export function createApi(
     /** Omit `hash` to create the file; the daemon refuses a stale hash with 409 and invalid fields with 400. */
     saveSettings: (body: { project: string; branch: string; hash?: string; settings: Record<string, unknown> }) =>
       json<SettingsDoc>("PUT", "/api/settings", { body }),
+    skills: (project: string) => json<SkillsList>("GET", "/api/skills", { query: { project } }),
+    skill: (project: string, id: string, scope: SkillScope) =>
+      json<SkillDoc>("GET", `/api/skills/${enc(id)}`, { query: { project, scope } }),
+    /** Replace an installed skill's front matter and body; project saves need `project` + `branch`. */
+    saveSkill: (id: string, body: SaveSkillRequest) =>
+      json<SkillDoc>("PUT", `/api/skills/${enc(id)}`, { body }),
+    installSkill: (body: InstallSkillRequest) =>
+      json<SkillMeta>("POST", "/api/skills/install", { body }),
+    uninstallSkill: (id: string, query: { project?: string; scope: SkillScope; branch?: string }) =>
+      empty("DELETE", `/api/skills/${enc(id)}`, { query }),
+    skillsSettings: () => json<SkillsSettings>("GET", "/api/skills/settings"),
+    saveSkillsSettings: (body: { globalPath: string }) =>
+      json<SkillsSettings>("PUT", "/api/skills/settings", { body }),
     health: () => json<Health>("GET", "/api/health"),
 
     listProjects: async (): Promise<Project[]> =>
@@ -332,6 +352,9 @@ export function createApi(
       json<Change>("GET", "/api/changes/active", { query: { project } }),
     switchChange: (project: string, branch: string) =>
       json<Change>("POST", `/api/changes/${enc(branch)}/switch`, { body: { project } }),
+    /** Check out `main` without deleting local change branches. */
+    leaveChange: (project: string) =>
+      json<{ branch: string }>("POST", "/api/changes/leave", { body: { project } }),
     updateChanges: (project: string) =>
       json<ChangesUpdate>("POST", "/api/changes/update", { body: { project } }),
     /** Whether Get latest would change anything (remote `main`, or a draft behind it). */
@@ -375,6 +398,10 @@ export function createApi(
           query: { project },
         })
       ).pr,
+
+    /** Production site URL for the live (`main`) tip, or null when unknown. */
+    liveSiteUrl: async (project: string): Promise<string | null> =>
+      (await json<{ url: string | null }>("GET", "/api/changes/live", { query: { project } })).url,
 
     /** Mark a change's draft PR ready for review; returns its fresh status. */
     markChangeReady: async (project: string, branch: string): Promise<PrStatus | null> =>

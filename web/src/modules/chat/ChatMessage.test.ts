@@ -1,14 +1,20 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { UIMessage } from "ai";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
+import { useChatSteps } from "@/lib/chatSteps";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatMessage from "./ChatMessage.vue";
+
+beforeEach(() => {
+  // Most step tests need the preference on; individual tests flip it off.
+  useChatSteps().set(true);
+});
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
@@ -58,6 +64,23 @@ describe("ChatMessage", () => {
     w.unmount();
   });
 
+  it("shows a page-context badge and hides the raw wire block", async () => {
+    const w = await render(
+      [
+        {
+          type: "text",
+          text: "Fix the hero\n[page-context]\ntab: preview\npath: /about\n[/page-context]",
+        },
+      ],
+      "user",
+    );
+    expect(w.find("[data-testid='message-page-context']").text()).toContain("Preview · /about");
+    expect(w.text()).toContain("Fix the hero");
+    expect(w.text()).not.toContain("[page-context]");
+    expect(w.text()).not.toContain("tab: preview");
+    w.unmount();
+  });
+
   it("shows attached images as previews and other files as chips instead of their paths", async () => {
     const dir = "/Users/me/orso-projects/.orso/p/attachments";
     const w = await render(
@@ -71,6 +94,23 @@ describe("ChatMessage", () => {
     expect(files[1]!.text()).toContain("PDF file");
     expect(w.text()).toContain("Test");
     expect(w.text()).not.toContain("attachments/");
+    w.unmount();
+  });
+
+  it("puts each image, file chips, and text in separate bubbles", async () => {
+    const dir = "/Users/me/orso-projects/.orso/p/attachments";
+    const w = await render(
+      [{ type: "text", text: `Please fix this\n${dir}/5d83a351365d7d18.png\n${dir}/0123456789abcdef.pdf` }],
+      "user",
+    );
+    const bubbles = w.findAll('[data-slot="bubble"]');
+    expect(bubbles).toHaveLength(3);
+    expect(bubbles[0]!.find("[data-testid='message-attachment'] img").exists()).toBe(true);
+    expect(bubbles[0]!.text()).not.toContain("Please fix this");
+    expect(bubbles[1]!.text()).toContain("PDF file");
+    expect(bubbles[1]!.find("img").exists()).toBe(false);
+    expect(bubbles[2]!.text()).toContain("Please fix this");
+    expect(bubbles[2]!.find("[data-testid='message-attachment']").exists()).toBe(false);
     w.unmount();
   });
 
@@ -183,6 +223,24 @@ describe("ChatMessage", () => {
     expect(w.find("[data-testid='chat-steps']").text()).toContain("Working…");
     expect(w.find("[data-testid='chat-steps'] [data-slot='trace-line']").attributes("data-status")).toBe("running");
     w.unmount();
+  });
+
+  it("hides finished steps when the appearance preference is off, but still shows Working…", async () => {
+    useChatSteps().set(false);
+    const done = await render([
+      { type: "step-start" },
+      { type: "reasoning", text: "Pondering", state: "done" },
+      { type: "text", text: "Fixed it" },
+    ]);
+    expect(done.find("[data-testid='chat-steps']").exists()).toBe(false);
+    expect(done.text()).toContain("Fixed it");
+    done.unmount();
+
+    const running = await render([
+      { type: "dynamic-tool", toolName: "shell", toolCallId: "t1", state: "input-available", input: { command: "ls" } },
+    ]);
+    expect(running.find("[data-testid='chat-steps']").text()).toContain("Working…");
+    running.unmount();
   });
 
   it("shows reasoning behind a collapsed Thinking trigger", async () => {

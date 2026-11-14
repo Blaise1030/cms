@@ -16,6 +16,7 @@ pub mod history;
 pub mod projects;
 pub mod settings;
 pub mod setup;
+pub mod skills;
 
 use std::path::PathBuf;
 
@@ -40,6 +41,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/content/entry/rename", post(content::rename))
         .route("/api/content/entry/impact", post(content::impact))
         .route("/api/design", get(design::get).put(design::put))
+        .route("/api/skills", get(skills::list))
+        .route("/api/skills/install", post(skills::install))
+        .route(
+            "/api/skills/settings",
+            get(skills::settings_get).put(skills::settings_put),
+        )
+        .route(
+            "/api/skills/{id}",
+            get(skills::get).put(skills::save).delete(skills::uninstall),
+        )
         .route("/api/settings", get(settings::get).put(settings::put))
         .route("/api/content/history", get(history::list))
         .route("/api/content/history/{sha}", get(history::version))
@@ -148,6 +159,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/checkpoints/{sha}/restore", post(checkpoints::restore))
         .route("/api/changes", get(changes::list).post(changes::create))
         .route("/api/changes/active", get(changes::active))
+        .route("/api/changes/leave", post(changes::leave))
         .route("/api/changes/update", post(changes::update))
         .route("/api/changes/conflicts", get(changes::list_conflicts))
         .route("/api/changes/conflicts/{id}", get(changes::get_conflict))
@@ -179,6 +191,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
         .route("/api/changes/sync", get(changes::sync))
+        .route("/api/changes/live", get(changes::live))
         .route(
             "/api/docs/branch-protection",
             get(changes::branch_protection_doc),

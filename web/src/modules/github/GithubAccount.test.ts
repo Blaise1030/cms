@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
@@ -10,10 +11,20 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { useGithubStore } from "./store";
 import GithubAccount from "./GithubAccount.vue";
 
+const empty = { render: () => null };
+let router: Router;
+
 function mountWith(status: unknown, api: Record<string, unknown> = {}) {
   h.daemon = createFakeDaemon({ githubStatus: vi.fn(async () => status), ...api });
   setActivePinia(createPinia());
-  return mount(GithubAccount, { attachTo: document.body });
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/", component: empty },
+      { path: "/settings", component: empty },
+    ],
+  });
+  return mount(GithubAccount, { attachTo: document.body, global: { plugins: [router] } });
 }
 
 enableAutoUnmount(afterEach);
@@ -48,6 +59,23 @@ describe("GithubAccount", () => {
     await w.find("[data-testid='github-account']").trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Sign out");
+  });
+
+  it("offers Settings in the account menu", async () => {
+    const w = mountWith({
+      configured: true, deviceFlow: true, source: "oauth",
+      user: { login: "ada", id: 1, name: "Ada", avatarUrl: "a.png" },
+    });
+    await flushPromises();
+    await w.find("[data-testid='github-account']").trigger("click");
+    await flushPromises();
+    const settings = [...document.body.querySelectorAll("[role='menuitem']")].find((m) =>
+      m.textContent?.includes("Settings"),
+    ) as HTMLElement;
+    expect(settings).toBeTruthy();
+    settings.click();
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/settings");
   });
 
   it("shows the GitHub CLI account without a Sign out item", async () => {

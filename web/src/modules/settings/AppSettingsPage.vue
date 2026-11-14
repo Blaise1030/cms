@@ -4,7 +4,7 @@
 // links and the command palette can point at one page.
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, BotMessageSquare, GitBranch, Info, Package, Palette, Search } from "@lucide/vue";
+import { ArrowLeft, BotMessageSquare, GitBranch, Info, Package, Palette, Search, Sparkles } from "@lucide/vue";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import {
   Sidebar,
@@ -28,6 +28,7 @@ import AppearanceSettings from "./AppearanceSettings.vue";
 import AssistantSettings from "./AssistantSettings.vue";
 import GithubSettings from "./GithubSettings.vue";
 import SiteBuilderSettings from "./SiteBuilderSettings.vue";
+import SkillsSettings from "./SkillsSettings.vue";
 
 interface SettingsSection {
   id: AppSettingsTab;
@@ -73,6 +74,14 @@ const SECTIONS: SettingsSection[] = [
     component: AppearanceSettings,
   },
   {
+    id: "skills",
+    label: "Skills",
+    title: "Skills",
+    description: "Where global skills live, shared across every project.",
+    icon: Sparkles,
+    component: SkillsSettings,
+  },
+  {
     id: "about",
     label: "About",
     title: "About",
@@ -84,7 +93,7 @@ const SECTIONS: SettingsSection[] = [
 
 const GROUPS: { label: string; ids: AppSettingsTab[] }[] = [
   { label: "Setup", ids: ["assistant", "builder", "github"] },
-  { label: "Preferences", ids: ["appearance"] },
+  { label: "Preferences", ids: ["appearance", "skills"] },
 ];
 
 const ABOUT = SECTIONS.find((section) => section.id === "about")!;

@@ -81,6 +81,16 @@ describe("App setup gate", () => {
     expect(w.find("[data-testid='shell']").exists()).toBe(false);
   });
 
+  it("shows the setup check when an assistant is installed but not ready to chat", async () => {
+    const { w } = mountWith({
+      ...complete,
+      providers: [{ id: "claude", name: "Claude", available: true, chatReady: false }],
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='setup-check']").exists()).toBe(true);
+    expect(w.find("[data-testid='shell']").exists()).toBe(false);
+  });
+
   it("goes to the shell when everything is ready", async () => {
     const { w } = mountWith(complete);
     await flushPromises();
@@ -91,7 +101,10 @@ describe("App setup gate", () => {
   it("holds the shell back while the check is in flight", async () => {
     const { w } = mountWith(() => new Promise<SetupStatus>(() => {}));
     await flushPromises();
-    expect(w.find("[data-testid='setup-pending']").exists()).toBe(true);
+    const pending = w.find("[data-testid='setup-pending']");
+    expect(pending.exists()).toBe(true);
+    expect(pending.attributes("role")).toBe("status");
+    expect(pending.text()).toContain("Loading…");
     expect(w.find("[data-testid='shell']").exists()).toBe(false);
     expect(w.find("[data-testid='setup-check']").exists()).toBe(false);
   });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, BotMessageSquare, Trash2, UserPlus } from "@lucide/vue";
+import { EllipsisVertical, BotMessageSquare, Settings, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -32,7 +32,7 @@ import RepoBrowser from "./RepoBrowser.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
-import { projectPath } from "@/router";
+import { projectPath, settingsPath } from "@/router";
 
 const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
@@ -91,6 +91,11 @@ function open(project: Project) {
       <div class="flex items-center gap-2" data-testid="account-slot">
         <Button variant="outline" size="sm" data-testid="open-assistant" @click="openAssistantSetup">
           <BotMessageSquare /> Assistant
+        </Button>
+        <Button variant="outline" size="sm" as-child>
+          <RouterLink :to="settingsPath()" data-testid="open-settings">
+            <Settings /> Settings
+          </RouterLink>
         </Button>
         <GithubAccount />
       </div>

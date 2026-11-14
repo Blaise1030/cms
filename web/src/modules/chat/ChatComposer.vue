@@ -1,19 +1,31 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, ListPlus, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, ListPlus, MapPin, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { pageContextBadge, type PageContext } from "./pageContext";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { groupModels, type GroupedModel } from "./modelGroups";
 import ProviderIcon from "./ProviderIcon.vue";
 
 export type ChatAttachment = { name: string; path: string };
@@ -38,6 +50,8 @@ const props = defineProps<{
   attaching: boolean;
   /** Elements picked from the preview for the next message. */
   references: ChatReference[];
+  /** Ambient page context that will be sent with the next message. */
+  pageContext?: PageContext | null;
   /** Run the assistant's tools without asking. */
   autoApprove: boolean;
 }>();
@@ -47,6 +61,7 @@ const emit = defineEmits<{
   attach: [files: File[]];
   removeAttachment: [index: number];
   removeReference: [index: number];
+  clearPageContext: [];
   setAutoApprove: [on: boolean];
   /** The user wants to set up another assistant; the caller opens its setup. */
   setup: [];
@@ -63,18 +78,30 @@ const pickerOpen = ref(false);
 const labelOf = (p: string) => labels[p] ?? p;
 const shownProviders = computed(() => (props.providerLocked && provider.value ? [provider.value] : props.providers));
 const choices = (p: string) => [{ id: DEFAULT_MODEL, name: "Default" }, ...(props.models[p] ?? [])];
+/** Direct picks vs hover flyouts for `provider/model` ids. */
+const menus = computed(() => {
+  const out: Record<string, { direct: GroupedModel[]; subs: { heading: string; items: GroupedModel[] }[] }> = {};
+  for (const p of shownProviders.value) {
+    const direct: GroupedModel[] = [];
+    const subs: { heading: string; items: GroupedModel[] }[] = [];
+    for (const g of groupModels(choices(p))) {
+      if (g.heading === null) direct.push(...g.items);
+      else subs.push({ heading: g.heading, items: g.items });
+    }
+    out[p] = { direct, subs };
+  }
+  return out;
+});
 const selected = computed(() => (provider.value ? `${provider.value}:${model.value ?? DEFAULT_MODEL}` : ""));
 const pickerLabel = computed(() => {
   if (!provider.value) return "Assistant";
   return props.models[provider.value]?.find((m) => m.id === model.value)?.name ?? labelOf(provider.value);
 });
+/** Vitest: keep submenu items mounted so picks don't need real hover. */
+const forceSubMount = import.meta.env.MODE === "test";
 
-function pick(value: unknown) {
-  if (typeof value !== "string") return;
-  const at = value.indexOf(":");
-  if (at < 0) return;
-  const id = value.slice(at + 1);
-  provider.value = value.slice(0, at);
+function pickModel(p: string, id: string) {
+  provider.value = p;
   model.value = id === DEFAULT_MODEL ? null : id;
   pickerOpen.value = false;
 }
@@ -164,7 +191,28 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
         Drop files for your assistant
       </div>
       <InputGroup>
-        <div v-if="attachments.length || attaching || references.length" class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5">
+        <div
+          v-if="attachments.length || attaching || references.length || pageContext"
+          class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5"
+        >
+          <Badge
+            v-if="pageContext"
+            variant="secondary"
+            data-testid="chat-page-context"
+            class="max-w-full py-1 pr-2 pl-1 text-xs"
+          >
+            <button
+              type="button"
+              class="hover:bg-background shrink-0 rounded p-0.5"
+              :aria-label="`Remove ${pageContextBadge(pageContext)}`"
+              data-testid="chat-page-context-remove"
+              @click="emit('clearPageContext')"
+            >
+              <X class="size-3" aria-hidden="true" />
+            </button>
+            <MapPin class="size-3 shrink-0" aria-hidden="true" />
+            <span class="min-w-0 truncate">{{ pageContextBadge(pageContext) }}</span>
+          </Badge>
           <Badge
             v-for="(reference, i) in references"
             :key="reference.full"
@@ -244,8 +292,8 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
             >
               <Paperclip />
             </InputGroupButton>
-            <Popover v-model:open="pickerOpen">
-              <PopoverTrigger as-child>
+            <DropdownMenu v-model:open="pickerOpen">
+              <DropdownMenuTrigger as-child>
                 <button
                   type="button"
                   data-testid="chat-agent"
@@ -257,47 +305,74 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
                   <span class="min-w-0 truncate">{{ pickerLabel }}</span>
                   <ChevronDown class="text-muted-foreground size-4 shrink-0 opacity-50" />
                 </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" class="w-72 p-0">
-                <Command :model-value="selected" @update:model-value="pick">
-                  <CommandInput placeholder="Search assistants and models" data-testid="chat-agent-search" />
-                  <CommandList class="max-h-80 p-1">
-                    <CommandEmpty>No models found</CommandEmpty>
-                    <CommandGroup
-                      v-for="p in shownProviders"
-                      :key="p"
-                      :heading="labelOf(p)"
-                      :data-provider="p"
-                      data-testid="chat-agent-group"
-                      class="p-0"
-                    >
-                      <CommandItem
-                        v-for="m in choices(p)"
-                        :key="m.id"
-                        :value="`${p}:${m.id}`"
-                        :data-value="`${p}:${m.id}`"
-                        data-testid="chat-model-item"
-                      >
-                        <ProviderIcon :provider="p" class="size-3.5 text-current" />
-                        <span class="min-w-0 flex-1 truncate">{{ m.name }}</span>
-                        <span class="sr-only">{{ labelOf(p) }}</span>
-                        <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                      </CommandItem>
-                    </CommandGroup>
-                    <CommandGroup class="p-0">
-                      <CommandItem
-                        value="setup-assistant"
-                        data-testid="chat-agent-setup"
-                        @select="setupAnother"
-                      >
-                        <Settings2 class="size-3.5 text-current" aria-hidden="true" />
-                        <span class="min-w-0 flex-1 truncate">Set up another assistant…</span>
-                      </CommandItem>
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="min-w-48" data-testid="chat-agent-menu">
+                <!-- Providers on the first layer; models open in a searchable hover flyout. -->
+                <DropdownMenuSub v-for="p in shownProviders" :key="p">
+                  <DropdownMenuSubTrigger data-testid="chat-agent-sub" :data-provider="p">
+                    <ProviderIcon :provider="p" class="size-3.5 text-current" />
+                    <span class="min-w-0 flex-1 truncate">{{ labelOf(p) }}</span>
+                    <Check v-if="provider === p" class="size-4" />
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent
+                    class="w-72 p-0"
+                    :force-mount="forceSubMount || undefined"
+                    @close-auto-focus.prevent
+                  >
+                    <Command :data-testid="`chat-model-menu-${p}`">
+                      <CommandInput
+                        placeholder="Search models…"
+                        data-testid="chat-model-search"
+                        @keydown.stop
+                      />
+                      <CommandList class="max-h-[min(320px,50vh)]">
+                        <CommandEmpty>No models found.</CommandEmpty>
+                        <CommandGroup v-if="menus[p]?.direct.length">
+                          <CommandItem
+                            v-for="m in menus[p]?.direct"
+                            :key="m.id"
+                            :value="`${m.id} ${m.label}`"
+                            data-testid="chat-model-item"
+                            :data-provider="p"
+                            :data-value="`${p}:${m.id}`"
+                            @select="pickModel(p, m.id)"
+                          >
+                            <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
+                            <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
+                          </CommandItem>
+                        </CommandGroup>
+                        <CommandGroup
+                          v-for="sub in menus[p]?.subs"
+                          :key="`${p}:${sub.heading}`"
+                          :heading="sub.heading"
+                          data-testid="chat-model-sub"
+                          :data-provider="p"
+                          :data-model-provider="sub.heading"
+                        >
+                          <CommandItem
+                            v-for="m in sub.items"
+                            :key="m.id"
+                            :value="`${m.id} ${sub.heading} ${m.label}`"
+                            data-testid="chat-model-sub-item"
+                            :data-provider="p"
+                            :data-value="`${p}:${m.id}`"
+                            @select="pickModel(p, m.id)"
+                          >
+                            <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
+                            <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
+                          </CommandItem>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem data-testid="chat-agent-setup" @select="setupAnother">
+                  <Settings2 class="size-3.5 text-current" aria-hidden="true" />
+                  <span class="min-w-0 flex-1 truncate">Set up another assistant…</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button

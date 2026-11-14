@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import {
-  codePath,
-  contentPath,
-  historyPath,
-  projectPath,
-  projectTabFromRoute,
-  routes,
-  settingsPath,
-} from "./router";
+import { codePath, contentPath, historyPath, projectPath, projectTabFromRoute, routes, settingsPath } from "./router";
 
 const router = () => createRouter({ history: createMemoryHistory(), routes });
 
@@ -56,6 +48,7 @@ describe("router", () => {
     expect(projectTabFromRoute("project-code")).toBe("code");
     expect(projectTabFromRoute("project-history")).toBe("history");
     expect(projectTabFromRoute("project-design")).toBe("design");
+    expect(projectTabFromRoute("project-skills")).toBe("skills");
     expect(projectTabFromRoute("project-settings")).toBe("settings");
     expect(projectTabFromRoute("home")).toBe("preview");
   });
@@ -67,7 +60,14 @@ describe("router", () => {
     expect(projectPath("x", "design")).toBe("/p/x/design");
   });
 
-  it("resolves the settings tab", () => {
+  it("resolves the skills tab", () => {
+    const r = router().resolve("/p/x/skills");
+    expect(r.name).toBe("project-skills");
+    expect(r.params.id).toBe("x");
+    expect(projectPath("x", "skills")).toBe("/p/x/skills");
+  });
+
+  it("resolves the project settings tab", () => {
     const r = router().resolve("/p/a/settings");
     expect(r.name).toBe("project-settings");
     expect(r.params.id).toBe("a");

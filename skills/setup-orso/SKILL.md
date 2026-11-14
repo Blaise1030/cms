@@ -30,20 +30,31 @@ Do only what is missing. Prefer a draft change / branch; do not push to `main` u
 
 Omit `orso.json` when defaults (`.` / npm) are fine. Empty strings are invalid — omit keys instead.
 
-2. **Vendor `orso-astro`** into `<astro-root>/packages/astro` (not published to npm). From a temp dir:
+2. **Vendor the integration** into `<astro-root>/integrations/orso/` (generated sources, not an npm package). Sparse-checkout `packages/astro/src` and copy the runtime files. Do not add `orso-astro` or `file:packages/astro`.
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/Blaise1030/cms.git /tmp/orso-src
-git -C /tmp/orso-src sparse-checkout set packages/astro
-cp -R /tmp/orso-src/packages/astro <astro-root>/packages/astro
+git -C /tmp/orso-src sparse-checkout set packages/astro/src
+mkdir -p <astro-root>/integrations/orso
+cp /tmp/orso-src/packages/astro/src/{index,manifest,patch,endpoint,bridge}.js <astro-root>/integrations/orso/
 ```
 
-In `<astro-root>/package.json` set `"orso-astro": "file:packages/astro"`, then install with the project’s package manager.
+Do not customize `integrations/orso/`; a later Orso upgrade may overwrite it.
+
+On `<astro-root>/package.json` `dependencies`, hoist the copy's runtime packages (Astro stays a direct dependency at `>=7.3.0 <8`):
+
+```json
+"js-yaml": "^4.3.2",
+"jsonc-parser": "^3.3.1",
+"yaml": "^2.9.1"
+```
+
+Then install with the project’s package manager.
 
 3. **Wire preview + integration** in `astro.config.*`:
 
 ```js
-import { orso } from "orso-astro";
+import { orso } from "./integrations/orso/index.js";
 
 const base = process.env.PUBLIC_BASE ?? "/";
 const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT || 0);
@@ -67,7 +78,7 @@ Merge with existing `vite` / `integrations` — do not drop them. Orso sets `PUB
 
 4. **Content loaders** in `src/content.config.ts` (or equivalent):
 
-- `import { orsoGlob } from "orso-astro"`
+- `import { orsoGlob } from "../integrations/orso/index.js"` (from `src/content.config.ts`; adjust the relative path if that file lives elsewhere)
 - Replace `glob({...})` from `astro/loaders` with `orsoGlob({...})` (same options)
 - Leave non-`glob` loaders alone (they stay listed but read-only in Orso)
 
@@ -80,6 +91,8 @@ Merge with existing `vite` / `integrations` — do not drop them. Orso sets `PUB
 - Add Cloudflare deploy workflows, `AGENTS.md`, or template sample content unless asked
 - Rewrite the site to match the marketing template
 - Commit secrets or force-push
+
+When you *are* asked to add or fix deploy workflows: record GitHub **Deployments** for both production (`main`, with live `environment_url`) and PR previews (with preview `environment_url`). orso’s **Open live site** / preview links read those statuses — see `templates/astro-marketing/.github/workflows/deploy.yml` and `working-in-orso`.
 
 ## Humans: install this skill
 

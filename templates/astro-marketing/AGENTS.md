@@ -4,7 +4,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 ## Content model
 
-- `src/content.config.ts` defines the collections and their schemas inline; each loader uses `orsoGlob` from `orso-astro`, and the `orso()` integration is registered in `astro.config.mjs`:
+- `src/content.config.ts` defines the collections and their schemas inline. Loaders import `orsoGlob` from `../integrations/orso/index.js`, and `astro.config.mjs` registers `orso()` imported from `./integrations/orso/index.js`. `integrations/orso/` is a generated copy of `packages/astro/src` (do not edit it; scaffolding overwrites it). `yaml`, `js-yaml`, and `jsonc-parser` are project dependencies; there is no `orso-astro` package. Collections:
   - `blog` ← `src/content/blog/en/*.md`: `title`, `description`, `pubDate` (`YYYY-MM-DD`), optional `coverImage` + `coverAlt`, `tags[]`, `relatedPosts[]`.
   - `helpDocs` ← `src/content/helpDocs/en/*.md`: `title`, `description`, `section`, `order`.
 
@@ -18,6 +18,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 - `src/styles/global.css` — Tailwind CSS v4 entry (`@import "tailwindcss"` plus the typography plugin). Theme tokens go in an `@theme` block here; there is no `tailwind.config.js`.
 - `src/lib/href.ts` — base-aware link helper.
 - `astro.config.mjs` — reads `PUBLIC_BASE` (default `/`) for `base` and the HMR socket path (needed for the live preview proxy). Keep both. Do not hard-code absolute paths; use `import.meta.env.BASE_URL` or `href()`.
+- `integrations/orso/` — generated Orso integration sources. Relative imports only. Do not edit; a scaffold overwrites this folder.
 
 ## Conventions
 
@@ -37,4 +38,4 @@ After adding or renaming content (or when the Content sidebar looks stale), run 
 
 ## Deployment
 
-Push-and-live on Cloudflare Workers (static assets). `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`, and uploads a preview of every pull request branch at a stable per-branch `workers.dev` URL (published as a GitHub deployment + sticky PR comment, see `README.md`); `wrangler.toml` names the Worker and points `[assets]` at `./dist`. Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`.
+Push-and-live on Cloudflare Workers (static assets). `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`, and uploads a preview of every pull request branch at a stable per-branch `workers.dev` URL. Both paths publish a GitHub **deployment** whose status carries `environment_url` (production → live site; PR → preview URL + sticky comment) so orso can show **Open live site** on main and **Preview** on a change — see `README.md`. `wrangler.toml` names the Worker and points `[assets]` at `./dist`. Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`. When editing the workflow, always record those deployment statuses — without them orso has no URL to link.

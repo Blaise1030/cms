@@ -19,7 +19,7 @@ import {
   Wrench,
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { Message, MessageContent } from "@/components/ui/message";
@@ -33,9 +33,12 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { useDaemon } from "@/core/daemon";
+import { useChatSteps } from "@/lib/chatSteps";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
+import { Badge } from "@/components/ui/badge";
 import { splitAttachments } from "./attachments";
 import { openWebLink } from "./links";
+import { pageContextBadge, splitPageContext } from "./pageContext";
 import {
   formatValue,
   groupSteps,
@@ -46,6 +49,7 @@ import {
   toolLabel,
   type AgentErrorData,
   type CheckpointData,
+  type MessageGroup,
   type ToolInput,
 } from "./parts";
 import { segmentReferences } from "./references";
@@ -60,14 +64,24 @@ const emit = defineEmits<{
   assistantAction: [{ action: "setup" | "signIn" | "retry"; provider: string }];
 }>();
 const daemon = useDaemon();
+const chatSteps = useChatSteps();
 
-/** The user's text parts, with the attachment paths ChatPanel appended split back out. */
+/** The user's text parts, with attachment paths and page-context blocks split back out. */
 const userTexts = computed(() =>
-  props.message.parts.flatMap((p) => (p.type === "text" ? [splitAttachments(p.text)] : [])),
+  props.message.parts.flatMap((p) => {
+    if (p.type !== "text") return [];
+    const attached = splitAttachments(p.text);
+    const { text, context } = splitPageContext(attached.text);
+    return [{ text, files: attached.files, context }];
+  }),
 );
 const groups = computed(() => groupSteps(props.message.parts));
 /** Attached images that failed to load (e.g. a cross-site daemon); shown as file chips. */
 const broken = reactive(new Set<string>());
+
+/** Finished steps follow Appearance; in-flight “Working…” always stays visible. */
+const showStepsGroup = (group: Extract<MessageGroup, { kind: "steps" }>) =>
+  group.working || chatSteps.enabled.value;
 
 /** Agent text is untrusted: replacing the parser's default `html` plugin leaves raw HTML as escaped text. */
 const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }] };
@@ -107,17 +121,21 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
   <!-- Padding keeps btn-raised-soft's shadow inside the scroller item (content-visibility clips paint). -->
   <Message v-if="message.role === 'user'" align="end" class="p-1">
     <MessageContent>
-      <Bubble variant="tinted" align="end">
+      <BubbleGroup class="items-end">
         <template v-for="(sent, i) in userTexts" :key="i">
-          <div v-if="sent.files.length" class="flex flex-wrap justify-end gap-1.5">
-            <template v-for="f in sent.files" :key="f.name">
+          <template v-for="f in sent.files" :key="f.name">
+            <Bubble
+              v-if="f.image && !broken.has(f.name)"
+              variant="tinted"
+              align="end"
+              class="overflow-hidden p-1"
+            >
               <a
-                v-if="f.image && !broken.has(f.name)"
                 data-testid="message-attachment"
                 :href="daemon.api.attachmentUrl(projectId, f.name)"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="block overflow-hidden rounded-lg border"
+                class="block overflow-hidden rounded-lg"
               >
                 <img
                   :src="daemon.api.attachmentUrl(projectId, f.name)"
@@ -126,76 +144,98 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
                   @error="broken.add(f.name)"
                 />
               </a>
-              <span
-                v-else
-                data-testid="message-attachment"
-                class="bg-secondary inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-              ><Paperclip class="size-3" aria-hidden="true" />{{ f.kind }} file</span>
-            </template>
-          </div>
-          <BubbleContent v-if="sent.text" class="whitespace-pre-wrap">
-            <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">
-              <span
-                v-if="seg.kind === 'element'"
-                data-testid="element-tag"
-                :title="seg.full"
-                class="bg-background/60 inline-flex items-center gap-1 rounded-md border px-1.5 align-baseline font-mono text-xs"
-              ><MousePointerClick class="size-3" aria-hidden="true" />{{ seg.label }}</span>
-              <template v-else>{{ seg.text }}</template>
-            </template>
-          </BubbleContent>
+            </Bubble>
+          </template>
+          <Bubble
+            v-if="sent.files.some((f) => !f.image || broken.has(f.name))"
+            variant="tinted"
+            align="end"
+          >
+            <BubbleContent class="flex flex-wrap justify-end gap-1.5">
+              <template v-for="f in sent.files" :key="f.name">
+                <span
+                  v-if="!f.image || broken.has(f.name)"
+                  data-testid="message-attachment"
+                  class="bg-secondary inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                ><Paperclip class="size-3" aria-hidden="true" />{{ f.kind }} file</span>
+              </template>
+            </BubbleContent>
+          </Bubble>
+          <Badge
+            v-if="sent.context"
+            variant="secondary"
+            data-testid="message-page-context"
+            class="max-w-full py-1 pr-2 pl-2 text-xs"
+          >
+            {{ pageContextBadge(sent.context) }}
+          </Badge>
+          <Bubble v-if="sent.text" variant="tinted" align="end">
+            <BubbleContent class="whitespace-pre-wrap">
+              <template v-for="(seg, j) in segmentReferences(sent.text)" :key="j">
+                <span
+                  v-if="seg.kind === 'element'"
+                  data-testid="element-tag"
+                  :title="seg.full"
+                  class="bg-background/60 inline-flex items-center gap-1 rounded-md border px-1.5 align-baseline font-mono text-xs"
+                ><MousePointerClick class="size-3" aria-hidden="true" />{{ seg.label }}</span>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </BubbleContent>
+          </Bubble>
         </template>
-      </Bubble>
+      </BubbleGroup>
     </MessageContent>
   </Message>
 
   <Message v-else>
     <MessageContent @click.capture="openWebLink">
       <template v-for="(group, i) in groups" :key="i">
-        <Trace v-if="group.kind === 'steps'" data-testid="chat-steps">
-          <TraceCollapsible>
-            <TraceCollapsibleTrigger>
-              <TraceLine :status="group.working ? 'running' : undefined">
-                <TraceIcon><ListChecks /></TraceIcon>
-                <TraceTitle>{{ stepsTitle(group) }}</TraceTitle>
-              </TraceLine>
-            </TraceCollapsibleTrigger>
-            <TraceCollapsibleContent>
-              <Trace>
-                <TraceCollapsible v-for="(step, j) in group.steps" :key="j">
-                  <template v-if="step.type === 'reasoning'">
-                    <TraceCollapsibleTrigger>
-                      <TraceLine>
-                        <TraceIcon><Brain /></TraceIcon>
-                        <TraceTitle>Thinking</TraceTitle>
-                      </TraceLine>
-                    </TraceCollapsibleTrigger>
-                    <TraceCollapsibleContent class="whitespace-pre-wrap">{{ step.text }}</TraceCollapsibleContent>
-                  </template>
-                  <template v-else>
-                    <TraceCollapsibleTrigger>
-                      <TraceLine :status="toolStatus(step)">
-                        <TraceIcon><component :is="toolIcons[step.toolName] ?? Wrench" /></TraceIcon>
-                        <TraceTitle>{{ toolLabel(step) }}</TraceTitle>
-                      </TraceLine>
-                    </TraceCollapsibleTrigger>
-                    <TraceCollapsibleContent class="flex flex-col gap-2">
-                      <CodeBlock size="sm">
-                        <CodeBlockContent wrap>{{ formatValue(toolArgs(step)) }}</CodeBlockContent>
-                      </CodeBlock>
-                      <CodeBlock v-if="step.state === 'output-available' && step.output != null" size="sm">
-                        <CodeBlockContent wrap>{{ formatValue(step.output) }}</CodeBlockContent>
-                      </CodeBlock>
-                      <CodeBlock v-if="step.state === 'output-error'" size="sm" variant="destructive" data-testid="tool-error">
-                        <CodeBlockContent wrap>{{ step.errorText }}</CodeBlockContent>
-                      </CodeBlock>
-                    </TraceCollapsibleContent>
-                  </template>
-                </TraceCollapsible>
-              </Trace>
-            </TraceCollapsibleContent>
-          </TraceCollapsible>
-        </Trace>
+        <template v-if="group.kind === 'steps'">
+          <Trace v-if="showStepsGroup(group)" data-testid="chat-steps">
+            <TraceCollapsible>
+              <TraceCollapsibleTrigger>
+                <TraceLine :status="group.working ? 'running' : undefined">
+                  <TraceIcon><ListChecks /></TraceIcon>
+                  <TraceTitle>{{ stepsTitle(group) }}</TraceTitle>
+                </TraceLine>
+              </TraceCollapsibleTrigger>
+              <TraceCollapsibleContent>
+                <Trace>
+                  <TraceCollapsible v-for="(step, j) in group.steps" :key="j">
+                    <template v-if="step.type === 'reasoning'">
+                      <TraceCollapsibleTrigger>
+                        <TraceLine>
+                          <TraceIcon><Brain /></TraceIcon>
+                          <TraceTitle>Thinking</TraceTitle>
+                        </TraceLine>
+                      </TraceCollapsibleTrigger>
+                      <TraceCollapsibleContent class="whitespace-pre-wrap">{{ step.text }}</TraceCollapsibleContent>
+                    </template>
+                    <template v-else>
+                      <TraceCollapsibleTrigger>
+                        <TraceLine :status="toolStatus(step)">
+                          <TraceIcon><component :is="toolIcons[step.toolName] ?? Wrench" /></TraceIcon>
+                          <TraceTitle>{{ toolLabel(step) }}</TraceTitle>
+                        </TraceLine>
+                      </TraceCollapsibleTrigger>
+                      <TraceCollapsibleContent class="flex flex-col gap-2">
+                        <CodeBlock size="sm">
+                          <CodeBlockContent wrap>{{ formatValue(toolArgs(step)) }}</CodeBlockContent>
+                        </CodeBlock>
+                        <CodeBlock v-if="step.state === 'output-available' && step.output != null" size="sm">
+                          <CodeBlockContent wrap>{{ formatValue(step.output) }}</CodeBlockContent>
+                        </CodeBlock>
+                        <CodeBlock v-if="step.state === 'output-error'" size="sm" variant="destructive" data-testid="tool-error">
+                          <CodeBlockContent wrap>{{ step.errorText }}</CodeBlockContent>
+                        </CodeBlock>
+                      </TraceCollapsibleContent>
+                    </template>
+                  </TraceCollapsible>
+                </Trace>
+              </TraceCollapsibleContent>
+            </TraceCollapsible>
+          </Trace>
+        </template>
 
         <Markdown
           v-else-if="group.part.type === 'text'"

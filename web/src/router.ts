@@ -7,18 +7,20 @@ import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
 import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
+import SkillsPanel from "@/modules/skills/SkillsPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
+export type ProjectTab = "preview" | "content" | "design" | "skills" | "code" | "history" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
-export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
+export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "skills" | "about";
 
 export const APP_SETTINGS_TABS: readonly AppSettingsTab[] = [
   "assistant",
   "builder",
   "github",
   "appearance",
+  "skills",
   "about",
 ];
 
@@ -53,6 +55,12 @@ export const routes: RouteRecordRaw[] = [
         props: (r) => ({ projectId: r.params.id as string }),
       },
       {
+        path: "skills",
+        name: "project-skills",
+        component: SkillsPanel,
+        props: (r) => ({ projectId: r.params.id as string }),
+      },
+      {
         path: "code/:path(.*)?",
         name: "project-code",
         component: FilesPanel,
@@ -79,6 +87,7 @@ export function projectPath(id: string, tab: ProjectTab = "preview") {
   return `/p/${encodeURIComponent(id)}/${tab}`;
 }
 
+/** App-level settings, with the tab in the query so every section is linkable. */
 export function settingsPath(tab: AppSettingsTab = "assistant") {
   return `/settings?tab=${tab}`;
 }
@@ -105,6 +114,7 @@ export function historyPath(id: string, sha?: string | null) {
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
   if (name === "project-content") return "content";
   if (name === "project-design") return "design";
+  if (name === "project-skills") return "skills";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
   if (name === "project-settings") return "settings";

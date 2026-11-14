@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import Shell from "./Shell.vue";
 
-function mountShell(chatDetached: boolean) {
+function mountShell(chatDetached: boolean, showChat = true) {
   return mount(Shell, {
-    props: { chatDetached },
+    props: { chatDetached, showChat },
     slots: { chat: "<div data-testid='chat'>chat</div>" },
     attachTo: document.body,
   });
@@ -30,6 +30,27 @@ describe("Shell", () => {
     await flushPromises();
     expect(chatPanel(w).attributes("data-state")).toBe("expanded");
     expect(w.find("[data-testid='chat-toggle']").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("gives the workspace the chat column's space when chat is hidden", async () => {
+    const w = mountShell(false, true);
+    await flushPromises();
+    const workspace = () => w.find("[data-panel-id='workspace']");
+    const size = () => Number(workspace().attributes("data-panel-size"));
+    const before = size();
+    expect(before).toBeLessThan(100);
+
+    await w.setProps({ showChat: false });
+    await flushPromises();
+    expect(w.find("[data-testid='chat']").exists()).toBe(false);
+    // A lone panel grows to fill the group.
+    expect(size()).toBe(1);
+
+    await w.setProps({ showChat: true });
+    await flushPromises();
+    expect(w.find("[data-testid='chat']").exists()).toBe(true);
+    expect(size()).toBeCloseTo(before, 0);
     w.unmount();
   });
 

@@ -98,6 +98,21 @@ test("content editor saves a blog article with an image on a change branch and p
   // Create the article from the list. On main that asks for a change first and then resumes the
   // create on the new change branch.
   await page.getByTestId("content-back").click();
+  // The back step remounts the collections panel after the editor panel; the splitter must still
+  // follow the pointer to the right instead of resizing the editor.
+  const collectionsWidth = () => page.evaluate(() => {
+    const el = document.getElementById("content-collections");
+    return el?.getBoundingClientRect().width ?? 0;
+  });
+  const widthBeforeDrag = await collectionsWidth();
+  const collectionsHandle = page.getByTestId("content-panel").locator('[data-slot="resizable-handle"]').first();
+  const handleBox = await collectionsHandle.boundingBox();
+  if (!handleBox) throw new Error("collections resize handle not found");
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 60, handleBox.y + handleBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+  expect(await collectionsWidth()).toBeGreaterThan(widthBeforeDrag);
   await page.getByTestId("content-new-entry").click();
   // The new entry opens as a draft; the writer fills it in and the file is created on Save.
   await expect(page.getByTestId("field-title")).toHaveValue("Untitled");

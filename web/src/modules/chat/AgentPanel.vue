@@ -6,7 +6,16 @@ import type ChatPanelComponent from "./ChatPanel.vue";
 /** Its AI SDK, markdown and highlighter would push the app shell past the PWA precache limit. */
 const ChatPanel = defineAsyncComponent(() => import("./ChatPanel.vue"));
 
-const props = defineProps<{ projectId: string }>();
+const props = withDefaults(
+  defineProps<{
+    projectId: string;
+    /** Floating host shows minimize/close in the chat header. */
+    layout?: "sidebar" | "floating";
+  }>(),
+  { layout: "sidebar" },
+);
+
+const emit = defineEmits<{ minimize: []; close: [] }>();
 
 const outbox = useAgentOutboxStore();
 /** Null until the lazy panel has loaded; the outbox waits for it. */
@@ -30,6 +39,13 @@ watch([() => outbox.messages.length, chat], deliverToChat, {
 
 <template>
   <div class="bg-background h-full min-h-0" data-testid="agent-panel">
-    <ChatPanel ref="chat" :project-id="props.projectId" :active="true" />
+    <ChatPanel
+      ref="chat"
+      :project-id="props.projectId"
+      :active="true"
+      :layout="props.layout"
+      @minimize="emit('minimize')"
+      @close="emit('close')"
+    />
   </div>
 </template>

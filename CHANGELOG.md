@@ -28,6 +28,9 @@
 
 ## v0.1.0
 
+- First public macOS desktop build.
+- Unsigned build: use Gatekeeper **Open Anyway** the first time you launch the app.
+- Astro marketing studio basics—edit content, preview your site, and chat with the assistant.
 
 ### Features
 
@@ -350,9 +353,3 @@
 - **changes:** Name post-merge edits when GitHub is unavailable ([03ef26d](https://github.com/Blaise1030/CMS/commit/03ef26d))
 - **preview:** Make back and forward work in a cross-origin frame ([b02441b](https://github.com/Blaise1030/CMS/commit/b02441b))
 - **web:** Keep the preview laid out while another tab shows ([aedab68](https://github.com/Blaise1030/CMS/commit/aedab68))
-
-## v0.1.0
-
-- First public macOS desktop build.
-- Unsigned build: use Gatekeeper **Open Anyway** the first time you launch the app.
-- Astro marketing studio basics—edit content, preview your site, and chat with the assistant.

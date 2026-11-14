@@ -200,6 +200,48 @@ async fn create_fetches_main_first() {
 }
 
 #[tokio::test]
+async fn create_from_local_main_when_dirty_edits_clash_with_origin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let remote = tmp.path().join("remote.git");
+    let local_main = git_cli(&work, &["rev-parse", "main"]);
+
+    // Remote advances the same file the writer has dirty locally — checkout from
+    // origin/main would refuse to overwrite those edits.
+    let push = tmp.path().join("push");
+    git_cli(tmp.path(), &["clone", remote.to_str().unwrap(), "push"]);
+    git_cli(&push, &["config", "user.name", "Ada"]);
+    git_cli(&push, &["config", "user.email", "ada@example.com"]);
+    std::fs::write(push.join("README.md"), "from origin\n").unwrap();
+    git_cli(&push, &["add", "-A"]);
+    git_cli(&push, &["commit", "-m", "advance readme"]);
+    git_cli(&push, &["push", "origin", "main"]);
+    std::fs::write(work.join("README.md"), "my draft\n").unwrap();
+
+    let change = changes::create(&work, "Keep my draft").await.unwrap();
+    assert_eq!(change.branch, "content/keep-my-draft");
+    assert_eq!(
+        git_cli(&work, &["branch", "--show-current"]),
+        "content/keep-my-draft"
+    );
+    assert_eq!(
+        git_cli(&work, &["rev-parse", "HEAD"]),
+        local_main,
+        "clash with origin/main must fall back to local main so edits can be carried"
+    );
+    assert_eq!(
+        std::fs::read_to_string(work.join("README.md")).unwrap(),
+        "my draft\n",
+        "dirty edits on main must survive into the new change"
+    );
+    assert_ne!(
+        git_cli(&work, &["rev-parse", "HEAD"]),
+        git_cli(&work, &["rev-parse", "origin/main"]),
+        "new change stays on local main when origin/main would overwrite dirty edits"
+    );
+}
+
+#[tokio::test]
 async fn active_returns_branch_and_title() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
@@ -321,6 +363,31 @@ async fn switch_checks_out_and_refuses_dirty() {
         "content/alpha",
         "must stay on current branch"
     );
+}
+
+#[tokio::test]
+async fn switch_from_dirty_main_says_discard_not_checkpoint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    changes::create(&work, "New post: Alpha").await.unwrap();
+    commit_file(&work, "alpha.md", "a\n", "alpha");
+    changes::leave_to_main(&work).await.unwrap();
+    std::fs::write(work.join("README.md"), "dirty on main\n").unwrap();
+
+    let err = changes::switch(&work, "content/alpha").await.unwrap_err();
+    assert_eq!(err.code, orso::error::ErrorCode::Conflict);
+    let msg = err.message.to_lowercase();
+    assert!(
+        msg.contains("discard"),
+        "dirty main must tell the writer to discard, got: {}",
+        err.message
+    );
+    assert!(
+        !msg.contains("checkpoint"),
+        "checkpointing on main is blocked for GitHub projects, got: {}",
+        err.message
+    );
+    assert_eq!(git_cli(&work, &["branch", "--show-current"]), "main");
 }
 
 #[tokio::test]
