@@ -155,7 +155,13 @@ export function orso() {
         command = current;
         // The dev UI frames this server directly (so client components hydrate), which
         // makes the frame cross-origin; the bridge keeps picking and appearance working.
-        if (command === "dev") injectScript("head-inline", PREVIEW_BRIDGE);
+        if (command === "dev") {
+          injectScript("head-inline", PREVIEW_BRIDGE);
+          injectScript(
+            "page",
+            `import ${JSON.stringify(new URL("./panel/panel.js", import.meta.url).href)}`,
+          );
+        }
         if (command !== "sync") return;
         updateConfig({
           vite: {
