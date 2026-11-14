@@ -21,7 +21,7 @@ const props = defineProps<ToasterProps>()
     v-bind="props"
   >
     <template #success-icon>
-      <CircleCheckIcon class="size-4" />
+      <CircleCheckIcon class="size-4 fill-emerald-500 text-white dark:fill-emerald-400 dark:text-emerald-950" />
     </template>
     <template #info-icon>
       <InfoIcon class="size-4" />
@@ -42,3 +42,27 @@ const props = defineProps<ToasterProps>()
     </template>
   </Sonner>
 </template>
+
+<style>
+/* Top-center toasts: keep the fixed-width pill and center the icon + title inside it. */
+[data-sonner-toaster][data-x-position='center'] [data-sonner-toast][data-styled='true'] {
+  justify-content: center;
+}
+
+/* Sonner's default shadow is black @ 10% — invisible on dark previews. Lift the toast clearly. */
+[data-sonner-toaster][data-sonner-theme='dark'] [data-sonner-toast][data-styled='true'] {
+  background: var(--normal-bg);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 12%, transparent),
+    0 8px 24px -4px rgb(0 0 0 / 0.55),
+    0 2px 8px rgb(0 0 0 / 0.4);
+}
+
+[data-sonner-toaster][data-sonner-theme='light'] [data-sonner-toast][data-styled='true'] {
+  background: var(--normal-bg);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent),
+    0 8px 24px -4px rgb(0 0 0 / 0.18),
+    0 2px 8px rgb(0 0 0 / 0.08);
+}
+</style>

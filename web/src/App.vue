@@ -118,6 +118,6 @@ onBeforeUnmount(() => {
     <CommandPalette />
     <AssistantDialog />
     <UpdateNotice />
-    <Toaster :theme="theme.resolved.value" />
+    <Toaster :theme="theme.resolved.value" position="top-center" />
   </div>
 </template>
