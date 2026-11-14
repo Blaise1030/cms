@@ -2,6 +2,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import Button from "./ui/Button.vue";
 import Badge from "./ui/Badge.vue";
+import Card from "./ui/Card.vue";
 import { sortFindings } from "../../src/checks/findings.js";
 import { auditPage } from "../../src/checks/page.js";
 
@@ -104,53 +105,52 @@ const sorted = computed(() => findings.value);
     :class="{ 'pointer-events-none opacity-35': picking }"
     data-testid="orso-checks-panel"
   >
-    <div
+    <Card
       v-show="open"
-      class="bg-card text-card-foreground border-border flex w-[min(22rem,calc(100vw-24px))] max-h-[min(26rem,calc(100vh-80px))] flex-col gap-2.5 overflow-hidden rounded-lg border p-3 shadow-lg"
+      class="w-[min(22rem,calc(100vw-24px))] max-h-[min(26rem,calc(100vh-80px))] gap-2.5 overflow-hidden rounded-lg py-3 shadow-lg"
       data-orso-checks-drawer
     >
-      <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-2 px-3">
         <div class="text-sm font-medium tracking-tight">Preview checks</div>
         <Button variant="outline" size="xs" data-orso-checks-refresh @click="refresh">
           Refresh
         </Button>
       </div>
-      <div class="text-muted-foreground text-[0.72rem]" data-orso-checks-summary>
+      <div class="text-muted-foreground px-3 text-[0.72rem]" data-orso-checks-summary>
         {{ summary }}
       </div>
-      <ul class="m-0 flex list-none flex-col gap-1.5 overflow-auto p-0" data-orso-checks-findings>
+      <ul class="m-0 flex list-none flex-col gap-2 overflow-auto px-3 pb-0.5" data-orso-checks-findings>
         <li v-if="sorted.length === 0" class="text-muted-foreground px-0.5 py-1 text-sm">
           No issues found on this page.
         </li>
-        <li
-          v-for="f in sorted"
-          :key="`${f.rule}:${f.message}`"
-          class="border-border bg-muted/65 flex items-start gap-2 rounded-md border px-2.5 py-2"
-          :data-rule="f.rule"
-        >
-          <Badge
-            :variant="f.severity === 'error' ? 'destructive' : 'secondary'"
-            class="mt-0.5 shrink-0 uppercase"
-          >
-            {{ f.severity }}
-          </Badge>
-          <div class="min-w-0 flex-1 text-sm">
-            <div>{{ f.message }}</div>
-            <div v-if="f.detail" class="text-muted-foreground mt-0.5 text-[0.72rem]">
-              {{ f.detail }}
+        <li v-for="f in sorted" :key="`${f.rule}:${f.message}`" :data-rule="f.rule">
+          <Card class="bg-muted/40 gap-0 rounded-lg py-0 shadow-none">
+            <div class="flex items-start gap-2 px-2.5 py-2">
+              <Badge
+                :variant="f.severity === 'error' ? 'destructive' : 'secondary'"
+                class="mt-0.5 shrink-0 uppercase"
+              >
+                {{ f.severity }}
+              </Badge>
+              <div class="min-w-0 flex-1 text-sm">
+                <div>{{ f.message }}</div>
+                <div v-if="f.detail" class="text-muted-foreground mt-0.5 text-[0.72rem]">
+                  {{ f.detail }}
+                </div>
+              </div>
+              <Button
+                size="xs"
+                class="shrink-0 self-center"
+                :data-orso-checks-fix="f.rule"
+                @click="postFix(fixPrompt(f))"
+              >
+                Fix this
+              </Button>
             </div>
-          </div>
-          <Button
-            size="xs"
-            class="shrink-0 self-center"
-            :data-orso-checks-fix="f.rule"
-            @click="postFix(fixPrompt(f))"
-          >
-            Fix this
-          </Button>
+          </Card>
         </li>
       </ul>
-    </div>
+    </Card>
 
     <Button
       variant="outline"
