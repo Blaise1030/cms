@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7DE6RY1EZ8RGBV89A02M386",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
     "web/src/App.vue",
     "web/src/components/ui/sonner/Sonner.vue"
@@ -15,14 +15,21 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 197090,
+    "input_tokens": 424010,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 1377408,
-    "output_tokens": 3799,
-    "api_call_count": 1
+    "cache_read_tokens": 2290560,
+    "output_tokens": 4981,
+    "api_call_count": 2
   },
   "redaction": {
     "replacements": 0,
