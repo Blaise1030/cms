@@ -1,0 +1,53 @@
+Kill port at 5173
+
+---
+
+[Image #1] We need more padding on the right of the iframe, and reduce padding from the bottom of the iframe
+
+---
+
+[Image #1] The new chat top right needs a close button instead of a plus butotn when in bottom bar mode
+
+---
+
+[Image #1] Please add folder icons for the collection column and the selected state of the sidebar items [Image #2] should have this kinds of styling
+
+---
+
+[Image #1] We need some padding on the side
+
+---
+
+there needs to be a gradient from bottom to up similar to the button
+
+---
+
+[Image #1] The settings sidebar should have the same treat ment
+
+---
+
+[Image #1] Shadow looks too heavy
+
+---
+
+Can we always select the first eelemtn in the collection list when entering this page ?
+
+---
+
+[Image #1] Need some padding on the right of the visual preview sidebar
+
+---
+
+[Image #1] Reduce padding from bottom ?
+
+---
+
+[Image #1] Reduce the max width of the sidebar
+
+---
+
+[Image #1] Need to add a tooltip on the pull from main button
+
+---
+
+[Image #1] Remove the full screen button here
