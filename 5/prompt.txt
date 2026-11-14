@@ -1,0 +1,9 @@
+Are we able to create in the preview module, like check SEO and AEO items on the html, performance, anything, suggest some items to see too
+
+---
+
+Are there any existing astro plugins for this
+
+---
+
+Should orso own it or others should
