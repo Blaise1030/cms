@@ -1,0 +1,75 @@
+Are we able to create in the preview module, like check SEO and AEO items on the html, performance, anything, suggest some items to see too
+
+---
+
+Are there any existing astro plugins for this
+
+---
+
+Should orso own it or others should
+
+---
+
+I wanted it for both writer in the app as well as the pipline itself, ideal/var/folders/bk/vm0wjmvn4rx1drzkrkqllr_h0000gn/T/TemporaryItems/NSIRD_screencaptureui_zF1kAf/Screenshot\ 2026-11-14\ at\ 3.36.42 PM.png when the preview got published, there are some CI results for the user to see too, so ideally the rules are consistent and same,
+
+---
+
+The CI checks live in the orso plugin, the perfomrance panel also lives in the rendered astro app
+
+---
+
+Only the inpage panel in the previrw
+
+---
+
+Sounds good
+
+---
+
+OPen this in the search browser
+
+---
+
+For the ### AEO / answer-engine oriented (per page)
+
+| Rule | Severity | Fires when |
+| --- | --- | --- |
+| `json-ld-type` | warning | JSON-LD present but no useful `@type` among a small allowlist (`Organization`, `WebSite`, `WebPage`, `Article`, `BlogPosting`, `FAQPage`, `HowTo`, `BreadcrumbList`) |
+| `faq-structure` | warning | Visible FAQ pattern (details/summary or heading+Q copy heuristics) without `FAQPage` JSON-LD â€” keep heuristic conservative; prefer skip over false positives |
+
+### Performance heuristics (panel + CI; not Lighthouse)
+
+| Rule | Severity | Fires when |
+| --- | --- | --- |
+| `img-dimensions` | warning | `img` lacking both `width` and `height` |
+| `sync-script` | warning | Render-blocking classic `script src` in `head` without `defer`/`async`/`type=module` |
+| `huge-inline` | warning | Inline `<script>` or `<style>` over a size cap (e.g. 50 KiB) |
+, is this all for AEO, are there more, if the json+schema valid or not
+
+---
+
+Nope, let's go with the design then
+
+---
+
+1
+
+---
+
+Just work in main
+
+---
+
+1
+
+---
+
+[Image #1] Is this the changes you made ?
+
+---
+
+Can you make the popup styling to be more similar to the orso app itself [Image #1]
+
+---
+
+Please update the astro-markting project with this new project
