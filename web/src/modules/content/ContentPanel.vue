@@ -6,6 +6,7 @@ import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
 import { usePreviewStore } from "@/modules/preview/store";
+import { useProjectsStore } from "@/modules/projects/store";
 import { openInPreview } from "./openInPreview";
 import { Button } from "@/components/ui/button";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -38,6 +39,7 @@ const props = defineProps<{projectId: string; collection?: string; entry?: strin
 const store = useContentStore();
 const router = useRouter();
 const preview = usePreviewStore();
+const projects = useProjectsStore();
 const changes = useChangesStore();
 const daemon = useDaemon();
 // Images inserted by the form or body editor stay pending in the draft until Save.
@@ -64,9 +66,12 @@ function removable(collection: string) {
 }
 const canRemove = computed(() => !!store.entry && !store.creating && !!store.descriptor && !store.readOnlyReason && removable(store.entry.collection));
 const openEntryCollection = computed(() => store.collections.find(c => c.name === store.entry?.collection));
+const previewReady = computed(
+  () => projects.projects.find((p) => p.id === props.projectId)?.devserver === "ready",
+);
 const canOpenInPreview = computed(() => {
   const c = openEntryCollection.value;
-  return !!store.entry && c?.hasPreviewPath === true && c.editable;
+  return !!store.entry && c?.hasPreviewPath === true && previewReady.value;
 });
 function previewEntry() {
   const e = store.entry;

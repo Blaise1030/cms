@@ -14,7 +14,7 @@ export async function openInPreview(opts: {
 }) {
   try {
     const { path } = await opts.resolve(opts.projectId, opts.collection, opts.id);
-    opts.preview.setFramePath(opts.projectId, path);
+    opts.preview.openPath(opts.projectId, path);
     await opts.router.push(projectPath(opts.projectId, "preview"));
   } catch (e) {
     toast.error(errorMessage(e));

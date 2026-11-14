@@ -28,6 +28,8 @@ export const usePreviewStore = defineStore("preview", () => {
   const dark = useLocalStorage("orso.preview.dark", false);
   /** Bumping this remounts the iframe. */
   const reloadNonce = ref(0);
+  /** Bumping this asks the mounted preview to open `paths[project]`, ignoring frame history. */
+  const navigateNonce = ref(0);
   /**
    * The page each project's frame last showed. A cross-origin frame cannot be read, so this is
    * what the reload reopens and what the address bar shows until the frame reports in.
@@ -40,6 +42,11 @@ export const usePreviewStore = defineStore("preview", () => {
   function setFramePath(projectId: string, path: string) {
     paths.value = { ...paths.value, [projectId]: path };
     writePref(pathKey(projectId), path);
+  }
+  /** Open `path` in the live frame. Unlike `setFramePath`, this is a navigation, not a report. */
+  function openPath(projectId: string, path: string) {
+    setFramePath(projectId, path);
+    navigateNonce.value++;
   }
   /** Live dev-server state per project, from `devserver.status` events. */
   const status = ref<Record<string, DevserverState>>({});
@@ -133,8 +140,10 @@ export const usePreviewStore = defineStore("preview", () => {
     rtl,
     dark,
     reloadNonce,
+    navigateNonce,
     framePathFor,
     setFramePath,
+    openPath,
     status,
     message,
     restarting,

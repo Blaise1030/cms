@@ -75,6 +75,46 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("remounts onto openPath even when frame history already has a page", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, {
+      props: { projectId: "site-1", devserver: "ready", port: 56066 },
+      attachTo: document.body,
+    });
+    const frameEl = () => w.find("iframe").element as HTMLIFrameElement;
+    // Iframe page loads are disabled in tests, so give the frame a srcdoc window the bridge can
+    // report from. That records a history entry without changing the iframe src attribute.
+    frameEl().srcdoc = "<!doctype html><html><body></body></html>";
+    // The srcdoc window is not the dev-server origin, so the appearance sync must not post to it.
+    const frameWindow = frameEl().contentWindow;
+    if (frameWindow) frameWindow.postMessage = () => {};
+    await flushPromises();
+    const address = () => (w.find("[data-testid='preview-address']").element as HTMLInputElement).value;
+    window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "orso:preview", op: "path", url: "http://127.0.0.1:56066/preview/site-1/about/" },
+      source: frameEl().contentWindow,
+    }));
+    try {
+      await flushPromises();
+      expect(address()).toBe("/about/");
+      const before = w.find("iframe").element;
+      usePreviewStore().openPath("site-1", "/blog/welcome/");
+      await flushPromises();
+      const after = w.find("iframe").element as HTMLIFrameElement;
+      expect(after).not.toBe(before);
+      expect(after.getAttribute("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/welcome/");
+      expect(address()).toBe("/blog/welcome/");
+      usePreviewStore().reload();
+      await flushPromises();
+      expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/welcome/");
+    } finally {
+      w.unmount();
+    }
+  });
+
   it("keeps the preview tools enabled when framing the dev server directly", () => {
     localStorage.clear();
     hDaemon.daemon = createFakeDaemon({});

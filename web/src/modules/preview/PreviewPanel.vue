@@ -150,6 +150,16 @@ watch(
   },
 );
 
+watch(
+  () => store.navigateNonce,
+  () => {
+    // A content "open in preview" must win over the frame's back stack. `setFramePath` alone is
+    // also how the bridge reports the page the frame is already on, so it must not navigate.
+    history.reset();
+    startHref.value = hrefFor(lastPath.value);
+  },
+);
+
 /** The frame's window when it is same-origin (the normal, proxied setup); null otherwise. */
 function frameWindow(): Window | null {
   const win = frame.value?.contentWindow;
@@ -304,7 +314,7 @@ async function pickElement(el: Element) {
 
 watch(() => store.picking, syncPicker);
 // A remount (reload, project switch) replaces the document; `onLoad` re-attaches.
-watch(() => [props.projectId, store.reloadNonce, state.value], () => {
+watch(() => [props.projectId, store.reloadNonce, store.navigateNonce, state.value], () => {
   detachPicker = null;
   if (state.value !== "ready") store.setPicking(false);
 });
@@ -604,7 +614,7 @@ function toggleFullscreen() {
         >
           <iframe
             ref="frame"
-            :key="`${projectId}:${store.reloadNonce}`"
+            :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}`"
             :src="startHref"
             title="Site preview"
             class="h-full origin-top-left border-0"
