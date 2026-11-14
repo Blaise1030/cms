@@ -104,6 +104,24 @@ test("auditDist: link to existing non-HTML asset is not broken-link", async () =
   }
 });
 
+test("auditDist: protocol-relative and scheme hrefs are not broken-link", async () => {
+  const dir = await fixtureDir(async (root) => {
+    await writeFile(
+      join(root, "index.html"),
+      goodPage(
+        '<a href="//cdn.example/logo.png">cdn</a><a href="sms:+15551212">text</a>',
+      ),
+    );
+  });
+
+  try {
+    const { findings } = await auditDist(dir);
+    assert.equal(findings.some((f) => f.rule === "broken-link"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("auditDist: /about.html href resolves to about/index.html output", async () => {
   const dir = await fixtureDir(async (root) => {
     await writeFile(

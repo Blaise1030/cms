@@ -129,14 +129,10 @@ export function filePathToUrlPath(rel) {
  * @param {string} href
  */
 function isNonResolvableHref(href) {
-  const lower = href.toLowerCase();
   return (
-    lower.startsWith("http:") ||
-    lower.startsWith("https:") ||
-    lower.startsWith("mailto:") ||
-    lower.startsWith("tel:") ||
-    lower.startsWith("javascript:") ||
-    href.startsWith("#")
+    href.startsWith("#") ||
+    href.startsWith("//") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(href)
   );
 }
 
