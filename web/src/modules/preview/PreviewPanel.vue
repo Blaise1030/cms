@@ -4,8 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
-  Maximize2,
-  Minimize2,
   Monitor,
   Moon,
   MousePointerClick,
@@ -207,6 +205,10 @@ function onFrameMessage(e: MessageEvent) {
     store.setPicking(false);
     return;
   }
+  if (e.data.op === "fix") {
+    store.fixCheck(e.data.text);
+    return;
+  }
   const element = { ...e.data.element };
   const file = element.file;
   store.pick(file ? { ...element, file: relativeFile(file, props.projectId) } : element);
@@ -378,16 +380,6 @@ function openExternal() {
   window.open(href, "_blank", "noopener");
 }
 
-// Tracks Esc / browser-initiated exits too, so the button always offers the right action.
-const isFullscreen = ref(false);
-useEventListener(document, "fullscreenchange", () => {
-  isFullscreen.value = !!shell.value && document.fullscreenElement === shell.value;
-});
-
-function toggleFullscreen() {
-  if (isFullscreen.value) void document.exitFullscreen?.();
-  else void shell.value?.requestFullscreen?.();
-}
 </script>
 
 <template>
@@ -478,8 +470,7 @@ function toggleFullscreen() {
                 <span v-if="zoomed" class="text-muted-foreground text-xs tabular-nums">{{ zoomPercent }}%</span>
               </Button>
             </DropdownMenuTrigger>
-            <!-- Portal into the shell while it is fullscreen; `body` is not rendered then. -->
-            <DropdownMenuContent align="end" side="bottom" :to="isFullscreen ? shell ?? undefined : undefined">
+            <DropdownMenuContent align="end" side="bottom">
               <DropdownMenuRadioGroup
                 :model-value="store.device"
                 @update:model-value="store.setDevice($event as Device)"
@@ -506,7 +497,7 @@ function toggleFullscreen() {
                 <Sun v-else />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom" :to="isFullscreen ? shell ?? undefined : undefined">
+            <DropdownMenuContent align="end" side="bottom">
               <DropdownMenuRadioGroup
                 :model-value="store.dark ? 'dark' : 'light'"
                 @update:model-value="($event === 'dark') !== store.dark && store.toggleDark()"
@@ -556,20 +547,6 @@ function toggleFullscreen() {
               </Button>
             </TooltipTrigger>
             <TooltipContent>Open in new tab</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                :aria-label="isFullscreen ? 'Exit full screen' : 'Full screen'"
-                @click="toggleFullscreen"
-              >
-                <Minimize2 v-if="isFullscreen" />
-                <Maximize2 v-else />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ isFullscreen ? "Exit full screen" : "Full screen" }}</TooltipContent>
           </Tooltip>
         </div>
       </TooltipProvider>

@@ -82,6 +82,13 @@ export const usePreviewStore = defineStore("preview", () => {
     outbox.send({ kind: "text", text: pageErrorPrompt(error, path) });
   }
 
+  /** Put a preview-checks finding fix request in the agent's input. */
+  function fixCheck(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    outbox.send({ kind: "text", text: trimmed });
+  }
+
   function fixCrash(projectId: string) {
     outbox.send({ kind: "text", text: crashPrompt(message.value[projectId]) });
   }
@@ -155,6 +162,7 @@ export const usePreviewStore = defineStore("preview", () => {
     setPicking,
     pick,
     fixPageError,
+    fixCheck,
     fixCrash,
     reload,
     seed,

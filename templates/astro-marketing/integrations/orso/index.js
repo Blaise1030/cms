@@ -178,7 +178,7 @@ export function orso(options = {}) {
           injectScript("head-inline", PREVIEW_BRIDGE);
           // Cache-bust so preview reloads pick up panel style changes.
           const panelUrl = new URL("./panel/panel.js", import.meta.url);
-          panelUrl.searchParams.set("v", "orso-chrome-2");
+          panelUrl.searchParams.set("v", "orso-chrome-3");
           injectScript("page", `import ${JSON.stringify(panelUrl.href)}`);
         }
 

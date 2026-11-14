@@ -7,7 +7,8 @@ export const BRIDGE_TYPE = "orso:preview";
 export type BridgeMessage =
   | { type: typeof BRIDGE_TYPE; op: "pick"; element: PickedElement }
   | { type: typeof BRIDGE_TYPE; op: "cancel" }
-  | { type: typeof BRIDGE_TYPE; op: "path"; url: string };
+  | { type: typeof BRIDGE_TYPE; op: "path"; url: string }
+  | { type: typeof BRIDGE_TYPE; op: "fix"; text: string };
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
@@ -19,6 +20,8 @@ export function isBridgeMessage(data: unknown): data is BridgeMessage {
   if (message.op === "cancel") return true;
   // The page's own address; only its path survives `framePath`, so no origin is trusted.
   if (message.op === "path") return isString(message.url) && /^https?:\/\//i.test(message.url);
+  // Preview-checks "Fix this" — plain-language prompt for the agent outbox.
+  if (message.op === "fix") return isString(message.text) && message.text.trim().length > 0;
   if (message.op !== "pick") return false;
   const element = message.element as Record<string, unknown> | null;
   return (

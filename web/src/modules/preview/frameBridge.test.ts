@@ -16,6 +16,9 @@ describe("isBridgeMessage", () => {
 
   it("accepts a cancel", () => {
     expect(isBridgeMessage({ type: "orso:preview", op: "cancel" })).toBe(true);
+    expect(isBridgeMessage({ type: "orso:preview", op: "fix", text: "Fix the title." })).toBe(true);
+    expect(isBridgeMessage({ type: "orso:preview", op: "fix", text: "  " })).toBe(false);
+    expect(isBridgeMessage({ type: "orso:preview", op: "fix" })).toBe(false);
   });
 
   it("accepts the page's own address, and only an http(s) URL", () => {

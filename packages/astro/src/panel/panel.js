@@ -3,10 +3,29 @@ import { auditPage } from "../checks/page.js";
 
 const PICKER_ID = "__orso-picker";
 const ROOT_TEST_ID = "orso-checks-panel";
+const BRIDGE_TYPE = "orso:preview";
 
 function pagePath() {
   const path = `${location.pathname}${location.search}`;
   return path === "" ? "/" : path;
+}
+
+/** @param {import("../checks/findings.js").Finding} finding */
+function fixPrompt(finding) {
+  const path = finding.page || pagePath();
+  const lines = [`The preview checks found an issue on ${path}: ${finding.message}`];
+  if (finding.detail) lines.push(finding.detail);
+  lines.push(
+    "",
+    "Fix it in the site and keep the existing copy and design.",
+    "Rely on HMR; do not run a build or publish.",
+  );
+  return lines.join("\n");
+}
+
+function postFix(text) {
+  if (window.parent === window) return;
+  window.parent.postMessage({ type: BRIDGE_TYPE, op: "fix", text }, "*");
 }
 
 /**
@@ -182,13 +201,26 @@ function mount() {
       color: oklch(0.22 0.05 75);
       background: color-mix(in oklch, var(--warning) 72%, white);
     }
-    .msg { min-width: 0; color: var(--card-foreground); }
+    .msg { min-width: 0; flex: 1; color: var(--card-foreground); }
     .detail {
       display: block;
       margin-top: 0.2rem;
       color: var(--muted-foreground);
       font-size: 0.72rem;
     }
+    .fix {
+      flex-shrink: 0;
+      align-self: center;
+      border: 1px solid transparent;
+      border-radius: calc(var(--radius) - 2px);
+      background: var(--primary);
+      color: var(--primary-foreground);
+      font-size: 0.7rem;
+      font-weight: 550;
+      padding: 0.28rem 0.55rem;
+      white-space: nowrap;
+    }
+    .fix:hover { filter: brightness(1.08); }
     .empty { color: var(--muted-foreground); padding: 0.35rem 0.15rem; }
     .picking { opacity: 0.35; pointer-events: none; }
   `;
@@ -268,7 +300,16 @@ function mount() {
         detail.textContent = f.detail;
         msg.append(detail);
       }
-      item.append(sev, msg);
+      const fix = document.createElement("button");
+      fix.type = "button";
+      fix.className = "fix";
+      fix.textContent = "Fix this";
+      fix.setAttribute("data-orso-checks-fix", f.rule);
+      fix.addEventListener("click", (event) => {
+        event.stopPropagation();
+        postFix(fixPrompt(f));
+      });
+      item.append(sev, msg, fix);
       list.append(item);
     }
   }
