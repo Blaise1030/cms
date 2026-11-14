@@ -1,20 +1,47 @@
 # orso
 
-Local site builder: a Rust daemon, a Vue SPA, and (on macOS) a Tauri desktop shell.
+Local site builder: a Rust CLI daemon and a Vue SPA (embedded in the binary).
 Edit content in the UI, chat with a coding agent about a project, preview locally, and
 publish to GitHub Pages. Sync with a live site can hand conflict resolution to the agent.
 
 Repo path is still `Blaise1030/cms`; the product name is **orso**.
 
+## Install
+
+**macOS (recommended):** Homebrew
+
+```sh
+brew install blaise1030/tap/orso
+orso serve --open
+```
+
+Opens `http://orso.localhost:<port>/?t=…` (still bound to `127.0.0.1`). Override with
+`--hostname` if you want another `*.localhost` name.
+
+**macOS or Linux:** curl installer (downloads the matching GitHub Release tarball, verifies sha256)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Blaise1030/cms/main/scripts/install.sh | sh
+orso serve --open
+```
+
+Pin a version with `ORSO_VERSION=0.1.2`, or change the install dir with `ORSO_INSTALL_DIR`.
+On macOS, prefer Homebrew when possible: a curl-downloaded binary can still pick up a
+Gatekeeper quarantine attribute (the installer clears it when it can).
+
+Windows is not shipped in this pass; see [docs/launch/briefs/001-windows-build.md](docs/launch/briefs/001-windows-build.md).
+
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `src/` | Daemon (`orso` binary): API, preview, terminals, publish, sync |
+| `src/` | Daemon (`orso` binary): API, preview, agents, publish, sync |
 | `web/` | Vue SPA (embedded in release builds; Vite in dev) |
-| `src-tauri/` | macOS desktop app: overlay title bar, supervises the daemon, in-app updater |
 | `e2e/` | Playwright smoke tests against a release-built daemon |
 | `templates/` | Starter site templates |
+| `scripts/install.sh` | Curl installer for GitHub Release tarballs |
+
+Releases are CLI tarballs + Homebrew only (the former Tauri macOS app was removed).
 
 ## Development
 
@@ -24,7 +51,6 @@ Repo path is still `Blaise1030/cms`; the product name is **orso**.
 - Rust toolchain (`cargo`)
 - Node.js with `npm` and `pnpm`
 - GitHub CLI (`gh`) for GitHub sign-in; see [docs/github-setup.md](docs/github-setup.md)
-- **Desktop only (macOS):** Xcode CLT / Tauri prerequisites; see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 Before sharing previews, protect `main` so merges need review; see
 [docs/branch-protection.md](docs/branch-protection.md).
@@ -48,26 +74,9 @@ page-error overlay and address-bar history still need the proxied preview.
 Without `just`:
 
 ```sh
-cargo run -- serve --ui-url http://localhost:5173
+cargo run -- serve --ui-url http://localhost:5173 --open
 pnpm -C web dev
 ```
-
-### Desktop (macOS)
-
-Title-bar-less shell with web HMR. Defaults stay clear of `just dev` so both can run:
-
-```sh
-just desktop-dev          # Vite :5180, daemon :7810
-# or: just desktop-dev 5173 7800
-```
-
-Runs `src-tauri/scripts/desktop-dev.sh`: debug daemon, Vite, then `tauri dev` with
-identifier `com.orso.desktop.dev` (leaves an installed orso.app alone).
-Shell (`src-tauri/`) edits rebuild and relaunch; daemon (`src/`) edits need a restart.
-Ctrl-C stops everything. Release builds ignore `ORSO_DEV_*`.
-
-Signing, notarization, updater keys, and cutting a release:
-[docs/desktop-release.md](docs/desktop-release.md).
 
 ### Agent providers
 
@@ -77,9 +86,9 @@ first assistant: it runs free models with no account and is downloaded from the 
 
 orso installs and pins its own copies of Node, the provider CLIs, and the Claude/Codex ACP
 adapters. Downloads are verified, staged, and kept under
-`~/Library/Application Support/orso/runtimes`; a CLI you installed yourself is used as a
-fallback. See [docs/agent-runtimes.md](docs/agent-runtimes.md). Override providers in
-`~/.config/orso/agents.json`, or pass `--agents-config`.
+`~/Library/Application Support/orso/runtimes` (or the XDG data dir on Linux); a CLI you
+installed yourself is used as a fallback. See [docs/agent-runtimes.md](docs/agent-runtimes.md).
+Override providers in `~/.config/orso/agents.json`, or pass `--agents-config`.
 
 ### Build and test
 
@@ -91,5 +100,5 @@ just e2e     # Playwright smoke (rebuilds release daemon with embedded UI)
 
 ## Releases
 
-GitHub Releases ship daemon tarballs and the signed macOS app (DMG + updater artifacts).
-Details and required secrets: [docs/desktop-release.md](docs/desktop-release.md).
+GitHub Releases ship daemon tarballs (`orso-v*-{target}.tar.gz` + sha256) for macOS and Linux.
+Homebrew is updated from the same workflow. There is no notarized desktop app.
