@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7CW0QKJBYBBZEX38AZW30BN",
+  "session_id": "ed634356-afec-4460-ba20-3d057d948dd8",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T11:10:26.434064Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [
+    "web/src/modules/chat/AgentPanel.test.ts"
+  ],
+  "agent": "Cursor",
+  "model": "default",
+  "turn_id": "5c23af9e51dd",
+  "compact_transcript_start": 0,
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 2
+  }
+}
