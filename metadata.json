@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7CW0QKJBYBBZEX38AZW30BN",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 78,
+  "checkpoints_count": 122,
   "files_touched": [
     ".github/workflows/release.yml",
     "docs/desktop-release.md",
@@ -23,10 +23,15 @@
     "scripts/sync-orso-integration.sh",
     "skills-lock.json",
     "src/changes.rs",
+    "src/chat/acp.rs",
+    "src/chat/manager.rs",
     "src/config.rs",
     "src/content/mutation.rs",
+    "src/http/checkpoints.rs",
     "src/lib.rs",
     "src/main.rs",
+    "src/providers.rs",
+    "src/state.rs",
     "src/static.rs",
     "templates/astro-marketing/AGENTS.md",
     "templates/astro-marketing/README.md",
@@ -42,6 +47,7 @@
     "web/src/app/Workspace.vue",
     "web/src/components/ui/button/index.ts",
     "web/src/index.css",
+    "web/src/modules/changes/ChangesBranchPicker.vue",
     "web/src/modules/changes/GetLatestButton.test.ts",
     "web/src/modules/changes/GetLatestButton.vue",
     "web/src/modules/changes/NewChangeDialog.test.ts",
@@ -127,14 +133,21 @@
       "compact_transcript": "/6/transcript.jsonl",
       "content_hash": "/6/content_hash.txt",
       "prompt": "/6/prompt.txt"
+    },
+    {
+      "metadata": "/7/metadata.json",
+      "transcript": "/7/full.jsonl",
+      "compact_transcript": "/7/transcript.jsonl",
+      "content_hash": "/7/content_hash.txt",
+      "prompt": "/7/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 407110,
+    "input_tokens": 1028223,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 16331008,
-    "output_tokens": 90133,
-    "api_call_count": 28
+    "cache_read_tokens": 46179712,
+    "output_tokens": 195670,
+    "api_call_count": 64
   },
   "redaction": {
     "replacements": 0,
