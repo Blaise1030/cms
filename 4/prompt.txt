@@ -1,0 +1,41 @@
+[Image #1] can you change the icon to circle check icon
+
+---
+
+[Image #1] Need border around here
+
+---
+
+Change the check cricle to solid variant
+
+---
+
+[Image #1] The assistant card is different to the other settings, card design
+
+---
+
+[Image #1] Can we change the icons here to a folder icon ?
+
+---
+
+If a CTA section is required, in the markdown document, then how ?
+
+---
+
+The CTA can be at the top middle or any way
+
+---
+
+If that's the case, my existing markdown preview will no longer work right ?
+
+---
+
+Can there be a custom convention like a template language support in the tiptap editor
+
+---
+
+:::cta
+     heading: Ready to launch?
+     label: Get started
+     href: /pricing
+     ::: this sounds like a good one
