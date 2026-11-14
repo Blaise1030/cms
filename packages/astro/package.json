@@ -12,5 +12,8 @@
     "yaml": "^2.9.1"
   },
   "peerDependencies": { "astro": ">=7.3.0 <8" },
-  "devDependencies": { "astro": "7.3.5" }
+  "devDependencies": {
+    "astro": "7.3.5",
+    "linkedom": "^0.18.12"
+  }
 }
