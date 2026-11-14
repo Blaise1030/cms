@@ -253,3 +253,30 @@ test("content editor saves a blog article with an image on a change branch and p
   await expectLoaded(page.getByTestId("body-rich").getByAltText(ALT));
   await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
 });
+
+test("welcome entry Open in preview navigates the preview to /blog/welcome/", async ({
+  page,
+  orso,
+  templateProject,
+}) => {
+  const { origin, token } = orso;
+  const { id: projectId } = templateProject;
+
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(`${origin}/?t=${token}`);
+  await page.goto(`${origin}/p/${projectId}`);
+  await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
+
+  await openBlog(page);
+  await entryRow(page, "welcome").click();
+  await expect(page.getByTestId("body-rich")).toBeVisible();
+  await expect(page.getByTestId("content-open-preview")).toBeVisible({ timeout: 120_000 });
+
+  await page.getByTestId("content-open-preview").click();
+
+  const address = page.getByTestId("preview-address");
+  await expect(address).toHaveValue("/blog/welcome/", { timeout: 180_000 });
+  await expect(frame(page).getByRole("heading", { level: 1 })).toHaveText("Welcome to the blog", {
+    timeout: 180_000,
+  });
+});
