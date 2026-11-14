@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7CFT8VGJC1D6TM9G5GQ2BAS",
+  "session_id": "6140e387-c222-4d5b-94dd-42e38e8d8fdb",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T07:37:10.899216Z",
+  "branch": "main",
+  "checkpoints_count": 7,
+  "save_step_count": 7,
+  "files_touched": [
+    "justfile",
+    "src/lib.rs",
+    "web/src/modules/chat/AgentPanel.vue",
+    "web/src/modules/chat/ChatPanel.test.ts",
+    "web/src/modules/chat/ChatPanel.vue",
+    "web/src/modules/content/ContentPanel.vue",
+    "web/src/modules/preview/PreviewPanel.vue",
+    "web/src/modules/projects/ProjectsGrid.test.ts",
+    "web/src/modules/projects/ProjectsGrid.vue",
+    "web/src/modules/settings/AppSettingsPage.vue"
+  ],
+  "agent": "Cursor",
+  "model": "default",
+  "turn_id": "30082fb2fddc",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 15951,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 410112,
+    "output_tokens": 3931,
+    "api_call_count": 7
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 7
+  }
+}
