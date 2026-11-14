@@ -160,7 +160,7 @@ const sorted = computed(() => findings.value);
       :aria-expanded="open"
       @click="toggle"
     >
-      Checks
+      {{ open ? "Close checks" : "Preview checks" }}
     </Button>
   </div>
 </template>
