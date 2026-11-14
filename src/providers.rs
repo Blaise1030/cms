@@ -322,7 +322,7 @@ A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its huma
 - Save your work as you go: `git add -A && git commit -m "<summary>"` before anything risky, so nothing is lost.
 - Get the latest / sync with main: commit pending work, then `git fetch origin main && git merge origin/main` (just `git merge main` without a remote). If it conflicts, resolve it keeping the intent of both sides, run nothing destructive, and ask the user in plain words when the right result is unclear.
 - Never rebase, force-push, `reset --hard`, delete branches, or push to `main`. Do not push at all unless asked — the app shares changes for review.
-- The app also commits your work automatically at the end of each turn; that is expected."#;
+- The app also commits your work automatically at the end of each turn; that is expected. Prefer ending the turn with a `COMMIT: …` line (see the orso guide) so the save title describes the change."#;
 
 /// The orso layer of [`agent_guide`]: who the user is, the words to use with them,
 /// what only they may do, and how to check work with `orso ctl`. Chat agents have
@@ -350,7 +350,13 @@ When a chat turn ends, the app also refreshes Content and the preview. Cursor ha
 If you edit a change after it got a greenlight, the greenlight no longer covers it. Tell the person it needs a new greenlight before it can be published.
 
 ## When unsure
-If what they want is unclear, ask one short question in plain words before editing."#;
+If what they want is unclear, ask one short question in plain words before editing.
+
+## Save title for the app
+When you change files in a turn, end your reply with one line the app uses as the automatic save title (not something you say to the person):
+COMMIT: <short imperative summary of what changed>
+Example: `COMMIT: Add sitemap.xml and robots.txt`
+Keep it under ~72 characters, describe the change (not your plan), and omit the line when you did not change files."#;
 
 /// Everything a guided agent is told: [`ORSO_GUIDE`] then [`GIT_GUIDE`].
 pub fn agent_guide() -> String {
@@ -646,6 +652,8 @@ mod tests {
         assert!(g.contains("crashed"));
         assert!(g.contains("the app saves them when your turn ends"));
         assert!(!g.contains("not saved yet"));
+        assert!(g.contains("COMMIT: <short imperative summary of what changed>"));
+        assert!(g.contains("COMMIT: Add sitemap.xml and robots.txt"));
     }
 
     #[test]

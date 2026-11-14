@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
-import { EllipsisVertical, BotMessageSquare, Settings, Trash2, UserPlus } from "@lucide/vue";
+import { EllipsisVertical, Trash2, UserPlus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import {
   AlertDialog,
@@ -25,14 +25,13 @@ import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
-import { openAssistantSetup } from "@/modules/assistant/dialog";
 import InviteDialog from "./InviteDialog.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
 import RepoBrowser from "./RepoBrowser.vue";
 import TemplateGallery from "./TemplateGallery.vue";
 import { STATUS_LABEL } from "./status";
 import { useProjectsStore } from "./store";
-import { projectPath, settingsPath } from "@/router";
+import { projectPath } from "@/router";
 
 const emit = defineEmits<{ deleted: [id: string] }>();
 const router = useRouter();
@@ -83,20 +82,16 @@ function open(project: Project) {
   <div class="flex h-full flex-col">
     <!-- One title-bar row. On macOS it is the drag region and clears the traffic lights. -->
     <div
-      class="flex h-11 shrink-0 items-start justify-end pt-1"
+      class="relative z-10 flex h-11 shrink-0 items-start justify-end bg-background pt-1"
       :class="macDesktop ? 'pr-3 fullscreen:hidden' : 'px-3'"
       :data-tauri-drag-region="macDesktop ? '' : undefined"
       data-testid="page-header"
     >
+      <div
+        class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent"
+        aria-hidden="true"
+      />
       <div class="flex items-center gap-2" data-testid="account-slot">
-        <Button variant="outline" size="sm" data-testid="open-assistant" @click="openAssistantSetup">
-          <BotMessageSquare /> Assistant
-        </Button>
-        <Button variant="outline" size="sm" as-child>
-          <RouterLink :to="settingsPath()" data-testid="open-settings">
-            <Settings /> Settings
-          </RouterLink>
-        </Button>
         <GithubAccount />
       </div>
     </div>

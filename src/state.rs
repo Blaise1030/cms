@@ -270,10 +270,21 @@ impl AppState {
             tokio::spawn(async move {
                 crate::http::ctl::emit_preview_reload(&state, &ended.project_id);
                 crate::http::ctl::emit_content_refresh(&state, &ended.project_id);
+                let summary = match state.projects.get(&ended.project_id).await {
+                    Some(project) => match crate::git::changed_paths(&project.dir).await {
+                        Ok(files) if !files.is_empty() => state
+                            .chats
+                            .draft_checkpoint_subject(&ended.project_id, &ended.chat_id, &files)
+                            .await
+                            .or(ended.summary),
+                        _ => ended.summary,
+                    },
+                    None => ended.summary,
+                };
                 match crate::http::checkpoints::finish_turn(
                     &state,
                     &ended.project_id,
-                    ended.summary.as_deref(),
+                    summary.as_deref(),
                 )
                 .await
                 {

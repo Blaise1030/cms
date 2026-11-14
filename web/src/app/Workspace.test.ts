@@ -69,17 +69,24 @@ describe("Workspace", () => {
     w.unmount();
   });
 
-  it("pads the workspace only when the floating chat is shown", async () => {
+  it("pads the workspace bottom and right only when the floating chat is shown", async () => {
     const { w } = await setup("/p/site/preview");
-    expect(w.get("[data-testid='workspace-root']").classes()).not.toContain("pb-11");
+    const root = () => w.get("[data-testid='workspace-root']");
+    expect(root().classes()).not.toContain("pb-11");
+    expect(root().classes()).not.toContain("pr-2");
+    expect(root().classes()).not.toContain("px-2");
 
     await w.setProps({ floatingChat: true });
     await flushPromises();
-    expect(w.get("[data-testid='workspace-root']").classes()).toContain("pb-11");
+    expect(root().classes()).toContain("pb-11");
+    expect(root().classes()).toContain("pr-2");
+    expect(root().classes()).not.toContain("px-2");
+    expect(root().classes()).not.toContain("pl-2");
 
     await w.setProps({ floatingChat: false });
     await flushPromises();
-    expect(w.get("[data-testid='workspace-root']").classes()).not.toContain("pb-11");
+    expect(root().classes()).not.toContain("pb-11");
+    expect(root().classes()).not.toContain("pr-2");
     w.unmount();
   });
 });

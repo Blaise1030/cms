@@ -160,8 +160,8 @@ async fn create_carries_edits_from_main_but_refuses_from_another_change() {
     let err = changes::create(&work, "Another").await.unwrap_err();
     assert_eq!(err.code, orso::error::ErrorCode::Conflict);
     assert!(
-        err.message.to_lowercase().contains("checkpoint"),
-        "expected checkpoint-first message, got: {}",
+        err.message.to_lowercase().contains("save or discard"),
+        "expected save-or-discard message, got: {}",
         err.message
     );
     assert_eq!(
@@ -354,8 +354,8 @@ async fn switch_checks_out_and_refuses_dirty() {
     let err = changes::switch(&work, "content/beta").await.unwrap_err();
     assert_eq!(err.code, orso::error::ErrorCode::Conflict);
     assert!(
-        err.message.to_lowercase().contains("checkpoint"),
-        "expected checkpoint-first message, got: {}",
+        err.message.to_lowercase().contains("save or discard"),
+        "expected save-or-discard message, got: {}",
         err.message
     );
     assert_eq!(

@@ -76,7 +76,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
         <div class="mx-auto w-full max-w-2xl px-4 pt-4 pb-8">
           <p v-if="store.error" role="alert" class="mb-3 text-sm text-destructive" data-testid="settings-error">{{ store.error }}</p>
           <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="settings-needs-change">
-            <p>Settings can't be edited on main. Create a change.</p>
+            <p>Settings can't be edited on the live site. Create a change.</p>
             <Button type="button" size="sm" class="mt-2" data-testid="settings-create-change" @click="showNewChange = true">Create change</Button>
           </section>
           <section v-if="fileErrors" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="settings-file-errors">

@@ -22,6 +22,11 @@ use crate::events::EventBus;
 
 /// How long an agent gets to answer `initialize` / `session/new`.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a turn-end commit-subject draft may take before we fall back.
+#[cfg(not(test))]
+const DRAFT_SUBJECT_TIMEOUT: Duration = Duration::from_secs(20);
+#[cfg(test)]
+const DRAFT_SUBJECT_TIMEOUT: Duration = Duration::from_millis(250);
 
 const BROADCAST_CAPACITY: usize = 256;
 
@@ -99,6 +104,9 @@ struct LiveChat {
     /// the handles stay here until drop, which aborts all of them. Otherwise
     /// an older task keeps an `AcpClient` and the child survives `forget`.
     prompts: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Hidden turn-end ask for a checkpoint subject: buffer text, skip UI + hook.
+    drafting: AtomicBool,
+    draft_buf: Mutex<String>,
 }
 
 impl Drop for LiveChat {
@@ -428,6 +436,8 @@ impl ChatManager {
             cancel: starting.cancel.clone(),
             exited: AtomicBool::new(false),
             prompts: Mutex::new(Vec::new()),
+            drafting: AtomicBool::new(false),
+            draft_buf: Mutex::new(String::new()),
         });
 
         let publish = {
@@ -530,6 +540,7 @@ impl ChatManager {
         let Some(live) = live.upgrade() else {
             return;
         };
+        let drafting = live.drafting.load(Ordering::SeqCst);
         let chunks = to_chunks(ev);
         let turn_end = chunks.iter().find_map(|chunk| match chunk {
             UiChunk::TurnEnd {
@@ -539,10 +550,26 @@ impl ChatManager {
             _ => None,
         });
         for chunk in chunks {
+            if drafting {
+                if let UiChunk::TextDelta { text, .. } = &chunk {
+                    live.draft_buf
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push_str(text);
+                }
+                continue;
+            }
             live.record(chunk);
         }
         if let AcpEvent::PermissionRequest { request_id, .. } = ev {
-            if self.auto_approves(&live.project_id) {
+            if drafting {
+                // Draft asks must not edit; refuse tools so the agent only answers.
+                let client = live.client.clone();
+                let request_id = request_id.clone();
+                tokio::spawn(async move {
+                    let _ = client.answer_permission(&request_id, false).await;
+                });
+            } else if self.auto_approves(&live.project_id) {
                 let client = live.client.clone();
                 let request_id = request_id.clone();
                 tokio::spawn(async move {
@@ -556,7 +583,11 @@ impl ChatManager {
             }
         }
         if let Some((session_id, stop_reason)) = turn_end {
-            self.note_turn_end(&live, &session_id, &stop_reason);
+            if drafting {
+                live.running.store(false, Ordering::SeqCst);
+            } else {
+                self.note_turn_end(&live, &session_id, &stop_reason);
+            }
         }
     }
 
@@ -721,6 +752,68 @@ impl ChatManager {
         live.client.clear_cancelled();
         self.dispatch(&live, prompt, None, false);
         Ok(())
+    }
+
+    /// Ask the live agent for a one-line checkpoint subject after a dirty turn.
+    ///
+    /// Hidden from the transcript and does not fire the turn-end checkpoint hook.
+    /// Returns `None` when the chat is busy/gone, the ask times out, or the reply
+    /// has no usable subject (caller falls back to the turn summary).
+    pub async fn draft_checkpoint_subject(
+        &self,
+        project_id: &str,
+        chat_id: &str,
+        files: &[String],
+    ) -> Option<String> {
+        if files.is_empty() {
+            return None;
+        }
+        let live = self.live(project_id, chat_id)?;
+        if live.exited.load(Ordering::SeqCst) || live.running.load(Ordering::SeqCst) {
+            return None;
+        }
+        if live.drafting.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        {
+            let mut buf = live.draft_buf.lock().unwrap_or_else(|e| e.into_inner());
+            buf.clear();
+        }
+
+        live.generation.fetch_add(1, Ordering::SeqCst);
+        live.running.store(true, Ordering::SeqCst);
+        live.cancel.store(false, Ordering::SeqCst);
+        live.client.clear_cancelled();
+
+        let prompt = draft_subject_prompt(files);
+        let session = live.acp_session_id.clone();
+        let client = live.client.clone();
+        let result =
+            tokio::time::timeout(DRAFT_SUBJECT_TIMEOUT, client.prompt(&session, &prompt)).await;
+
+        // `prompt` can return before the event pump has applied text + turn_end.
+        if matches!(result, Ok(Ok(()))) {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+            while live.running.load(Ordering::SeqCst) && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        } else {
+            let _ = client.cancel(&session).await;
+            client.clear_cancelled();
+        }
+
+        let text = live
+            .draft_buf
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        live.drafting.store(false, Ordering::SeqCst);
+        live.running.store(false, Ordering::SeqCst);
+
+        match result {
+            Ok(Ok(())) => crate::http::checkpoints::checkpoint_subject_from_draft(&text),
+            Ok(Err(_)) | Err(_) => None,
+        }
     }
 
     /// Latches cancel for a live chat or one still handshaking. A live agent's
@@ -1129,6 +1222,23 @@ fn prompt_busy(err: &str) -> bool {
         .contains("already has an active acp prompt")
 }
 
+/// Hidden prompt after a dirty turn: one `COMMIT:` line, no tools, no chatter.
+fn draft_subject_prompt(files: &[String]) -> String {
+    let mut lines = vec![
+        "The app is about to save your edits as a checkpoint.".into(),
+        "Reply with only one line in this exact form (no other text):".into(),
+        "COMMIT: <short imperative summary of what changed>".into(),
+        "Keep it under 72 characters. Do not use tools. Changed files:".into(),
+    ];
+    for path in files.iter().take(20) {
+        lines.push(format!("- {path}"));
+    }
+    if files.len() > 20 {
+        lines.push(format!("- …and {} more", files.len() - 20));
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1473,6 +1583,94 @@ mod tests {
             }
         }
         assert!(saw, "cancel latch did not emit chat.turn");
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn draft_checkpoint_subject_returns_commit_line_without_ui_or_hook() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        let hooks = Arc::new(AtomicUsize::new(0));
+        chats.set_on_turn_end({
+            let hooks = hooks.clone();
+            move |_| {
+                hooks.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        chats.send_message("proj", "chat-1", "hi").await.unwrap();
+        wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(|c| matches!(c, UiChunk::TurnEnd { .. }))
+        })
+        .await;
+        assert_eq!(hooks.load(Ordering::SeqCst), 1);
+        let before = chats.history("proj", "chat-1");
+        let subject = chats
+            .draft_checkpoint_subject("proj", "chat-1", &["src/pages/sitemap.xml.ts".into()])
+            .await;
+        assert_eq!(subject.as_deref(), Some("Add sitemap and robots"));
+        assert_eq!(hooks.load(Ordering::SeqCst), 1, "draft must not re-enter turn-end hook");
+        let after = chats.history("proj", "chat-1");
+        assert_eq!(before.len(), after.len(), "draft must stay out of the transcript");
+        assert!(
+            !after.iter().any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("COMMIT:"))),
+            "draft text leaked into history: {after:?}"
+        );
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn draft_checkpoint_subject_times_out_to_none() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        let subject = chats
+            .draft_checkpoint_subject("proj", "chat-1", &["timeout-me.md".into()])
+            .await;
+        assert_eq!(subject, None);
+        assert!(
+            chats.history("proj", "chat-1").is_empty()
+                || !chats.history("proj", "chat-1").iter().any(|c| {
+                    matches!(c, UiChunk::TextDelta { text, .. } if text.contains("COMMIT:"))
+                })
+        );
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn draft_checkpoint_subject_skips_when_turn_running() {
+        let (chats, _dir) = manager();
+        let cwd = std::env::temp_dir();
+        let argv = argv();
+        chats
+            .start("proj", "chat-1", &cwd, &argv, &[])
+            .await
+            .unwrap();
+        chats
+            .send_message("proj", "chat-1", "slow please")
+            .await
+            .unwrap();
+        wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter()
+                .any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("slow started")))
+        })
+        .await;
+        assert!(chats.any_running("proj"));
+        assert_eq!(
+            chats
+                .draft_checkpoint_subject("proj", "chat-1", &["a.md".into()])
+                .await,
+            None
+        );
+        chats.cancel("proj", "chat-1").await.unwrap();
         chats.shutdown().await;
     }
 

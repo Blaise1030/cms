@@ -76,6 +76,11 @@ pub struct Config {
     pub runtime_base_url: Option<String>,
     /// Lock file to install from instead of the one embedded in the daemon (tests).
     pub runtime_lock: Option<PathBuf>,
+    /// Open the ready URL in the system browser after bind (`orso serve --open`).
+    pub open_browser: bool,
+    /// Hostname used in the ready URL (default [`crate::DEFAULT_HOSTNAME`]).
+    /// The daemon still binds `127.0.0.1`; this only changes the advertised link.
+    pub hostname: String,
 }
 
 /// Tests build configs with `..Default::default()`, so the default must never run the
@@ -99,6 +104,8 @@ impl Default for Config {
             runtime_dir: default_runtime_dir(),
             runtime_base_url: std::env::var("ORSO_RUNTIME_BASE").ok(),
             runtime_lock: None,
+            open_browser: false,
+            hostname: crate::DEFAULT_HOSTNAME.to_string(),
         }
     }
 }

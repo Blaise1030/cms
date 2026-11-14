@@ -72,7 +72,7 @@ function onAction(action: RowAction) {
       </Button>
     </template>
 
-    <Card class="gap-0 overflow-hidden p-0">
+    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
       <p
         v-if="loading"
         class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
@@ -114,7 +114,7 @@ function onAction(action: RowAction) {
         </EmptyHeader>
       </Empty>
 
-      <ul v-else class="divide-y divide-border px-4" data-testid="site-builder-row">
+      <ul v-else class="divide-y divide-border [&>li]:px-4" data-testid="site-builder-row">
         <ProviderRow :row="row" @action="onAction" />
       </ul>
     </Card>

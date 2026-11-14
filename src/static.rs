@@ -140,6 +140,7 @@ pub struct Template;
 #[folder = "packages/astro/src/"]
 #[exclude = "node_modules/**"]
 #[exclude = "test/**"]
+#[exclude = "panel/**"]
 #[exclude = ".DS_Store"]
 pub struct OrsoAstro;
 
@@ -332,7 +333,7 @@ mod tests {
         collect_js_relative_paths(&canonical_root, &canonical_root, &mut rel_paths).unwrap();
         rel_paths.sort();
 
-        for must_have in ["checks/page.js", "panel/checks-panel.js"] {
+        for must_have in ["checks/page.js", "checks/meta.js", "bridge.js"] {
             assert!(
                 rel_paths
                     .iter()
@@ -343,6 +344,10 @@ mod tests {
 
         for rel in &rel_paths {
             let name = rel.to_string_lossy().replace('\\', "/");
+            // Panel UI is owned by the CMS app; do not vendor minified bundles into sites.
+            if name.starts_with("panel/") {
+                continue;
+            }
             let canonical = std::fs::read(canonical_root.join(rel)).unwrap();
             let templated = std::fs::read(template_root.join(rel));
             assert!(

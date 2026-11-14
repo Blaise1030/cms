@@ -9,7 +9,24 @@ npm run dev     # local dev server
 npm run build   # static build into ./dist
 ```
 
-## Deploys (Cloudflare Workers)
+## Deploys
+
+The site is a static `dist/` build. The starter ships Cloudflare Workers CI; any other static
+host works the same for orso as long as your workflow records GitHub Deployments (see below).
+
+### What orso needs (any host)
+
+orso’s **Preview** (on a change) and **Open live site** (on `main`) links come only from
+GitHub Deployments — not from the host brand. For each successful deploy, create a GitHub
+Deployment and set its latest status to `success` with an `http(s)` `environment_url`:
+
+- **PR / change preview** → deployment for the PR **head SHA**, `environment_url` = preview URL
+- **Production / live site** → deployment for the current **`main` tip**, `environment_url` = live URL
+
+Without that `environment_url`, those buttons stay empty. Local in-app preview does not use
+Deployments.
+
+### Default: Cloudflare Workers
 
 `.github/workflows/deploy.yml` builds the site and deploys `dist/` to Cloudflare Workers as static
 assets (no Worker script; `wrangler.toml` points `[assets]` at `./dist`):
@@ -29,11 +46,7 @@ assets (no Worker script; `wrangler.toml` points `[assets]` at `./dist`):
     with `environment_url` = the preview URL (or `failure` if the upload failed);
   - posts one **sticky PR comment** with the preview link, updated on every push.
 
-  The CMS orso reads those deployments: a **Preview** link beside the PR status
-  ("Draft · Checks pending", "Open · Checks passing", …), and **Open live site** in the
-  header when you are on `main`.
-
-### One-time setup
+### One-time setup (Cloudflare)
 
 1. Set `name` in `wrangler.toml` to your Worker's name (the first deploy creates it). Keep
    `workers_dev` and `preview_urls` on: preview URLs live on `workers.dev`.
@@ -47,3 +60,9 @@ assets (no Worker script; `wrangler.toml` points `[assets]` at `./dist`):
 The job asks for its own token permissions (`contents: read`, `deployments: write`,
 `pull-requests: write`); nothing else needs enabling. Pull requests from forks get no secrets,
 so they are skipped.
+
+### Other hosts
+
+Replace or adapt `deploy.yml` (and drop `wrangler.toml` if unused). Keep the site fully static
+(no SSR adapter), build into `dist/`, and keep the Deployments contract above so Preview and
+Open live site still work.

@@ -141,7 +141,7 @@ describe("AppSettingsPage", () => {
   it("adds room for the traffic lights on the macOS desktop", async () => {
     document.documentElement.dataset.desktop = "macos";
     const { w } = await mountPage();
-    expect(w.get("[data-testid='app-settings-sidebar-header']").classes()).toContain("pt-11");
+    expect(w.get("[data-testid='app-settings-nav']").classes()).toContain("pt-11");
   });
 
   it("defaults to the Assistant section with its nav row active", async () => {

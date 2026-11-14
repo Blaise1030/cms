@@ -229,8 +229,8 @@ async fn refuses_uncommitted_changes() {
 
     assert_eq!(err.code, ErrorCode::Conflict);
     assert!(
-        err.message.to_lowercase().contains("checkpoint"),
-        "expected checkpoint-first message, got: {}",
+        err.message.to_lowercase().contains("save or discard"),
+        "expected save-or-discard message, got: {}",
         err.message
     );
     assert_eq!(rev(&work, "main"), main_before);

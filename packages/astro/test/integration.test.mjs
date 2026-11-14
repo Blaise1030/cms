@@ -11,7 +11,7 @@ import { orso } from "orso-astro";
 const noop = () => {};
 const logger = { error: noop, warn: noop, info: noop };
 
-test("astro:config:setup injects the preview bridge and checks panel during dev", () => {
+test("astro:config:setup injects the preview bridge during dev", () => {
   const injected = [];
   const { hooks } = orso();
   hooks["astro:config:setup"]({
@@ -20,15 +20,14 @@ test("astro:config:setup injects the preview bridge and checks panel during dev"
     logger,
     injectScript: (stage, content) => injected.push({ stage, content }),
   });
-  assert.equal(injected.length, 2);
+  assert.equal(injected.length, 1);
   assert.equal(injected[0].stage, "head-inline");
   assert.match(injected[0].content, /orso:preview/);
   // The frame is cross-origin, so the app learns the reader's page only from the bridge.
   assert.match(injected[0].content, /post\("path"/);
   assert.match(injected[0].content, /location\.href/);
-  assert.equal(injected[1].stage, "page");
-  assert.match(injected[1].content, /^import /);
-  assert.match(injected[1].content, /panel\/checks-panel\.js/);
+  // Page details snapshot for the CMS sidebar (no minified panel inject).
+  assert.match(injected[0].content, /op === "snapshot"/);
 });
 
 test("astro:config:setup does not register the collections virtual plugin without collections", () => {

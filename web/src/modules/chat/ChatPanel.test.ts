@@ -1177,6 +1177,37 @@ describe("ChatPanel", () => {
     expect(textOf(messagePosts()[1]!)).toBe("try again");
   });
 
+  it("opens Start a change first on CHANGE_REQUIRED and resends after create", async () => {
+    messageFailure = json(
+      { error: { code: "CHANGE_REQUIRED", message: "Start a change first — the live site can't be edited directly" } },
+      409,
+    );
+    const w = await mountPanel();
+    await send(w, "edit the notes");
+    expect(messagePosts()).toHaveLength(1);
+    expect(w.find("[data-testid='chat-error']").exists()).toBe(false);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Start a change first"));
+
+    messageFailure = null;
+    const input = document.querySelector<HTMLInputElement>("[aria-label='Change title']")!;
+    expect(input).toBeTruthy();
+    input.value = "New post: Launch week";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushPromises();
+    document.querySelector<HTMLFormElement>("[role='dialog'] form")!.requestSubmit();
+    await flushPromises();
+
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes`)).toBe(true),
+    );
+    const createBody = JSON.parse(
+      String(calls.find((c) => c.method === "POST" && c.url === `${ORIGIN}/api/changes`)!.init.body),
+    );
+    expect(createBody).toMatchObject({ project: "p1", title: "New post: Launch week" });
+    await vi.waitFor(() => expect(messagePosts()).toHaveLength(2));
+    expect(textOf(messagePosts()[1]!)).toBe("edit the notes");
+  });
+
   it("starts an empty chat with a new active id", async () => {
     histories["c-old"] = {
       chunks: [{ type: "user_text", session_id: "s", text: "Earlier question" }],
@@ -1197,6 +1228,19 @@ describe("ChatPanel", () => {
     expect(id).toBeTruthy();
     expect(w.text()).not.toContain("Earlier question");
     expect(w.findAll("[data-testid='chat-suggestion']")).toHaveLength(3);
+  });
+
+  it("shows a close button instead of new-chat when floating", async () => {
+    const w = mount(ChatPanel, {
+      props: { projectId: "p1", active: true, layout: "floating" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='chat-new']").exists()).toBe(false);
+    await w.find("[data-testid='agent-minimize']").trigger("click");
+    expect(w.emitted("minimize")).toHaveLength(1);
+    await w.find("[data-testid='agent-close']").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
   });
 
   it("loads a chat picked from the history", async () => {

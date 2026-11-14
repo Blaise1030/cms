@@ -39,6 +39,8 @@ test("readPageMeta: full SEO snapshot", () => {
   assert.equal(m.ogDescription, "OG desc");
   assert.equal(m.ogImage, "https://example.com/og.png");
   assert.deepEqual(m.jsonLdTypes, ["WebPage", "Organization", "WebSite"]);
+  assert.equal(m.jsonLdBlocks.length, 2);
+  assert.match(m.jsonLdBlocks[0], /"@type": "WebPage"/);
 });
 
 test("readPageMeta: missing fields use empty strings and default robots", () => {
@@ -57,6 +59,7 @@ test("readPageMeta: missing fields use empty strings and default robots", () => 
   assert.equal(m.ogDescription, "");
   assert.equal(m.ogImage, "");
   assert.deepEqual(m.jsonLdTypes, []);
+  assert.deepEqual(m.jsonLdBlocks, []);
 });
 
 test("readPageMeta: exports length caps used by the panel", () => {

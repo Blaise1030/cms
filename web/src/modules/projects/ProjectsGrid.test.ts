@@ -11,8 +11,6 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { useGithubStore } from "@/modules/github/store";
-import AssistantDialog from "@/modules/assistant/AssistantDialog.vue";
-import { assistantDialogOpen } from "@/modules/assistant/dialog";
 import ProjectsGrid from "./ProjectsGrid.vue";
 
 const p = (id: string, devserver: Project["devserver"]): Project => ({
@@ -57,7 +55,6 @@ async function chooseDelete(w: ReturnType<typeof mountGrid>, name: string) {
 
 beforeEach(() => {
   localStorage.clear();
-  assistantDialogOpen.value = false;
   api = {
     listProjects: vi.fn(async () => [p("a", "ready"), p("b", "crashed")]),
     createProject: vi.fn(async (name: string) => ({ ...p("new", "starting"), name })),
@@ -86,6 +83,8 @@ describe("ProjectsGrid", () => {
     expect(brand.get("p").text()).toBe("Build and edit your sites with your assistant");
     expect(brand.element.nextElementSibling?.querySelector("h2")?.textContent).toBe("Recent");
     const header = w.get("[data-testid='page-header']");
+    expect(header.classes()).toEqual(expect.arrayContaining(["relative", "z-10", "bg-background"]));
+    expect(header.find("[aria-hidden='true'].bg-linear-to-b").exists()).toBe(true);
     expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
     expect(header.find("svg.paw-mark").exists()).toBe(false);
     w.unmount();
@@ -199,36 +198,6 @@ describe("ProjectsGrid", () => {
     expect(document.body.textContent).toContain("They open this site");
     const link = document.body.querySelector<HTMLAnchorElement>("[data-testid='invite-collaborators-link']");
     expect(link?.getAttribute("href")).toBe("https://github.com/acme/site/settings/access");
-    w.unmount();
-  });
-
-  it("opens assistant setup from the header", async () => {
-    const w = mountGrid();
-    await flushPromises();
-    const dialog = mount(AssistantDialog, { attachTo: document.body });
-    try {
-      expect(document.body.textContent).not.toContain("Set up your assistant");
-      await w.get("[data-testid='open-assistant']").trigger("click");
-      await flushPromises();
-      expect(assistantDialogOpen.value).toBe(true);
-      const content = document.body.querySelector("[data-testid='assistant-dialog']");
-      expect(content?.textContent).toContain("Set up your assistant");
-    } finally {
-      dialog.unmount();
-      w.unmount();
-    }
-  });
-
-  it("opens app settings from the header settings pill", async () => {
-    const w = mountGrid();
-    await flushPromises();
-    const pill = w.get("[data-testid='open-settings']");
-    expect(pill.text()).toContain("Settings");
-    expect(pill.attributes("href")).toBe("/settings?tab=assistant");
-    await pill.trigger("click");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/settings");
-    expect(router.currentRoute.value.query.tab).toBe("assistant");
     w.unmount();
   });
 

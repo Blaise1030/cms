@@ -48,6 +48,70 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("opens Page details as a resizable sidebar from the toolbar", async () => {
+    const w = mountPanel();
+    expect(w.get("[data-testid='page-details-toggle']").attributes("aria-pressed")).toBe("false");
+    expect(w.find("[data-testid='page-details-sidebar']").exists()).toBe(false);
+    await w.get("[data-testid='page-details-toggle']").trigger("click");
+    expect(w.get("[data-testid='page-details-toggle']").attributes("aria-pressed")).toBe("true");
+    const sidebar = w.get("[data-testid='page-details-sidebar']");
+    expect(sidebar.text()).toContain("Page details");
+    expect(w.find("[data-slot='resizable-handle']").exists()).toBe(true);
+    await w.get("[data-testid='page-details-close']").trigger("click");
+    expect(w.find("[data-testid='page-details-sidebar']").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("shows SEO fields in Page details from a bridge snapshot", async () => {
+    localStorage.clear();
+    hDaemon.daemon = createFakeDaemon({});
+    hDaemon.daemon.config.value = { origin: window.location.origin, token: "tok" };
+    setActivePinia(createPinia());
+    const w = mount(PreviewPanel, {
+      props: { projectId: "site-1", devserver: "ready", port: 56066 },
+      attachTo: document.body,
+    });
+    const frameEl = () => w.find("iframe").element as HTMLIFrameElement;
+    frameEl().srcdoc = "<!doctype html><html><body></body></html>";
+    const frameWindow = frameEl().contentWindow;
+    if (frameWindow) frameWindow.postMessage = () => {};
+    await flushPromises();
+    await w.get("[data-testid='page-details-toggle']").trigger("click");
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: "orso:preview",
+          op: "snapshot",
+          url: "http://127.0.0.1:56066/preview/site-1/",
+          html: `<!doctype html><html lang="en"><head>
+            <title>Welcome</title>
+            <meta name="description" content="Hello world" />
+            <link rel="icon" href="/preview/site-1/favicon.svg" />
+            <meta property="og:image" content="https://cdn.example/preview/site-1/og.png" />
+          </head><body><h1>Welcome</h1></body></html>`,
+        },
+        source: frameEl().contentWindow,
+      }),
+    );
+    await flushPromises();
+    await w.get("[data-testid='page-details-tab-meta']").trigger("click");
+    await flushPromises();
+    const meta = w.get("[data-testid='page-details-meta']");
+    expect(meta.text()).toContain("Title");
+    expect(meta.text()).toContain("Welcome");
+    expect(meta.text()).toContain("Description");
+    expect(meta.text()).toContain("Hello world");
+    expect(meta.text()).toContain("/favicon.svg");
+    expect(meta.text()).toContain("/og.png");
+    const favicon = w.get("[data-testid='page-details-favicon']");
+    expect(favicon.attributes("src")).toBe(
+      `${window.location.origin}/preview/site-1/favicon.svg?t=tok`,
+    );
+    const og = w.get("[data-testid='page-details-og-image']");
+    expect(og.attributes("src")).toBe(`${window.location.origin}/preview/site-1/og.png?t=tok`);
+    w.unmount();
+  });
+
   it("uses a full radius when the agent sits in the bottom chrome", async () => {
     useChatPanelLayout().set("sidebar");
     const docked = mountPanel();

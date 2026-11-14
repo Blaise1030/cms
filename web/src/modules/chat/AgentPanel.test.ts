@@ -18,10 +18,18 @@ vi.mock("./ChatPanel.vue", async () => {
     // Loaded through defineAsyncComponent, which only unwraps `default` from an ES module.
     __esModule: true,
     default: defineComponent({
-      props: { projectId: String, active: Boolean },
-      setup(props, { expose }) {
+      props: { projectId: String, active: Boolean, layout: { type: String, default: "sidebar" } },
+      emits: ["close"],
+      setup(props, { emit, expose }) {
         expose({ insert: h.insert, insertReference: h.insertReference, send: h.send, busy: h.busy });
-        return () => render("div", { "data-testid": "chat-stub", "data-active": String(props.active) });
+        return () =>
+          render("div", { "data-testid": "chat-stub", "data-active": String(props.active), "data-layout": props.layout }, [
+            render("button", {
+              "data-testid": "chat-stub-close",
+              type: "button",
+              onClick: () => emit("close"),
+            }),
+          ]);
       },
     }),
   };
@@ -58,6 +66,17 @@ describe("AgentPanel", () => {
     expect(stub(w, "chat-stub").isVisible()).toBe(true);
     expect(w.find("[role='tablist']").exists()).toBe(false);
     expect(w.find("[data-testid='agent-tab-terminal']").exists()).toBe(false);
+  });
+
+  it("forwards floating layout and close from the chat", async () => {
+    const w = mount(AgentPanel, {
+      props: { projectId: "p", layout: "floating" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(stub(w, "chat-stub").attributes("data-layout")).toBe("floating");
+    await stub(w, "chat-stub-close").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
   });
 
   it("puts a picked element in the chat input without sending it", async () => {

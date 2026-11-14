@@ -10,7 +10,7 @@
   "files": ["src", "README.md"],
   "scripts": {
     "build:panel": "npm --prefix panel-ui run build",
-    "test": "npm run build:panel && node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "js-yaml": "^4.3.2",

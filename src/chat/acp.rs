@@ -717,6 +717,15 @@ while True:
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "stopReason": "cancelled" if cancelled else "end_turn"}})
             continue
+        # Turn-end checkpoint subject ask (see ChatManager::draft_checkpoint_subject).
+        if "Reply with only one line in this exact form" in text and "COMMIT:" in text:
+            if "- timeout-me.md" in text:
+                time.sleep(2)
+            update(sid, {"sessionUpdate": "agent_message_chunk",
+                         "content": {"type": "text",
+                                     "text": "COMMIT: Add sitemap and robots"}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
         if "permission" in text:
             if "ordered" in text:
                 opts = [{"optionId": "always", "name": "Always", "kind": "allow_always"},

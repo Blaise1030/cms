@@ -38,6 +38,8 @@ After adding or renaming content (or when the Content sidebar looks stale), run 
 
 ## Deployment
 
-Push-and-live on Cloudflare Workers (static assets). `.github/workflows/deploy.yml` runs `npm ci && npm run build` and deploys `dist/` on every push to `main`, and uploads a preview of every pull request branch at a stable per-branch `workers.dev` URL.
+Static `dist/` only (no SSR adapter). Default CI is Cloudflare Workers via `.github/workflows/deploy.yml` + `wrangler.toml` (secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) — see `README.md`.
 
-`npm run build` (and thus CI deploy) runs Orso preview checks on the built HTML via `integrations/orso/`: **error**-severity findings fail the build; warnings are logged only. `linkedom` is a production dependency for those checks. Both paths publish a GitHub **deployment** whose status carries `environment_url` (production → live site; PR → preview URL + sticky comment) so orso can show **Open live site** on main and **Preview** on a change — see `README.md`. `wrangler.toml` names the Worker and points `[assets]` at `./dist`. Needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets. Keep the site fully static (no SSR adapter) and keep the build output in `dist/`. When editing the workflow, always record those deployment statuses — without them orso has no URL to link.
+**Any host is fine** if the deploy workflow records GitHub Deployments: on success, set status `success` with an `http(s)` `environment_url` (PR head SHA → Preview link; `main` tip → Open live site). Without that URL, orso has nothing to link. When editing or replacing the workflow, always keep those deployment statuses.
+
+`npm run build` (and thus CI deploy) runs Orso preview checks on the built HTML via `integrations/orso/`: **error**-severity findings fail the build; warnings are logged only. `linkedom` is a production dependency for those checks.

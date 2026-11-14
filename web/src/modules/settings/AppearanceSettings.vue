@@ -84,27 +84,27 @@ function playSample() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8" data-testid="appearance-settings">
+  <div class="flex flex-col gap-5" data-testid="appearance-settings">
     <SettingsSection label="Light and dark" :icon="SunMoon">
-      <Card class="gap-0 overflow-hidden p-0">
-        <Item class="items-start">
-          <ItemMedia variant="icon">
+      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
+        <Item size="sm" class="items-start">
+          <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
             <SunMoon aria-hidden="true" />
           </ItemMedia>
-          <ItemContent class="gap-3">
-            <div class="flex flex-col gap-1">
+          <ItemContent class="gap-2.5">
+            <div class="flex flex-col gap-0.5">
               <ItemTitle>Appearance</ItemTitle>
               <ItemDescription>Light, dark, or whatever the Mac is doing.</ItemDescription>
             </div>
 
-            <div role="group" aria-label="Appearance" class="flex flex-wrap gap-3">
+            <div role="group" aria-label="Appearance" class="flex flex-wrap gap-2">
               <button
                 v-for="option in THEMES"
                 :key="option.id"
                 type="button"
                 :aria-pressed="themeValue === option.id"
                 :data-testid="`appearance-theme-${option.id}`"
-                class="group/theme flex flex-col items-center gap-2 rounded-lg p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                class="group/theme flex flex-col items-center gap-1.5 rounded-md p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 @click="onTheme(option.id)"
               >
                 <span
@@ -115,7 +115,7 @@ function playSample() {
                       : 'group-hover/theme:ring-1 group-hover/theme:ring-ring/40'
                   "
                 >
-                  <ThemePreview :mode="option.id" />
+                  <ThemePreview :mode="option.id" class="w-14" />
                 </span>
                 <span
                   class="text-xs"
@@ -131,9 +131,9 @@ function playSample() {
     </SettingsSection>
 
     <SettingsSection label="Typing" :icon="AudioLines">
-      <Card class="gap-0 overflow-hidden p-0">
-        <Item>
-          <ItemMedia variant="icon">
+      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
+        <Item size="sm">
+          <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
             <AudioLines aria-hidden="true" />
           </ItemMedia>
           <ItemContent>
@@ -142,7 +142,7 @@ function playSample() {
               Plays a soft key sound while you type in the content editor.
             </ItemDescription>
           </ItemContent>
-          <ItemActions class="gap-2">
+          <ItemActions class="gap-1.5">
             <Button
               variant="ghost"
               size="sm"
@@ -156,7 +156,7 @@ function playSample() {
               <SelectTrigger
                 id="appearance-typing-sound"
                 data-testid="appearance-typing-sound"
-                class="w-40"
+                class="h-8 w-36"
                 aria-label="Typing sound"
               >
                 <SelectValue />
@@ -173,10 +173,10 @@ function playSample() {
     </SettingsSection>
 
     <SettingsSection label="Chat" :icon="ListChecks">
-      <Card class="gap-0 overflow-hidden p-0">
+      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
         <div class="divide-y divide-border">
-          <Item>
-            <ItemMedia variant="icon">
+          <Item size="sm">
+            <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
               <PanelRight aria-hidden="true" />
             </ItemMedia>
             <ItemContent>
@@ -190,7 +190,7 @@ function playSample() {
                 <SelectTrigger
                   id="appearance-panel-layout"
                   data-testid="appearance-panel-layout"
-                  class="w-40"
+                  class="h-8 w-36"
                   aria-label="Agent panel"
                 >
                   <SelectValue />
@@ -203,8 +203,8 @@ function playSample() {
               </Select>
             </ItemActions>
           </Item>
-          <Item>
-            <ItemMedia variant="icon">
+          <Item size="sm">
+            <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
               <ListChecks aria-hidden="true" />
             </ItemMedia>
             <ItemContent>

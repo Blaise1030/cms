@@ -92,7 +92,7 @@ function onAction(row: AssistantRow, action: RowAction) {
       </Button>
     </template>
 
-    <Card class="gap-0 overflow-hidden p-0">
+    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
       <p
         v-if="loading"
         class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
@@ -139,7 +139,7 @@ function onAction(row: AssistantRow, action: RowAction) {
         </EmptyContent>
       </Empty>
 
-      <ul v-else class="divide-y divide-border px-4" data-testid="assistant-settings-rows">
+      <ul v-else class="divide-y divide-border [&>li]:px-4" data-testid="assistant-settings-rows">
         <template v-for="row in rows" :key="row.id">
           <ProviderRow :row="row" hide-connected-action @action="onAction(row, $event)" />
           <li v-if="panelFor(row.id)" class="pb-3">

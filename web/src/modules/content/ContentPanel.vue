@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, ExternalLink, FileJson, FileText, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
+import { ChevronLeft, ExternalLink, FileText, Folder, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { contentPath } from "@/router";
@@ -302,14 +302,14 @@ onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
 
 /** Same as App Settings sidebar nav (no primary tint — that belongs on the icon rail). */
-const navItem = "h-9 rounded-lg px-2.5 text-[13px]";
+const navItem = "h-7 rounded-lg px-2 text-[13px]";
 const navActive = [
   "font-medium btn-raised-soft",
   "data-[active=true]:bg-background data-[active=true]:text-sidebar-accent-foreground",
   "data-[active=true]:hover:bg-background",
 ].join(" ");
-/** Same kind glyphs as the entry list, so a collection's type is visible before you open it. */
-const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as const;
+/** Collections are folders of entries; kind glyphs stay on the entry list. */
+const COLLECTION_ICON = { markdown: Folder, mdx: Folder, json: Folder } as const;
 </script>
 <template>
   <div class="h-full min-h-0" data-testid="content-panel">
@@ -317,9 +317,9 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
       <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
       <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :order="1" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
       <Sidebar collapsible="none" class="bg-background h-full min-h-0 w-full min-w-0" data-testid="content-collections-sidebar">
-        <SidebarContent class="gap-0 overflow-hidden py-2">
-          <SidebarGroup class="min-h-0 flex-1 px-1.5 py-1">
-            <SidebarGroupLabel class="text-sidebar-foreground/50 h-7 px-2 text-[11px] tracking-wide">
+        <SidebarContent class="gap-0 overflow-hidden py-1.5">
+          <SidebarGroup class="min-h-0 flex-1 px-0.5 py-0.5">
+            <SidebarGroupLabel class="text-sidebar-foreground/50 h-7 px-1.5 text-[11px] tracking-wide">
               Collections
             </SidebarGroupLabel>
             <SidebarGroupContent class="flex min-h-0 flex-1 flex-col gap-2">
@@ -336,7 +336,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
                 />
               </InputGroup>
               <!-- Padding keeps btn-raised-soft's shadow inside the scroller (overflow clips paint). -->
-              <SidebarMenu data-testid="content-collections" aria-label="Collections" class="min-h-0 flex-1 gap-0.5 overflow-y-auto p-1.5">
+              <SidebarMenu data-testid="content-collections" aria-label="Collections" class="min-h-0 flex-1 gap-1 overflow-y-auto p-0.5">
                 <SidebarMenuItem v-for="c in filteredCollections" :key="c.name">
                   <SidebarMenuButton
                     type="button"
@@ -369,7 +369,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
       <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
       <div v-if="!editing" class="flex h-full min-h-0 flex-col">
         <div class="flex h-11 shrink-0 items-center px-2">
-          <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
+          <Button type="button" variant="ghost" size="icon" class="text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
             <PanelLeft class="size-4" />
           </Button>
         </div>
@@ -403,7 +403,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
       <form v-else ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-        <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="backLabel" :title="backLabel" data-testid="content-back" @click="backToList">
+        <Button type="button" variant="secondary" size="icon" :aria-label="backLabel" :title="backLabel" data-testid="content-back" @click="backToList">
           <ChevronLeft class="size-4" />
         </Button>
         <template v-if="store.entry">
@@ -417,7 +417,6 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
               v-if="openEntryCollection?.hasPreviewPath === true"
               type="button"
               variant="secondary"
-              size="sm"
               data-testid="content-open-preview"
               :title="previewReady ? 'Open in new tab' : 'Start the preview to open this entry'"
               :disabled="!previewReady || !store.entry"
@@ -427,9 +426,9 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
               Open preview
             </Button>
             <template v-if="canRemove">
-              <Button type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
+              <Button type="button" variant="ghost" size="icon" class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
             </template>
-            <Button v-if="hasFieldsPanel" type="button" variant="ghost" size="icon" class="size-8 text-muted-foreground" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen">
+            <Button v-if="hasFieldsPanel" type="button" variant="ghost" size="icon" class="text-muted-foreground" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen">
               <PanelRight class="size-4" />
             </Button>
           </div>
@@ -472,7 +471,7 @@ const COLLECTION_ICON = { markdown: FileText, mdx: FileText, json: FileJson } as
           <div class="flex min-h-full w-full flex-col @3xl:flex-row">
           <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" :class="{ 'order-2': !hasFieldsPanel }" data-testid="content-side">
             <Tabs :model-value="sideTab" @update:model-value="tab = $event as 'fields' | 'history'">
-              <TabsList class="w-full">
+              <TabsList class="border-border w-full border">
                 <TabsTrigger v-if="hasFieldsPanel" value="fields">Fields</TabsTrigger>
                 <TabsTrigger value="history">History</TabsTrigger>
               </TabsList>

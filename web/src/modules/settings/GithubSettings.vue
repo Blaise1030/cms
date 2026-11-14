@@ -66,7 +66,7 @@ onMounted(() => {
       </Button>
     </template>
 
-    <Card class="gap-0 overflow-hidden p-0">
+    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
       <p
         v-if="loading"
         class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
@@ -105,7 +105,7 @@ onMounted(() => {
             <ItemTitle>
               <CircleCheck
                 v-if="status.git"
-                class="size-3.5 text-emerald-600 dark:text-emerald-400"
+                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />
@@ -137,7 +137,7 @@ onMounted(() => {
             <ItemTitle>
               <CircleCheck
                 v-if="status.gh"
-                class="size-3.5 text-emerald-600 dark:text-emerald-400"
+                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />
@@ -169,7 +169,7 @@ onMounted(() => {
             <ItemTitle>
               <CircleCheck
                 v-if="githubSignedIn"
-                class="size-3.5 text-emerald-600 dark:text-emerald-400"
+                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />

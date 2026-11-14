@@ -9,11 +9,9 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -165,8 +163,13 @@ function goBack() {
   else void router.push("/");
 }
 
-const navItem = "h-9 rounded-lg px-2.5 text-[13px]";
-const navActive = "bg-card text-sidebar-accent-foreground font-medium shadow-sm btn-raised-soft";
+/** Same as the content collections sidebar (no primary tint — that belongs on the icon rail). */
+const navItem = "h-7 rounded-lg px-2.5 text-[13px]";
+const navActive = [
+  "font-medium btn-raised-soft",
+  "data-[active=true]:bg-background data-[active=true]:text-sidebar-accent-foreground",
+  "data-[active=true]:hover:bg-background",
+].join(" ");
 </script>
 
 <template>
@@ -180,47 +183,68 @@ const navActive = "bg-card text-sidebar-accent-foreground font-medium shadow-sm 
       class="bg-background h-full min-h-0 shrink-0"
       data-testid="app-settings-sidebar"
     >
-      <SidebarHeader
-        data-testid="app-settings-sidebar-header"
+      <SidebarContent
+        data-testid="app-settings-nav"
         :class="[
-          'gap-3 px-3 pb-3',
-          macDesktop ? 'pt-11 fullscreen:pt-3' : 'pt-3',
+          'gap-0 overflow-hidden px-3 py-2',
+          macDesktop ? 'pt-11 fullscreen:pt-2' : '',
         ]"
       >
-        <h1 class="px-1 text-sm font-semibold">Settings</h1>
-        <div ref="searchWrap">
-          <InputGroup
-            class="h-8 border-sidebar-border bg-card shadow-none"
-          >
-            <InputGroupAddon align="inline-start">
-              <Search aria-hidden="true" />
-            </InputGroupAddon>
-            <InputGroupInput
-              v-model="query"
-              data-testid="app-settings-search"
-              placeholder="Find a setting"
-              aria-label="Find a setting"
-              class="h-8 text-[13px]"
-              @keydown.enter.prevent="selectFirstMatch"
-              @keydown.esc="query = ''"
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText>
-                <kbd
-                  class="rounded border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 font-sans text-[10px] leading-none"
-                  data-testid="app-settings-search-hint"
-                >
-                  ⌘F
-                </kbd>
-              </InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
-        </div>
-      </SidebarHeader>
+        <SidebarGroup class="shrink-0 py-1">
+          <SidebarMenu class="gap-1 p-1.5">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                type="button"
+                :class="navItem"
+                data-testid="app-settings-back"
+                @click="goBack"
+              >
+                <ArrowLeft aria-hidden="true" />
+                <span>Back to app</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
 
-      <SidebarContent class="gap-0 py-2" data-testid="app-settings-nav">
+        <SidebarGroup
+          class="shrink-0 py-1"
+          data-testid="app-settings-sidebar-header"
+        >
+          <SidebarGroupLabel class="text-sidebar-foreground/50 h-7 px-2 text-[11px] tracking-wide">
+            Settings
+          </SidebarGroupLabel>
+          <SidebarGroupContent class="flex flex-col gap-2 px-1.5">
+            <div ref="searchWrap">
+              <InputGroup class="h-8 w-auto border-sidebar-border bg-card shadow-none">
+                <InputGroupAddon align="inline-start">
+                  <Search class="size-4 opacity-50" aria-hidden="true" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  v-model="query"
+                  data-testid="app-settings-search"
+                  placeholder="Find a setting"
+                  aria-label="Find a setting"
+                  class="h-8 text-[13px]"
+                  @keydown.enter.prevent="selectFirstMatch"
+                  @keydown.esc="query = ''"
+                />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupText>
+                    <kbd
+                      class="rounded border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 font-sans text-[10px] leading-none"
+                      data-testid="app-settings-search-hint"
+                    >
+                      ⌘F
+                    </kbd>
+                  </InputGroupText>
+                </InputGroupAddon>
+              </InputGroup>
+            </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         <template v-for="(group, index) in visibleGroups" :key="group.label">
-          <div v-if="index > 0" class="h-4" aria-hidden="true" />
+          <div v-if="index > 0" class="h-2" aria-hidden="true" />
           <SidebarGroup class="py-1">
             <SidebarGroupLabel
               class="text-sidebar-foreground/50 h-7 px-2 text-[11px] tracking-wide"
@@ -228,7 +252,8 @@ const navActive = "bg-card text-sidebar-accent-foreground font-medium shadow-sm 
               {{ group.label }}
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu class="gap-0.5">
+              <!-- Padding keeps btn-raised-soft's shadow inside the scroller (overflow clips paint). -->
+              <SidebarMenu class="gap-1 p-1.5">
                 <SidebarMenuItem v-for="section in group.sections" :key="section.id">
                   <SidebarMenuButton
                     type="button"
@@ -255,52 +280,31 @@ const navActive = "bg-card text-sidebar-accent-foreground font-medium shadow-sm 
           No settings found.
         </p>
 
-        <div v-if="aboutMatches" class="mt-auto">
-          <div class="my-2" aria-hidden="true" />
-          <SidebarGroup class="py-1">
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    type="button"
-                    :is-active="activeTab === ABOUT.id"
-                    :class="[navItem, activeTab === ABOUT.id ? navActive : '']"
-                    :aria-current="activeTab === ABOUT.id ? 'page' : undefined"
-                    data-testid="app-settings-tab-about"
-                    @click="setTab(ABOUT.id)"
-                  >
-                    <component :is="ABOUT.icon" aria-hidden="true" />
-                    <span>{{ ABOUT.label }}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+        <div v-if="aboutMatches" class="mt-auto py-1">
+          <SidebarMenu class="gap-1 p-1.5">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                type="button"
+                :is-active="activeTab === ABOUT.id"
+                :class="[navItem, activeTab === ABOUT.id ? navActive : '']"
+                :aria-current="activeTab === ABOUT.id ? 'page' : undefined"
+                data-testid="app-settings-tab-about"
+                @click="setTab(ABOUT.id)"
+              >
+                <component :is="ABOUT.icon" aria-hidden="true" />
+                <span>{{ ABOUT.label }}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </div>
       </SidebarContent>
-
-      <SidebarFooter class="p-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              type="button"
-              :class="navItem"
-              data-testid="app-settings-back"
-              @click="goBack"
-            >
-              <ArrowLeft aria-hidden="true" />
-              <span>Back to app</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
     </Sidebar>
 
     <SidebarInset class="h-full min-h-0 w-auto overflow-y-auto">
       <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8 sm:px-8">
         <header class="flex items-start gap-3">
           <div
-            class="bg-card text-foreground btn-raised-soft flex size-11 shrink-0 items-center justify-center rounded-xl border"
+            class="bg-card text-foreground flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 shadow-xs"
           >
             <component :is="activeSection.icon" class="size-5" aria-hidden="true" />
           </div>

@@ -758,7 +758,7 @@ function dotLabel(n: Step): string {
             <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-git">
               <CircleCheck
                 v-if="status.git"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -783,7 +783,7 @@ function dotLabel(n: Step): string {
             <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-tools">
               <CircleCheck
                 v-if="status.gh"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -806,7 +806,7 @@ function dotLabel(n: Step): string {
             <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-account">
               <CircleCheck
                 v-if="githubSignedIn"
-                class="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
                 aria-hidden="true"
               />
               <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />

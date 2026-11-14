@@ -54,7 +54,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <div class="px-4">
           <p v-if="store.error" role="alert" class="text-sm text-destructive" data-testid="design-error">{{ store.error }}</p>
           <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="design-needs-change">
-            <p>The design cannot be edited on main. Create a change to save your edits.</p>
+            <p>The design cannot be edited on the live site. Create a change to save your edits.</p>
             <Button type="button" size="sm" class="mt-2" data-testid="design-create-change" @click="showNewChange = true">Create change</Button>
           </section>
           <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="design-changed-on-disk">

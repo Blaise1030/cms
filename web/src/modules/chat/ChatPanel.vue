@@ -1025,7 +1025,7 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
       v-model:open="showStartChange"
       :project-id="projectId"
       heading="Start a change first"
-      description="GitHub projects cannot be edited on main. Name this change to create a branch, then your assistant will continue."
+      description="The live site can't be edited directly. Name this change to continue with your prompt."
       @created="onChangeCreated"
     />
   </div>

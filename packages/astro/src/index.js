@@ -175,11 +175,8 @@ export function orso(options = {}) {
         // The dev UI frames this server directly (so client components hydrate), which
         // makes the frame cross-origin; the bridge keeps picking and appearance working.
         if (command === "dev") {
+          // Pick / appearance / path / Page-details snapshot for the CMS preview frame.
           injectScript("head-inline", PREVIEW_BRIDGE);
-          // Vue + shadcn checks panel (built from panel-ui/).
-          const panelUrl = new URL("./panel/checks-panel.js", import.meta.url);
-          panelUrl.searchParams.set("v", "vue-shadcn-7");
-          injectScript("page", `import ${JSON.stringify(panelUrl.href)}`);
         }
 
         const vitePlugins = [];

@@ -27,9 +27,7 @@ beforeEach(() => {
 describe("GetLatestButton", () => {
   it("is labelled for writers", () => {
     const { w } = mountButton();
-    const button = w.find("[data-testid='get-latest']");
-    expect(button.attributes("aria-label")).toBe("Sync with live site");
-    expect(button.attributes("title")).toBe("Sync with live site");
+    expect(w.find("[data-testid='get-latest']").attributes("aria-label")).toBe("Sync with live site");
   });
 
   it("asks the daemon to sync instead of the agent", async () => {
@@ -63,7 +61,7 @@ describe("GetLatestButton", () => {
     await flushPromises();
     const button = w.find("[data-testid='get-latest']");
     expect(button.attributes("disabled")).toBeDefined();
-    expect(button.attributes("title")).toBe("Already up to date");
+    expect(button.attributes("aria-label")).toBe("Already up to date");
   });
 
   it("stays enabled while the sync state is unknown", async () => {

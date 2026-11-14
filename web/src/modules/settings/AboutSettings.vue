@@ -36,7 +36,7 @@ onMounted(async () => {
 
 <template>
   <SettingsSection label="About" :icon="Info" data-testid="about-settings">
-    <Card class="gap-0 overflow-hidden p-0">
+    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
       <ItemGroup class="divide-y divide-border">
         <Item>
           <ItemMedia variant="icon">

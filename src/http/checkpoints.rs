@@ -23,12 +23,18 @@ use crate::git;
 use crate::state::AppState;
 
 const SUMMARY_MAX: usize = 72;
+const COMMIT_PREFIX: &str = "COMMIT:";
 
 /// One-line commit subject for turn-end checkpoints.
+///
+/// Prefers a trailing `COMMIT: …` line from the agent reply (see [`crate::providers::ORSO_GUIDE`]),
+/// then the first reply line, then a short list of changed paths.
 pub fn commit_message(summary: Option<&str>, changed: &[String]) -> String {
-    let first = summary
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    let text = summary.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(line) = text.and_then(commit_convention_line) {
+        return truncate_summary(line);
+    }
+    let first = text
         .and_then(|s| s.lines().next().map(str::trim))
         .filter(|s| !s.is_empty());
     match first {
@@ -44,6 +50,46 @@ pub fn commit_message(summary: Option<&str>, changed: &[String]) -> String {
             format!("Update {n} files: {paths}")
         }
     }
+}
+
+/// Subject from a draft-commit reply: a `COMMIT:` line, else a single short line.
+pub(crate) fn checkpoint_subject_from_draft(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some(line) = commit_convention_line(text) {
+        return Some(truncate_summary(line));
+    }
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    match lines.as_slice() {
+        [only] if only.chars().count() <= SUMMARY_MAX => Some((*only).to_string()),
+        _ => None,
+    }
+}
+
+/// Last non-empty `COMMIT: <subject>` line in the turn text, if any.
+pub(crate) fn commit_convention_line(summary: &str) -> Option<&str> {
+    summary.lines().rev().find_map(|line| {
+        let trimmed = line.trim();
+        let rest = trimmed
+            .strip_prefix(COMMIT_PREFIX)
+            .or_else(|| {
+                if trimmed.len() >= COMMIT_PREFIX.len()
+                    && trimmed[..COMMIT_PREFIX.len()].eq_ignore_ascii_case(COMMIT_PREFIX)
+                {
+                    Some(&trimmed[COMMIT_PREFIX.len()..])
+                } else {
+                    None
+                }
+            })?
+            .trim();
+        (!rest.is_empty()).then_some(rest)
+    })
 }
 
 fn truncate_summary(line: &str) -> String {
@@ -196,4 +242,75 @@ pub async fn restore(
     let dir = project_dir(&state, &req.project).await?;
     let restored = git::restore(&dir, &sha).await?;
     Ok(Json(json!({ "restored": restored })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commit_message_prefers_commit_line_over_chat_reply() {
+        let summary = "I'll add sitemap.xml and robots.txt for the site.\n\nCOMMIT: Add sitemap.xml and robots.txt";
+        assert_eq!(
+            commit_message(Some(summary), &["public/sitemap.xml".into()]),
+            "Add sitemap.xml and robots.txt"
+        );
+    }
+
+    #[test]
+    fn commit_message_uses_last_commit_line_when_several() {
+        let summary = "COMMIT: Draft one\nDone.\nCOMMIT: Add Astro sitemap plugin";
+        assert_eq!(
+            commit_message(Some(summary), &[]),
+            "Add Astro sitemap plugin"
+        );
+    }
+
+    #[test]
+    fn commit_message_falls_back_to_first_reply_line() {
+        assert_eq!(
+            commit_message(Some("I'll check the screenshot.\nMore detail."), &[]),
+            "I'll check the screenshot."
+        );
+    }
+
+    #[test]
+    fn commit_message_falls_back_to_changed_paths() {
+        assert_eq!(
+            commit_message(None, &["a.md".into(), "b.md".into(), "c.md".into(), "d.md".into()]),
+            "Update 4 files: a.md, b.md, c.md"
+        );
+    }
+
+    #[test]
+    fn commit_message_ignores_empty_commit_marker() {
+        assert_eq!(
+            commit_message(Some("Hello\nCOMMIT:   \n"), &["x.md".into()]),
+            "Hello"
+        );
+    }
+
+    #[test]
+    fn checkpoint_subject_from_draft_reads_commit_line() {
+        assert_eq!(
+            checkpoint_subject_from_draft("Sure.\nCOMMIT: Fix nav link\n"),
+            Some("Fix nav link".into())
+        );
+    }
+
+    #[test]
+    fn checkpoint_subject_from_draft_accepts_single_short_line() {
+        assert_eq!(
+            checkpoint_subject_from_draft("Fix nav link"),
+            Some("Fix nav link".into())
+        );
+    }
+
+    #[test]
+    fn checkpoint_subject_from_draft_rejects_chatty_replies() {
+        assert_eq!(
+            checkpoint_subject_from_draft("I'll fix it.\nThen we ship."),
+            None
+        );
+    }
 }

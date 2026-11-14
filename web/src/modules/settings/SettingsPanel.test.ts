@@ -86,7 +86,7 @@ describe("SettingsPanel", () => {
     await el(w, "settings-root").setValue("site");
     await el(w, "settings-save").trigger("click");
     await flushPromises();
-    expect(w.get('[data-testid="settings-needs-change"] p').text()).toBe("Settings can't be edited on main. Create a change.");
+    expect(w.get('[data-testid="settings-needs-change"] p').text()).toBe("Settings can't be edited on the live site. Create a change.");
     await el(w, "settings-create-change").trigger("click");
     await el(w, "new-change-stub").trigger("click");
     await flushPromises();

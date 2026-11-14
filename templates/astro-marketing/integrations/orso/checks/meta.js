@@ -16,6 +16,7 @@ export const DESCRIPTION_MAX = 160;
  * @property {string} ogDescription
  * @property {string} ogImage
  * @property {string[]} jsonLdTypes
+ * @property {string[]} jsonLdBlocks
  */
 
 /**
@@ -44,12 +45,15 @@ export function readPageMeta(doc) {
   const ogImage = metaProperty(doc, "og:image");
 
   const jsonLdTypes = [];
+  const jsonLdBlocks = [];
   const seen = new Set();
   for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
     const raw = (script.textContent ?? "").trim();
     if (!raw) continue;
     try {
-      for (const type of collectTypes(JSON.parse(raw))) {
+      const parsed = JSON.parse(raw);
+      jsonLdBlocks.push(JSON.stringify(parsed, null, 2));
+      for (const type of collectTypes(parsed)) {
         if (seen.has(type)) continue;
         seen.add(type);
         jsonLdTypes.push(type);
@@ -73,6 +77,7 @@ export function readPageMeta(doc) {
     ogDescription,
     ogImage,
     jsonLdTypes,
+    jsonLdBlocks,
   };
 }
 

@@ -56,6 +56,12 @@ enum Command {
         /// Directory for managed Node and assistant builds (default: app support dir).
         #[arg(long, env = "ORSO_RUNTIME_DIR")]
         runtime_dir: Option<PathBuf>,
+        /// Open the ready URL in the system browser after the daemon binds.
+        #[arg(long)]
+        open: bool,
+        /// Hostname in the ready URL (default: orso.localhost). Still binds 127.0.0.1.
+        #[arg(long, default_value = orso::DEFAULT_HOSTNAME)]
+        hostname: String,
     },
     /// App state for the agent in a orso chat (prints JSON).
     Ctl {
@@ -92,6 +98,8 @@ async fn main() -> ExitCode {
         github_git_url,
         ui_url,
         runtime_dir,
+        open,
+        hostname,
     } = command
     else {
         return match command {
@@ -127,6 +135,8 @@ async fn main() -> ExitCode {
         runtime_dir: runtime_dir.unwrap_or_else(orso::config::default_runtime_dir),
         runtime_base_url: std::env::var("ORSO_RUNTIME_BASE").ok(),
         runtime_lock: None,
+        open_browser: open,
+        hostname,
     };
     match orso::serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

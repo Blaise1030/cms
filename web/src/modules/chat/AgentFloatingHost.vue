@@ -183,7 +183,9 @@ defineExpose({ expand, minimize, close: closePanel });
           :aria-label="tab.running ? `${tab.title}, working` : tab.title"
           :class="
             cn(
-              'group flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pr-1 pl-3 text-left text-xs transition-all active:translate-y-px',
+              'group relative flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pl-3 pr-3 text-left text-xs transition-all active:translate-y-px',
+              // Close control is absolutely positioned so it does not reserve width when hidden.
+              !tab.running && 'hover:pr-6 focus-within:pr-6',
               tab.active
                 ? 'bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30'
                 : 'text-muted-foreground hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50',
@@ -216,7 +218,7 @@ defineExpose({ expand, minimize, close: closePanel });
             type="button"
             variant="ghost"
             size="icon-xs"
-            class="text-muted-foreground hover:text-destructive size-5 w-0 shrink-0 overflow-hidden rounded-full p-0 opacity-0 transition-[width,opacity,padding] group-hover:w-5 group-hover:opacity-100 group-focus-within:w-5 group-focus-within:opacity-100 focus-visible:w-5 focus-visible:opacity-100"
+            class="text-muted-foreground hover:text-destructive absolute top-1/2 right-0.5 size-5 -translate-y-1/2 rounded-full p-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
             data-testid="agent-tab-delete"
             :aria-label="`Delete ${tab.title}`"
             @click="requestDelete($event, tab)"

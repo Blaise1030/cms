@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
+  FileSearch,
   Monitor,
   Moon,
   MousePointerClick,
@@ -28,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Spinner } from "@/components/ui/spinner";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
@@ -40,8 +42,13 @@ import { applyFrameAppearance } from "./frameAppearance";
 import { BRIDGE_TYPE, isBridgeMessage } from "./frameBridge";
 import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 import { cn } from "@/lib/utils";
+import { auditDocument, auditHtml, type PageAudit } from "./checks/auditDocument";
+import type { Finding } from "./checks/findings";
+import type { PageMeta } from "./checks/meta";
+import type { ResourceSummary } from "./checks/resourceSummary";
 import { DESKTOP_MIN_WIDTH, frameFit } from "./frameFit";
 import { useFrameHistory } from "./frameHistory";
+import PageDetailsSidebar from "./PageDetailsSidebar.vue";
 import { type PageError, watchPageErrors } from "./pageErrors";
 import { DEVICE_WIDTH, type Device, usePreviewStore } from "./store";
 
@@ -180,12 +187,20 @@ function frameWindow(): Window | null {
 
 // --- Direct-frame bridge -------------------------------------------------------------------------
 
-/** The dev-server origin the bridge runs on; null while framing the proxied preview. */
-const bridgeOrigin = computed(() => (directFrame.value ? new URL(src.value).origin : null));
+/** The framed page's origin (Astro direct or daemon preview). Used for postMessage. */
+const frameOrigin = computed(() => {
+  try {
+    return new URL(src.value, window.location.href).origin;
+  } catch {
+    return null;
+  }
+});
 
-/** Drive the direct frame's page over `postMessage` (the proxied frame is driven via its DOM). */
-function postToFrame(op: string, extra: Record<string, unknown> = {}) {
-  const origin = bridgeOrigin.value;
+/** Direct Astro origin only — pick/appearance use the bridge in DEV; proxied frames use the DOM. */
+const bridgeOrigin = computed(() => (directFrame.value ? frameOrigin.value : null));
+
+/** Drive the framed page over `postMessage`. */
+function postToFrame(op: string, extra: Record<string, unknown> = {}, origin = bridgeOrigin.value) {
   if (!origin) return;
   frame.value?.contentWindow?.postMessage({ type: BRIDGE_TYPE, op, ...extra }, origin);
 }
@@ -199,6 +214,12 @@ function onFrameMessage(e: MessageEvent) {
     const path = framePath(e.data.url, base.value);
     store.setFramePath(props.projectId, path);
     history.visit(path);
+    // Re-audit after client-side navigations reported by the bridge.
+    refreshPageDetails();
+    return;
+  }
+  if (e.data.op === "snapshot") {
+    applyAudit(auditHtml(e.data.html, framePath(e.data.url, base.value), e.data.url));
     return;
   }
   if (e.data.op === "cancel") {
@@ -228,15 +249,61 @@ function onLoad() {
   syncPicker();
   syncAppearance();
   watchErrors(win);
-  if (!win) return;
-  const sync = () => history.visit(framePath(win.location.href, base.value));
+  if (!win) {
+    // Cross-origin frame: Page details comes from the bridge HTML snapshot.
+    refreshPageDetails();
+    return;
+  }
+  const sync = () => {
+    history.visit(framePath(win.location.href, base.value));
+    refreshPageDetails();
+  };
   sync();
   // Same-document navigations: history traversal, anchors, and Astro's client-side router.
   win.addEventListener("popstate", sync);
   win.addEventListener("hashchange", sync);
   win.document.addEventListener("astro:page-load", sync);
   // Astro's router copies the next page's `<html>` attributes over ours.
-  win.document.addEventListener("astro:after-swap", () => syncAppearance(true));
+  win.document.addEventListener("astro:after-swap", () => {
+    syncAppearance(true);
+    refreshPageDetails();
+  });
+}
+
+// --- Page details (SEO snapshot + findings) ----------------------------------------------------
+
+const detailsOpen = ref(false);
+const pageMeta = ref<PageMeta | null>(null);
+const pageFindings = ref<Finding[]>([]);
+const pageResources = ref<ResourceSummary | null>(null);
+const errorCount = computed(
+  () => pageFindings.value.filter((f) => f.severity === "error").length,
+);
+const warningCount = computed(
+  () => pageFindings.value.filter((f) => f.severity === "warning").length,
+);
+
+function applyAudit(audit: PageAudit) {
+  pageMeta.value = audit.meta;
+  pageFindings.value = audit.findings;
+  pageResources.value = audit.resources;
+}
+
+function refreshPageDetails() {
+  const win = frameWindow();
+  if (win?.document) {
+    applyAudit(
+      auditDocument(win.document, framePath(win.location.href, base.value), win.location.href),
+    );
+    return;
+  }
+  // Cross-origin frame (Vite UI ↔ Astro or daemon): ask the injected bridge for HTML.
+  postToFrame("snapshot", {}, frameOrigin.value);
+}
+
+function togglePageDetails() {
+  detailsOpen.value = !detailsOpen.value;
+  if (detailsOpen.value) refreshPageDetails();
 }
 
 // --- Page errors -------------------------------------------------------------------------------
@@ -542,6 +609,31 @@ function openExternal() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
+              <Button
+                :variant="detailsOpen ? 'secondary' : 'ghost'"
+                size="icon-sm"
+                aria-label="Page details"
+                :aria-pressed="detailsOpen"
+                :disabled="state !== 'ready' || crossSite"
+                data-testid="page-details-toggle"
+                class="relative"
+                @click="togglePageDetails"
+              >
+                <FileSearch />
+                <span
+                  v-if="errorCount + warningCount > 0"
+                  class="bg-background absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[0.6rem] font-medium tabular-nums leading-none"
+                  :class="errorCount > 0 ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'"
+                  data-testid="page-details-badge"
+                >
+                  {{ errorCount + warningCount }}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Page details</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
               <Button variant="ghost" size="icon-sm" aria-label="Open in new tab" @click="openExternal">
                 <ExternalLink />
               </Button>
@@ -551,102 +643,137 @@ function openExternal() {
         </div>
       </TooltipProvider>
 
-      <div class="relative flex min-h-0 flex-1 flex-col">
-      <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
-        <div
-          v-if="state === 'crashed'"
-          class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
-          role="alert"
-        >
-          <p>The dev server crashed{{ store.message[projectId] ? `: ${store.message[projectId]}` : "." }}</p>
-          <p v-if="store.error" class="text-destructive">{{ store.error }}</p>
-          <div class="flex gap-2">
-            <Button :disabled="store.restarting" @click="store.restart(projectId)">
-              {{ store.restarting ? "Restarting…" : "Restart dev server" }}
-            </Button>
-            <Button variant="outline" data-testid="fix-crash" @click="store.fixCrash(projectId)">
-              <Sparkles />
-              Fix this with your assistant
-            </Button>
-          </div>
-        </div>
-        <div
-          v-else-if="state === 'starting'"
-          class="text-muted-foreground flex flex-col items-center justify-center gap-3 text-sm"
-          data-testid="preview-starting"
-        >
-          <Spinner class="size-5" />
-          Starting dev server…
-        </div>
-        <div
-          v-else-if="crossSite"
-          class="flex max-w-md flex-col items-center justify-center gap-3 p-6 text-center text-sm"
-          role="note"
-          data-testid="preview-cross-site"
-        >
-          <p class="font-medium">Live preview isn't available from this page</p>
-          <p class="text-muted-foreground">
-            The daemon at {{ daemonOrigin }} is on a different site than this app, so the
-            browser won't send its session cookie to the preview frame. Open the daemon link
-            directly (the one printed at startup) to use the live preview.
-          </p>
-          <Button variant="outline" size="sm" @click="forceFrame = true">Try anyway</Button>
-        </div>
-        <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
-        <div
-          v-else
-          class="relative h-full shrink-0 overflow-hidden"
-          data-testid="preview-canvas"
-          :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
-        >
-          <iframe
-            ref="frame"
-            :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}`"
-            :src="startHref"
-            title="Site preview"
-            class="h-full origin-top-left border-0"
-            :class="store.dark ? 'bg-neutral-950' : 'bg-white'"
-            :style="{
-              width: fit.width ? `${fit.width}px` : '100%',
-              ...(zoomed ? { height: `${fit.height}px`, transform: `scale(${fit.scale})` } : {}),
-              // An iframe's `color-scheme` sets `prefers-color-scheme` inside the framed page.
-              colorScheme: store.dark ? 'dark' : 'light',
-            }"
-            data-testid="preview-frame"
-            @load="onLoad"
-          />
-          <!-- A device-sized frame has no visible edge against the panel; outline it. -->
-          <div
-            v-if="store.device !== 'desktop'"
-            class="border-border pointer-events-none absolute inset-0 border"
-            data-testid="preview-boundary"
-            aria-hidden="true"
-          />
-        </div>
-      </div>
-
-      <div
-        v-if="pageError && state === 'ready'"
-        class="bg-background absolute inset-x-3 bottom-3 flex items-start gap-3 rounded-lg border p-3 text-sm shadow-lg"
-        role="alert"
-        data-testid="page-error"
+      <ResizablePanelGroup
+        direction="horizontal"
+        auto-save-id="preview-page-details"
+        class="relative min-h-0 flex-1"
       >
-        <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-        <div class="min-w-0 flex-1">
-          <p class="font-medium">
-            {{ pageError.kind === "build" ? "This page failed to build" : "This page threw an error" }}
-          </p>
-          <p class="text-muted-foreground line-clamp-2 font-mono text-xs break-words">{{ pageError.message }}</p>
-        </div>
-        <Button size="sm" data-testid="fix-page-error" @click="fixPageError">
-          <Sparkles />
-          Fix this with your assistant
-        </Button>
-        <Button variant="ghost" size="icon-sm" aria-label="Dismiss error" @click="pageError = null">
-          <X />
-        </Button>
-      </div>
-      </div>
+        <ResizablePanel
+          id="preview-frame"
+          :default-size="detailsOpen ? 72 : 100"
+          :min-size="detailsOpen ? 40 : 100"
+        >
+          <div class="relative flex h-full min-h-0 min-w-0 flex-col">
+            <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
+              <div
+                v-if="state === 'crashed'"
+                class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+                role="alert"
+              >
+                <p>The dev server crashed{{ store.message[projectId] ? `: ${store.message[projectId]}` : "." }}</p>
+                <p v-if="store.error" class="text-destructive">{{ store.error }}</p>
+                <div class="flex gap-2">
+                  <Button :disabled="store.restarting" @click="store.restart(projectId)">
+                    {{ store.restarting ? "Restarting…" : "Restart dev server" }}
+                  </Button>
+                  <Button variant="outline" data-testid="fix-crash" @click="store.fixCrash(projectId)">
+                    <Sparkles />
+                    Fix this with your assistant
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-else-if="state === 'starting'"
+                class="text-muted-foreground flex flex-col items-center justify-center gap-3 text-sm"
+                data-testid="preview-starting"
+              >
+                <Spinner class="size-5" />
+                Starting dev server…
+              </div>
+              <div
+                v-else-if="crossSite"
+                class="flex max-w-md flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+                role="note"
+                data-testid="preview-cross-site"
+              >
+                <p class="font-medium">Live preview isn't available from this page</p>
+                <p class="text-muted-foreground">
+                  The daemon at {{ daemonOrigin }} is on a different site than this app, so the
+                  browser won't send its session cookie to the preview frame. Open the daemon link
+                  directly (the one printed at startup) to use the live preview.
+                </p>
+                <Button variant="outline" size="sm" @click="forceFrame = true">Try anyway</Button>
+              </div>
+              <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
+              <div
+                v-else
+                class="relative h-full shrink-0 overflow-hidden"
+                data-testid="preview-canvas"
+                :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
+              >
+                <iframe
+                  ref="frame"
+                  :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}`"
+                  :src="startHref"
+                  title="Site preview"
+                  class="h-full origin-top-left border-0"
+                  :class="store.dark ? 'bg-neutral-950' : 'bg-white'"
+                  :style="{
+                    width: fit.width ? `${fit.width}px` : '100%',
+                    ...(zoomed ? { height: `${fit.height}px`, transform: `scale(${fit.scale})` } : {}),
+                    // An iframe's `color-scheme` sets `prefers-color-scheme` inside the framed page.
+                    colorScheme: store.dark ? 'dark' : 'light',
+                  }"
+                  data-testid="preview-frame"
+                  @load="onLoad"
+                />
+                <!-- A device-sized frame has no visible edge against the panel; outline it. -->
+                <div
+                  v-if="store.device !== 'desktop'"
+                  class="border-border pointer-events-none absolute inset-0 border"
+                  data-testid="preview-boundary"
+                  aria-hidden="true"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="pageError && state === 'ready'"
+              class="bg-background absolute inset-x-3 bottom-3 flex items-start gap-3 rounded-lg border p-3 text-sm shadow-lg"
+              role="alert"
+              data-testid="page-error"
+            >
+              <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">
+                  {{ pageError.kind === "build" ? "This page failed to build" : "This page threw an error" }}
+                </p>
+                <p class="text-muted-foreground line-clamp-2 font-mono text-xs break-words">{{ pageError.message }}</p>
+              </div>
+              <Button size="sm" data-testid="fix-page-error" @click="fixPageError">
+                <Sparkles />
+                Fix this with your assistant
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Dismiss error" @click="pageError = null">
+                <X />
+              </Button>
+            </div>
+          </div>
+        </ResizablePanel>
+        <template v-if="detailsOpen">
+          <ResizableHandle with-handle class="bg-border" />
+          <ResizablePanel
+            id="page-details"
+            :default-size="28"
+            :min-size="16"
+            :max-size="45"
+            collapsible
+            :collapsed-size="0"
+            @collapse="detailsOpen = false"
+          >
+            <PageDetailsSidebar
+              :meta="pageMeta"
+              :findings="pageFindings"
+              :resources="pageResources"
+              :path="currentPath"
+              :page-url="hrefFor(currentPath)"
+              @close="detailsOpen = false"
+              @refresh="refreshPageDetails"
+              @fix="store.fixCheck($event)"
+            />
+          </ResizablePanel>
+        </template>
+      </ResizablePanelGroup>
     </div>
   </div>
 </template>

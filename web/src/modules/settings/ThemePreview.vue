@@ -2,12 +2,23 @@
 // A tiny window mockup used by the Appearance choices. The neutral palette is
 // deliberate: each mockup previews one appearance even while the app itself is
 // in the other theme.
-defineProps<{ mode: "light" | "dark" | "system" }>();
+import type { HTMLAttributes } from "vue";
+import { cn } from "@/lib/utils";
+
+const props = defineProps<{
+  mode: "light" | "dark" | "system";
+  class?: HTMLAttributes["class"];
+}>();
 </script>
 
 <template>
   <span
-    class="relative block aspect-[4/3] w-20 overflow-hidden rounded-md border border-zinc-300/80 shadow-sm"
+    :class="
+      cn(
+        'relative block aspect-[4/3] w-20 overflow-hidden rounded-md border border-zinc-300/80 shadow-sm',
+        props.class,
+      )
+    "
     aria-hidden="true"
   >
     <!-- The pane itself. -->

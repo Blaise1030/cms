@@ -138,11 +138,11 @@ pub async fn create(dir: &Path, raw_title: &str) -> Result<Change, ApiError> {
         // edits are carried. Checkpointing on GitHub `main` is blocked, so refusing here
         // would leave the writer with no in-app way forward.
         if on_main && start != "main" && is_dirty(dir).await? {
-            run(dir, &["checkout", "-b", &branch, "main"]).await.map_err(|_| {
-                ApiError::conflict(
-                    "Your unsaved edits conflict with starting a new change — discard them, then try again",
-                )
-            })?;
+            run(dir, &["checkout", "-b", &branch, "main"])
+                .await
+                .map_err(|_| {
+                    ApiError::conflict("Save or discard your edits before starting a new change")
+                })?;
         } else {
             return Err(e);
         }
@@ -179,17 +179,10 @@ async fn has_remote(dir: &Path, name: &str) -> Result<bool, ApiError> {
 /// Refuse while tracked files have uncommitted modifications.
 async fn ensure_clean(dir: &Path, action: &str) -> Result<(), ApiError> {
     // Ignore untracked (e.g. `node_modules` / build output from preview); those do not
-    // block checkout and are not what "checkpoint first" means.
+    // block checkout and are not what "save first" means.
     if is_dirty(dir).await? {
-        // On `main`, GitHub projects cannot checkpoint — only discard works in-app.
-        // On a change branch, the agent can checkpoint first.
-        let hint = if current_branch(dir).await? == "main" {
-            "discard them"
-        } else {
-            "checkpoint or discard them"
-        };
         return Err(ApiError::conflict(format!(
-            "Uncommitted changes — {hint} before {action}"
+            "Save or discard your edits before {action}"
         )));
     }
     Ok(())
@@ -207,7 +200,7 @@ pub async fn require_change(dir: &Path, github_repo: Option<&str>) -> Result<(),
         .to_string();
     if branch == "main" {
         return Err(ApiError::change_required(
-            "Start a change first — GitHub projects cannot be edited on main",
+            "Start a change first — the live site can't be edited directly",
         ));
     }
     Ok(())
@@ -290,7 +283,7 @@ pub async fn integrate_remote(
 /// when it is checked out. Uncommitted edits and untracked files in the way are refused.
 async fn advance_change(dir: &Path, branch: &str, old: &str, target: &str) -> Result<(), ApiError> {
     if current_branch(dir).await? == branch {
-        ensure_clean(dir, "updating this change from GitHub").await?;
+        ensure_clean(dir, "updating this draft").await?;
         ensure_no_untracked_in_the_way(dir, target).await?;
     }
     conflicts::advance_branch(dir, branch, old, target).await
@@ -414,7 +407,7 @@ pub async fn switch(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     if !branch_exists(dir, branch).await? {
         return Err(ApiError::enoent(format!("no such change: {branch}")));
     }
-    ensure_clean(dir, "switching changes").await?;
+    ensure_clean(dir, "switching drafts").await?;
     // Only the app's checkout is allowed: mark this one invocation (never process-wide).
     run_env(
         dir,
@@ -524,7 +517,7 @@ async fn get_latest_impl(
     let lock = crate::git::lock_for(dir);
     let _guard = lock.lock().await;
     if !leave_checkout {
-        ensure_clean(dir, "getting the latest").await?;
+        ensure_clean(dir, "syncing with the live site").await?;
     }
     let current = run(dir, &["branch", "--show-current"])
         .await?

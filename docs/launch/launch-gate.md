@@ -6,7 +6,7 @@ Recomputed every Thursday. Only the user closes an item.
 
 | # | Gate | State | Evidence |
 |---|---|---|---|
-| 1 | A stranger on **Windows** can install ORSO and publish a site | ✗ | macOS only today (#24) |
+| 1 | A stranger can install ORSO via **curl/brew** (and later Windows CLI) and publish a site | ✗ | macOS+Linux CLI path in progress; Windows CLI still open (#24); desktop app retired |
 | 2 | Content editor shipped (#22) | ✗ | open |
 | 3 | Localisation shipped (#23) | ✗ | open |
 | 4 | Three-minute demo showing the agent resolving a real conflict | ✗ | — |
@@ -15,8 +15,8 @@ Recomputed every Thursday. Only the user closes an item.
 
 ## Why each matters
 
-1. **Windows** — the majority of the target audience is on Windows. Without it, the launch reaches
-   half the market and generates refund-shaped support.
+1. **Install reach** — strangers need a one-line install (curl/brew) without a notarized desktop
+   app. Windows CLI still matters for half the market (#24); macOS+Linux CLI is the current path.
 2. **Content editor** — the non-technical half of the audience cannot use ORSO without it, and that
    half is what makes the product interesting to agencies.
 3. **Localisation** — the differentiator the user has already proven at scale elsewhere. Shipping

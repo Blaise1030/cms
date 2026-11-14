@@ -19,7 +19,7 @@ const floatingChrome = computed(() => props.floatingChat === true);
 <template>
   <div
     class="flex h-full min-h-0 flex-col"
-    :class="floatingChrome ? 'pb-11' : undefined"
+    :class="floatingChrome ? 'pr-2 pb-11' : 'pb-2'"
     data-testid="workspace-root"
   >
     <div class="relative min-h-0 flex-1">

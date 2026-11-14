@@ -29,6 +29,19 @@ describe("isBridgeMessage", () => {
     expect(isBridgeMessage({ type: "orso:preview", op: "path", url: 3 })).toBe(false);
   });
 
+  it("accepts an HTML snapshot for Page details", () => {
+    const href = "http://127.0.0.1:56066/preview/site-1/";
+    expect(
+      isBridgeMessage({ type: "orso:preview", op: "snapshot", url: href, html: "<html></html>" }),
+    ).toBe(true);
+    expect(isBridgeMessage({ type: "orso:preview", op: "snapshot", url: href, html: "" })).toBe(
+      false,
+    );
+    expect(isBridgeMessage({ type: "orso:preview", op: "snapshot", url: "/x", html: "<html></html>" })).toBe(
+      false,
+    );
+  });
+
   it("rejects unrelated messages", () => {
     expect(isBridgeMessage(null)).toBe(false);
     expect(isBridgeMessage({ type: "other", op: "pick", element })).toBe(false);

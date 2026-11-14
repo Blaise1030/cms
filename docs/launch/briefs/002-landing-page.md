@@ -34,7 +34,7 @@ a hosted CMS, and installs it — in under ninety seconds of reading.
 
 - Do not invent users, testimonials, logos, benchmarks, or "trusted by".
 - Do not promise Windows, localisation or pricing. Those are open decisions.
-- Do not edit `src/`, `web/` or `src-tauri/`. Copy and assets only.
+- Do not edit `src/` or `web/`. Copy and assets only. (`src-tauri/` is unsupported.)
 - Do not use the banned word list in your instructions.
 
 ## Output

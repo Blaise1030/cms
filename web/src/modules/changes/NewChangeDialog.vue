@@ -24,7 +24,7 @@ const props = withDefaults(
   }>(),
   {
     heading: "New change",
-    description: "Creates a branch from the latest main. Your assistant's saves are committed to it.",
+    description: "Starts from the latest version of the site. Your assistant's saves go on this change.",
   },
 );
 const emit = defineEmits<{ created: [change: Change] }>();

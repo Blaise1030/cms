@@ -80,7 +80,7 @@ pub(crate) fn stale() -> ApiError {
 pub(crate) async fn require_content_change(root: &Path, opened: &str) -> Result<String, ApiError> {
     let Some(active) = changes::active(root).await? else {
         return Err(ApiError::change_required(
-            "Start a change first — content cannot be edited on main",
+            "Start a change first — the live site can't be edited directly",
         ));
     };
     if active.branch != opened {

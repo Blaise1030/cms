@@ -240,6 +240,27 @@ file-tree-container {
     --tw-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
   }
 }
+/* Soft raised pill with the filled-button gloss→shade gradient (nav selected states). */
+@utility btn-raised-nav {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklch, white var(--raised-gloss), transparent),
+    transparent 55%,
+    color-mix(in oklch, black 6%, transparent)
+  );
+  --tw-inset-shadow: inset 0 1px 0 color-mix(in oklch, white var(--raised-soft-gloss), transparent);
+  --tw-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent),
+    0 1px 1px color-mix(in oklch, var(--foreground) 5%, transparent),
+    0 2px 4px -2px color-mix(in oklch, var(--foreground) 6%, transparent);
+  box-shadow:
+    var(--tw-inset-shadow), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:active {
+    --tw-inset-shadow: inset 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
+    --tw-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
+  }
+}
 
 /* Fades a scroll container's top and bottom edges while there is more content that way. Driven by
    its own scroll position, so content that fits shows no fade. */

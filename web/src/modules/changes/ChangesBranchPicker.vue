@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Check, ChevronsUpDown, GitBranch, Plus } from "@lucide/vue";
+import { ChevronsUpDown, CircleCheck, GitBranch, Plus } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
@@ -96,8 +96,8 @@ function onNewChange() {
               class="items-start"
               @select="onLiveSite"
             >
-              <Check
-                class="mt-0.5 size-3.5 shrink-0"
+              <CircleCheck
+                class="mt-0.5 size-3.5 shrink-0 fill-foreground text-background"
                 :class="store.active ? 'opacity-0' : 'opacity-100'"
               />
               <span class="min-w-0 flex-1">
@@ -122,8 +122,8 @@ function onNewChange() {
               class="items-start"
               @select="onSelect(c.branch)"
             >
-              <Check
-                class="mt-0.5 size-3.5 shrink-0"
+              <CircleCheck
+                class="mt-0.5 size-3.5 shrink-0 fill-foreground text-background"
                 :class="c.branch === store.active?.branch ? 'opacity-100' : 'opacity-0'"
               />
               <span class="min-w-0 flex-1">
