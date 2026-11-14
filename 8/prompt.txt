@@ -1,0 +1,53 @@
+[Image #1] Styling issues here
+
+---
+
+[Image #1] How do we handle this case for non tech users ?
+
+---
+
+Wait I remember there are some changes locally that handle this case, can you check the wortrees or brnach ?
+
+---
+
+There is also a change where when I type in a new agent session on main, it will prompt me to start a new change via the dialog, then after I add the change, then only the agent will only continue
+
+---
+
+So we have this already ?
+
+---
+
+[Image #1] See
+
+---
+
+[Image #1] See, this is the issue, also when the new change dialog is created, it asked the agent to make the chagne instead so it's a race condition
+
+---
+
+Make the change
+
+---
+
+I also have the page aware badge for the agent panel whcih branch is it from ?
+
+---
+
+Can merge the skill module to main ?
+
+---
+
+1
+
+---
+
+Push
+
+---
+
+[Image #1] The padding on the right side of the iframe preview is gone
+
+---
+
+Can we remove the skills module entirely and push to remote

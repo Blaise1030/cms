@@ -3,7 +3,7 @@
   "checkpoint_id": "01M7CW0QKJBYBBZEX38AZW30BN",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 122,
+  "checkpoints_count": 123,
   "files_touched": [
     ".github/workflows/release.yml",
     "docs/desktop-release.md",
@@ -140,6 +140,13 @@
       "compact_transcript": "/7/transcript.jsonl",
       "content_hash": "/7/content_hash.txt",
       "prompt": "/7/prompt.txt"
+    },
+    {
+      "metadata": "/8/metadata.json",
+      "transcript": "/8/full.jsonl",
+      "compact_transcript": "/8/transcript.jsonl",
+      "content_hash": "/8/content_hash.txt",
+      "prompt": "/8/prompt.txt"
     }
   ],
   "token_usage": {
