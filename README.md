@@ -67,6 +67,32 @@ terminal open while you work. Ctrl-C stops orso.
    which deploys the live site. **Get latest** pulls in what others have published. If someone
    edited the same lines, orso shows the conflict and can hand it to the agent to resolve.
 
+## Use orso with an existing site
+
+orso works best with sites started from its template, but an existing Astro site works too
+once it meets these requirements:
+
+| Needs | For |
+| --- | --- |
+| Default branch `main` | Changes, sync and publishing |
+| Astro `>=7.3.0 <8`, with a `dev` script | Live preview |
+| `base` and the HMR socket read `PUBLIC_BASE` / `ORSO_DEV_PORT`; links use `BASE_URL` | Live preview under `/preview/{id}/` |
+| orso's integration copied into `integrations/orso/`, `orso()` in the config, plus `yaml`, `js-yaml`, `jsonc-parser`, `linkedom` | Content tab and page checks |
+| Collections loaded with `orsoGlob` (`*.md`, `*.mdx` or `*.json`, with a schema) | Editable content |
+| `DESIGN.md` at the root | Design tab |
+| A deploy that records GitHub Deployments with an `environment_url` | Preview and Open live site links |
+| `orso.json` when you use pnpm/yarn or the site isn't at the repo root | Install and dev commands |
+
+Let your coding agent do it. Install the skills, then ask it to "set up this site for orso":
+
+```sh
+npx skills add Blaise1030/cms --skill setup-orso       # adopt or update orso in a repo
+npx skills add Blaise1030/cms --skill working-in-orso  # day-to-day editing rules
+```
+
+The skill checks the repo, wires everything in on a branch, migrates sites still using the
+old `orso-astro` package, and verifies the dev server and content manifest before it reports.
+
 ## Publishing your site
 
 The built-in template deploys to **Cloudflare Workers** through GitHub Actions
