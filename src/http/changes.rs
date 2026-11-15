@@ -32,6 +32,9 @@ const PR_STATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
 struct CreateRequest {
     project: String,
     title: String,
+    /// What the change is for; becomes the body of its GitHub page.
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -47,7 +50,7 @@ fn change_json(c: &changes::Change) -> Value {
     v
 }
 
-/// `POST /api/changes` `{ project, title }` → `{ branch, title }` (201).
+/// `POST /api/changes` `{ project, title, description? }` → `{ branch, title }` (201).
 pub async fn create(
     State(state): State<AppState>,
     body: Bytes,
@@ -60,6 +63,9 @@ pub async fn create(
     let dir = project_dir(&state, &req.project).await?;
     save_edits(&state, &req.project, &dir, true).await?;
     let change = changes::create(&dir, &req.title).await?;
+    if let Some(text) = req.description.as_deref() {
+        changes::set_description(&dir, &change.branch, text).await?;
+    }
     // Same as switch: a new change checks out a different tree; restart so preview matches.
     let _ = state.devservers.start(&req.project).await;
     Ok((StatusCode::CREATED, Json(change_json(&change))))
@@ -255,7 +261,8 @@ pub async fn share(
         Some(existing) => existing,
         None => {
             let title = pr_title(&change.title);
-            let body = pr_body(&change.title);
+            let description = changes::description(&project.dir, &branch).await;
+            let body = pr_body(&change.title, description.as_deref());
             state
                 .github
                 .create_draft_pr(&repo, &branch, &title, &body)
@@ -864,7 +871,8 @@ pub async fn publish(
         Some(existing) => existing,
         None => {
             let title = pr_title(&change.title);
-            let body = pr_body(&change.title);
+            let description = changes::description(&project.dir, &branch).await;
+            let body = pr_body(&change.title, description.as_deref());
             state
                 .github
                 .create_draft_pr(&repo, &branch, &title, &body)

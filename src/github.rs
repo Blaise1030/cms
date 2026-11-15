@@ -139,9 +139,12 @@ pub fn pr_title(change_title: &str) -> String {
     change_title.trim().to_string()
 }
 
-/// Draft PR body references the change title.
-pub fn pr_body(change_title: &str) -> String {
-    format!("Preview of change: {}", change_title.trim())
+/// Draft PR body: the writer's description, or a line naming the change when there is none.
+pub fn pr_body(change_title: &str, description: Option<&str>) -> String {
+    match description.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => d.to_string(),
+        None => format!("Preview of change: {}", change_title.trim()),
+    }
 }
 
 impl From<ApiRepo> for RepoInfo {
@@ -2029,7 +2032,9 @@ mod tests {
     #[test]
     fn draft_pr_copy_uses_change_title() {
         assert_eq!(pr_title("Launch week"), "Launch week");
-        assert_eq!(pr_body("Launch week"), "Preview of change: Launch week");
+        assert_eq!(pr_body("Launch week", None), "Preview of change: Launch week");
+        assert_eq!(pr_body("Launch week", Some("  ")), "Preview of change: Launch week");
+        assert_eq!(pr_body("Launch week", Some(" New hero copy and pricing table. ")), "New hero copy and pricing table.");
     }
 
     #[test]
@@ -2474,7 +2479,7 @@ mod tests {
         );
 
         let title = pr_title("Launch week");
-        let body = pr_body("Launch week");
+        let body = pr_body("Launch week", None);
         let pr = auth
             .create_draft_pr("acme/site", "content/launch-week", &title, &body)
             .await

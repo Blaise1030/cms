@@ -17,7 +17,7 @@ async function startChangeAndCheckpoint(
   await page.goto(`${origin}/p/${projectId}`);
   await expect(page.getByTestId("preview-panel")).toBeVisible({ timeout: 60_000 });
 
-  await startChange(orso, title);
+  await startChange(orso, title, "New hero copy and a launch-week banner.");
   await page.reload();
   await expect(page.getByTestId("active-change")).toHaveText("Launch week");
 
@@ -53,6 +53,8 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
     title: "Launch week",
     head: "content/launch-week",
     base: "main",
+    // The description given when the change was started becomes the page's body.
+    body: "New hero copy and a launch-week banner.",
   });
 
   const remoteBefore = git(bareRemote, ["rev-parse", "refs/heads/content/launch-week"]);

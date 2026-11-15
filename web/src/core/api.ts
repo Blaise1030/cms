@@ -326,8 +326,10 @@ export function createApi(
       json<unknown>("POST", `/api/chat/${enc(project)}/${enc(chatId)}/model`, { body: { modelId: model } }),
     deleteChat: (project: string, chatId: string) =>
       json<{ deleted: true }>("DELETE", `/api/chat/${enc(project)}/${enc(chatId)}`),
-    createChange: (project: string, title: string) =>
-      json<Change>("POST", "/api/changes", { body: { project, title } }),
+    createChange: (project: string, title: string, description?: string) =>
+      json<Change>("POST", "/api/changes", {
+        body: { project, title, ...(description?.trim() ? { description: description.trim() } : {}) },
+      }),
     listChanges: async (project: string): Promise<Change[]> =>
       (await json<{ changes: Change[] }>("GET", "/api/changes", { query: { project } })).changes,
     activeChange: async (project: string): Promise<Change> =>

@@ -49,4 +49,30 @@ describe("NewChangeDialog", () => {
     });
     w.unmount();
   });
+  it("sends the description along with the title", async () => {
+    const createChange = vi.fn(async (_p: string, title: string) => ({ branch: "content/launch-week", title }));
+    h.daemon = createFakeDaemon({
+      createChange,
+      listChanges: async () => [],
+      activeChange: async () => null,
+      tree: async () => ({ entries: [] }),
+    });
+    const w = mount(NewChangeDialog, { props: { projectId: "site", open: true }, attachTo: document.body });
+    await flushPromises();
+
+    expect(document.querySelector("[role='dialog']")!.textContent).toContain("Description");
+    const fill = (label: string, value: string) => {
+      const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label='${label}']`)!;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    fill("Change title", "Launch week");
+    fill("Change description", "New hero copy and a launch-week banner.");
+    await flushPromises();
+    document.querySelector<HTMLFormElement>("[role='dialog'] form")!.requestSubmit();
+    await flushPromises();
+
+    expect(createChange).toHaveBeenCalledWith("site", "Launch week", "New hero copy and a launch-week banner.");
+    w.unmount();
+  });
 });

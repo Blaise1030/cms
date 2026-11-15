@@ -301,6 +301,30 @@ pub async fn push(dir: &Path, branch: &str, env: &[(String, String)]) -> Result<
     Ok(())
 }
 
+/// Git config key for a change's optional description (the title lives in `branch.*.description`).
+fn description_key(branch: &str) -> String {
+    format!("branch.{branch}.orsoDescription")
+}
+
+/// Store what a change is for; it becomes the body of the change's GitHub page when shared.
+/// Blank text clears it.
+pub async fn set_description(dir: &Path, branch: &str, text: &str) -> Result<(), ApiError> {
+    let text = text.trim();
+    if text.is_empty() {
+        let _ = run(dir, &["config", "--unset", &description_key(branch)]).await;
+        return Ok(());
+    }
+    run(dir, &["config", &description_key(branch), text]).await?;
+    Ok(())
+}
+
+/// The change's description, if the writer gave one.
+pub async fn description(dir: &Path, branch: &str) -> Option<String> {
+    let text = run(dir, &["config", "--get", &description_key(branch)]).await.ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 /// Load a change branch's display title (from branch description).
 pub async fn get(dir: &Path, branch: &str) -> Result<Change, ApiError> {
     if !branch.starts_with("content/") {

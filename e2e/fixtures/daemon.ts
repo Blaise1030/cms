@@ -76,10 +76,12 @@ export async function createChange(
 export async function startChange(
   env: Pick<orsoEnv, "origin" | "token" | "projectId">,
   title: string,
+  description?: string,
 ): Promise<{ branch: string; title: string }> {
   const res = await api(env.origin, env.token, "POST", "/api/changes", {
     project: env.projectId,
     title,
+    ...(description ? { description } : {}),
   });
   if (!res.ok) throw new Error(`start change failed: ${await res.text()}`);
   return (await res.json()) as { branch: string; title: string };

@@ -287,14 +287,17 @@ export const useChangesStore = defineStore("changes", () => {
     }
   }
 
-  async function create(id: string, title: string): Promise<Change> {
+  /** `description` says what the change is for; it becomes the body of its GitHub page. */
+  async function create(id: string, title: string, description?: string): Promise<Change> {
     const trimmed = title.trim();
     if (!trimmed) throw new Error("Change title is required");
     creating.value = true;
     error.value = null;
     needsSignIn.value = false;
     try {
-      const change = await daemon.api.createChange(id, trimmed);
+      const change = description?.trim()
+        ? await daemon.api.createChange(id, trimmed, description)
+        : await daemon.api.createChange(id, trimmed);
       projectId.value = id;
       active.value = change;
       prUrl.value = null;
