@@ -951,15 +951,16 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
         </template>
       </UAlert>
       <!-- Only the frame and icon are amber; the command reads as code, and the actions stay in view. -->
+      <!-- One request at a time: a stack of cards would push the transcript off screen. -->
       <UAlert
-        v-for="perm in permissions"
+        v-for="perm in permissions.slice(0, 1)"
         :key="perm.request_id"
         data-testid="chat-approval"
         role="alert"
         color="warning"
         variant="outline"
         icon="i-hugeicons-shield-01"
-        title="Approval needed"
+        :title="permissions.length > 1 ? `Approval needed · ${permissions.length - 1} more waiting` : 'Approval needed'"
         orientation="vertical"
         :ui="{ title: 'text-highlighted', description: 'text-muted min-w-0', wrapper: 'min-w-0' }"
       >

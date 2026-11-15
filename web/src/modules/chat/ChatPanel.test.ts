@@ -408,6 +408,30 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
   });
 
+  it("shows one approval at a time and says how many more are waiting", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: true }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: true,
+      chunks: [
+        { type: "user_text", session_id: "s", text: "go" },
+        { type: "permission", session_id: "s", request_id: "1", tool_call: { title: "Fetch a page" }, options: [] },
+        { type: "permission", session_id: "s", request_id: "2", tool_call: { title: "Edit a file" }, options: [] },
+        { type: "permission", session_id: "s", request_id: "3", tool_call: { title: "Run a command" }, options: [] },
+      ],
+      pendingPermissions: ["1", "2", "3"],
+    } as History;
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    expect(w.findAll("[data-testid='chat-approval']")).toHaveLength(1);
+    expect(w.get("[data-testid='chat-approval']").text()).toContain("Approval needed · 2 more waiting");
+    expect(w.get("[data-testid='chat-approval-title']").text()).toBe("Fetch a page");
+    await w.get("[data-testid='chat-approval-allow']").trigger("click");
+    await flushPromises();
+    expect(w.findAll("[data-testid='chat-approval']")).toHaveLength(1);
+    expect(w.get("[data-testid='chat-approval-title']").text()).toBe("Edit a file");
+    expect(w.get("[data-testid='chat-approval']").text()).toContain("1 more waiting");
+  });
+
   it("shows the approval's command as code, clipped with Show all, and keeps the actions", async () => {
     const command = Array.from({ length: 14 }, (_, i) => `echo line ${i}`).join("\n");
     chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: true }];
