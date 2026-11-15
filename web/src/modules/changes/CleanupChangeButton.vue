@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { toast } from "vue-sonner";
-import { Button } from "@/components/ui/button";
+import { toast } from "@/lib/toast";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "./store";
 
@@ -26,15 +26,16 @@ async function onCleanup() {
 </script>
 
 <template>
-  <Button
+  <UButton
     v-if="visible"
+    color="neutral"
     variant="outline"
     size="sm"
-    class="h-7 shrink-0 px-2 text-xs"
+    class="shrink-0"
     title="Delete this change's local branch and return to the updated main"
     data-testid="cleanup-change"
     :disabled="store.cleaningUp"
+    :label="store.cleaningUp ? 'Cleaning up…' : 'Clean up'"
     @click="onCleanup"
-    >{{ store.cleaningUp ? "Cleaning up…" : "Clean up" }}</Button
-  >
+  />
 </template>

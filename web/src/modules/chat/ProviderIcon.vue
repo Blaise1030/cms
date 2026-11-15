@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bot } from "@lucide/vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import { cn } from "@/lib/utils";
 
 const props = defineProps<{ provider: string; class?: string }>();
@@ -25,5 +25,5 @@ const marks: Record<string, string> = {
   >
     <path :d="marks[provider]" />
   </svg>
-  <Bot v-else :class="cn('size-3.5 shrink-0', props.class)" aria-hidden="true" />
+  <UIcon v-else name="i-hugeicons-bot" :class="cn('size-3.5 shrink-0', props.class)" aria-hidden="true" />
 </template>

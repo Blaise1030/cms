@@ -2,19 +2,10 @@
 // App settings → Assistant. The same rows and sign-in steps as the setup dialog,
 // without a chat to connect to: a ready row simply stays ready.
 import { computed, onMounted, ref } from "vue";
-import { BotMessageSquare, CircleAlert, RefreshCw } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import type { ProviderSignInState } from "@/core/types";
 import ProviderRow from "@/modules/assistant/ProviderRow.vue";
 import SignInPanel from "@/modules/assistant/SignInPanel.vue";
@@ -79,81 +70,92 @@ function onAction(row: AssistantRow, action: RowAction) {
 </script>
 
 <template>
-  <SettingsSection label="Assistants" :icon="BotMessageSquare" data-testid="assistant-settings">
+  <SettingsSection label="Assistants" icon="i-hugeicons-chat-bot" data-testid="assistant-settings">
     <template #actions>
-      <Button
+      <UButton
+        color="neutral"
         variant="outline"
         size="sm"
+        icon="i-hugeicons-refresh"
+        loading-icon="i-hugeicons-refresh"
+        label="Recheck"
+        :loading="rechecking"
         :disabled="rechecking"
         data-testid="assistant-settings-recheck"
         @click="recheck"
-      >
-        <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
-      </Button>
+      />
     </template>
 
-    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-      <p
-        v-if="loading"
-        class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
-        data-testid="assistant-settings-loading"
-      >
-        <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
-      </p>
+    <p
+      v-if="loading"
+      class="text-muted flex items-center gap-2 p-4 text-sm"
+      data-testid="assistant-settings-loading"
+    >
+      <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" /> Checking your setup…
+    </p>
 
-      <Alert
-        v-else-if="store.error && !store.snapshot"
-        variant="destructive"
-        class="m-4"
+    <div v-else-if="store.error && !store.snapshot" class="p-4">
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-hugeicons-alert-circle"
+        description="We couldn't check your setup just now. Make sure orso is still running, then check again."
         data-testid="assistant-settings-error"
       >
-        <CircleAlert aria-hidden="true" />
-        <AlertDescription class="flex flex-col items-start gap-2">
-          <p>We couldn't check your setup just now. Make sure orso is still running, then check again.</p>
-          <Button
+        <template #actions>
+          <UButton
+            color="neutral"
             variant="outline"
             size="sm"
+            icon="i-hugeicons-refresh"
+            loading-icon="i-hugeicons-refresh"
+            label="Check again"
+            :loading="rechecking"
             :disabled="rechecking"
             data-testid="assistant-settings-retry"
             @click="recheck"
-          >
-            <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Check again
-          </Button>
-        </AlertDescription>
-      </Alert>
-
-      <Empty v-else-if="!rows.length" class="border-0" data-testid="assistant-settings-empty">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <BotMessageSquare aria-hidden="true" />
-          </EmptyMedia>
-          <EmptyTitle>No assistants found</EmptyTitle>
-          <EmptyDescription>
-            Download an assistant to make changes to your site, then check again.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button variant="outline" size="sm" :disabled="rechecking" @click="recheck">
-            <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Check again
-          </Button>
-        </EmptyContent>
-      </Empty>
-
-      <ul v-else class="divide-y divide-border [&>li]:px-4" data-testid="assistant-settings-rows">
-        <template v-for="row in rows" :key="row.id">
-          <ProviderRow :row="row" hide-connected-action @action="onAction(row, $event)" />
-          <li v-if="panelFor(row.id)" class="pb-3">
-            <SignInPanel
-              :provider-name="row.name"
-              :state="panelFor(row.id) ?? NO_SIGN_IN"
-              @submit-code="store.submitCode(row.id, $event)"
-              @cancel="store.cancelSignIn(row.id)"
-              @retry="store.signIn(row.id)"
-              @dismiss="store.clearSignIn(row.id)"
-            />
-          </li>
+          />
         </template>
-      </ul>
-    </Card>
+      </UAlert>
+    </div>
+
+    <UEmpty
+      v-else-if="!rows.length"
+      variant="naked"
+      icon="i-hugeicons-chat-bot"
+      title="No assistants found"
+      description="Download an assistant to make changes to your site, then check again."
+      data-testid="assistant-settings-empty"
+    >
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-hugeicons-refresh"
+          loading-icon="i-hugeicons-refresh"
+          label="Check again"
+          :loading="rechecking"
+          :disabled="rechecking"
+          @click="recheck"
+        />
+      </template>
+    </UEmpty>
+
+    <ul v-else class="divide-y divide-default [&>li]:px-4" data-testid="assistant-settings-rows">
+      <template v-for="row in rows" :key="row.id">
+        <ProviderRow :row="row" hide-connected-action @action="onAction(row, $event)" />
+        <li v-if="panelFor(row.id)" class="pb-3">
+          <SignInPanel
+            :provider-name="row.name"
+            :state="panelFor(row.id) ?? NO_SIGN_IN"
+            @submit-code="store.submitCode(row.id, $event)"
+            @cancel="store.cancelSignIn(row.id)"
+            @retry="store.signIn(row.id)"
+            @dismiss="store.clearSignIn(row.id)"
+          />
+        </li>
+      </template>
+    </ul>
   </SettingsSection>
 </template>

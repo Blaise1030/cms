@@ -30,5 +30,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="host" class="bg-background overflow-hidden rounded-md border" data-testid="diff-view" />
+  <div ref="host" class="bg-default border-default overflow-hidden rounded-md border" data-testid="diff-view" />
 </template>

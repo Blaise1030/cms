@@ -105,7 +105,7 @@ test("content editor saves a blog article with an image on a change branch and p
     return el?.getBoundingClientRect().width ?? 0;
   });
   const widthBeforeDrag = await collectionsWidth();
-  const collectionsHandle = page.getByTestId("content-panel").locator('[data-slot="resizable-handle"]').first();
+  const collectionsHandle = page.getByTestId("content-panel").locator('[data-slot="handle"]').first();
   const handleBox = await collectionsHandle.boundingBox();
   if (!handleBox) throw new Error("collections resize handle not found");
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
@@ -136,7 +136,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await page.keyboard.type("We shipped the spring launch.");
   await page.keyboard.press("Enter");
   await page.keyboard.type("/");
-  await page.getByTestId("slash-item").filter({ hasText: "Image" }).click();
+  await page.getByTestId("slash-menu").getByRole("option", { name: "Image" }).click();
   await page.getByTestId("image-file").setInputFiles({
     name: "team.png",
     mimeType: "image/png",

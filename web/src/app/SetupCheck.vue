@@ -6,21 +6,17 @@
 // Copy rules: never show "agent", "CLI", "ACP", "SDK", "npx", "PATH" or
 // "runtime" to the user. Keep the product words: assistant, site, download.
 import { computed, onMounted, ref, watch } from "vue";
-import {
-  Check,
-  CircleAlert,
-  CircleCheck,
-  Download,
-  ExternalLink,
-  LogIn,
-  Package,
-  RefreshCw,
-  RotateCcw,
-  X,
-} from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UAvatar from "@nuxt/ui/components/Avatar.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCard from "@nuxt/ui/components/Card.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UPageHeader from "@nuxt/ui/components/PageHeader.vue";
+import URadioGroup from "@nuxt/ui/components/RadioGroup.vue";
+import UProgress from "@nuxt/ui/components/Progress.vue";
+import USeparator from "@nuxt/ui/components/Separator.vue";
 import { useDaemon } from "@/core/daemon";
 import type { ProviderSignInState, RuntimeStatus, SetupProvider, SetupStatus } from "@/core/types";
 import PawMark from "@/app/PawMark.vue";
@@ -30,11 +26,13 @@ import {
   buildRows,
   deriveRow,
   type AssistantRow,
+  type RowTone,
 } from "@/modules/assistant/rows";
 import { formatDownloadSize, sourceLabel } from "@/modules/assistant/presentation";
 import SignInPanel from "@/modules/assistant/SignInPanel.vue";
 import { useAssistantStore } from "@/modules/assistant/store";
 import DeviceCodeDialog from "@/modules/github/DeviceCodeDialog.vue";
+import SettingsRow from "@/modules/settings/SettingsRow.vue";
 import { useGithubStore } from "@/modules/github/store";
 import { onboardingStartStep } from "@/app/setup";
 
@@ -53,6 +51,29 @@ const STEPS: readonly { n: Step; label: string }[] = [
   { n: 2, label: "Site builder" },
   { n: 3, label: "GitHub" },
 ];
+
+/** Step titles: a page header without its default rule and padding. */
+const HEADER_UI = {
+  root: "border-none py-0",
+  title: "font-semibold tracking-tight text-balance",
+  description: "mt-2 max-w-xl text-base",
+};
+
+/** The square tile behind a provider or package icon. */
+const AVATAR_UI = { root: "bg-background rounded-lg border border-default", icon: "text-default size-5" };
+
+function toneColor(tone: RowTone): "success" | "warning" | "error" | "neutral" {
+  if (tone === "success") return "success";
+  if (tone === "warning") return "warning";
+  if (tone === "destructive") return "error";
+  return "neutral";
+}
+
+function toneIcon(tone: RowTone): string | undefined {
+  if (tone === "success") return "i-hugeicons-checkmark-circle-02";
+  if (tone === "destructive") return "i-hugeicons-alert-circle";
+  return undefined;
+}
 
 /** The card list order; OpenCode is the recommendation and the default. */
 const CARD_ORDER = ["opencode", "claude", "codex", "cursor"] as const;
@@ -115,6 +136,19 @@ const selectedRow = computed<AssistantRow | null>(() => {
 });
 
 /** Assistants that are already on the Mac and can chat right now. */
+/** Radio items for the two assistant groups; `row` feeds the custom label and description slots. */
+const cardItems = computed(() => cards.value.map((row) => ({ value: row.id, row })));
+const existingItems = computed(() =>
+  existingRows.value.map((row) => ({ value: row.id, row, description: "Already on your Mac" })),
+);
+/** Each group shows the selection only when the selected assistant is one of its own. */
+const selectedCardId = computed(() =>
+  cards.value.some((r) => r.id === selectedRow.value?.id) ? selectedRow.value?.id : undefined,
+);
+const selectedExistingId = computed(() =>
+  existingRows.value.some((r) => r.id === selectedRow.value?.id) ? selectedRow.value?.id : undefined,
+);
+
 const existingRows = computed<AssistantRow[]>(() =>
   buildRows(
     assistant.providers.filter(
@@ -160,6 +194,15 @@ const setupLabel = computed(() => {
     default:
       return `Set up with ${row.name}`;
   }
+});
+
+const setupIcon = computed(() => {
+  const row = selectedRow.value;
+  if (!row || row.chatReady) return undefined;
+  if (row.phase === "notDownloaded") return "i-hugeicons-download-01";
+  if (row.phase === "downloadError") return "i-hugeicons-refresh";
+  if (row.phase === "ready") return "i-hugeicons-login-03";
+  return undefined;
 });
 
 const setupDisabled = computed(() => {
@@ -237,6 +280,25 @@ const siteLabel = computed(() => {
 
 const siteDisabled = computed(() => site.value.phase === "finishing");
 
+/** Cancel and retry are the secondary look; download and continue are primary. */
+const siteSecondary = computed(
+  () => site.value.phase === "downloading" || site.value.phase === "downloadError",
+);
+
+const siteIcon = computed(() => {
+  switch (site.value.phase) {
+    case "notDownloaded":
+    case "updateAvailable":
+      return "i-hugeicons-download-01";
+    case "downloading":
+      return "i-hugeicons-cancel-01";
+    case "downloadError":
+      return "i-hugeicons-arrow-turn-backward";
+    default:
+      return undefined;
+  }
+});
+
 function startSite() {
   switch (site.value.phase) {
     case "notDownloaded":
@@ -261,6 +323,30 @@ function startSite() {
 const githubSignedIn = computed(
   () => gh.user != null || status.value?.githubSignedIn === true,
 );
+
+/** Git and the GitHub tools share one row shape: ready, or a link to get it. */
+const tools = computed(() => [
+  {
+    id: "git",
+    testId: "onboarding-git",
+    icon: "i-hugeicons-git-branch",
+    title: "Git",
+    description: "Keeps the history of every change to your sites.",
+    ready: status.value?.git === true,
+    getLabel: "Get Git",
+    getUrl: "https://git-scm.com/downloads/mac",
+  },
+  {
+    id: "tools",
+    testId: "onboarding-github-tools",
+    icon: "i-hugeicons-git-pull-request",
+    title: "GitHub tools",
+    description: "Connects your sites to GitHub.",
+    ready: status.value?.gh === true,
+    getLabel: "Get the GitHub tools",
+    getUrl: "https://cli.github.com/",
+  },
+]);
 
 // A finished in-app sign-in changes what the daemon reports.
 watch(
@@ -357,32 +443,38 @@ function dotLabel(n: Step): string {
 
 <template>
   <div
-    class="bg-background text-foreground flex min-h-screen flex-col p-6 sm:p-8"
+    class="bg-background text-default flex min-h-screen flex-col p-6 sm:p-8"
     data-testid="setup-check"
   >
     <div class="mx-auto flex w-full max-w-xl flex-1 flex-col">
       <header class="flex justify-end">
-        <Button
+        <UButton
+          color="neutral"
           variant="ghost"
           size="sm"
+          label="Skip setup"
           data-testid="onboarding-skip"
           @click="emit('continue')"
-        >
-          Skip setup
-        </Button>
+        />
       </header>
 
       <main class="flex flex-1 flex-col justify-center py-10">
-        <p v-if="failed" class="text-destructive text-sm" role="alert" data-testid="setup-error">
-          We couldn't check your setup just now. Make sure orso is still running, then select
-          Recheck.
-        </p>
+        <UAlert
+          v-if="failed"
+          color="error"
+          variant="subtle"
+          icon="i-hugeicons-alert-circle"
+          role="alert"
+          description="We couldn't check your setup just now. Make sure orso is still running, then select Recheck."
+          data-testid="setup-error"
+        />
         <p
           v-else-if="!status"
-          class="text-muted-foreground flex items-center gap-2 text-sm"
+          class="text-muted flex items-center gap-2 text-sm"
           data-testid="setup-loading"
         >
-          <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
+          <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" />
+          Checking your setup…
         </p>
 
         <!-- 1. Assistant -->
@@ -391,248 +483,203 @@ function dotLabel(n: Step): string {
           class="flex flex-col gap-8"
           data-testid="onboarding-step-assistant"
         >
-          <div class="flex flex-col gap-2">
-            <h1 class="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-              Set up your assistant.
-            </h1>
-            <p class="text-muted-foreground max-w-xl text-base text-pretty">
-              Download an assistant to make changes to your site. OpenCode is free to start; use
-              the account you already have for the others.
-            </p>
-          </div>
+          <UPageHeader
+            title="Set up your assistant."
+            description="Download an assistant to make changes to your site. OpenCode is free to start; use the account you already have for the others."
+            :ui="HEADER_UI"
+          />
 
           <div class="flex flex-col gap-4">
-            <div
-              class="bg-card divide-y overflow-hidden rounded-xl border"
-              role="radiogroup"
+            <URadioGroup
+              :model-value="selectedCardId"
+              :items="cardItems"
+              variant="card"
+              indicator="start"
               aria-label="Assistant"
+              class="w-full"
+              :ui="{ fieldset: 'gap-2', item: 'w-full items-start', wrapper: 'min-w-0 flex-1' }"
+              @update:model-value="(id) => select(String(id))"
             >
-              <div v-for="row in cards" :key="row.id" class="flex flex-col">
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="selectedRow?.id === row.id"
-                  :data-testid="`onboarding-provider-${row.id}`"
-                  :data-selected="selectedRow?.id === row.id ? 'true' : undefined"
-                  :data-phase="row.phase"
-                  class="flex w-full items-center gap-3 px-4 py-3.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
-                  :class="
-                    selectedRow?.id === row.id
-                      ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
-                      : 'hover:bg-muted/50'
-                  "
-                  @click="select(row.id)"
+              <template #label="{ item }">
+                <span
+                  class="flex flex-wrap items-center gap-2"
+                  :data-testid="`onboarding-provider-${item.row.id}`"
+                  :data-selected="selectedRow?.id === item.row.id ? 'true' : undefined"
+                  :data-phase="item.row.phase"
                 >
-                  <span
-                    class="bg-background flex size-9 shrink-0 items-center justify-center rounded-lg border"
-                  >
-                    <ProviderIcon :provider="row.id" class="size-5" />
-                  </span>
-
-                  <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span class="flex flex-wrap items-center gap-2">
-                      <span class="font-medium">{{ row.name }}</span>
-                      <span
-                        v-if="row.recommended"
-                        class="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[11px] font-medium"
-                      >
-                        Recommended
-                      </span>
+                  <ProviderIcon :provider="item.row.id" class="size-4" />
+                  <span class="text-highlighted font-medium">{{ item.row.name }}</span>
+                  <UBadge
+                    v-if="item.row.recommended"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                    class="rounded-full"
+                    label="Recommended"
+                  />
+                </span>
+              </template>
+              <template #description="{ item }">
+                <span class="flex flex-col gap-1">
+                  <span>{{ item.row.description }}</span>
+                  <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <UBadge
+                      v-if="item.row.status && item.row.phase !== 'downloading' && item.row.phase !== 'finishing'"
+                      :color="toneColor(item.row.tone)"
+                      variant="soft"
+                      size="sm"
+                      :icon="toneIcon(item.row.tone)"
+                      :label="item.row.status"
+                      :data-testid="`onboarding-status-${item.row.id}`"
+                    />
+                    <span
+                      v-else-if="item.row.phase === 'downloading'"
+                      class="tabular-nums"
+                      :data-testid="`onboarding-percent-${item.row.id}`"
+                    >
+                      {{ item.row.progress ?? 0 }}%
                     </span>
-                    <span class="text-muted-foreground text-sm">{{ row.description }}</span>
-
-                    <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                      <span
-                        v-if="row.status && row.phase !== 'downloading' && row.phase !== 'finishing'"
-                        class="inline-flex items-center gap-1"
-                        :class="
-                          row.tone === 'destructive'
-                            ? 'text-destructive'
-                            : row.tone === 'warning'
-                              ? 'text-amber-700 dark:text-amber-400'
-                              : row.tone === 'success'
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : 'text-muted-foreground'
-                        "
-                        :data-testid="`onboarding-status-${row.id}`"
+                    <span v-else-if="item.row.phase === 'finishing'" class="inline-flex items-center gap-1">
+                      <UIcon name="i-hugeicons-loading-03" class="size-3 animate-spin" aria-hidden="true" />
+                      Setting up…
+                    </span>
+                    <span
+                      v-if="(item.row.phase === 'ready' || item.row.phase === 'updateAvailable') && item.row.version"
+                      :data-testid="`onboarding-version-${item.row.id}`"
+                    >
+                      Version {{ item.row.version }}<template v-if="sourceLabel(item.row.source)">
+                        · {{ sourceLabel(item.row.source) }}</template
                       >
-                        <CircleCheck v-if="row.tone === 'success'" class="size-3.5" aria-hidden="true" />
-                        <CircleAlert v-else-if="row.tone === 'destructive'" class="size-3.5" aria-hidden="true" />
-                        {{ row.status }}
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'downloading'"
-                        class="text-muted-foreground tabular-nums"
-                        :data-testid="`onboarding-percent-${row.id}`"
-                      >
-                        {{ row.progress ?? 0 }}%
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'finishing'"
-                        class="text-muted-foreground inline-flex items-center gap-1"
-                      >
-                        <Spinner class="size-3" aria-hidden="true" /> Setting up…
-                      </span>
-                      <span
-                        v-if="
-                          (row.phase === 'ready' || row.phase === 'updateAvailable') && row.version
-                        "
-                        class="text-muted-foreground"
-                        :data-testid="`onboarding-version-${row.id}`"
-                      >
-                        Version {{ row.version }}<template v-if="sourceLabel(row.source)">
-                          · {{ sourceLabel(row.source) }}</template
-                        >
-                      </span>
-                      <span
-                        v-else-if="row.phase === 'notDownloaded'"
-                        class="text-muted-foreground"
-                        :data-testid="`onboarding-size-${row.id}`"
-                      >
-                        {{ formatDownloadSize(row.provider.runtime?.downloadBytes) ?? "" }}
-                      </span>
+                    </span>
+                    <span
+                      v-else-if="item.row.phase === 'notDownloaded'"
+                      :data-testid="`onboarding-size-${item.row.id}`"
+                    >
+                      {{ formatDownloadSize(item.row.provider.runtime?.downloadBytes) ?? "" }}
                     </span>
                   </span>
+                </span>
+              </template>
+            </URadioGroup>
 
-                  <Check
-                    v-if="selectedRow?.id === row.id"
-                    class="size-5 shrink-0"
-                    aria-hidden="true"
-                    data-testid="onboarding-selected-check"
-                  />
-                </button>
-
-                <div
-                  v-if="selectedRow?.id === row.id && row.phase === 'downloading'"
-                  class="flex items-center gap-3 px-4 pb-4 sm:pl-16"
-                  :data-testid="`onboarding-progress-${row.id}`"
-                >
-                  <Progress
-                    :model-value="row.progress ?? 0"
-                    :aria-label="`Downloading ${row.name}: ${row.progress ?? 0}%`"
-                    class="max-w-64"
-                  />
-                  <span class="text-muted-foreground text-xs tabular-nums">
-                    {{ row.progress ?? 0 }}%
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    :data-testid="`onboarding-cancel-${row.id}`"
-                    @click="cancelSelected"
-                  >
-                    <X aria-hidden="true" /> Cancel
-                  </Button>
-                </div>
-
-                <div
-                  v-if="selectedRow?.id === row.id && row.phase === 'downloadError'"
-                  class="px-4 pb-4 text-sm sm:pl-16"
-                  :data-testid="`onboarding-error-${row.id}`"
-                >
-                  <p class="text-destructive">
-                    We couldn't download {{ row.name }}. Check your connection and try again.
-                  </p>
-                  <details v-if="row.message" class="mt-1">
-                    <summary class="text-muted-foreground cursor-pointer text-xs underline">
-                      Details
-                    </summary>
-                    <p class="text-muted-foreground mt-1 text-xs break-words">{{ row.message }}</p>
-                  </details>
-                </div>
-
-                <div
-                  v-if="selectedRow?.id === row.id && signInState"
-                  class="px-4 pb-4 sm:pl-16"
-                >
-                  <SignInPanel
-                    :provider-name="row.name"
-                    :state="signInState ?? NO_SIGN_IN"
-                    @submit-code="onSubmitCode(row.id, $event)"
-                    @cancel="onCancelSignIn(row.id)"
-                    @retry="onRetrySignIn(row.id)"
-                    @dismiss="onDismissSignIn(row.id)"
-                  />
-                </div>
+            <!-- The selected assistant's controls sit under the group, outside the option labels. -->
+            <template v-if="selectedRow">
+              <div
+                v-if="selectedRow.phase === 'downloading'"
+                class="flex items-center gap-3"
+                :data-testid="`onboarding-progress-${selectedRow.id}`"
+              >
+                <UProgress
+                  :model-value="selectedRow.progress ?? 0"
+                  size="sm"
+                  :get-value-label="() => `Downloading ${selectedRow?.name}: ${selectedRow?.progress ?? 0}%`"
+                  class="max-w-64"
+                />
+                <span class="text-muted text-xs tabular-nums">{{ selectedRow.progress ?? 0 }}%</span>
+                <UButton
+                  color="neutral"
+                  variant="outline"
+                  size="xs"
+                  icon="i-hugeicons-cancel-01"
+                  label="Cancel"
+                  :data-testid="`onboarding-cancel-${selectedRow.id}`"
+                  @click="cancelSelected"
+                />
               </div>
-            </div>
+
+              <UAlert
+                v-if="selectedRow.phase === 'downloadError'"
+                color="error"
+                variant="subtle"
+                icon="i-hugeicons-alert-circle"
+                :data-testid="`onboarding-error-${selectedRow.id}`"
+              >
+                <template #description>
+                  <p>We couldn't download {{ selectedRow.name }}. Check your connection and try again.</p>
+                  <UCollapsible v-if="selectedRow.message" :unmount-on-hide="false" class="mt-1">
+                    <UButton
+                      variant="link"
+                      color="neutral"
+                      size="xs"
+                      class="px-0 underline"
+                      label="Details"
+                      data-testid="onboarding-error-details-toggle"
+                    />
+                    <template #content>
+                      <p class="mt-1 text-xs break-words">{{ selectedRow.message }}</p>
+                    </template>
+                  </UCollapsible>
+                </template>
+              </UAlert>
+
+              <SignInPanel
+                v-if="signInState"
+                :provider-name="selectedRow.name"
+                :state="signInState ?? NO_SIGN_IN"
+                @submit-code="onSubmitCode(selectedRow.id, $event)"
+                @cancel="onCancelSignIn(selectedRow.id)"
+                @retry="onRetrySignIn(selectedRow.id)"
+                @dismiss="onDismissSignIn(selectedRow.id)"
+              />
+            </template>
 
             <div class="flex flex-wrap items-center gap-3">
-              <Button
+              <UButton
                 v-if="selectedRow"
+                :icon="setupIcon"
+                :label="setupLabel"
                 :disabled="setupDisabled"
                 :data-testid="`onboarding-setup-${selectedRow.id}`"
                 @click="startSelected"
-              >
-                <Download
-                  v-if="!selectedRow.chatReady && selectedRow.phase === 'notDownloaded'"
-                  aria-hidden="true"
-                />
-                <RefreshCw
-                  v-else-if="!selectedRow.chatReady && selectedRow.phase === 'downloadError'"
-                  aria-hidden="true"
-                />
-                <LogIn
-                  v-else-if="!selectedRow.chatReady && selectedRow.phase === 'ready'"
-                  aria-hidden="true"
-                />
-                {{ setupLabel }}
-              </Button>
+              />
             </div>
           </div>
 
-          <section class="flex flex-col gap-3 border-t pt-6" data-testid="onboarding-existing">
+          <USeparator />
+
+          <section class="flex flex-col gap-3" data-testid="onboarding-existing">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="flex flex-col gap-1">
-                <h2 class="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                <h2 class="text-muted text-xs font-medium tracking-wide uppercase">
                   Or use an assistant you already have.
                 </h2>
-                <p v-if="existingRows.length" class="text-muted-foreground text-sm">
+                <p v-if="existingRows.length" class="text-muted text-sm">
                   Select one to continue with it.
                 </p>
               </div>
-              <Button
+              <UButton
+                color="neutral"
                 variant="ghost"
                 size="sm"
+                icon="i-hugeicons-refresh"
+                loading-icon="i-hugeicons-refresh"
+                label="Recheck"
+                :loading="checking"
                 :disabled="checking"
                 data-testid="setup-recheck"
                 @click="recheck"
-              >
-                <RefreshCw
-                  :class="{ 'animate-spin motion-reduce:animate-none': checking }"
-                  aria-hidden="true"
-                />
-                Recheck
-              </Button>
+              />
             </div>
 
-            <div v-if="existingRows.length" class="flex flex-col gap-2" role="radiogroup" aria-label="Existing assistants">
-              <button
-                v-for="row in existingRows"
-                :key="row.id"
-                type="button"
-                role="radio"
-                :aria-checked="selectedRow?.id === row.id"
-                :data-testid="`onboarding-existing-${row.id}`"
-                class="bg-card flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
-                :class="
-                  selectedRow?.id === row.id
-                    ? 'bg-accent/60 ring-2 ring-ring/60 ring-inset'
-                    : 'hover:bg-muted/50'
-                "
-                @click="select(row.id)"
-              >
-                <span class="bg-background flex size-8 shrink-0 items-center justify-center rounded-md border">
-                  <ProviderIcon :provider="row.id" class="size-4" />
+            <URadioGroup
+              v-if="existingRows.length"
+              :model-value="selectedExistingId"
+              :items="existingItems"
+              variant="card"
+              indicator="start"
+              aria-label="Existing assistants"
+              class="w-full"
+              :ui="{ fieldset: 'gap-2', item: 'w-full items-start', wrapper: 'min-w-0 flex-1' }"
+              @update:model-value="(id) => select(String(id))"
+            >
+              <template #label="{ item }">
+                <span class="flex items-center gap-2" :data-testid="`onboarding-existing-${item.row.id}`">
+                  <ProviderIcon :provider="item.row.id" class="size-4" />
+                  <span class="text-highlighted font-medium">{{ item.row.name }}</span>
                 </span>
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm font-medium">{{ row.name }}</span>
-                  <span class="text-muted-foreground block text-xs">Already on your Mac</span>
-                </span>
-                <Check v-if="selectedRow?.id === row.id" class="size-4" aria-hidden="true" />
-              </button>
-            </div>
-            <p v-else class="text-muted-foreground text-sm">
+              </template>
+            </URadioGroup>
+            <p v-else class="text-muted text-sm">
               If an assistant is already on your Mac, it will appear here. Select Recheck after
               installing it.
             </p>
@@ -645,37 +692,35 @@ function dotLabel(n: Step): string {
           class="flex flex-col gap-8"
           data-testid="onboarding-step-site"
         >
-          <div class="flex flex-col gap-2">
-            <h1 class="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-              Add the site builder.
-            </h1>
-            <p class="text-muted-foreground max-w-xl text-base text-pretty">
-              orso uses this to install packages and preview your site. It is downloaded once.
-            </p>
-          </div>
+          <UPageHeader
+            title="Add the site builder."
+            description="orso uses this to install packages and preview your site. It is downloaded once."
+            :ui="HEADER_UI"
+          />
 
-          <div class="bg-card rounded-xl border p-4 sm:p-5" data-testid="onboarding-site">
+          <UCard
+            variant="outline"
+            :ui="{ root: 'rounded-xl', body: 'flex flex-col gap-3 p-4 sm:p-5' }"
+            data-testid="onboarding-site"
+          >
             <div class="flex items-start gap-3">
-              <span
-                class="bg-background flex size-9 shrink-0 items-center justify-center rounded-lg border"
-              >
-                <Package class="size-5" aria-hidden="true" />
-              </span>
+              <UAvatar size="lg" icon="i-hugeicons-package" :ui="AVATAR_UI" />
 
               <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium">Site builder</span>
-                  <span
+                  <span class="text-highlighted font-medium">Site builder</span>
+                  <UBadge
                     v-if="site.phase === 'ready' || site.phase === 'updateAvailable'"
-                    class="text-xs font-medium text-emerald-700 dark:text-emerald-400"
-                  >
-                    Ready
-                  </span>
+                    color="success"
+                    variant="subtle"
+                    size="sm"
+                    label="Ready"
+                  />
                 </div>
-                <p class="text-muted-foreground text-sm">Lets orso build and preview your site.</p>
+                <p class="text-muted text-sm">Lets orso build and preview your site.</p>
                 <p
                   v-if="formatDownloadSize(site.provider.runtime?.downloadBytes)"
-                  class="text-muted-foreground text-xs"
+                  class="text-muted text-xs"
                   data-testid="onboarding-site-size"
                 >
                   {{ formatDownloadSize(site.provider.runtime?.downloadBytes) }}
@@ -684,7 +729,7 @@ function dotLabel(n: Step): string {
                   v-if="
                     (site.phase === 'ready' || site.phase === 'updateAvailable') && site.version
                   "
-                  class="text-muted-foreground text-xs"
+                  class="text-muted text-xs"
                   data-testid="onboarding-site-version"
                 >
                   Version {{ site.version }}<template v-if="sourceLabel(site.source)">
@@ -693,198 +738,193 @@ function dotLabel(n: Step): string {
                 </p>
               </div>
 
-              <Button
+              <UButton
                 v-if="sitePresent"
-                :variant="
-                  site.phase === 'downloading' || site.phase === 'downloadError'
-                    ? 'outline'
-                    : 'default'
-                "
+                :color="siteSecondary ? 'neutral' : 'primary'"
+                :variant="siteSecondary ? 'outline' : 'solid'"
+                :icon="siteIcon"
+                :label="siteLabel"
                 :disabled="siteDisabled"
                 data-testid="onboarding-site-primary"
                 @click="startSite"
-              >
-                <Download
-                  v-if="site.phase === 'notDownloaded' || site.phase === 'updateAvailable'"
-                  aria-hidden="true"
-                />
-                <X v-else-if="site.phase === 'downloading'" aria-hidden="true" />
-                <RotateCcw v-else-if="site.phase === 'downloadError'" aria-hidden="true" />
-                {{ siteLabel }}
-              </Button>
+              />
             </div>
 
             <div
               v-if="sitePresent && site.phase === 'downloading'"
-              class="mt-3 flex items-center gap-3"
+              class="flex items-center gap-3"
               data-testid="onboarding-site-progress"
             >
-              <Progress
+              <UProgress
                 :model-value="site.progress ?? 0"
-                :aria-label="`Downloading the site builder: ${site.progress ?? 0}%`"
+                size="sm"
+                :get-value-label="() => `Downloading the site builder: ${site.progress ?? 0}%`"
                 class="max-w-72"
               />
-              <span class="text-muted-foreground text-xs tabular-nums">
+              <span class="text-muted text-xs tabular-nums">
                 {{ site.progress ?? 0 }}%
               </span>
             </div>
 
-            <p
+            <UAlert
               v-if="sitePresent && site.phase === 'downloadError'"
-              class="text-destructive mt-3 text-sm"
+              color="error"
+              variant="subtle"
+              icon="i-hugeicons-alert-circle"
+              description="We couldn't download the site builder. Check your connection and try again."
               data-testid="onboarding-site-error"
-            >
-              We couldn't download the site builder. Check your connection and try again.
-            </p>
+            />
 
-            <p v-if="!sitePresent" class="text-muted-foreground mt-3 text-sm">
+            <p v-if="!sitePresent" class="text-muted text-sm">
               This version of orso doesn't need a separate download.
             </p>
-          </div>
+          </UCard>
         </section>
 
         <!-- 3. GitHub (optional) -->
         <section v-else class="flex flex-col gap-8" data-testid="onboarding-step-github">
-          <div class="flex flex-col gap-2">
-            <h1 class="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-              Connect GitHub.
-            </h1>
-            <p class="text-muted-foreground max-w-xl text-base text-pretty">
-              Share previews and publish when you are ready. You can do this later.
-            </p>
-          </div>
+          <UPageHeader
+            title="Connect GitHub."
+            description="Share previews and publish when you are ready. You can do this later."
+            :ui="HEADER_UI"
+          />
 
-          <ul class="bg-card divide-y overflow-hidden rounded-xl border">
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-git">
-              <CircleCheck
-                v-if="status.git"
-                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
+          <UCard
+            variant="outline"
+            :ui="{ root: 'overflow-hidden rounded-xl', body: 'divide-y divide-default p-0 sm:p-0' }"
+          >
+            <SettingsRow
+              v-for="tool in tools"
+              :key="tool.id"
+              :icon="tool.icon"
+              :description="tool.description"
+              :data-testid="tool.testId"
+            >
+              <template #title>
+                <UIcon
+                  :name="tool.ready ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-alert-circle'"
+                  :class="tool.ready ? 'text-success' : 'text-muted'"
+                  class="size-3.5"
+                  aria-hidden="true"
+                />
+                {{ tool.title }}
+              </template>
+              <UButton
+                v-if="!tool.ready"
+                variant="link"
+                color="neutral"
+                size="sm"
+                class="self-start px-0"
+                trailing-icon="i-hugeicons-link-square-02"
+                :label="tool.getLabel"
+                :to="tool.getUrl"
+                target="_blank"
               />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">Git</span>
-                <span class="text-muted-foreground">
-                  Keeps the history of every change to your sites.
-                </span>
-                <a
-                  v-if="!status.git"
-                  class="inline-flex items-center gap-1 self-start underline"
-                  href="https://git-scm.com/downloads/mac"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Get Git <ExternalLink class="size-3" aria-hidden="true" />
-                </a>
-              </div>
-              <span class="text-muted-foreground text-xs">{{ status.git ? "Ready" : "Optional" }}</span>
-            </li>
+              <template #actions>
+                <UBadge
+                  color="neutral"
+                  :variant="tool.ready ? 'subtle' : 'outline'"
+                  :label="tool.ready ? 'Ready' : 'Optional'"
+                />
+              </template>
+            </SettingsRow>
 
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-tools">
-              <CircleCheck
-                v-if="status.gh"
-                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">GitHub tools</span>
-                <span class="text-muted-foreground">Connects your sites to GitHub.</span>
-                <a
-                  v-if="!status.gh"
-                  class="inline-flex items-center gap-1 self-start underline"
-                  href="https://cli.github.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Get the GitHub tools <ExternalLink class="size-3" aria-hidden="true" />
-                </a>
-              </div>
-              <span class="text-muted-foreground text-xs">{{ status.gh ? "Ready" : "Optional" }}</span>
-            </li>
-
-            <li class="flex items-start gap-3 px-4 py-3.5" data-testid="onboarding-github-account">
-              <CircleCheck
-                v-if="githubSignedIn"
-                class="mt-0.5 size-4 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div class="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span class="font-medium">GitHub account</span>
-                <span v-if="githubSignedIn" class="text-muted-foreground">
+            <SettingsRow
+              icon="i-hugeicons-user-circle"
+              align="start"
+              data-testid="onboarding-github-account"
+            >
+              <template #title>
+                <UIcon
+                  :name="githubSignedIn ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-alert-circle'"
+                  :class="githubSignedIn ? 'text-success' : 'text-muted'"
+                  class="size-3.5"
+                  aria-hidden="true"
+                />
+                GitHub account
+              </template>
+              <template #description>
+                <template v-if="githubSignedIn">
                   <template v-if="gh.user">Signed in as {{ gh.user.login }}. </template>
                   <template v-else>You're signed in to GitHub. </template>
                   Share previews and publish when you are ready.
-                </span>
-                <template v-else>
-                  <span class="text-muted-foreground">
-                    Sign in so orso can open your sites and share your changes.
-                  </span>
-                  <Button
-                    v-if="status.gh && gh.deviceFlow"
-                    size="sm"
-                    variant="outline"
-                    class="self-start"
-                    data-testid="setup-sign-in"
-                    @click="gh.signIn()"
-                  >
-                    <LogIn aria-hidden="true" /> Sign in with GitHub
-                  </Button>
-                  <span v-else-if="status.gh" class="text-muted-foreground text-xs">
-                    Sign in with GitHub on this Mac, then select Recheck.
-                  </span>
-                  <span v-else class="text-muted-foreground text-xs">
-                    Install the GitHub tools first, then sign in.
-                  </span>
                 </template>
-                <p v-if="gh.error" class="text-destructive text-xs" role="alert">
-                  GitHub sign-in didn't finish. Please try again.
+                <template v-else>Sign in so orso can open your sites and share your changes.</template>
+              </template>
+
+              <template v-if="!githubSignedIn">
+                <UButton
+                  v-if="status.gh && gh.deviceFlow"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  class="self-start"
+                  icon="i-hugeicons-login-03"
+                  label="Sign in with GitHub"
+                  data-testid="setup-sign-in"
+                  @click="gh.signIn()"
+                />
+                <p v-else-if="status.gh" class="text-muted text-xs">
+                  Sign in with GitHub on this Mac, then select Recheck.
                 </p>
-              </div>
-            </li>
-          </ul>
+                <p v-else class="text-muted text-xs">
+                  Install the GitHub tools first, then sign in.
+                </p>
+              </template>
+              <p v-if="gh.error" class="text-error text-xs" role="alert">
+                GitHub sign-in didn't finish. Please try again.
+              </p>
+
+              <template #actions>
+                <UBadge
+                  color="neutral"
+                  :variant="githubSignedIn ? 'subtle' : 'outline'"
+                  :label="githubSignedIn ? 'Ready' : 'Optional'"
+                />
+              </template>
+            </SettingsRow>
+          </UCard>
 
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <Button
+            <UButton
+              color="neutral"
               variant="ghost"
+              label="Skip for now"
               data-testid="onboarding-github-skip"
               @click="emit('continue')"
-            >
-              Skip for now
-            </Button>
-            <Button
+            />
+            <UButton
+              color="neutral"
               variant="ghost"
               size="sm"
+              icon="i-hugeicons-refresh"
+              loading-icon="i-hugeicons-refresh"
+              label="Recheck"
+              :loading="checking"
               :disabled="checking"
               data-testid="setup-recheck"
               @click="recheck"
-            >
-              <RefreshCw
-                :class="{ 'animate-spin motion-reduce:animate-none': checking }"
-                aria-hidden="true"
-              />
-              Recheck
-            </Button>
+            />
           </div>
         </section>
       </main>
 
-      <footer class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 border-t pt-5">
+      <footer class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pt-5">
         <div class="flex items-center">
-          <PawMark class="text-muted-foreground size-5" />
+          <PawMark class="text-muted size-5" />
         </div>
 
         <div class="flex items-center justify-center gap-2" aria-label="Setup steps">
-          <button
+          <UButton
             v-for="item in STEPS"
             :key="item.n"
-            type="button"
-            class="h-2.5 rounded-full transition-colors disabled:cursor-default motion-reduce:transition-none"
+            :color="item.n === step ? 'primary' : 'neutral'"
+            variant="solid"
+            class="h-2.5 rounded-full p-0 transition-colors disabled:cursor-default disabled:opacity-100 motion-reduce:transition-none"
             :class="[
               item.n === step ? 'bg-primary w-5' : 'w-2.5',
-              item.n < step ? 'bg-muted-foreground/60 hover:bg-foreground' : '',
-              item.n > step ? 'bg-muted-foreground/25' : '',
+              item.n < step ? 'bg-inverted/40 hover:bg-inverted' : '',
+              item.n > step ? 'bg-inverted/15 disabled:bg-inverted/15' : '',
             ]"
             :aria-label="dotLabel(item.n)"
             :aria-current="item.n === step ? 'step' : undefined"
@@ -895,17 +935,20 @@ function dotLabel(n: Step): string {
         </div>
 
         <div class="flex items-center justify-end gap-2">
-          <Button
+          <UButton
+            color="neutral"
             variant="ghost"
+            label="Back"
             :disabled="step === 1"
             data-testid="onboarding-back"
             @click="back"
-          >
-            Back
-          </Button>
-          <Button :disabled="nextDisabled" data-testid="onboarding-next" @click="next">
-            {{ nextLabel }}
-          </Button>
+          />
+          <UButton
+            :label="nextLabel"
+            :disabled="nextDisabled"
+            data-testid="onboarding-next"
+            @click="next"
+          />
         </div>
       </footer>
     </div>

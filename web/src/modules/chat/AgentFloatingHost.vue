@@ -1,17 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Plus, X } from "@lucide/vue";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
 import {
   applySessionOrder,
   moveSessionId,
@@ -45,14 +36,38 @@ const tabIds = computed(() => {
   return applySessionOrder(ids, order.value);
 });
 
+/**
+ * What a session is doing, from what the chat store knows: a turn in flight, a sync chat
+ * combining, a queue stopped until the user resumes it, or nothing.
+ */
+type TabStatus = "running" | "combining" | "paused" | "idle";
+
+const STATUS: Record<TabStatus, { label: string; icon?: string; class: string }> = {
+  running: { label: "Working…", icon: "i-hugeicons-loading-03", class: "text-primary animate-spin" },
+  combining: { label: "Combining…", icon: "i-hugeicons-refresh", class: "text-primary animate-spin" },
+  paused: { label: "Queue paused, needs you", icon: "i-hugeicons-pause-circle", class: "text-warning" },
+  idle: { label: "Idle", class: "bg-accented" },
+};
+
+function statusOf(id: string): TabStatus {
+  const summary = chats.value.find((c) => c.id === id);
+  if (store.isChatRunning(props.projectId, id) || summary?.running) return "running";
+  if (summary?.kind === "sync" && (summary.sync?.phase === "working" || summary.sync?.phase === "checking"))
+    return "combining";
+  if (store.isQueuePaused(props.projectId, id) && store.queued[props.projectId]?.[id]?.length) return "paused";
+  return "idle";
+}
+
 /** Every available session, plus a draft tab when the active id is not in the list yet. */
 const tabs = computed(() =>
   tabIds.value.map((id) => {
     const summary = chats.value.find((c) => c.id === id);
+    const status = statusOf(id);
     return {
       id,
       title: summary?.title?.trim() || "New chat",
-      running: store.isChatRunning(props.projectId, id) || !!summary?.running,
+      status,
+      running: status === "running",
       active: activeId.value === id,
     };
   }),
@@ -153,7 +168,7 @@ defineExpose({ expand, minimize, close: closePanel });
       v-if="mounted"
       v-show="expanded"
       data-testid="agent-floating-panel"
-      class="pointer-events-auto absolute right-4 bottom-14 flex h-[min(40rem,calc(100vh-5rem))] w-[24rem] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-lg"
+      class="border-default bg-background pointer-events-auto absolute right-4 bottom-14 flex h-[min(40rem,calc(100vh-5rem))] w-[24rem] flex-col overflow-hidden rounded-xl border shadow-lg"
     >
       <AgentPanel
         class="min-h-0 flex-1"
@@ -171,24 +186,27 @@ defineExpose({ expand, minimize, close: closePanel });
       aria-label="Agent sessions"
     >
       <div class="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-x-auto px-2">
-        <button
+        <UButton
           v-for="tab in tabs"
           :key="tab.id"
-          type="button"
+          color="neutral"
+          :variant="tab.active ? 'outline' : 'ghost'"
           role="tab"
           draggable="true"
           data-testid="agent-session-tab"
+          :data-status="tab.status"
           :aria-selected="tab.active"
           :aria-current="tab.active ? 'page' : undefined"
-          :aria-label="tab.running ? `${tab.title}, working` : tab.title"
+          :aria-label="`${tab.title}, ${STATUS[tab.status].label}`"
+          :title="`${tab.title}: ${STATUS[tab.status].label}`"
           :class="
             cn(
-              'group relative flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pl-3 pr-3 text-left text-xs transition-all active:translate-y-px',
+              'group relative flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pl-3 pr-3 text-left text-xs font-normal transition-all active:translate-y-px',
               // Close control is absolutely positioned so it does not reserve width when hidden.
               !tab.running && 'hover:pr-6 focus-within:pr-6',
               tab.active
-                ? 'bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30'
-                : 'text-muted-foreground hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50',
+                ? 'bg-elevated text-highlighted font-medium'
+                : 'text-muted hover:bg-elevated hover:text-highlighted',
               dragId === tab.id && 'opacity-60',
             )
           "
@@ -198,64 +216,64 @@ defineExpose({ expand, minimize, close: closePanel });
           @drop="onDrop($event, tab.id)"
           @dragend="onDragEnd"
         >
-          <Spinner
-            v-if="tab.running"
+          <UIcon
+            v-if="STATUS[tab.status].icon"
+            :name="STATUS[tab.status].icon!"
             data-testid="agent-tab-status"
-            data-state="running"
-            class="size-3 shrink-0"
+            :data-state="tab.status"
+            :class="cn('size-3.5 shrink-0', STATUS[tab.status].class)"
             aria-hidden="true"
           />
           <span
             v-else
             data-testid="agent-tab-status"
-            data-state="idle"
-            class="bg-muted-foreground/40 size-1.5 shrink-0 rounded-full"
+            :data-state="tab.status"
+            :class="cn('size-1.5 shrink-0 rounded-full', STATUS[tab.status].class)"
             aria-hidden="true"
           />
           <span class="min-w-0 flex-1 truncate">{{ tab.title }}</span>
-          <Button
+          <UButton
             v-if="!tab.running"
             type="button"
+            color="neutral"
             variant="ghost"
-            size="icon-xs"
-            class="text-muted-foreground hover:text-destructive absolute top-1/2 right-0.5 size-5 -translate-y-1/2 rounded-full p-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            size="xs"
+            icon="i-hugeicons-cancel-01"
+            class="text-muted hover:text-error absolute top-1/2 right-0.5 size-5 -translate-y-1/2 justify-center rounded-full p-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            :ui="{ leadingIcon: 'size-3' }"
             data-testid="agent-tab-delete"
             :aria-label="`Delete ${tab.title}`"
             @click="requestDelete($event, tab)"
-          >
-            <X class="size-3" />
-          </Button>
-        </button>
+          />
+        </UButton>
       </div>
-      <Button
+      <UButton
         type="button"
+        color="neutral"
         variant="ghost"
-        size="icon-sm"
+        size="sm"
+        icon="i-hugeicons-plus-sign"
         class="m-1 shrink-0 self-center rounded-full"
         data-testid="agent-new-tab"
         aria-label="New agent session"
         @click="newTab"
-      >
-        <Plus />
-      </Button>
+      />
     </div>
 
-    <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
-      <AlertDialogContent class="pointer-events-auto">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
-          <AlertDialogDescription>
-            “{{ pendingDelete?.title }}” and its messages will be removed. Changes your assistant
-            made to your site stay.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" data-testid="agent-tab-delete-confirm" @click="confirmDelete">
-            Delete chat
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <UModal
+      :open="pendingDelete !== null"
+      title="Delete this chat?"
+      :description="`“${pendingDelete?.title ?? ''}” and its messages will be removed. Changes your assistant made to your site stay.`"
+      :close="false"
+      :ui="{ content: 'pointer-events-auto' }"
+      @update:open="(o) => !o && (pendingDelete = null)"
+    >
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="outline" label="Cancel" @click="pendingDelete = null" />
+          <UButton color="error" label="Delete chat" data-testid="agent-tab-delete-confirm" @click="confirmDelete" />
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

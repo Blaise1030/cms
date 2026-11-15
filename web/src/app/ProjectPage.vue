@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import ConnectionStatus from "@/app/ConnectionStatus.vue";
 import EditorMenubar from "@/app/EditorMenubar.vue";
 import ProjectRail from "@/app/ProjectRail.vue";

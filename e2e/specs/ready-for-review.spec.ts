@@ -27,7 +27,7 @@ test("writer marks a shared draft change ready for review", async ({ page, orso 
   await expect.poll(() => github.readyForReviewCalls()).toEqual(["PR_kwStub1"]);
 
   await openPrMenu(page);
-  await expect(pill).toHaveText("Open", { timeout: 30_000 });
+  await expect(pill).toHaveText("Waiting for greenlight", { timeout: 30_000 });
   await expect(ready).toHaveCount(0);
   const open = page.getByTestId("pr-link");
   await expect(open).toHaveText("Open on GitHub");

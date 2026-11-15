@@ -7,7 +7,7 @@ import CleanupChangeButton from "./CleanupChangeButton.vue";
 import { useChangesStore } from "./store";
 
 const h = vi.hoisted(() => ({ toastError: vi.fn(), toastWarning: vi.fn() }));
-vi.mock("vue-sonner", () => ({ toast: { error: h.toastError, warning: h.toastWarning } }));
+vi.mock("@/lib/toast", () => ({ toast: { error: h.toastError, warning: h.toastWarning } }));
 
 const merged: PrStatus = {
   number: 1,

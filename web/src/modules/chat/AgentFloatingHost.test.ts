@@ -75,6 +75,48 @@ describe("AgentFloatingHost", () => {
     expect(tabs[0]!.find("[data-testid='agent-tab-status']").attributes("data-state")).toBe("idle");
   });
 
+  it("shows each session's state as an indicator and in its accessible name", async () => {
+    const sync = (phase: string) => ({
+      ...chat("c3", "Combine"),
+      kind: "sync" as const,
+      sync: { conflictSessionId: "cs", branch: "b", tip: "t", incoming: "i", files: [], phase },
+    });
+    const listed = [chat("c1", "Idle one"), chat("c2", "Busy", true), sync("working"), chat("c4", "Paused")];
+    h.daemon = createFakeDaemon({ listChats: async () => ({ chats: listed, running: "c2" }) });
+    setActivePinia(createPinia());
+    const store = useChatStore();
+    store.enqueue("p1", "c4", "next", "next");
+    store.setQueuePaused("p1", "c4", true);
+    store.setActive("p1", "c1");
+
+    const w = mountHost();
+    await flushPromises();
+    store.setChatRunning("p1", "c2", true);
+    await nextTick();
+
+    const tab = (title: string) => w.findAll("[data-testid='agent-session-tab']").find((t) => t.text().includes(title))!;
+    const cases = [
+      ["Idle one", "idle", "Idle", "bg-accented"],
+      ["Busy", "running", "Working…", "text-primary"],
+      ["Combine", "combining", "Combining…", "text-primary"],
+      ["Paused", "paused", "Queue paused, needs you", "text-warning"],
+    ] as const;
+    for (const [title, state, label, colour] of cases) {
+      const t = tab(title);
+      const status = t.get("[data-testid='agent-tab-status']");
+      expect(status.attributes("data-state")).toBe(state);
+      expect(status.classes()).toContain(colour);
+      expect(t.attributes("data-status")).toBe(state);
+      expect(t.attributes("aria-label")).toBe(`${title}, ${label}`);
+    }
+    expect(tab("Busy").get("[data-testid='agent-tab-status']").classes()).toContain("animate-spin");
+    // The active tab is outlined and highlighted, not just tinted.
+    expect(tab("Idle one").attributes("aria-selected")).toBe("true");
+    expect(tab("Idle one").classes()).toContain("text-highlighted");
+    expect(tab("Idle one").classes()).toContain("ring");
+    expect(tab("Busy").classes()).not.toContain("text-highlighted");
+  });
+
   it("opens the floating panel from a session tab or +", async () => {
     h.daemon = createFakeDaemon({
       listChats: async () => ({ chats: [chat("c1", "SEO audit")], running: null }),

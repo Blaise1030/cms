@@ -1,10 +1,11 @@
 import type { ChecksState, PrState, PrStatus } from "@/core/types";
 
+/** Writer words for a shared change's state; git and GitHub terms stay out of the UI. */
 export const PR_STATE_LABEL: Record<PrState, string> = {
   draft: "Draft",
-  open: "Open",
-  approved: "Approved",
-  merged: "Merged",
+  open: "Waiting for greenlight",
+  approved: "Greenlit",
+  merged: "Published",
   closed: "Closed",
 };
 

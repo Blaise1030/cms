@@ -2,18 +2,10 @@
 // App settings → Site builder. The Node download orso uses to install packages
 // and preview sites, shown in the same row style as the assistant setup.
 import { computed, onMounted, ref } from "vue";
-import { CircleAlert, Package, RefreshCw } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import ProviderRow from "@/modules/assistant/ProviderRow.vue";
 import { useAssistantStore } from "@/modules/assistant/store";
 import type { AssistantRow, RowAction } from "@/modules/assistant/rows";
@@ -59,64 +51,66 @@ function onAction(action: RowAction) {
 </script>
 
 <template>
-  <SettingsSection label="Package" :icon="Package" data-testid="site-builder-settings">
+  <SettingsSection label="Package" icon="i-hugeicons-package" data-testid="site-builder-settings">
     <template #actions>
-      <Button
+      <UButton
+        color="neutral"
         variant="outline"
         size="sm"
+        icon="i-hugeicons-refresh"
+        loading-icon="i-hugeicons-refresh"
+        label="Recheck"
+        :loading="rechecking"
         :disabled="rechecking"
         data-testid="site-builder-recheck"
         @click="recheck"
-      >
-        <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Recheck
-      </Button>
+      />
     </template>
 
-    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-      <p
-        v-if="loading"
-        class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
-        data-testid="site-builder-loading"
-      >
-        <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
-      </p>
+    <p
+      v-if="loading"
+      class="text-muted flex items-center gap-2 p-4 text-sm"
+      data-testid="site-builder-loading"
+    >
+      <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" /> Checking your setup…
+    </p>
 
-      <Alert
-        v-else-if="store.error && !store.snapshot"
-        variant="destructive"
-        class="m-4"
+    <div v-else-if="store.error && !store.snapshot" class="p-4">
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-hugeicons-alert-circle"
+        description="We couldn't check the site builder just now. Make sure orso is still running, then check again."
         data-testid="site-builder-error"
       >
-        <CircleAlert aria-hidden="true" />
-        <AlertDescription class="flex flex-col items-start gap-2">
-          <p>We couldn't check the site builder just now. Make sure orso is still running, then check again.</p>
-          <Button
+        <template #actions>
+          <UButton
+            color="neutral"
             variant="outline"
             size="sm"
+            icon="i-hugeicons-refresh"
+            loading-icon="i-hugeicons-refresh"
+            label="Check again"
+            :loading="rechecking"
             :disabled="rechecking"
             data-testid="site-builder-retry"
             @click="recheck"
-          >
-            <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Check again
-          </Button>
-        </AlertDescription>
-      </Alert>
+          />
+        </template>
+      </UAlert>
+    </div>
 
-      <Empty v-else-if="store.node == null" class="border-0" data-testid="site-builder-not-needed">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Package aria-hidden="true" />
-          </EmptyMedia>
-          <EmptyTitle>No separate download</EmptyTitle>
-          <EmptyDescription>
-            This version of orso doesn't need a separate site builder download.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+    <UEmpty
+      v-else-if="store.node == null"
+      variant="naked"
+      icon="i-hugeicons-package"
+      title="No separate download"
+      description="This version of orso doesn't need a separate site builder download."
+      data-testid="site-builder-not-needed"
+    />
 
-      <ul v-else class="divide-y divide-border [&>li]:px-4" data-testid="site-builder-row">
-        <ProviderRow :row="row" @action="onAction" />
-      </ul>
-    </Card>
+    <ul v-else class="divide-y divide-default [&>li]:px-4" data-testid="site-builder-row">
+      <ProviderRow :row="row" @action="onAction" />
+    </ul>
   </SettingsSection>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { FileCode } from "@lucide/vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import { useFilesStore } from "./store";
 
 // CodeMirror and its language packs are large; keep them out of the main bundle.
@@ -17,22 +18,24 @@ const readyFile = computed(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="file-viewer">
-    <div
+    <UEmpty
       v-if="!store.selectedPath"
-      class="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-3 text-sm"
-    >
-      <FileCode class="size-8 opacity-50" aria-hidden="true" />
-      <p>Select a file to view it.</p>
-    </div>
+      variant="naked"
+      icon="i-hugeicons-file-script"
+      description="Select a file to view it."
+      class="flex-1"
+    />
     <template v-else>
-      <div class="text-muted-foreground flex h-8 shrink-0 items-center px-3 font-mono text-xs">
+      <div class="text-muted flex h-8 shrink-0 items-center px-3 font-mono text-xs">
         {{ store.selectedPath }}
       </div>
-      <p v-if="store.fileError" class="text-destructive p-3 text-sm" role="alert">{{ store.fileError }}</p>
-      <p v-else-if="store.fileLoading && !store.file" class="text-muted-foreground p-3 text-sm">Loading…</p>
+      <p v-if="store.fileError" class="text-error p-3 text-sm" role="alert">{{ store.fileError }}</p>
+      <p v-else-if="store.fileLoading && !store.file" class="text-muted flex items-center gap-2 p-3 text-sm">
+        <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" /> Loading…
+      </p>
       <p
         v-else-if="store.file && (store.file.binary || store.file.content === null)"
-        class="text-muted-foreground p-3 text-sm"
+        class="text-muted p-3 text-sm"
         data-testid="file-unavailable"
       >
         {{ store.file.binary ? "Binary file" : "File too large" }} ({{ store.file.size }} bytes) — no preview.

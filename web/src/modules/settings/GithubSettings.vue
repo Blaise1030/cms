@@ -2,32 +2,13 @@
 // App settings → GitHub. Git and the GitHub tools are optional for local work;
 // signing in only matters when a site is shared or published.
 import { computed, onMounted, ref } from "vue";
-import {
-  CircleAlert,
-  CircleCheck,
-  ExternalLink,
-  GitBranch,
-  GitPullRequest,
-  LogIn,
-  RefreshCw,
-  UserRound,
-} from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import DeviceCodeDialog from "@/modules/github/DeviceCodeDialog.vue";
 import { useGithubStore } from "@/modules/github/store";
+import SettingsRow from "./SettingsRow.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 const gh = useGithubStore();
@@ -37,6 +18,28 @@ const checking = ref(false);
 const status = computed(() => gh.setup);
 const githubSignedIn = computed(() => gh.user != null || status.value?.githubSignedIn === true);
 const loading = computed(() => !status.value && !gh.setupError);
+
+/** The git and GitHub-tools rows share one shape: ready, or a link to get it. */
+const tools = computed(() => [
+  {
+    id: "git",
+    icon: "i-hugeicons-git-branch",
+    title: "Git",
+    description: "Keeps the history of every change to your sites.",
+    ready: status.value?.git === true,
+    getLabel: "Get Git",
+    getUrl: "https://git-scm.com/downloads/mac",
+  },
+  {
+    id: "tools",
+    icon: "i-hugeicons-git-pull-request",
+    title: "GitHub tools",
+    description: "Connects your sites to GitHub.",
+    ready: status.value?.gh === true,
+    getLabel: "Get the GitHub tools",
+    getUrl: "https://cli.github.com/",
+  },
+]);
 
 async function recheck() {
   checking.value = true;
@@ -53,166 +56,139 @@ onMounted(() => {
 </script>
 
 <template>
-  <SettingsSection label="Account" :icon="UserRound" data-testid="github-settings">
+  <SettingsSection label="Account" icon="i-hugeicons-user-circle" data-testid="github-settings">
     <template #actions>
-      <Button
+      <UButton
+        color="neutral"
         variant="outline"
         size="sm"
+        icon="i-hugeicons-refresh"
+        loading-icon="i-hugeicons-refresh"
+        label="Recheck"
+        :loading="checking"
         :disabled="checking"
         data-testid="github-settings-recheck"
         @click="recheck"
-      >
-        <RefreshCw :class="{ 'animate-spin': checking }" aria-hidden="true" /> Recheck
-      </Button>
+      />
     </template>
 
-    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-      <p
-        v-if="loading"
-        class="text-muted-foreground flex items-center gap-2 p-4 text-sm"
-        data-testid="github-settings-loading"
-      >
-        <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
-      </p>
+    <p
+      v-if="loading"
+      class="text-muted flex items-center gap-2 p-4 text-sm"
+      data-testid="github-settings-loading"
+    >
+      <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" /> Checking your setup…
+    </p>
 
-      <Alert
-        v-else-if="gh.setupError || !status"
-        variant="destructive"
-        class="m-4"
+    <div v-else-if="gh.setupError || !status" class="p-4">
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-hugeicons-alert-circle"
+        description="We couldn't check GitHub just now. Make sure orso is still running, then check again."
         data-testid="github-settings-error"
       >
-        <CircleAlert aria-hidden="true" />
-        <AlertDescription class="flex flex-col items-start gap-2">
-          <p>We couldn't check GitHub just now. Make sure orso is still running, then check again.</p>
-          <Button
+        <template #actions>
+          <UButton
+            color="neutral"
             variant="outline"
             size="sm"
+            icon="i-hugeicons-refresh"
+            loading-icon="i-hugeicons-refresh"
+            label="Check again"
+            :loading="checking"
             :disabled="checking"
             data-testid="github-settings-retry"
             @click="recheck"
-          >
-            <RefreshCw :class="{ 'animate-spin': checking }" aria-hidden="true" /> Check again
-          </Button>
-        </AlertDescription>
-      </Alert>
+          />
+        </template>
+      </UAlert>
+    </div>
 
-      <ItemGroup v-else class="divide-y divide-border">
-        <Item data-testid="github-settings-git">
-          <ItemMedia variant="icon">
-            <GitBranch aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              <CircleCheck
-                v-if="status.git"
-                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />
-              Git
-            </ItemTitle>
-            <ItemDescription>Keeps the history of every change to your sites.</ItemDescription>
-            <a
-              v-if="!status.git"
-              class="text-foreground inline-flex items-center gap-1 self-start text-sm underline underline-offset-4"
-              href="https://git-scm.com/downloads/mac"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Get Git <ExternalLink class="size-3" aria-hidden="true" />
-            </a>
-          </ItemContent>
-          <ItemActions>
-            <Badge :variant="status.git ? 'secondary' : 'outline'">
-              {{ status.git ? "Ready" : "Optional" }}
-            </Badge>
-          </ItemActions>
-        </Item>
+    <template v-else>
+      <SettingsRow
+        v-for="tool in tools"
+        :key="tool.id"
+        :icon="tool.icon"
+        :description="tool.description"
+        :data-testid="`github-settings-${tool.id}`"
+      >
+        <template #title>
+          <UIcon
+            :name="tool.ready ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-alert-circle'"
+            :class="tool.ready ? 'text-success' : 'text-muted'"
+            class="size-3.5"
+          />
+          {{ tool.title }}
+        </template>
+        <UButton
+          v-if="!tool.ready"
+          variant="link"
+          color="neutral"
+          size="sm"
+          class="self-start px-0"
+          trailing-icon="i-hugeicons-link-square-02"
+          :label="tool.getLabel"
+          :to="tool.getUrl"
+          target="_blank"
+        />
+        <template #actions>
+          <UBadge
+            color="neutral"
+            :variant="tool.ready ? 'subtle' : 'outline'"
+            :label="tool.ready ? 'Ready' : 'Optional'"
+          />
+        </template>
+      </SettingsRow>
 
-        <Item data-testid="github-settings-tools">
-          <ItemMedia variant="icon">
-            <GitPullRequest aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              <CircleCheck
-                v-if="status.gh"
-                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />
-              GitHub tools
-            </ItemTitle>
-            <ItemDescription>Connects your sites to GitHub.</ItemDescription>
-            <a
-              v-if="!status.gh"
-              class="text-foreground inline-flex items-center gap-1 self-start text-sm underline underline-offset-4"
-              href="https://cli.github.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Get the GitHub tools <ExternalLink class="size-3" aria-hidden="true" />
-            </a>
-          </ItemContent>
-          <ItemActions>
-            <Badge :variant="status.gh ? 'secondary' : 'outline'">
-              {{ status.gh ? "Ready" : "Optional" }}
-            </Badge>
-          </ItemActions>
-        </Item>
+      <SettingsRow icon="i-hugeicons-user-circle" data-testid="github-settings-account">
+        <template #title>
+          <UIcon
+            :name="githubSignedIn ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-alert-circle'"
+            :class="githubSignedIn ? 'text-success' : 'text-muted'"
+            class="size-3.5"
+          />
+          GitHub account
+        </template>
+        <template #description>
+          <template v-if="githubSignedIn">
+            <template v-if="gh.user">Signed in as {{ gh.user.login }}. </template>
+            <template v-else>You're signed in to GitHub. </template>
+            Share previews and publish when you are ready.
+          </template>
+          <template v-else>Sign in so orso can open your sites and share your changes.</template>
+        </template>
 
-        <Item data-testid="github-settings-account">
-          <ItemMedia variant="icon">
-            <UserRound aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              <CircleCheck
-                v-if="githubSignedIn"
-                class="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-emerald-950"
-                aria-hidden="true"
-              />
-              <CircleAlert v-else class="text-muted-foreground size-3.5" aria-hidden="true" />
-              GitHub account
-            </ItemTitle>
-            <ItemDescription v-if="githubSignedIn">
-              <template v-if="gh.user">Signed in as {{ gh.user.login }}. </template>
-              <template v-else>You're signed in to GitHub. </template>
-              Share previews and publish when you are ready.
-            </ItemDescription>
-            <template v-else>
-              <ItemDescription>
-                Sign in so orso can open your sites and share your changes.
-              </ItemDescription>
-              <Button
-                v-if="status.gh && gh.deviceFlow"
-                size="sm"
-                variant="outline"
-                class="self-start"
-                data-testid="github-settings-sign-in"
-                @click="gh.signIn()"
-              >
-                <LogIn aria-hidden="true" /> Sign in with GitHub
-              </Button>
-              <p v-else-if="status.gh" class="text-muted-foreground text-xs">
-                Sign in with GitHub on this Mac, then select Recheck.
-              </p>
-              <p v-else class="text-muted-foreground text-xs">
-                Install the GitHub tools first, then sign in.
-              </p>
-            </template>
-            <p v-if="gh.error" class="text-destructive text-xs" role="alert">
-              GitHub sign-in didn't finish. Please try again.
-            </p>
-          </ItemContent>
-          <ItemActions>
-            <Badge :variant="githubSignedIn ? 'secondary' : 'outline'">
-              {{ githubSignedIn ? "Ready" : "Optional" }}
-            </Badge>
-          </ItemActions>
-        </Item>
-      </ItemGroup>
-    </Card>
+        <template v-if="!githubSignedIn">
+          <UButton
+            v-if="status.gh && gh.deviceFlow"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            class="self-start"
+            icon="i-hugeicons-login-03"
+            label="Sign in with GitHub"
+            data-testid="github-settings-sign-in"
+            @click="gh.signIn()"
+          />
+          <p v-else-if="status.gh" class="text-muted text-xs">
+            Sign in with GitHub on this Mac, then select Recheck.
+          </p>
+          <p v-else class="text-muted text-xs">Install the GitHub tools first, then sign in.</p>
+        </template>
+        <p v-if="gh.error" class="text-error text-xs" role="alert">
+          GitHub sign-in didn't finish. Please try again.
+        </p>
+
+        <template #actions>
+          <UBadge
+            color="neutral"
+            :variant="githubSignedIn ? 'subtle' : 'outline'"
+            :label="githubSignedIn ? 'Ready' : 'Optional'"
+          />
+        </template>
+      </SettingsRow>
+    </template>
 
     <DeviceCodeDialog />
   </SettingsSection>

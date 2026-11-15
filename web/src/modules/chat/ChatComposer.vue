@@ -1,30 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ArrowUp, Check, ChevronDown, ListPlus, MapPin, MousePointerClick, Paperclip, Settings2, ShieldCheck, ShieldQuestion, Square, X } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
+import { TooltipProvider } from "reka-ui";
+import type { DropdownMenuItem as MenuItem } from "@nuxt/ui";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UChatPrompt from "@nuxt/ui/components/ChatPrompt.vue";
+import UChatPromptSubmit from "@nuxt/ui/components/ChatPromptSubmit.vue";
+import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UTextarea from "@nuxt/ui/components/Textarea.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { pageContextBadge, type PageContext } from "./pageContext";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
-import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { groupModels, type GroupedModel } from "./modelGroups";
 import ProviderIcon from "./ProviderIcon.vue";
 
@@ -78,27 +64,71 @@ const pickerOpen = ref(false);
 const labelOf = (p: string) => labels[p] ?? p;
 const shownProviders = computed(() => (props.providerLocked && provider.value ? [provider.value] : props.providers));
 const choices = (p: string) => [{ id: DEFAULT_MODEL, name: "Default" }, ...(props.models[p] ?? [])];
-/** Direct picks vs hover flyouts for `provider/model` ids. */
-const menus = computed(() => {
-  const out: Record<string, { direct: GroupedModel[]; subs: { heading: string; items: GroupedModel[] }[] }> = {};
-  for (const p of shownProviders.value) {
-    const direct: GroupedModel[] = [];
-    const subs: { heading: string; items: GroupedModel[] }[] = [];
-    for (const g of groupModels(choices(p))) {
-      if (g.heading === null) direct.push(...g.items);
-      else subs.push({ heading: g.heading, items: g.items });
-    }
-    out[p] = { direct, subs };
-  }
-  return out;
-});
 const selected = computed(() => (provider.value ? `${provider.value}:${model.value ?? DEFAULT_MODEL}` : ""));
 const pickerLabel = computed(() => {
   if (!provider.value) return "Assistant";
   return props.models[provider.value]?.find((m) => m.id === model.value)?.name ?? labelOf(provider.value);
 });
-/** Vitest: keep submenu items mounted so picks don't need real hover. */
+/** Vitest: open every provider flyout with the menu so picks don't need real hover. */
 const forceSubMount = import.meta.env.MODE === "test";
+
+/** One model row; `data-*` keys land on the menu item element (Nuxt UI forwards them). */
+function modelItem(p: string, m: GroupedModel, testid: string, search: string): MenuItem {
+  return {
+    label: m.label,
+    slot: "model" as const,
+    search,
+    selected: selected.value === `${p}:${m.id}`,
+    "data-testid": testid,
+    "data-provider": p,
+    "data-value": `${p}:${m.id}`,
+    onSelect: () => pickModel(p, m.id),
+  };
+}
+
+/** A provider's flyout: direct picks first, then one labelled group per `provider/model` prefix. */
+function modelGroups(p: string): MenuItem[][] {
+  const direct: MenuItem[] = [];
+  const groups: MenuItem[][] = [];
+  for (const g of groupModels(choices(p))) {
+    if (g.heading === null) {
+      direct.push(...g.items.map((m) => modelItem(p, m, "chat-model-item", `${m.id} ${m.label}`)));
+    } else {
+      const heading = g.heading;
+      groups.push([
+        { type: "label", label: heading, slot: "model-group" as const, provider: p },
+        ...g.items.map((m) => modelItem(p, m, "chat-model-sub-item", `${m.id} ${heading} ${m.label}`)),
+      ]);
+    }
+  }
+  return direct.length ? [direct, ...groups] : groups;
+}
+
+/** Slot props of custom-slot rows (Nuxt UI types them from literal slot names only). */
+const row = (item: unknown) => item as MenuItem;
+
+/** Providers on the first layer; each opens a searchable flyout of its models. */
+const pickerItems = computed<MenuItem[][]>(() => [
+  shownProviders.value.map((p) => ({
+    label: labelOf(p),
+    slot: "provider" as const,
+    provider: p,
+    children: modelGroups(p),
+    filter: { placeholder: "Search models…", "data-testid": "chat-model-search" },
+    filterFields: ["search"],
+    open: forceSubMount || undefined,
+    ui: { content: "w-72" },
+    content: { onCloseAutoFocus: (e: Event) => e.preventDefault() },
+  })),
+  [
+    {
+      label: "Set up another assistant…",
+      icon: "i-hugeicons-settings-04",
+      "data-testid": "chat-agent-setup",
+      onSelect: setupAnother,
+    },
+  ],
+]);
 
 function pickModel(p: string, id: string) {
   provider.value = p;
@@ -111,7 +141,25 @@ function setupAnother() {
   pickerOpen.value = false;
   emit("setup");
 }
-const textarea = ref<{ $el: HTMLTextAreaElement } | null>(null);
+/** Tool approvals: an ask/auto pair; the mode in force shows a check (see `#item-trailing`). */
+const approvalItems = computed<MenuItem[][]>(() => [
+  [{ type: "label", label: "Tool approvals" }],
+  [
+    {
+      label: "Ask each time",
+      active: !props.autoApprove,
+      "data-testid": "chat-approval-ask",
+      onSelect: () => emit("setAutoApprove", false),
+    },
+    {
+      label: "Auto-approve",
+      active: props.autoApprove,
+      "data-testid": "chat-approval-auto",
+      onSelect: () => emit("setAutoApprove", true),
+    },
+  ],
+]);
+const textarea = ref<{ textareaRef: HTMLTextAreaElement | null } | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const dropping = ref(false);
 
@@ -171,10 +219,11 @@ function onDrop(e: DragEvent) {
   if (files.length) emit("attach", files);
 }
 
-defineExpose({ focus: () => textarea.value?.$el.focus() });
+defineExpose({ focus: () => textarea.value?.textareaRef?.focus() });
 </script>
 
 <template>
+  <!-- UApp provides this in the app; kept here so the composer also mounts on its own. -->
   <TooltipProvider>
     <div
       class="relative"
@@ -185,93 +234,111 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
     >
       <div
         v-if="dropping"
-        class="bg-background/80 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border border-dashed text-sm"
+        class="bg-default/80 border-accented pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border border-dashed text-sm"
         data-testid="chat-drop-overlay"
       >
         Drop files for your assistant
       </div>
-      <InputGroup>
-        <div
-          v-if="attachments.length || attaching || references.length || pageContext"
-          class="flex w-full min-w-0 flex-wrap gap-1.5 px-3 pt-2.5"
-        >
-          <Badge
+      <!-- `as="div"`: sending is driven by our own keydown/buttons (attachments-only sends, queueing). -->
+      <UChatPrompt as="div" variant="outline" :ui="{ header: 'flex-wrap' }">
+        <template v-if="attachments.length || attaching || references.length || pageContext" #header>
+          <UBadge
             v-if="pageContext"
-            variant="secondary"
+            color="neutral"
+            variant="soft"
             data-testid="chat-page-context"
-            class="max-w-full py-1 pr-2 pl-1 text-xs"
+            class="max-w-full gap-1 pl-0.5"
           >
-            <button
-              type="button"
-              class="hover:bg-background shrink-0 rounded p-0.5"
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-cancel-01"
+              class="shrink-0 p-0.5"
+              :ui="{ leadingIcon: 'size-3' }"
               :aria-label="`Remove ${pageContextBadge(pageContext)}`"
               data-testid="chat-page-context-remove"
               @click="emit('clearPageContext')"
-            >
-              <X class="size-3" aria-hidden="true" />
-            </button>
-            <MapPin class="size-3 shrink-0" aria-hidden="true" />
+            />
+            <UIcon name="i-hugeicons-location-01" class="size-3 shrink-0" aria-hidden="true" />
             <span class="min-w-0 truncate">{{ pageContextBadge(pageContext) }}</span>
-          </Badge>
-          <Badge
+          </UBadge>
+          <UBadge
             v-for="(reference, i) in references"
             :key="reference.full"
-            variant="secondary"
+            color="neutral"
+            variant="soft"
             data-testid="chat-reference"
-            class="max-w-full py-1 pr-1 pl-2 text-xs"
+            class="max-w-full gap-1 pr-0.5"
           >
-            <MousePointerClick class="size-3 shrink-0" aria-hidden="true" />
+            <UIcon name="i-hugeicons-cursor-pointer-01" class="size-3 shrink-0" aria-hidden="true" />
             <span class="min-w-0 truncate">{{ reference.label }}</span>
-            <button
-              type="button"
-              class="hover:bg-background shrink-0 rounded p-0.5"
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-cancel-01"
+              class="shrink-0 p-0.5"
+              :ui="{ leadingIcon: 'size-3' }"
               :aria-label="`Remove ${reference.label}`"
               data-testid="chat-reference-remove"
               @click="emit('removeReference', i)"
-            >
-              <X class="size-3" aria-hidden="true" />
-            </button>
-          </Badge>
-          <span
+            />
+          </UBadge>
+          <UBadge
             v-for="(a, i) in attachments"
             :key="a.path"
+            color="neutral"
+            variant="outline"
             data-testid="chat-attachment"
-            class="bg-muted inline-flex max-w-full items-center gap-1.5 rounded-md py-1 pr-1 pl-2 text-xs"
+            class="max-w-full gap-1 pr-0.5"
           >
-            <Paperclip class="size-3 shrink-0" aria-hidden="true" />
+            <UIcon name="i-hugeicons-attachment-01" class="size-3 shrink-0" aria-hidden="true" />
             <span class="min-w-0 truncate">{{ a.name }}</span>
-            <button
-              type="button"
-              class="hover:bg-background shrink-0 rounded p-0.5"
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-cancel-01"
+              class="shrink-0 p-0.5"
+              :ui="{ leadingIcon: 'size-3' }"
               :aria-label="`Remove ${a.name}`"
               @click="emit('removeAttachment', i)"
-            >
-              <X class="size-3" aria-hidden="true" />
-            </button>
+            />
+          </UBadge>
+          <span v-if="attaching" class="text-muted inline-flex items-center gap-1.5 py-1 text-xs">
+            <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" /> Attaching…
           </span>
-          <span v-if="attaching" class="text-muted-foreground inline-flex items-center gap-1.5 py-1 text-xs">
-            <Spinner class="size-3.5" aria-hidden="true" /> Attaching…
-          </span>
-        </div>
-        <p
-          v-if="locked"
-          data-testid="chat-locked"
-          class="text-muted-foreground min-h-16 px-3 py-2 text-sm"
-        >
-          {{ locked }}
-        </p>
-        <InputGroupTextarea
-          v-else
-          ref="textarea"
-          v-model="text"
-          data-testid="chat-input"
-          placeholder="Ask your assistant to change your site"
-          class="max-h-48 min-h-16"
-          @keydown="onKeydown"
-          @paste="onPaste"
-        />
-        <InputGroupAddon align="block-end" class="justify-between">
+        </template>
+
+        <template #body>
+          <p
+            v-if="locked"
+            data-testid="chat-locked"
+            class="text-muted min-h-10 py-1 text-sm"
+          >
+            {{ locked }}
+          </p>
+          <UTextarea
+            v-else
+            ref="textarea"
+            v-model="text"
+            variant="none"
+            :rows="1"
+            autoresize
+            :maxrows="8"
+            data-testid="chat-input"
+            placeholder="Ask your assistant to change your site"
+            class="w-full"
+            :ui="{ base: 'max-h-48 min-h-10 px-0 py-1' }"
+            @keydown="onKeydown"
+            @paste="onPaste"
+          />
+        </template>
+
+        <template #footer>
           <div class="flex min-w-0 items-center gap-2">
+            <!-- Hidden native picker (no Nuxt UI equivalent for a headless file dialog trigger). -->
             <input
               ref="fileInput"
               type="file"
@@ -281,161 +348,119 @@ defineExpose({ focus: () => textarea.value?.$el.focus() });
               accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md"
               @change="onFileChange"
             />
-            <InputGroupButton
+            <UButton
+              color="neutral"
               variant="ghost"
-              size="icon-xs"
-              class="size-7 shrink-0"
+              size="sm"
+              icon="i-hugeicons-attachment-01"
+              class="shrink-0"
               aria-label="Attach image or file"
               data-testid="chat-attach"
               :disabled="attaching"
               @click="pickFiles"
+            />
+            <UDropdownMenu
+              v-model:open="pickerOpen"
+              :items="pickerItems"
+              :content="{ align: 'start' }"
+              :ui="{ content: 'min-w-48' }"
             >
-              <Paperclip />
-            </InputGroupButton>
-            <DropdownMenu v-model:open="pickerOpen">
-              <DropdownMenuTrigger as-child>
-                <button
-                  type="button"
-                  data-testid="chat-agent"
-                  :data-provider="provider ?? undefined"
-                  aria-label="Assistant and model"
-                  class="bg-card hover:bg-accent btn-raised-soft dark:bg-input/30 dark:hover:bg-input/50 focus-visible:ring-ring/50 flex h-7 max-w-56 min-w-0 items-center gap-1.5 rounded-md border border-transparent py-0 pr-1.5 pl-2 text-xs whitespace-nowrap outline-none focus-visible:ring-3"
-                >
-                  <ProviderIcon v-if="provider" :provider="provider" class="size-3.5 text-current" />
-                  <span class="min-w-0 truncate">{{ pickerLabel }}</span>
-                  <ChevronDown class="text-muted-foreground size-4 shrink-0 opacity-50" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="min-w-48" data-testid="chat-agent-menu">
-                <!-- Providers on the first layer; models open in a searchable hover flyout. -->
-                <DropdownMenuSub v-for="p in shownProviders" :key="p">
-                  <DropdownMenuSubTrigger data-testid="chat-agent-sub" :data-provider="p">
-                    <ProviderIcon :provider="p" class="size-3.5 text-current" />
-                    <span class="min-w-0 flex-1 truncate">{{ labelOf(p) }}</span>
-                    <Check v-if="provider === p" class="size-4" />
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent
-                    class="w-72 p-0"
-                    :force-mount="forceSubMount || undefined"
-                    @close-auto-focus.prevent
-                  >
-                    <Command :data-testid="`chat-model-menu-${p}`">
-                      <CommandInput
-                        placeholder="Search models…"
-                        data-testid="chat-model-search"
-                        @keydown.stop
-                      />
-                      <CommandList class="max-h-[min(320px,50vh)]">
-                        <CommandEmpty>No models found.</CommandEmpty>
-                        <CommandGroup v-if="menus[p]?.direct.length">
-                          <CommandItem
-                            v-for="m in menus[p]?.direct"
-                            :key="m.id"
-                            :value="`${m.id} ${m.label}`"
-                            data-testid="chat-model-item"
-                            :data-provider="p"
-                            :data-value="`${p}:${m.id}`"
-                            @select="pickModel(p, m.id)"
-                          >
-                            <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
-                            <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                          </CommandItem>
-                        </CommandGroup>
-                        <CommandGroup
-                          v-for="sub in menus[p]?.subs"
-                          :key="`${p}:${sub.heading}`"
-                          :heading="sub.heading"
-                          data-testid="chat-model-sub"
-                          :data-provider="p"
-                          :data-model-provider="sub.heading"
-                        >
-                          <CommandItem
-                            v-for="m in sub.items"
-                            :key="m.id"
-                            :value="`${m.id} ${sub.heading} ${m.label}`"
-                            data-testid="chat-model-sub-item"
-                            :data-provider="p"
-                            :data-value="`${p}:${m.id}`"
-                            @select="pickModel(p, m.id)"
-                          >
-                            <span data-testid="chat-model-label" class="min-w-0 flex-1 truncate">{{ m.label }}</span>
-                            <Check v-if="selected === `${p}:${m.id}`" class="size-4" />
-                          </CommandItem>
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem data-testid="chat-agent-setup" @select="setupAnother">
-                  <Settings2 class="size-3.5 text-current" aria-hidden="true" />
-                  <span class="min-w-0 flex-1 truncate">Set up another assistant…</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <button
-                  type="button"
-                  data-testid="chat-auto-approve"
-                  :data-approve="autoApprove ? 'auto' : 'ask'"
-                  :aria-label="`Tool approvals: ${autoApprove ? 'Auto-approve' : 'Ask each time'}`"
-                  title="Choose whether your assistant asks before running tools"
-                  class="bg-card hover:bg-accent btn-raised-soft dark:bg-input/30 dark:hover:bg-input/50 focus-visible:ring-ring/50 flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent py-0 pr-1.5 pl-2 text-xs whitespace-nowrap outline-none focus-visible:ring-3"
-                >
-                  <ShieldCheck v-if="autoApprove" class="size-3.5" aria-hidden="true" />
-                  <ShieldQuestion v-else class="size-3.5" aria-hidden="true" />
-                  <span>{{ autoApprove ? "Auto" : "Ask" }}</span>
-                  <ChevronDown class="text-muted-foreground size-4 shrink-0 opacity-50" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="w-56">
-                <DropdownMenuLabel>Tool approvals</DropdownMenuLabel>
-                <DropdownMenuItem data-testid="chat-approval-ask" @select="emit('setAutoApprove', false)">
-                  <span class="flex-1">Ask each time</span>
-                  <Check v-if="!autoApprove" class="size-4" aria-hidden="true" />
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="chat-approval-auto" @select="emit('setAutoApprove', true)">
-                  <span class="flex-1">Auto-approve</span>
-                  <Check v-if="autoApprove" class="size-4" aria-hidden="true" />
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="xs"
+                trailing-icon="i-hugeicons-arrow-down-01"
+                data-testid="chat-agent"
+                :data-provider="provider ?? undefined"
+                aria-label="Assistant and model"
+                class="h-7 max-w-56 min-w-0 whitespace-nowrap"
+                :ui="{ trailingIcon: 'text-dimmed' }"
+              >
+                <ProviderIcon v-if="provider" :provider="provider" class="size-3.5 text-current" />
+                <span class="min-w-0 truncate">{{ pickerLabel }}</span>
+              </UButton>
+              <template #provider-leading="{ item }">
+                <ProviderIcon :provider="row(item).provider" class="size-3.5 text-current" />
+              </template>
+              <template #provider-label="{ item }">
+                <!-- Sub triggers take no attrs; the label carries the flyout's testid (hovering it opens the flyout). -->
+                <span data-testid="chat-agent-sub" :data-provider="row(item).provider">{{ row(item).label }}</span>
+              </template>
+              <template #provider-trailing="{ item }">
+                <UIcon v-if="provider === row(item).provider" name="i-hugeicons-tick-02" class="size-4" aria-hidden="true" />
+                <UIcon name="i-hugeicons-arrow-right-01" class="text-dimmed size-4" aria-hidden="true" />
+              </template>
+              <template #model-group="{ item }">
+                <span data-testid="chat-model-sub" :data-provider="row(item).provider" :data-model-provider="row(item).label">
+                  {{ row(item).label }}
+                </span>
+              </template>
+              <template #model-label="{ item }">
+                <span data-testid="chat-model-label">{{ row(item).label }}</span>
+              </template>
+              <template #model-trailing="{ item }">
+                <UIcon v-if="row(item).selected" name="i-hugeicons-tick-02" class="size-4" aria-hidden="true" />
+              </template>
+            </UDropdownMenu>
+            <UDropdownMenu :items="approvalItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="xs"
+                :icon="autoApprove ? 'i-hugeicons-shield-check' : 'i-hugeicons-shield-01'"
+                trailing-icon="i-hugeicons-arrow-down-01"
+                :label="autoApprove ? 'Auto' : 'Ask'"
+                data-testid="chat-auto-approve"
+                :data-approve="autoApprove ? 'auto' : 'ask'"
+                :aria-label="`Tool approvals: ${autoApprove ? 'Auto-approve' : 'Ask each time'}`"
+                title="Choose whether your assistant asks before running tools"
+                class="h-7 shrink-0 whitespace-nowrap"
+                :ui="{ trailingIcon: 'text-dimmed' }"
+              />
+              <template #item-trailing="{ item }">
+                <UIcon v-if="item.active" name="i-hugeicons-tick-02" class="size-4" aria-hidden="true" />
+              </template>
+            </UDropdownMenu>
           </div>
           <div class="flex shrink-0 items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <span tabindex="0" class="shrink-0 rounded-md">
-                  <InputGroupButton
-                    variant="default"
-                    size="icon-xs"
-                    class="size-7"
-                    :aria-label="blocked ?? (streaming ? 'Queue message' : 'Send')"
-                    :data-testid="streaming ? 'chat-queue' : 'chat-send'"
-                    :disabled="!canSend"
-                    @click="submit"
-                  >
-                    <ListPlus v-if="streaming" />
-                    <ArrowUp v-else />
-                  </InputGroupButton>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{{ blocked ?? (streaming ? "Queue message" : "Send") }}</TooltipContent>
-            </Tooltip>
-            <InputGroupButton
+            <UTooltip :text="blocked ?? (streaming ? 'Queue message' : 'Send')">
+              <!-- The span keeps the tooltip reachable while the button is disabled. -->
+              <span tabindex="0" class="shrink-0 rounded-md">
+                <!-- While a turn runs, a new message is queued (UChatPromptSubmit has no queue state). -->
+                <UButton
+                  v-if="streaming"
+                  size="sm"
+                  icon="i-hugeicons-add-to-list"
+                  :aria-label="blocked ?? 'Queue message'"
+                  data-testid="chat-queue"
+                  :disabled="!canSend"
+                  @click="submit"
+                />
+                <UChatPromptSubmit
+                  v-else
+                  status="ready"
+                  size="sm"
+                  icon="i-hugeicons-arrow-up-01"
+                  :aria-label="blocked ?? 'Send'"
+                  data-testid="chat-send"
+                  :disabled="!canSend"
+                  @click="submit"
+                />
+              </span>
+            </UTooltip>
+            <UChatPromptSubmit
               v-if="streaming"
-              variant="ghost"
-              size="icon-xs"
-              class="size-7 shrink-0"
+              status="streaming"
+              size="sm"
+              streaming-icon="i-hugeicons-stop"
+              class="shrink-0"
               aria-label="Stop"
               data-testid="chat-stop"
-              @click="emit('stop')"
-            >
-              <Square />
-            </InputGroupButton>
+              @stop="emit('stop')"
+            />
           </div>
-        </InputGroupAddon>
-      </InputGroup>
+        </template>
+      </UChatPrompt>
     </div>
   </TooltipProvider>
 </template>

@@ -7,7 +7,7 @@ import PublishButton from "./PublishButton.vue";
 import { useChangesStore } from "./store";
 
 const h = vi.hoisted(() => ({ toastError: vi.fn(), toastSuccess: vi.fn() }));
-vi.mock("vue-sonner", () => ({ toast: { error: h.toastError, success: h.toastSuccess } }));
+vi.mock("@/lib/toast", () => ({ toast: { error: h.toastError, success: h.toastSuccess } }));
 
 const open: PrStatus = {
   number: 1,
@@ -74,7 +74,7 @@ describe("PublishButton", () => {
     });
     const button = wrapper.get('[data-testid="publish-change"]');
     expect(button.attributes("disabled")).toBeDefined();
-    expect(button.attributes("title")).toBe("This pull request can't be merged yet.");
+    expect(button.attributes("title")).toBe("This change can't be published yet.");
   });
 
   it("is disabled when branch protection blocks the merge", async () => {
@@ -88,7 +88,7 @@ describe("PublishButton", () => {
     const { wrapper } = mountWith({ status: { ...open, state: "closed" } });
     const button = wrapper.get('[data-testid="publish-change"]');
     expect(button.attributes("disabled")).toBeDefined();
-    expect(button.attributes("title")).toBe("This pull request is closed.");
+    expect(button.attributes("title")).toBe("This change was closed without publishing.");
   });
 
   it("stays enabled for a draft, which Publish marks ready itself", async () => {

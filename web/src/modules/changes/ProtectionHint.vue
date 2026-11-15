@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ShieldAlert, X } from "@lucide/vue";
-import { toast } from "vue-sonner";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { toast } from "@/lib/toast";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import ULink from "@nuxt/ui/components/Link.vue";
 import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "@/modules/changes/store";
 
@@ -19,46 +19,50 @@ async function onDismiss() {
 </script>
 
 <template>
-  <Alert
+  <UAlert
     v-if="changes.protectionHint"
-    class="absolute top-full right-0 z-50 mt-2 w-80 pr-9 shadow-md"
+    color="neutral"
+    variant="outline"
+    icon="i-hugeicons-shield-alert"
+    title="Protect main so merges need review"
+    close
+    class="bg-default absolute top-full right-0 z-50 mt-2 w-80 shadow-md"
     data-testid="protection-hint"
   >
-    <ShieldAlert />
-    <AlertTitle>Protect main so merges need review</AlertTitle>
-    <AlertDescription>
+    <template #description>
       <p>
         Anyone with push access can merge this change straight to <code>main</code>. Add a branch
         protection rule that requires a pull request review.
       </p>
-      <p class="flex gap-3">
-        <a
-          class="underline underline-offset-2"
+      <p class="mt-2 flex gap-3">
+        <ULink
+          class="text-highlighted underline underline-offset-2"
           data-testid="protection-hint-settings"
-          :href="changes.protectionHint.settingsUrl"
+          :to="changes.protectionHint.settingsUrl"
           target="_blank"
           rel="noopener noreferrer"
-          >Branch settings</a
+          >Branch settings</ULink
         >
-        <a
-          class="underline underline-offset-2"
+        <ULink
+          class="text-highlighted underline underline-offset-2"
           data-testid="protection-hint-docs"
-          :href="changes.protectionHint.docsUrl"
+          :to="changes.protectionHint.docsUrl"
           target="_blank"
           rel="noopener noreferrer"
-          >How to</a
+          >How to</ULink
         >
       </p>
-    </AlertDescription>
-    <Button
-      variant="ghost"
-      size="icon"
-      class="absolute top-2 right-2 size-6"
-      aria-label="Dismiss"
-      data-testid="protection-hint-dismiss"
-      @click="onDismiss"
-    >
-      <X />
-    </Button>
-  </Alert>
+    </template>
+    <template #close>
+      <UButton
+        color="neutral"
+        variant="link"
+        size="sm"
+        icon="i-hugeicons-cancel-01"
+        aria-label="Dismiss"
+        data-testid="protection-hint-dismiss"
+        @click="onDismiss"
+      />
+    </template>
+  </UAlert>
 </template>

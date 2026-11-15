@@ -80,7 +80,8 @@ test("share preview shows push-access error on 403", async ({ page, orso }) => {
   orso.github.setPullsStatus(403);
 
   await page.getByTestId("share-preview").click();
-  await expect(page.locator("[data-sonner-toast]")).toContainText("You don't have push access");
+  // Toasts render in Nuxt UI's (reka-ui) toaster, a region labelled "Notifications (F8)".
+  await expect(page.getByRole("region", { name: /Notifications/ })).toContainText("You don't have push access");
 });
 
 test("share preview prompts sign-in on 401", async ({ page, orso }) => {

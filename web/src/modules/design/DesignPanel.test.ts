@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import type { DesignDoc } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 // The real editor loads Tiptap and CodeMirror; the stub shows its body and emits one edit.
 vi.mock("@/modules/content/MarkdownBodyEditor.vue", async () => {
   const { defineComponent, h: el } = await import("vue");

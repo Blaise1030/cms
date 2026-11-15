@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@nuxt/ui";
 
 @custom-variant dark (&:is(.dark *));
 /* The macOS desktop window is full screen (set by the shell), so there are no traffic lights to clear. */
@@ -28,6 +29,12 @@
   /* How much white the raised buttons' top gloss and edge highlight mix in. */
   --raised-gloss: 22%;
   --raised-soft-gloss: 70%;
+  /* Button depth (btn-depth / btn-depth-soft): lit top edge, sheen and drop strength. */
+  --depth-highlight: 0.22;
+  --depth-sheen: 0.08;
+  --depth-drop: 22%;
+  --depth-soft-highlight: 0.7;
+  --depth-soft-drop: 8%;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -66,6 +73,11 @@
   --ring: oklch(0.6 0.17 260);
   --raised-gloss: 14%;
   --raised-soft-gloss: 6%;
+  --depth-highlight: 0.14;
+  --depth-sheen: 0.05;
+  --depth-drop: 45%;
+  --depth-soft-highlight: 0.06;
+  --depth-soft-drop: 50%;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -79,6 +91,35 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.6 0.17 260);
+}
+
+/* Nuxt UI reads its own `--ui-*` variables. Point them at the app palette above so Nuxt UI and
+   shadcn-vue components share one set of colours while both are in use. This also matters for
+   class names both libraries define: Nuxt UI's `bg-muted`, `bg-border`, `border-muted`… take
+   precedence over the shadcn `--color-*` ones, so they must resolve to the same colours.
+   Unlayered, so it beats Nuxt UI's `@layer theme` defaults in light and dark alike. */
+:root {
+  --ui-primary: var(--primary);
+  --ui-error: var(--destructive);
+  --ui-radius: calc(var(--radius) / 2);
+
+  --ui-text: var(--foreground);
+  --ui-text-highlighted: var(--foreground);
+  --ui-text-toned: color-mix(in oklch, var(--foreground) 75%, var(--muted-foreground));
+  --ui-text-muted: var(--muted-foreground);
+  --ui-text-dimmed: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+  --ui-text-inverted: var(--background);
+
+  --ui-bg: var(--card);
+  --ui-bg-muted: var(--muted);
+  --ui-bg-elevated: var(--muted);
+  --ui-bg-accented: var(--border);
+  --ui-bg-inverted: var(--foreground);
+
+  --ui-border: var(--border);
+  --ui-border-muted: var(--border);
+  --ui-border-accented: var(--input);
+  --ui-border-inverted: var(--foreground);
 }
 
 /* Compact density: every p-/m-/gap-/h-/size- utility derives from --spacing (default 0.25rem). */
@@ -173,27 +214,50 @@ file-tree-container {
   color-scheme: inherit;
 }
 
-/* Running-state text shimmer used by the trace, attachment and chat components: a highlight sweeps
-   across the text, which keeps its own colour (`currentColor`) as the base. */
-@utility shimmer {
-  background-image: linear-gradient(110deg, currentColor 35%, var(--color-foreground) 50%, currentColor 65%);
-  background-size: 250% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer 2s linear infinite;
-}
-@utility shimmer-none {
-  animation: none;
-  background-image: none;
-  -webkit-text-fill-color: currentColor;
-}
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
+/* Button depth for Nuxt UI buttons (wired in vite.config.ts), after Medusa's: a hairline darker
+   edge, a 1px drop and a thin lit top edge, with only a faint sheen. Shadows go through Tailwind's
+   shadow variables so Nuxt UI's outline rings and focus rings still stack on top. */
+@utility btn-depth {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / var(--depth-sheen)), transparent 70%);
+  --tw-inset-shadow: inset 0 0.75px 0 rgb(255 255 255 / var(--depth-highlight));
+  --tw-shadow:
+    0 0 0 1px color-mix(in oklch, black 16%, transparent),
+    0 1px 2px color-mix(in oklch, black var(--depth-drop), transparent);
+  box-shadow:
+    var(--tw-inset-shadow), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:active:not(:disabled) {
+    background-image: none;
+    --tw-inset-shadow: inset 0 1px 1px color-mix(in oklch, black 14%, transparent);
   }
-  to {
-    background-position: 0 0;
+  &:disabled {
+    --tw-shadow: 0 0 #0000;
+  }
+}
+@utility btn-depth-soft {
+  --tw-inset-shadow: inset 0 0.75px 0 rgb(255 255 255 / var(--depth-soft-highlight));
+  --tw-shadow: 0 1px 2px color-mix(in oklch, black var(--depth-soft-drop), transparent);
+  box-shadow:
+    var(--tw-inset-shadow), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:active:not(:disabled) {
+    --tw-inset-shadow: inset 0 1px 1px color-mix(in oklch, black 10%, transparent);
+    --tw-shadow: 0 0 #0000;
+  }
+  &:disabled {
+    --tw-shadow: 0 0 #0000;
+  }
+}
+
+/* Text fields: a soft 1px drop under Nuxt UI's hairline ring, no lit edge (a field is a place to
+   type, not a control to press). Through `--tw-shadow`, so the ring and the focus ring stack. */
+@utility field-depth {
+  --tw-shadow: 0 1px 2px color-mix(in oklch, black var(--depth-soft-drop), transparent);
+  box-shadow:
+    var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  &:disabled {
+    --tw-shadow: 0 0 #0000;
   }
 }
 

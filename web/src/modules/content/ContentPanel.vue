@@ -1,31 +1,22 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useElementBounding, useWindowSize } from "@vueuse/core";
-import { ChevronLeft, ExternalLink, FileText, Folder, PanelLeft, PanelRight, Search, Trash2 } from "@lucide/vue";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
+import type { ModalProps, SplitterItem, TableColumn, TabsItem } from "@nuxt/ui";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCard from "@nuxt/ui/components/Card.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UFormField from "@nuxt/ui/components/FormField.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
+import UTable from "@nuxt/ui/components/Table.vue";
+import UTabs from "@nuxt/ui/components/Tabs.vue";
 import { contentPath } from "@/router";
 import { useProjectsStore } from "@/modules/projects/store";
 import { openInPreview } from "./openInPreview";
-import { Button } from "@/components/ui/button";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-} from "@/components/ui/sidebar";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
@@ -106,7 +97,10 @@ const canConfirm = computed(() => {
 async function confirmLifecycle() { try { await store.confirmLifecycle(); showInUrl(); } catch { /* recorded on the store; the draft stays */ } }
 /** The branch the project is on, as the Changes picker knows it. */
 const currentBranch = () => changes.active?.branch ?? "main";
-const collectionsPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
+/** The collections sidebar and the editor; panel ids and the auto-save id match the old resizable layout. */
+const splitter = ref<{ panelsRef: ({ collapse?: () => void; expand?: () => void } | undefined)[] } | null>(null);
+const COLLECTIONS_PANEL: SplitterItem = { id: "content-collections", slot: "collections", order: 1, defaultSize: 16, minSize: 10, maxSize: 30, collapsible: true, collapsedSize: 0 };
+const EDITOR_PANEL: SplitterItem = { id: "content-editor", slot: "editor", order: 2, defaultSize: 80, minSize: 40 };
 /** The sidebar's filter; it matches the name the writer reads, not the raw collection id. */
 const collectionQuery = ref("");
 const filteredCollections = computed(() => {
@@ -116,14 +110,21 @@ const filteredCollections = computed(() => {
 const sidebarOpen = ref(true);
 const fieldsOpen = ref(true);
 function toggleSidebar() {
-  if (sidebarOpen.value) collectionsPanel.value?.collapse(); else collectionsPanel.value?.expand();
+  const panel = splitter.value?.panelsRef[0];
+  if (sidebarOpen.value) panel?.collapse?.(); else panel?.expand?.();
 }
+const panels = computed<SplitterItem[]>(() => (editing.value ? [EDITOR_PANEL] : [COLLECTIONS_PANEL, EDITOR_PANEL]));
+function panelToggled(index: number, open: boolean) { if (!editing.value && index === 0) sidebarOpen.value = open; }
 /** Markdown and MDX entries edit the body in the page and the fields beside it. */
 const hasFieldsPanel = computed(() => !!store.descriptor && !!store.entry && store.entry.kind !== "json");
 const history = useContentHistoryStore();
 const tab = ref<"fields" | "history">("fields");
 /** JSON entries edit their fields in the page, so their side panel only has History. */
 const sideTab = computed(() => (hasFieldsPanel.value ? tab.value : "history"));
+const sideTabs = computed<TabsItem[]>(() => [
+  ...(hasFieldsPanel.value ? [{ label: "Fields", icon: "i-hugeicons-text-creation", value: "fields", slot: "fields" }] : []),
+  { label: "History", icon: "i-hugeicons-clock-04", value: "history", slot: "history" },
+]);
 const entryKey = computed(() => (store.entry ? `${store.entry.collection}/${store.entry.id}` : null));
 /** The URL slug is the entry's file name; saving a new one renames the document. */
 const slugDraft = ref("");
@@ -286,6 +287,14 @@ const differences = computed(() => {
   return rows;
 });
 const show = (v: unknown) => v === undefined ? "(not set)" : typeof v === "string" ? v : JSON.stringify(v);
+/** Nuxt UI passes extra `content` keys to the dialog panel as attributes; this one names it for tests. */
+const dialogTestId = (id: string) => ({ "data-testid": id }) as ModalProps["content"];
+type Difference = { name: string; draft: unknown; current: unknown };
+const differenceColumns: TableColumn<Difference>[] = [
+  { accessorKey: "name", header: "Field" },
+  { id: "draft", header: "Your draft", cell: ({ row }) => show(row.original.draft) },
+  { id: "current", header: "On disk now", cell: ({ row }) => show(row.original.current) },
+];
 // The editor is a CSS container, so `fixed` would still place the bar against it, not the screen.
 const editorForm = ref<HTMLElement | null>(null);
 const { left: editorLeft, width: editorWidth } = useElementBounding(editorForm);
@@ -301,83 +310,71 @@ onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 // File events stop refreshing Content while the tab is closed; reopening it refreshes once.
 onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
 
-/** Same as App Settings sidebar nav (no primary tint — that belongs on the icon rail). */
-const navItem = "h-7 rounded-lg px-2 text-[13px]";
-const navActive = [
-  "font-medium btn-raised-soft",
-  "data-[active=true]:bg-background data-[active=true]:text-sidebar-accent-foreground",
-  "data-[active=true]:hover:bg-background",
-].join(" ");
-/** Collections are folders of entries; kind glyphs stay on the entry list. */
-const COLLECTION_ICON = { markdown: Folder, mdx: Folder, json: Folder } as const;
 </script>
 <template>
   <div class="h-full min-h-0" data-testid="content-panel">
-    <SidebarProvider class="h-full min-h-0 overflow-hidden" :shortcut="false">
-      <ResizablePanelGroup direction="horizontal" auto-save-id="content-sidebar" class="h-full min-h-0">
-      <ResizablePanel v-if="!editing" id="content-collections" ref="collectionsPanel" :order="1" :default-size="16" :min-size="10" :max-size="30" collapsible :collapsed-size="0" @collapse="sidebarOpen = false" @expand="sidebarOpen = true">
-      <Sidebar collapsible="none" class="bg-background h-full min-h-0 w-full min-w-0" data-testid="content-collections-sidebar">
-        <SidebarContent class="gap-0 overflow-hidden py-1.5">
-          <SidebarGroup class="min-h-0 flex-1 px-0.5 py-0.5">
-            <SidebarGroupLabel class="text-sidebar-foreground/50 h-7 px-1.5 text-[11px] tracking-wide">
-              Collections
-            </SidebarGroupLabel>
-            <SidebarGroupContent class="flex min-h-0 flex-1 flex-col gap-2">
-              <InputGroup class="h-8 w-auto border-sidebar-border bg-card shadow-none">
-                <InputGroupAddon align="inline-start">
-                  <Search class="size-4 opacity-50" aria-hidden="true" />
-                </InputGroupAddon>
-                <InputGroupInput
-                  v-model="collectionQuery"
-                  data-testid="content-collection-filter"
-                  placeholder="Filter collections"
-                  aria-label="Filter collections"
-                  class="h-8 text-[13px]"
-                />
-              </InputGroup>
-              <!-- Padding keeps btn-raised-soft's shadow inside the scroller (overflow clips paint). -->
-              <SidebarMenu data-testid="content-collections" aria-label="Collections" class="min-h-0 flex-1 gap-1 overflow-y-auto p-0.5">
-                <SidebarMenuItem v-for="c in filteredCollections" :key="c.name">
-                  <SidebarMenuButton
-                    type="button"
-                    :is-active="store.selectedCollection === c.name"
-                    :class="[navItem, store.selectedCollection === c.name ? navActive : '']"
-                    :aria-current="store.selectedCollection === c.name ? 'page' : undefined"
-                    data-testid="content-collection"
-                    :data-collection-name="c.name"
-                    @click="openCollection(c)"
-                  >
-                    <component :is="COLLECTION_ICON[c.kind]" aria-hidden="true" />
-                    <span>{{ humanize(c.name) }}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <p
-                  v-if="!filteredCollections.length"
-                  class="text-sidebar-foreground/50 px-3 py-2 text-xs"
-                  data-testid="content-collections-empty"
-                >
-                  No matches
-                </p>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
-      </ResizablePanel>
-      <ResizableHandle v-if="!editing" with-handle class="bg-transparent" />
-      <ResizablePanel id="content-editor" :order="2" :default-size="80" :min-size="40">
-      <SidebarInset class="@container/inset h-full min-h-0 min-w-0 w-auto overflow-hidden bg-background">
+    <USplitter
+      ref="splitter"
+      :items="panels"
+      auto-save-id="content-sidebar"
+      class="h-full min-h-0 overflow-hidden"
+      :ui="{ handle: 'flex items-center justify-center' }"
+      @collapse="panelToggled($event, false)"
+      @expand="panelToggled($event, true)"
+    >
+      <template #collections>
+        <nav class="bg-background flex h-full min-h-0 w-full min-w-0 flex-col gap-2 px-1.5 py-2" aria-label="Content collections" data-testid="content-collections-sidebar">
+          <UFormField label="Collections" :ui="{ label: 'text-dimmed text-xs font-normal tracking-wide px-1', container: 'mt-2' }" class="shrink-0">
+            <UInput
+              v-model="collectionQuery"
+              icon="i-hugeicons-search-01"
+              size="sm"
+              class="w-full"
+              data-testid="content-collection-filter"
+              placeholder="Filter collections"
+              aria-label="Filter collections"
+            />
+          </UFormField>
+          <ul data-testid="content-collections" aria-label="Collections" class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-0.5">
+            <li v-for="c in filteredCollections" :key="c.name">
+              <UButton
+                type="button"
+                color="neutral"
+                :variant="store.selectedCollection === c.name ? 'soft' : 'ghost'"
+                size="sm"
+                block
+                icon="i-hugeicons-folder-01"
+                :label="humanize(c.name)"
+                class="justify-start"
+                :class="store.selectedCollection === c.name ? 'font-medium' : 'text-default'"
+                :aria-current="store.selectedCollection === c.name ? 'page' : undefined"
+                data-testid="content-collection"
+                :data-collection-name="c.name"
+                @click="openCollection(c)"
+              />
+            </li>
+            <li v-if="!filteredCollections.length" class="text-dimmed px-3 py-2 text-xs" data-testid="content-collections-empty">No matches</li>
+          </ul>
+        </nav>
+      </template>
+      <template #resize-handle>
+        <div
+          class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+          aria-hidden="true"
+        />
+      </template>
+      <template #editor>
+      <div class="@container/inset bg-background h-full min-h-0 w-full min-w-0 overflow-hidden">
       <div v-if="!editing" class="flex h-full min-h-0 flex-col">
         <div class="flex h-11 shrink-0 items-center px-2">
-          <Button type="button" variant="ghost" size="icon" class="text-muted-foreground" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar">
-            <PanelLeft class="size-4" />
-          </Button>
+          <UButton type="button" color="neutral" variant="ghost" square icon="i-hugeicons-sidebar-left" class="text-muted" :aria-label="sidebarOpen ? 'Hide collections' : 'Show collections'" :title="sidebarOpen ? 'Hide collections' : 'Show collections'" data-testid="content-toggle-sidebar" @click="toggleSidebar" />
         </div>
-        <p v-if="store.error" role="alert" class="px-4 pb-2 text-sm text-destructive">{{ store.error }}</p>
-        <section v-if="store.needsChange" role="alert" class="mx-4 mb-2 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-          <p>Content cannot be edited on the live site. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
-          <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
-        </section>
+        <UAlert v-if="store.error" role="alert" color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.error" class="mx-4 mb-2 w-auto" />
+        <UAlert v-if="store.needsChange" role="alert" color="neutral" variant="outline" orientation="horizontal" class="mx-4 mb-2 w-auto" data-testid="content-needs-change" :description="`Content cannot be edited on the live site. Create a change to ${store.creation ? 'create this entry' : 'save your edits'}.`">
+          <template #actions>
+            <UButton type="button" size="sm" label="Create change" data-testid="content-create-change" @click="showNewChange = true" />
+          </template>
+        </UAlert>
         <EntryList
           v-if="activeCollection"
           class="min-h-0 flex-1"
@@ -389,117 +386,114 @@ const COLLECTION_ICON = { markdown: Folder, mdx: Folder, json: Folder } as const
           @open="openEntry(activeCollection.name, $event)"
           @create="newEntry(activeCollection.name)"
         />
-        <div v-else-if="!store.loading && !store.error && !store.collections.length" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-empty-catalog">
-          <FileText class="size-8 opacity-50" aria-hidden="true" />
-          <p class="font-medium text-foreground">No content collections</p>
-          <p class="max-w-md">Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.</p>
-        </div>
-        <p v-else-if="store.loading" class="px-4 text-sm text-muted-foreground">Loading content…</p>
-        <div v-else class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground" data-testid="content-choose-collection">
-          <FileText class="size-8 opacity-50" aria-hidden="true" />
-          <p>Choose a collection.</p>
-        </div>
+        <UEmpty v-else-if="!store.loading && !store.error && !store.collections.length" variant="naked" icon="i-hugeicons-file-01" title="No content collections" class="h-full pb-11" data-testid="content-empty-catalog">
+          <template #description>
+            Content editing needs the orso-astro integration: <code>orso()</code> in astro.config and <code>orsoGlob</code> loaders in src/content.config.ts. Collections appear once the preview starts.
+          </template>
+        </UEmpty>
+        <p v-else-if="store.loading" class="text-muted px-4 text-sm">Loading content…</p>
+        <UEmpty v-else variant="naked" icon="i-hugeicons-file-01" description="Choose a collection." class="h-full pb-11" data-testid="content-choose-collection" />
       </div>
       <form v-else ref="editorForm" class="relative flex h-full min-h-0 flex-col" :data-testid="store.entry && store.descriptor ? 'content-form' : undefined" @submit.prevent="store.entry && store.descriptor && !store.readOnlyReason && save()" @keydown.esc="history.selectedSha && history.select(null)">
-      <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
-        <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-        <Button type="button" variant="secondary" size="icon" :aria-label="backLabel" :title="backLabel" data-testid="content-back" @click="backToList">
-          <ChevronLeft class="size-4" />
-        </Button>
+      <header class="bg-background relative z-10 flex h-11 shrink-0 items-center gap-1 px-2">
+        <div class="from-background pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b to-transparent" aria-hidden="true" />
+        <UButton type="button" color="neutral" variant="outline" square icon="i-hugeicons-arrow-left-01" :aria-label="backLabel" :title="backLabel" data-testid="content-back" @click="backToList" />
         <template v-if="store.entry">
           <div class="flex min-w-0 items-center gap-1 px-1">
-            <h2 class="truncate text-sm font-medium" data-testid="content-entry-title">{{ humanize(store.entry.id) }}</h2>
-            <p class="hidden truncate text-xs text-muted-foreground @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
+            <h2 class="text-highlighted truncate text-sm font-medium" data-testid="content-entry-title">{{ humanize(store.entry.id) }}</h2>
+            <p class="text-muted hidden truncate text-xs @xl/inset:block" :title="`${store.entry.path} · ${store.entry.branch || 'No branch'}`">{{ store.entry.branch || 'No branch' }}</p>
           </div>
           <div class="ml-auto flex shrink-0 items-center gap-1">
-            <span v-if="wordCount !== null" class="hidden px-2 text-xs text-muted-foreground @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
-            <Button
+            <span v-if="wordCount !== null" class="text-muted hidden px-2 text-xs @lg/inset:inline" data-testid="content-word-count">{{ wordCount }} {{ wordCount === 1 ? "word" : "words" }}</span>
+            <UButton
               v-if="openEntryCollection?.hasPreviewPath === true"
               type="button"
-              variant="secondary"
+              color="neutral"
+              variant="outline"
+              icon="i-hugeicons-link-square-02"
+              label="Open preview"
               data-testid="content-open-preview"
               :title="previewReady ? 'Open in new tab' : 'Start the preview to open this entry'"
               :disabled="!previewReady || !store.entry"
               @click="previewEntry"
-            >
-              <ExternalLink class="size-4" aria-hidden="true" />
-              Open preview
-            </Button>
-            <template v-if="canRemove">
-              <Button type="button" variant="ghost" size="icon" class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()"><Trash2 class="size-4" /></Button>
-            </template>
-            <Button v-if="hasFieldsPanel" type="button" variant="ghost" size="icon" class="text-muted-foreground" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen">
-              <PanelRight class="size-4" />
-            </Button>
+            />
+            <UButton v-if="canRemove" type="button" color="neutral" variant="ghost" square icon="i-hugeicons-delete-02" class="text-muted hover:text-error hover:bg-error/10" aria-label="Delete" data-testid="content-delete" :disabled="store.dirty" :title="store.dirty ? 'Save or discard your changes first' : 'Delete'" @click="store.startLifecycle()" />
+            <UButton v-if="hasFieldsPanel" type="button" color="neutral" variant="ghost" square icon="i-hugeicons-sidebar-right" class="text-muted" :aria-label="fieldsOpen ? 'Hide fields' : 'Show fields'" :title="fieldsOpen ? 'Hide fields' : 'Show fields'" :aria-pressed="fieldsOpen" data-testid="content-toggle-fields" @click="fieldsOpen = !fieldsOpen" />
           </div>
         </template>
       </header>
       <div class="relative min-h-0 flex-1">
       <div class="h-full overflow-auto [container-type:size]">
-      <div class="px-4">
-        <p v-if="store.error" role="alert" class="text-sm text-destructive">{{ store.error }}</p>
-        <p v-if="store.loading" class="text-sm text-muted-foreground">Loading content…</p>
-        <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="content-needs-change">
-          <p>Content cannot be edited on the live site. Create a change to {{ store.creation ? "create this entry" : "save your edits" }}.</p>
-          <Button type="button" size="sm" class="mt-2" data-testid="content-create-change" @click="showNewChange = true">Create change</Button>
-        </section>
-        <p v-if="store.entry && store.changedOnDisk" class="mb-3 text-sm" role="status">Content changed on disk. Your unsaved draft is preserved.</p>
+      <div class="flex flex-col gap-3 px-4 empty:hidden">
+        <UAlert v-if="store.error" role="alert" color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.error" />
+        <p v-if="store.loading" class="text-muted text-sm">Loading content…</p>
+        <UAlert v-if="store.needsChange" role="alert" color="neutral" variant="outline" orientation="horizontal" data-testid="content-needs-change" :description="`Content cannot be edited on the live site. Create a change to ${store.creation ? 'create this entry' : 'save your edits'}.`">
+          <template #actions>
+            <UButton type="button" size="sm" label="Create change" data-testid="content-create-change" @click="showNewChange = true" />
+          </template>
+        </UAlert>
+        <UAlert v-if="store.entry && store.changedOnDisk" role="status" color="warning" variant="subtle" icon="i-hugeicons-information-circle" description="Content changed on disk. Your unsaved draft is preserved." />
         <template v-if="store.entry && store.descriptor">
-          <p v-if="store.readOnlyReason" class="mb-3 text-sm text-muted-foreground" role="status" data-testid="content-read-only">{{ store.readOnlyReason }}</p>
-          <p v-if="store.saveError" role="alert" class="mb-2 text-sm text-destructive" data-testid="content-save-error">{{ store.saveError }}</p>
-          <ul v-if="Object.keys(store.fieldErrors).length" class="mb-2 text-xs text-destructive" data-testid="content-field-errors">
-            <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
-          </ul>
-          <section v-if="store.conflict" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="content-conflict">
-            <p>{{ store.conflict.message }}. Your edits are kept.<template v-if="store.conflict.branch"> Reload and Compare use {{ store.conflict.branch }}.</template></p>
-            <div class="mt-2 flex gap-2">
-              <Button type="button" variant="outline" size="sm" data-testid="content-reload" @click="store.reload()">Reload entry</Button>
-              <Button type="button" variant="outline" size="sm" data-testid="content-compare" @click="store.compare()">Compare</Button>
-            </div>
-            <table v-if="store.current" class="mt-2 w-full text-xs" data-testid="content-compare-table">
-              <thead><tr><th class="text-left">Field</th><th class="text-left">Your draft</th><th class="text-left">On disk now</th></tr></thead>
-              <tbody>
-                <tr v-for="row in differences" :key="row.name"><td>{{ row.name }}</td><td>{{ show(row.draft) }}</td><td>{{ show(row.current) }}</td></tr>
-                <tr v-if="!differences.length"><td colspan="3">No differences from the current file.</td></tr>
-              </tbody>
-            </table>
-          </section>
+          <UAlert v-if="store.readOnlyReason" role="status" color="neutral" variant="subtle" icon="i-hugeicons-square-lock-02" :description="store.readOnlyReason" data-testid="content-read-only" />
+          <UAlert v-if="store.saveError" role="alert" color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.saveError" data-testid="content-save-error" />
+          <UAlert v-if="Object.keys(store.fieldErrors).length" color="error" variant="subtle" data-testid="content-field-errors">
+            <template #description>
+              <ul class="text-xs">
+                <li v-for="(msg, path) in store.fieldErrors" :key="path">{{ path }}: {{ msg }}</li>
+              </ul>
+            </template>
+          </UAlert>
+          <UAlert v-if="store.conflict" role="alert" color="error" variant="outline" icon="i-hugeicons-git-compare" data-testid="content-conflict">
+            <template #description>
+              <p>{{ store.conflict.message }}. Your edits are kept.<template v-if="store.conflict.branch"> Reload and Compare use {{ store.conflict.branch }}.</template></p>
+              <div class="mt-2 flex gap-2">
+                <UButton type="button" color="neutral" variant="outline" size="sm" label="Reload entry" data-testid="content-reload" @click="store.reload()" />
+                <UButton type="button" color="neutral" variant="outline" size="sm" label="Compare" data-testid="content-compare" @click="store.compare()" />
+              </div>
+              <UTable v-if="store.current" :data="differences" :columns="differenceColumns" empty="No differences from the current file." class="mt-2 text-xs" data-testid="content-compare-table" />
+            </template>
+          </UAlert>
         </template>
       </div>
       <template v-if="store.entry">
         <div v-if="store.descriptor" class="@container flex min-h-full">
           <div class="flex min-h-full w-full flex-col @3xl:flex-row">
           <aside v-show="!hasFieldsPanel || fieldsOpen" class="min-w-0 px-4 pt-6 pb-4 @3xl:sticky @3xl:top-0 @3xl:order-2 @3xl:max-h-[100cqh] @3xl:w-80 @3xl:shrink-0 @3xl:self-start @3xl:overflow-y-auto" :class="{ 'order-2': !hasFieldsPanel }" data-testid="content-side">
-            <Tabs :model-value="sideTab" @update:model-value="tab = $event as 'fields' | 'history'">
-              <TabsList class="border-border w-full border">
-                <TabsTrigger v-if="hasFieldsPanel" value="fields">Fields</TabsTrigger>
-                <TabsTrigger value="history">History</TabsTrigger>
-              </TabsList>
-              <TabsContent v-if="hasFieldsPanel" value="fields" data-testid="content-fields">
-                <div v-if="canRenameEntry" class="mb-4 space-y-1" data-testid="content-slug-field">
-                  <Label for="content-slug" class="text-xs font-medium">Slug<span class="text-destructive">*</span></Label>
-                  <div class="flex gap-1">
-                    <Input
-                      v-if="store.creating"
-                      id="content-slug"
-                      :model-value="store.creation?.slug"
-                      data-testid="content-slug"
-                      required
-                      aria-required="true"
-                      class="h-8"
-                      @update:model-value="store.setCreateSlug(String($event))"
-                    />
-                    <Input v-else id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" class="h-8" @keydown.enter.prevent="commitSlug" />
-                    <Button v-if="!store.creating && slugDirty" type="button" size="sm" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug">Rename</Button>
-                  </div>
-                  <p class="text-xs text-muted-foreground">{{ store.creating ? "The page's address. Nothing is saved until you save." : "The page's address. Renaming moves the file and updates links." }}</p>
+            <UTabs :items="sideTabs" :model-value="sideTab" size="sm" color="neutral" variant="pill" class="w-full" :ui="{ root: 'items-stretch', trigger: 'flex-1 justify-center data-[state=active]:text-highlighted' }" @update:model-value="tab = $event as 'fields' | 'history'">
+              <template #fields>
+                <div data-testid="content-fields">
+                  <UFormField
+                    v-if="canRenameEntry"
+                    label="Slug"
+                    required
+                    :help="store.creating ? 'The page\'s address. Nothing is saved until you save.' : 'The page\'s address. Renaming moves the file and updates links.'"
+                    :ui="{ label: 'text-xs' }"
+                    class="mb-4"
+                    data-testid="content-slug-field"
+                  >
+                    <div class="flex gap-1">
+                      <UInput
+                        v-if="store.creating"
+                        id="content-slug"
+                        :model-value="store.creation?.slug"
+                        data-testid="content-slug"
+                        required
+                        aria-required="true"
+                        size="sm"
+                        class="flex-1"
+                        @update:model-value="store.setCreateSlug(String($event))"
+                      />
+                      <UInput v-else id="content-slug" v-model="slugDraft" data-testid="content-slug" required aria-required="true" size="sm" class="flex-1" @keydown.enter.prevent="commitSlug" />
+                      <UButton v-if="!store.creating && slugDirty" type="button" size="sm" label="Rename" data-testid="content-slug-apply" :disabled="store.saving || !slugDraft.trim()" @click="commitSlug" />
+                    </div>
+                  </UFormField>
+                  <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
                 </div>
-                <FrontmatterForm :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
-              </TabsContent>
-              <TabsContent value="history">
+              </template>
+              <template #history>
                 <VersionsList :versions="history.versions" :selected-sha="history.selectedSha" :loading="history.loading" :error="history.error" @select="history.select($event)" @retry="history.reload()" />
-              </TabsContent>
-            </Tabs>
+              </template>
+            </UTabs>
           </aside>
           <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">
           <div class="mx-auto w-full" :class="{ 'max-w-3xl': !history.version }">
@@ -510,74 +504,77 @@ const COLLECTION_ICON = { markdown: Folder, mdx: Folder, json: Folder } as const
           </div>
           </div>
         </div>
-        <pre v-else data-testid="content-source" class="mx-auto max-w-3xl whitespace-pre-wrap break-words px-6 py-4 text-sm">{{ store.draftSource }}</pre>
+        <pre v-else data-testid="content-source" class="text-default mx-auto max-w-3xl px-6 py-4 text-sm break-words whitespace-pre-wrap">{{ store.draftSource }}</pre>
       </template>
       <div v-if="store.entry && store.descriptor" class="h-24" aria-hidden="true" />
       </div>
-      <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-linear-to-t from-background via-background/60 to-transparent" aria-hidden="true" />
+      <div class="from-background via-background/60 pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-linear-to-t to-transparent" aria-hidden="true" />
       </div>
       <Transition enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0">
         <div v-if="store.creating || (store.entry && store.descriptor && (store.dirty || store.saving))" role="status" class="absolute bottom-4 z-20 w-[min(28rem,calc(100%-2rem))] -translate-x-1/2" :style="{ left: `${unsavedCentre}px` }" data-testid="content-unsaved">
-          <div class="flex w-full items-center gap-2 rounded-xl border bg-popover py-2 pr-2 pl-4 text-popover-foreground shadow-lg">
-            <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-            <span class="min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
-            <Button type="button" variant="ghost" size="sm" data-testid="content-discard" :disabled="store.saving" @click="store.discard()">Discard</Button>
-            <Button type="submit" size="sm" data-testid="content-save" :disabled="store.creating ? !!store.readOnlyReason : !store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined">{{ store.saving ? "Saving…" : "Save" }}</Button>
-          </div>
+          <UCard class="rounded-xl shadow-lg" :ui="{ body: 'flex w-full items-center gap-2 py-2 pr-2 pl-4 sm:py-2 sm:pr-2 sm:pl-4' }">
+            <span class="bg-warning size-2 shrink-0 rounded-full" aria-hidden="true" />
+            <span class="text-highlighted min-w-0 flex-1 truncate text-sm">Unsaved changes</span>
+            <UButton type="button" color="neutral" variant="ghost" size="sm" label="Discard" data-testid="content-discard" :disabled="store.saving" @click="store.discard()" />
+            <UButton type="submit" size="sm" :label="store.saving ? 'Saving…' : 'Save'" data-testid="content-save" :disabled="store.creating ? !!store.readOnlyReason : !store.dirty || store.saving || !!store.readOnlyReason" :title="store.readOnlyReason ?? undefined" />
+          </UCard>
         </div>
       </Transition>
       </form>
-        <AlertDialog v-model:open="lifecycleOpen">
-          <AlertDialogContent v-if="store.lifecycle" data-testid="content-lifecycle">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {{ store.lifecycle.collection }}/{{ store.lifecycle.id }}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The entry and its asset folder are removed. History can restore them.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <p v-if="!store.lifecycle.impact && !store.lifecycle.error" class="text-sm text-muted-foreground">Checking references…</p>
-            <div v-if="store.lifecycle.impact" class="space-y-3 text-sm">
+      <UModal
+        v-model:open="lifecycleOpen"
+        :title="store.lifecycle ? `Delete ${store.lifecycle.collection}/${store.lifecycle.id}?` : undefined"
+        description="The entry and its asset folder are removed. History can restore them."
+        :close="false"
+        :content="dialogTestId('content-lifecycle')"
+      >
+        <template #body>
+          <div v-if="store.lifecycle" class="space-y-3 text-sm">
+            <p v-if="!store.lifecycle.impact && !store.lifecycle.error" class="text-muted">Checking references…</p>
+            <template v-if="store.lifecycle.impact">
               <section>
-                <h3 class="font-medium">References</h3>
-                <p v-if="store.lifecycle.impact.references.length" class="text-destructive">Remove these references before deleting.</p>
+                <h3 class="text-highlighted font-medium">References</h3>
+                <p v-if="store.lifecycle.impact.references.length" class="text-error">Remove these references before deleting.</p>
                 <ul><li v-for="r in store.lifecycle.impact.references" :key="r.path + r.field">{{ r.collection }}/{{ r.id }} · {{ r.field }}</li></ul>
-                <p v-if="!store.lifecycle.impact.references.length" class="text-muted-foreground">None</p>
+                <p v-if="!store.lifecycle.impact.references.length" class="text-muted">None</p>
               </section>
               <section>
-                <h3 class="font-medium">Assets</h3>
+                <h3 class="text-highlighted font-medium">Assets</h3>
                 <ul><li v-for="a in store.lifecycle.impact.assets" :key="a" class="break-all">{{ a }}</li></ul>
-                <p v-if="!store.lifecycle.impact.assets.length" class="text-muted-foreground">None</p>
+                <p v-if="!store.lifecycle.impact.assets.length" class="text-muted">None</p>
               </section>
               <section v-if="store.lifecycle.impact.proseLinks.length">
-                <h3 class="font-medium">Links in text (review by hand)</h3>
+                <h3 class="text-highlighted font-medium">Links in text (review by hand)</h3>
                 <ul><li v-for="link in store.lifecycle.impact.proseLinks" :key="link.path + link.line">{{ link.path }}:{{ link.line }} → {{ link.url }}</li></ul>
               </section>
-            </div>
-            <p v-if="store.lifecycle.error" role="alert" class="text-sm text-destructive" data-testid="content-lifecycle-error">{{ store.lifecycle.error }}</p>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="content-lifecycle-cancel">Cancel</AlertDialogCancel>
-              <Button variant="destructive" :disabled="!canConfirm" data-testid="content-lifecycle-confirm" @click="confirmLifecycle">
-                {{ store.lifecycle.busy ? "Working…" : "Delete" }}
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      <AlertDialog v-model:open="confirmRestore">
-        <AlertDialogContent data-testid="content-restore-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Replace unsaved edits?</AlertDialogTitle>
-            <AlertDialogDescription>Your unsaved edits to this entry are replaced by this version. Nothing is saved until you choose Save.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" @click="applyRestore">Replace</Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </template>
+            <UAlert v-if="store.lifecycle.error" role="alert" color="error" variant="subtle" :description="store.lifecycle.error" data-testid="content-lifecycle-error" />
+          </div>
+        </template>
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton type="button" color="neutral" variant="outline" label="Cancel" data-testid="content-lifecycle-cancel" @click="lifecycleOpen = false" />
+            <UButton type="button" color="error" :label="store.lifecycle?.busy ? 'Working…' : 'Delete'" :disabled="!canConfirm" data-testid="content-lifecycle-confirm" @click="confirmLifecycle" />
+          </div>
+        </template>
+      </UModal>
+      <UModal
+        v-model:open="confirmRestore"
+        title="Replace unsaved edits?"
+        description="Your unsaved edits to this entry are replaced by this version. Nothing is saved until you choose Save."
+        :close="false"
+        :content="dialogTestId('content-restore-confirm')"
+      >
+        <template #footer>
+          <div class="flex w-full justify-end gap-2">
+            <UButton type="button" color="neutral" variant="outline" label="Cancel" @click="confirmRestore = false" />
+            <UButton type="button" color="error" label="Replace" @click="applyRestore" />
+          </div>
+        </template>
+      </UModal>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
-      </SidebarInset>
-      </ResizablePanel>
-      </ResizablePanelGroup>
-    </SidebarProvider>
+      </div>
+      </template>
+    </USplitter>
   </div>
 </template>

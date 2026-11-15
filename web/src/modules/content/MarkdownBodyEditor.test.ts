@@ -2,9 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { EditorView } from "@codemirror/view";
+import USelect from "@nuxt/ui/components/Select.vue";
 import MarkdownBodyEditor from "./MarkdownBodyEditor.vue";
 import { Editor } from "@tiptap/core";
 import { canRoundTrip, markdownExtensions } from "./markdown";
+/** A Nuxt UI component wrapper; its generic props type does not survive `findComponent`. */
+type AnyWrapper = Omit<VueWrapper, "props"> & { props(key: string): unknown };
 
 type Change = { body: string; dirty: boolean };
 const mounted: VueWrapper[] = [];
@@ -20,8 +23,15 @@ async function render(body: string, opts: { kind?: "markdown" | "mdx"; rich?: bo
   await flushPromises();
   return w;
 }
+/** The bubble's block-type select; its menu is portalled, so it is driven through its model. */
+const blockType = (w: VueWrapper) => {
+  const select = w.findAllComponents(USelect).find(s => s.find('[data-testid="body-block-type"]').exists()) as unknown as AnyWrapper;
+  return { value: () => select.props("modelValue"), choose: async (v: string) => { select.vm.$emit("update:modelValue", v); await flushPromises(); } };
+};
 const changes = (w: VueWrapper) => (w.emitted("change") ?? []).map(e => e[0] as Change);
 const last = (w: VueWrapper) => changes(w).at(-1);
+/** The open slash menu's commands (Nuxt UI's suggestion menu renders them as listbox options). */
+const slashItems = (w: VueWrapper) => w.findAll('[data-testid="slash-menu"] [role="option"]');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const editorOf = (w: VueWrapper) => (w.vm as any).richEditor();
 const rawView = (w: VueWrapper) => EditorView.findFromDOM(w.get('[data-testid="body-raw"] .cm-editor').element as HTMLElement)!;
@@ -96,7 +106,7 @@ describe("MarkdownBodyEditor", () => {
     const w = await render("Hello");
     await selectAll(w);
     expect(w.find('[data-testid="body-bubble"]').exists()).toBe(true);
-    expect((w.get('[data-testid="body-block-type"]').element as HTMLSelectElement).value).toBe("text");
+    expect(blockType(w).value()).toBe("text");
     editorOf(w).commands.setTextSelection(1); await flushPromises();
     expect(w.find('[data-testid="body-bubble"]').exists()).toBe(false);
   });
@@ -111,15 +121,15 @@ describe("MarkdownBodyEditor", () => {
   ])("block type %s rewrites the selection", async (block, expected) => {
     const w = await render("Hello");
     await selectAll(w);
-    await w.get('[data-testid="body-block-type"]').setValue(block); await flushPromises();
+    await blockType(w).choose(block);
     expect(last(w)).toEqual({ body: expected, dirty: true });
   });
 
   it("block type Text turns a heading back into a paragraph", async () => {
     const w = await render("## Hello");
     await selectAll(w);
-    expect((w.get('[data-testid="body-block-type"]').element as HTMLSelectElement).value).toBe("h2");
-    await w.get('[data-testid="body-block-type"]').setValue("text"); await flushPromises();
+    expect(blockType(w).value()).toBe("h2");
+    await blockType(w).choose("text");
     expect(last(w)).toEqual({ body: "Hello", dirty: true });
   });
 
@@ -198,8 +208,7 @@ describe("MarkdownBodyEditor", () => {
   it("slash link with no selection asks for the link text too", async () => {
     const w = await render("Hi ");
     editorOf(w).chain().focus().setTextSelection(4).insertContent("/").run(); await flushPromises();
-    (document.body.querySelector('[data-testid="slash-item"]:nth-child(4)') as HTMLElement)
-      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    slashItems(w)[3]!.element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await flushPromises();
     await fillLink("url", "https://x.test");
     await fillLink("text", "docs");
@@ -243,7 +252,7 @@ describe("MarkdownBodyEditor", () => {
   it("slash image needs non-empty alt text", async () => {
     const w = await render("");
     editorOf(w).chain().focus().insertContent("/image").run(); await flushPromises();
-    await w.get('[data-testid="slash-item"]').trigger("mousedown"); await flushPromises();
+    await slashItems(w)[0]!.trigger("mousedown"); await flushPromises();
     await pickImage(" ");
     expect((document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).disabled).toBe(true);
     await pickImage("A cat");
@@ -260,22 +269,31 @@ describe("MarkdownBodyEditor", () => {
   ])("slash command %s formats the block", async (label, expected) => {
     const w = await render("");
     editorOf(w).chain().focus().insertContent("/").run(); await flushPromises();
-    const item = w.findAll('[data-testid="slash-item"]').find(i => i.text().includes(label));
+    const item = slashItems(w).find(i => i.text().includes(label));
     expect(item, `slash item ${label}`).toBeTruthy();
     await item!.trigger("mousedown"); await flushPromises();
     editorOf(w).commands.insertContent("Title"); await flushPromises();
     expect(last(w)?.body).toBe(expected);
   });
 
+  it("cancelling a slash image leaves the body as it was", async () => {
+    const w = await render("");
+    editorOf(w).chain().focus().insertContent("/ima").run(); await flushPromises();
+    expect(last(w)?.dirty).toBe(true);
+    await slashItems(w)[0]!.trigger("mousedown"); await flushPromises();
+    (document.body.querySelector('[data-testid="image-cancel"]') as HTMLButtonElement).click(); await flushPromises();
+    expect(last(w)).toEqual({ body: "", dirty: false });
+  });
+
   it("slash commands filter by query and cover links and images", async () => {
     const w = await render("");
     editorOf(w).chain().focus().insertContent("/").run(); await flushPromises();
-    const labels = w.findAll('[data-testid="slash-item"]').map(i => i.text());
+    const labels = slashItems(w).map(i => i.text());
     for (const label of ["Heading", "Bullet list", "Numbered list", "Link", "Quote", "Code block", "Image"])
       expect(labels.some(l => l.includes(label))).toBe(true);
     editorOf(w).commands.insertContent("ima"); await flushPromises();
-    expect(w.findAll('[data-testid="slash-item"]').map(i => i.text())).toEqual([expect.stringContaining("Image")]);
-    await w.get('[data-testid="slash-item"]').trigger("mousedown"); await flushPromises();
+    expect(slashItems(w).map(i => i.text())).toEqual([expect.stringContaining("Image")]);
+    await slashItems(w)[0]!.trigger("mousedown"); await flushPromises();
     await pickImage("A cat");
     (document.body.querySelector('[data-testid="image-insert"]') as HTMLButtonElement).click(); await flushPromises();
     expect(last(w)?.body).toContain("![A cat](blob:preview)");

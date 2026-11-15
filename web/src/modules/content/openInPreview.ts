@@ -1,4 +1,4 @@
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { errorMessage, frameHref } from "@orso/utils";
 
 /** Resolve the entry's site path and open the live preview URL in a new tab. */

@@ -2,12 +2,14 @@
 import { expect, it, vi } from "vitest";
 import { nextTick, reactive } from "vue";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { DatePicker } from "@/components/ui/date-picker";
-import { Select, SelectItem } from "@/components/ui/select";
-import { TagInput } from "@/components/ui/tag-input";
+import DatePicker from "./DatePicker.vue";
+import USelect from "@nuxt/ui/components/Select.vue";
+import UInputTags from "@nuxt/ui/components/InputTags.vue";
 import FrontmatterForm from "./FrontmatterForm.vue";
 import { REFERENCE_ENTRIES } from "./references";
 import type { FieldDescriptor } from "@/core/types";
+/** A Nuxt UI component wrapper; its generic props type does not survive `findComponent`. */
+type AnyWrapper = Omit<VueWrapper, "props"> & { props(key: string): unknown };
 
 const str: FieldDescriptor = { type: "string", required: true };
 const descriptor: FieldDescriptor = {
@@ -36,13 +38,16 @@ function render(value: Record<string, unknown>) {
 }
 const value = () => ({ title: "Hi", pubDate: "2026-01-02", kind: "news", featured: true, order: 3, tags: ["a"], seo: { noindex: false }, section: { type: "hero", heading: "H" }, related: ["welcome"], coverImage: "src/assets/blog/x.png", custom: { a: 1 } });
 
-it("calls the document's own title the display title", () => {
+it("calls the document's own title the display title", async () => {
   const w = render({});
+  // UFormField points its label at the input's id once the input has mounted.
+  await nextTick();
   expect(w.get('label[for="field-title"]').text()).toContain("Display title");
   // A title nested inside another object keeps its plain name.
   const nested = mount(FrontmatterForm, {
     props: { descriptor: { type: "object", required: true, properties: { title: str } }, label: "seo", path: ["seo"], modelValue: { title: "x" } },
   });
+  await nextTick();
   expect(nested.get('label[for="field-seo.title"]').text()).toContain("Title");
   expect(nested.get('label[for="field-seo.title"]').text()).not.toContain("Display");
 });
@@ -57,20 +62,24 @@ it("shows a placeholder named after the field in empty text inputs", () => {
 
 /** The Select whose trigger carries `id`; selects are driven through their model since their menus are portalled. */
 function select(w: VueWrapper, id: string) {
-  const found = w.findAllComponents(Select).find(s => s.find(`[data-testid="${id}"]`).exists());
+  const found = w.findAllComponents(USelect).find(s => s.find(`[data-testid="${id}"]`).exists()) as unknown as AnyWrapper | undefined;
   if (!found) throw new Error(`no select ${id}`);
-  return { items: () => found.findAllComponents(SelectItem).map(i => i.props("value")), text: () => found.get(`[data-testid="${id}"]`).text(), value: () => found.props("modelValue"), choose: async (v: string) => { found.vm.$emit("update:modelValue", v); await nextTick(); } };
+  return { items: () => (found.props("items") as { value: string }[]).map(i => i.value), text: () => found.get(`[data-testid="${id}"]`).text(), value: () => found.props("modelValue"), choose: async (v: string) => { found.vm.$emit("update:modelValue", v); await nextTick(); } };
 }
 
-it("maps each descriptor type to a control holding the loaded value", () => {
+/** The tag field: the input carries the test id, the tags sit beside it in the root. */
+const tagsOf = (w: VueWrapper) => w.findAllComponents(UInputTags).find(t => t.find('[data-testid="field-tags"]').exists())!;
+
+it("maps each descriptor type to a control holding the loaded value", async () => {
   const w = render(value());
+  await flushPromises(); // the date picker loads lazily
   const val = (id: string) => (w.get(`[data-testid="${id}"]`).element as HTMLInputElement).value;
   expect(val("field-title")).toBe("Hi");
   expect(w.get('[data-testid="field-pubDate"]').text()).toBe("Jan 2, 2026");
   expect(select(w, "field-kind").value()).toBe("news");
   expect(w.get('[data-testid="field-featured"]').attributes("aria-checked")).toBe("true");
   expect(val("field-order")).toBe("3");
-  expect(w.get('[data-testid="field-tags"]').findAll('[data-slot="tag"]').map(t => t.text())).toEqual(["a"]);
+  expect(tagsOf(w).findAll('[data-slot="itemText"]').map(t => t.text())).toEqual(["a"]);
   expect(w.get('[data-testid="field-seo.noindex"]').attributes("aria-checked")).toBe("false");
   expect(select(w, "field-section").value()).toBe("hero");
   expect(val("field-section.heading")).toBe("H");
@@ -85,10 +94,10 @@ it("emits typed values for edits, array changes, variant switches, and cleared o
   await w.get('[data-testid="field-order"]').setValue("7");
   await w.get('[data-testid="field-featured"]').trigger("click");
   await select(w, "field-kind").choose("guide");
-  const tags = w.get('[data-testid="field-tags"] input');
+  const tags = w.get('input[data-testid="field-tags"]');
   await tags.setValue("b, c");
   await tags.trigger("keydown", { key: "Enter" });
-  await w.get('[data-testid="field-tags"] [aria-label="Remove a"]').trigger("click");
+  await tagsOf(w).findAll('[data-slot="item"]').find(t => t.text() === "a")!.get('[data-slot="itemDelete"]').trigger("click");
   await select(w, "field-section").choose("cta");
   await w.get('[data-testid="field-section.label"]').setValue("Go");
   await w.get('[data-testid="field-coverImage-uploader"] [data-slot="image-uploader-remove"]').trigger("click");
@@ -100,24 +109,27 @@ it("emits typed values for edits, array changes, variant switches, and cleared o
 });
 
 it("adds tags on Enter or blur, skips duplicates, and removes the last one on Backspace", async () => {
-  const w = mount(TagInput, { props: { modelValue: ["a"], "onUpdate:modelValue": (v: string[]) => w.setProps({ modelValue: v }) } });
-  const input = w.get("input");
+  // The tags field (Nuxt UI `UInputTags`) keeps the behaviour of the old tag input.
+  const w = render(value());
+  const tags = () => (w.props("modelValue") as { tags: string[] }).tags;
+  const input = w.get('input[data-testid="field-tags"]');
   await input.setValue("a");
-  await input.trigger("keydown", { key: "Enter" });
-  expect(w.props("modelValue")).toEqual(["a"]);
+  await input.trigger("keydown", { key: "Enter" }); await flushPromises();
+  expect(tags()).toEqual(["a"]);
   await input.setValue("b");
-  await input.trigger("blur");
-  expect(w.props("modelValue")).toEqual(["a", "b"]);
-  await input.trigger("keydown", { key: "Backspace" });
-  expect(w.props("modelValue")).toEqual(["a"]);
+  await input.trigger("blur"); await flushPromises();
+  expect(tags()).toEqual(["a", "b"]);
+  await input.trigger("keydown", { key: "Backspace" }); await flushPromises();
+  await input.trigger("keydown", { key: "Backspace" }); await flushPromises();
+  expect(tags()).toEqual(["a"]);
 });
 
 it("an optional date picker offers Clear", async () => {
   const w = mount(DatePicker, { props: { modelValue: "2026-01-02", clearable: true }, attachTo: document.body });
   await w.get("button").trigger("click");
   await flushPromises();
-  const clear = document.querySelector<HTMLButtonElement>('[data-slot="date-picker-clear"]');
-  expect(document.querySelector('[data-slot="calendar"]')).not.toBeNull();
+  const clear = document.querySelector<HTMLButtonElement>('[data-testid="date-picker-clear"]');
+  expect(document.querySelector('[data-testid="date-picker-calendar"]')).not.toBeNull();
   clear!.click();
   expect(w.emitted("update:modelValue")).toEqual([[undefined]]);
   w.unmount();

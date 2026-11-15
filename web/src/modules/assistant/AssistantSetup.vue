@@ -4,10 +4,10 @@
 // the data comes from the assistant store, `initial` is a read-only fallback
 // for previews and tests, and the caller owns Continue / dismissal.
 import { computed, onMounted, ref } from "vue";
-import { ChevronDown, CircleAlert, RefreshCw } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import type { ProviderSignInState } from "@/core/types";
 import ProviderRow from "./ProviderRow.vue";
 import SignInPanel from "./SignInPanel.vue";
@@ -120,42 +120,51 @@ function onDismissSignIn(id: string) {
   <div class="flex flex-col gap-5" data-testid="assistant-setup">
     <p
       v-if="loading"
-      class="text-muted-foreground flex items-center gap-2 text-sm"
+      class="text-muted flex items-center gap-2 text-sm"
       data-testid="assistant-loading"
     >
-      <Spinner class="size-3.5" aria-hidden="true" /> Checking your setup…
+      <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" />
+      Checking your setup…
     </p>
 
-    <Alert v-else-if="error" variant="destructive" data-testid="assistant-load-error">
-      <CircleAlert aria-hidden="true" />
-      <AlertDescription class="flex flex-col items-start gap-2">
-        <p>We couldn't check your setup just now. Make sure orso is still running, then check again.</p>
-        <Button
+    <UAlert
+      v-else-if="error"
+      color="error"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      description="We couldn't check your setup just now. Make sure orso is still running, then check again."
+      data-testid="assistant-load-error"
+    >
+      <template #actions>
+        <UButton
+          color="neutral"
           variant="outline"
           size="sm"
+          icon="i-hugeicons-refresh"
+          loading-icon="i-hugeicons-refresh"
+          label="Check again"
+          :loading="rechecking"
           :disabled="rechecking"
           data-testid="assistant-load-retry"
           @click="recheck"
-        >
-          <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Check again
-        </Button>
-      </AlertDescription>
-    </Alert>
+        />
+      </template>
+    </UAlert>
 
     <template v-else>
       <section class="flex flex-col gap-2" data-testid="assistant-assistants">
         <div class="flex flex-col gap-1">
-          <h3 class="text-sm font-medium">Assistants</h3>
-          <p class="text-muted-foreground text-xs">
+          <h3 class="text-highlighted text-sm font-medium">Assistants</h3>
+          <p class="text-muted text-xs">
             Pick an assistant to make the changes you ask for. You can add another later.
           </p>
         </div>
 
-        <p v-if="!rows.length" class="text-muted-foreground text-sm">
+        <p v-if="!rows.length" class="text-muted text-sm">
           No assistants were found. Select Check again below.
         </p>
 
-        <ul v-else class="flex flex-col divide-y" data-testid="assistant-rows">
+        <ul v-else class="flex flex-col divide-y divide-default" data-testid="assistant-rows">
           <template v-for="row in rows" :key="row.id">
             <ProviderRow :row="row" @action="onAction(row, $event)" />
             <li v-if="panelFor(row.id)" class="pb-3">
@@ -171,29 +180,37 @@ function onDismissSignIn(id: string) {
           </template>
         </ul>
 
-        <details class="group" data-testid="assistant-installed">
-          <summary
-            class="text-muted-foreground hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1.5 text-sm"
-          >
-            <ChevronDown
-              class="size-4 transition-transform group-open:rotate-180"
-              aria-hidden="true"
-            />
-            I already installed an assistant
-          </summary>
-          <div class="text-muted-foreground mt-2 flex flex-col items-start gap-2 text-sm">
-            <p>orso can use an assistant you installed yourself. Select Check again once it's ready.</p>
-            <Button
-              variant="outline"
+        <UCollapsible :unmount-on-hide="false" data-testid="assistant-installed">
+          <template #default="{ open }">
+            <UButton
+              color="neutral"
+              variant="link"
               size="sm"
-              :disabled="rechecking"
-              data-testid="assistant-recheck"
-              @click="recheck"
-            >
-              <RefreshCw :class="{ 'animate-spin': rechecking }" aria-hidden="true" /> Check again
-            </Button>
-          </div>
-        </details>
+              class="px-0"
+              icon="i-hugeicons-arrow-down-01"
+              :ui="{ leadingIcon: ['transition-transform', open ? 'rotate-180' : ''] }"
+              label="I already installed an assistant"
+              data-testid="assistant-installed-toggle"
+            />
+          </template>
+          <template #content>
+            <div class="text-muted mt-2 flex flex-col items-start gap-2 text-sm">
+              <p>orso can use an assistant you installed yourself. Select Check again once it's ready.</p>
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="sm"
+                icon="i-hugeicons-refresh"
+                loading-icon="i-hugeicons-refresh"
+                label="Check again"
+                :loading="rechecking"
+                :disabled="rechecking"
+                data-testid="assistant-recheck"
+                @click="recheck"
+              />
+            </div>
+          </template>
+        </UCollapsible>
       </section>
 
       <section
@@ -202,20 +219,20 @@ function onDismissSignIn(id: string) {
         data-testid="assistant-site-builder"
       >
         <div class="flex flex-col gap-1">
-          <h3 class="text-sm font-medium">Site builder</h3>
-          <p class="text-muted-foreground text-xs">
+          <h3 class="text-highlighted text-sm font-medium">Site builder</h3>
+          <p class="text-muted text-xs">
             orso needs this to create a project and preview your site. You can start chatting
             first.
           </p>
         </div>
-        <ul class="flex flex-col divide-y">
+        <ul class="flex flex-col divide-y divide-default">
           <ProviderRow :row="siteBuilder" @action="onAction(siteBuilder, $event)" />
         </ul>
       </section>
     </template>
 
     <div v-if="showContinue" class="flex justify-end">
-      <Button data-testid="assistant-continue" @click="emit('continue')">Continue</Button>
+      <UButton label="Continue" data-testid="assistant-continue" @click="emit('continue')" />
     </div>
   </div>
 </template>

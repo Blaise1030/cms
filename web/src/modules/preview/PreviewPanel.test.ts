@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import { defineComponent, h } from "vue";
+import { TooltipProvider } from "reka-ui";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
@@ -13,6 +16,14 @@ import { useChangesStore } from "@/modules/changes/store";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
 import { useChatPanelLayout } from "@/lib/chatPanelLayout";
 
+/** Tooltips need the provider `UApp` gives the real app. */
+function mountPreview(options: { props: InstanceType<typeof PreviewPanel>["$props"]; attachTo?: Element }) {
+  const Host = defineComponent({
+    setup: () => () => h(TooltipProvider, null, { default: () => h(PreviewPanel, options.props) }),
+  });
+  return mount(Host, { attachTo: options.attachTo });
+}
+
 // Not attached to the document on purpose: happy-dom logs an error for every attached iframe.
 function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api = {}) {
   localStorage.clear();
@@ -20,7 +31,7 @@ function mountPanel(devserver: "starting" | "ready" | "crashed" = "ready", api =
   // Default to the embedded topology (page and daemon share an origin).
   hDaemon.daemon.config.value = { origin: window.location.origin };
   setActivePinia(createPinia());
-  return mount(PreviewPanel, { props: { projectId: "site-1", devserver } });
+  return mountPreview({ props: { projectId: "site-1", devserver } });
 }
 
 describe("PreviewPanel", () => {
@@ -56,7 +67,7 @@ describe("PreviewPanel", () => {
     expect(w.get("[data-testid='page-details-toggle']").attributes("aria-pressed")).toBe("true");
     const sidebar = w.get("[data-testid='page-details-sidebar']");
     expect(sidebar.text()).toContain("Page details");
-    expect(w.find("[data-slot='resizable-handle']").exists()).toBe(true);
+    expect(w.find("[data-slot='handle']").exists()).toBe(true);
     await w.get("[data-testid='page-details-close']").trigger("click");
     expect(w.find("[data-testid='page-details-sidebar']").exists()).toBe(false);
     w.unmount();
@@ -67,7 +78,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin, token: "tok" };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, {
+    const w = mountPreview({
       props: { projectId: "site-1", devserver: "ready", port: 56066 },
       attachTo: document.body,
     });
@@ -134,7 +145,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
     localStorage.setItem("orso.preview.path.site-1", "/blog/");
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     expect(w.find("iframe").attributes("src")).toBe("http://127.0.0.1:56066/preview/site-1/blog/");
     expect((w.find("[data-testid='preview-address']").element as HTMLInputElement).value).toBe("/blog/");
     w.unmount();
@@ -145,7 +156,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     // A cross-origin frame reports where the reader went (the injected bridge forwards it);
     // the agent's checkpoint then reloads the preview, which must come back to that page.
     usePreviewStore().setFramePath("site-1", "/blog/");
@@ -161,7 +172,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, {
+    const w = mountPreview({
       props: { projectId: "site-1", devserver: "ready", port: 56066 },
       attachTo: document.body,
     });
@@ -201,7 +212,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     expect(w.find("[data-testid='preview-appearance']").attributes("disabled")).toBeUndefined();
     expect(w.find("[data-testid='element-picker']").attributes("disabled")).toBeUndefined();
     w.unmount();
@@ -212,7 +223,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     const store = usePreviewStore();
     const src = () => w.find("iframe").attributes("src");
 
@@ -232,7 +243,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     const store = usePreviewStore();
     await w.find("[data-testid='element-picker']").trigger("click");
     await flushPromises();
@@ -249,7 +260,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon({});
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     const address = w.find("[data-testid='preview-address']");
     await address.setValue("about/");
     await w.find("form").trigger("submit");
@@ -264,7 +275,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
     localStorage.setItem("orso.preview.path.site-1", "/blog/?x=1");
-    const w = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready", port: 56066 } });
+    const w = mountPreview({ props: { projectId: "site-1", devserver: "ready", port: 56066 } });
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     await w.find("button[aria-label='Open in new tab']").trigger("click");
     expect(open).toHaveBeenCalledWith("http://127.0.0.1:56066/preview/site-1/blog/?x=1", "_blank", "noopener");
@@ -318,13 +329,14 @@ describe("PreviewPanel", () => {
     const w = mountPanel();
     const store = usePreviewStore();
     const iframe = () => w.find("iframe").element as HTMLIFrameElement;
-    const trigger = () => w.find("[data-testid='preview-appearance']");
+    const trigger = () =>
+      w.findAllComponents(UButton).find((b) => b.attributes("data-testid") === "preview-appearance")!;
     expect(iframe().style.colorScheme).toBe("light");
-    expect(trigger().attributes("data-variant")).toBe("ghost");
+    expect(trigger().props("variant")).toBe("ghost");
     store.toggleDark();
     await flushPromises();
     expect(iframe().style.colorScheme).toBe("dark");
-    expect(trigger().attributes("data-variant")).toBe("secondary");
+    expect(trigger().props("variant")).toBe("soft");
     expect(localStorage.getItem("orso.preview.dark")).toBe("true");
     w.unmount();
   });
@@ -357,7 +369,7 @@ describe("PreviewPanel", () => {
     hDaemon.daemon = createFakeDaemon();
     hDaemon.daemon.config.value = { origin: window.location.origin };
     setActivePinia(createPinia());
-    const again = mount(PreviewPanel, { props: { projectId: "site-1", devserver: "ready" } });
+    const again = mountPreview({ props: { projectId: "site-1", devserver: "ready" } });
     expect(again.find("iframe").attributes("src")).toBe(
       "http://127.0.0.1:7800/preview/site-1/pricing/?plan=pro",
     );

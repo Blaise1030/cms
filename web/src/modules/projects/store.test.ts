@@ -6,7 +6,7 @@ import type { Project } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastInfo: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { info: h.toastInfo, success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { info: h.toastInfo, success: vi.fn(), error: vi.fn() } }));
 
 import { useProjectsStore } from "./store";
 

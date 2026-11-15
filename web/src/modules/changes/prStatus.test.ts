@@ -17,16 +17,16 @@ describe("prStatusLabel", () => {
   it("joins PR state and checks", () => {
     expect(prStatusLabel(base)).toBe("Draft · Checks pending");
     expect(prStatusLabel({ ...base, state: "open", checks: "passing" })).toBe(
-      "Open · Checks passing",
+      "Waiting for greenlight · Checks passing",
     );
     expect(prStatusLabel({ ...base, state: "approved", checks: "failing" })).toBe(
-      "Approved · Checks failing",
+      "Greenlit · Checks failing",
     );
   });
 
   it("omits checks when there are none, and for merged or closed PRs", () => {
-    expect(prStatusLabel({ ...base, state: "open", checks: "none" })).toBe("Open");
-    expect(prStatusLabel({ ...base, state: "merged", checks: "passing" })).toBe("Merged");
+    expect(prStatusLabel({ ...base, state: "open", checks: "none" })).toBe("Waiting for greenlight");
+    expect(prStatusLabel({ ...base, state: "merged", checks: "passing" })).toBe("Published");
     expect(prStatusLabel({ ...base, state: "closed", checks: "failing" })).toBe("Closed");
   });
 });

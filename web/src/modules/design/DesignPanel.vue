@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Palette } from "@lucide/vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
-import { Button } from "@/components/ui/button";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import type { Change } from "@/core/types";
 import { askAgentToApplyDesign } from "./agentRequests";
@@ -29,42 +32,116 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
 
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="design-panel">
-    <section v-if="store.invalid" role="alert" class="m-4 rounded-md border border-destructive p-3 text-sm" data-testid="design-invalid">
-      <p>DESIGN.md has invalid frontmatter. Ask your assistant to fix it.</p>
-      <p class="mt-1 text-xs text-muted-foreground">{{ store.invalid }}</p>
-      <pre v-if="store.invalidSource" class="mt-2 max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap" data-testid="design-invalid-source">{{ store.invalidSource }}</pre>
-    </section>
-    <div v-else-if="store.doc && !store.doc.exists && !store.dirty" class="flex h-full flex-col items-center justify-center gap-3 px-4 pb-11 text-center text-sm text-muted-foreground">
-      <Palette class="size-8 opacity-50" aria-hidden="true" />
-      <p>This project has no DESIGN.md yet.</p>
-      <Button type="button" data-testid="design-create" @click="store.create()">Create design</Button>
-    </div>
+    <UAlert
+      v-if="store.invalid"
+      role="alert"
+      color="error"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      title="DESIGN.md has invalid frontmatter. Ask your assistant to fix it."
+      class="m-4 w-auto"
+      data-testid="design-invalid"
+    >
+      <template #description>
+        <p class="text-muted text-xs">{{ store.invalid }}</p>
+        <pre
+          v-if="store.invalidSource"
+          class="bg-muted text-default mt-2 max-h-96 overflow-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap"
+          data-testid="design-invalid-source"
+        >{{ store.invalidSource }}</pre>
+      </template>
+    </UAlert>
+    <UEmpty
+      v-else-if="store.doc && !store.doc.exists && !store.dirty"
+      variant="naked"
+      icon="i-hugeicons-paint-board"
+      description="This project has no DESIGN.md yet."
+      class="h-full pb-11"
+    >
+      <template #actions>
+        <UButton type="button" label="Create design" data-testid="design-create" @click="store.create()" />
+      </template>
+    </UEmpty>
     <template v-else-if="store.doc">
       <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
         <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-        <h2 class="truncate px-1 text-sm font-medium">DESIGN.md</h2>
-        <p class="truncate text-xs text-muted-foreground">{{ store.doc.branch }}</p>
+        <h2 class="text-highlighted truncate px-1 text-sm font-medium">DESIGN.md</h2>
+        <UBadge color="neutral" variant="subtle" size="sm" icon="i-hugeicons-git-branch" :label="store.doc.branch" class="min-w-0 truncate" />
         <div class="ml-auto flex shrink-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" data-testid="design-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
-          <Button type="button" variant="outline" size="sm" data-testid="design-save" :disabled="!store.dirty || store.saving" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
-          <Button type="button" size="sm" data-testid="design-apply" :disabled="store.dirty || !store.doc.exists" :title="store.dirty ? 'Save your changes first' : undefined" @click="askAgentToApplyDesign()">Apply to site</Button>
+          <UButton
+            type="button"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            label="Discard"
+            data-testid="design-discard"
+            :disabled="!store.dirty || store.saving"
+            @click="store.discard()"
+          />
+          <UButton
+            type="button"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :label="store.saving ? 'Saving…' : 'Save'"
+            :loading="store.saving"
+            data-testid="design-save"
+            :disabled="!store.dirty || store.saving"
+            @click="save"
+          />
+          <UButton
+            type="button"
+            size="sm"
+            label="Apply to site"
+            data-testid="design-apply"
+            :disabled="store.dirty || !store.doc.exists"
+            :title="store.dirty ? 'Save your changes first' : undefined"
+            @click="askAgentToApplyDesign()"
+          />
         </div>
       </header>
       <div class="min-h-0 flex-1 overflow-auto [container-type:size]">
-        <div class="px-4">
-          <p v-if="store.error" role="alert" class="text-sm text-destructive" data-testid="design-error">{{ store.error }}</p>
-          <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="design-needs-change">
-            <p>The design cannot be edited on the live site. Create a change to save your edits.</p>
-            <Button type="button" size="sm" class="mt-2" data-testid="design-create-change" @click="showNewChange = true">Create change</Button>
-          </section>
-          <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="design-changed-on-disk">
-            <p>DESIGN.md changed on disk. Your unsaved draft is preserved.</p>
-            <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="design-reload" @click="store.reloadFromDisk()">Reload</Button>
-          </section>
-          <section v-if="store.conflict" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="design-conflict">
-            <p>{{ store.conflict.message }}. Your edits are kept.</p>
-            <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="design-reload" @click="store.reloadFromDisk()">Reload</Button>
-          </section>
+        <div class="flex flex-col gap-3 px-4">
+          <p v-if="store.error" role="alert" class="text-error text-sm" data-testid="design-error">{{ store.error }}</p>
+          <UAlert
+            v-if="store.needsChange"
+            role="alert"
+            color="warning"
+            variant="subtle"
+            icon="i-hugeicons-git-branch"
+            description="The design cannot be edited on the live site. Create a change to save your edits."
+            data-testid="design-needs-change"
+          >
+            <template #actions>
+              <UButton type="button" size="sm" label="Create change" data-testid="design-create-change" @click="showNewChange = true" />
+            </template>
+          </UAlert>
+          <UAlert
+            v-if="store.changedOnDisk"
+            role="status"
+            color="neutral"
+            variant="subtle"
+            icon="i-hugeicons-information-circle"
+            description="DESIGN.md changed on disk. Your unsaved draft is preserved."
+            data-testid="design-changed-on-disk"
+          >
+            <template #actions>
+              <UButton type="button" color="neutral" variant="outline" size="sm" label="Reload" data-testid="design-reload" @click="store.reloadFromDisk()" />
+            </template>
+          </UAlert>
+          <UAlert
+            v-if="store.conflict"
+            role="alert"
+            color="error"
+            variant="subtle"
+            icon="i-hugeicons-alert-circle"
+            :description="`${store.conflict.message}. Your edits are kept.`"
+            data-testid="design-conflict"
+          >
+            <template #actions>
+              <UButton type="button" color="neutral" variant="outline" size="sm" label="Reload" data-testid="design-reload" @click="store.reloadFromDisk()" />
+            </template>
+          </UAlert>
         </div>
         <div class="@container flex min-h-full">
           <div class="flex min-h-full w-full flex-col @3xl:flex-row">
@@ -81,7 +158,9 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
       </div>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
     </template>
-    <p v-else-if="store.loading" class="p-4 text-sm text-muted-foreground">Loading design…</p>
-    <p v-else-if="store.error" role="alert" class="p-4 text-sm text-destructive" data-testid="design-error">{{ store.error }}</p>
+    <p v-else-if="store.loading" class="text-muted flex items-center gap-2 p-4 text-sm">
+      <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" /> Loading design…
+    </p>
+    <p v-else-if="store.error" role="alert" class="text-error p-4 text-sm" data-testid="design-error">{{ store.error }}</p>
   </div>
 </template>

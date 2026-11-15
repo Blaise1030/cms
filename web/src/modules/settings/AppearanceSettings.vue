@@ -2,29 +2,10 @@
 // App settings → Appearance. The theme and typing sound are read and written by
 // the same shared composables the rest of the app uses (and the command palette).
 import { computed } from "vue";
-import { AudioLines, ListChecks, PanelRight, SunMoon, Volume2 } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  useChatPanelLayout,
-  type ChatPanelLayout,
-} from "@/lib/chatPanelLayout";
+import UButton from "@nuxt/ui/components/Button.vue";
+import USelect from "@nuxt/ui/components/Select.vue";
+import USwitch from "@nuxt/ui/components/Switch.vue";
+import { useChatPanelLayout, type ChatPanelLayout } from "@/lib/chatPanelLayout";
 import { useChatSteps } from "@/lib/chatSteps";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 import {
@@ -33,6 +14,7 @@ import {
   type SoundPack,
   type TypingSoundSetting,
 } from "@/lib/typingSound";
+import SettingsRow from "./SettingsRow.vue";
 import SettingsSection from "./SettingsSection.vue";
 import ThemePreview from "./ThemePreview.vue";
 
@@ -41,9 +23,9 @@ const typingSound = useTypingSound();
 const chatSteps = useChatSteps();
 const panelLayout = useChatPanelLayout();
 
-const LAYOUT_OPTIONS: { id: ChatPanelLayout; label: string }[] = [
-  { id: "sidebar", label: "Sidebar" },
-  { id: "floating", label: "Floating" },
+const LAYOUT_OPTIONS: { value: ChatPanelLayout; label: string }[] = [
+  { value: "sidebar", label: "Sidebar" },
+  { value: "floating", label: "Floating" },
 ];
 const layoutValue = computed(() => panelLayout.layout.value);
 
@@ -60,9 +42,9 @@ const THEMES: { id: ThemePreference; label: string }[] = [
 ];
 const themeValue = computed(() => theme.preference.value);
 
-const SOUND_OPTIONS: { id: TypingSoundSetting; label: string }[] = [
-  { id: "off", label: "Off" },
-  ...(Object.keys(SOUND_PACKS) as SoundPack[]).map((id) => ({ id, label: SOUND_PACKS[id].label })),
+const SOUND_OPTIONS: { value: TypingSoundSetting; label: string }[] = [
+  { value: "off", label: "Off" },
+  ...(Object.keys(SOUND_PACKS) as SoundPack[]).map((id) => ({ value: id, label: SOUND_PACKS[id].label })),
 ];
 const soundValue = computed(() => typingSound.setting.value);
 
@@ -85,145 +67,104 @@ function playSample() {
 
 <template>
   <div class="flex flex-col gap-5" data-testid="appearance-settings">
-    <SettingsSection label="Light and dark" :icon="SunMoon">
-      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-        <Item size="sm" class="items-start">
-          <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
-            <SunMoon aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent class="gap-2.5">
-            <div class="flex flex-col gap-0.5">
-              <ItemTitle>Appearance</ItemTitle>
-              <ItemDescription>Light, dark, or whatever the Mac is doing.</ItemDescription>
-            </div>
-
-            <div role="group" aria-label="Appearance" class="flex flex-wrap gap-2">
-              <button
-                v-for="option in THEMES"
-                :key="option.id"
-                type="button"
-                :aria-pressed="themeValue === option.id"
-                :data-testid="`appearance-theme-${option.id}`"
-                class="group/theme flex flex-col items-center gap-1.5 rounded-md p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                @click="onTheme(option.id)"
-              >
-                <span
-                  class="rounded-md p-0.5 transition-shadow"
-                  :class="
-                    themeValue === option.id
-                      ? 'ring-2 ring-ring'
-                      : 'group-hover/theme:ring-1 group-hover/theme:ring-ring/40'
-                  "
-                >
-                  <ThemePreview :mode="option.id" class="w-14" />
-                </span>
-                <span
-                  class="text-xs"
-                  :class="themeValue === option.id ? 'text-foreground font-medium' : 'text-muted-foreground'"
-                >
-                  {{ option.label }}
-                </span>
-              </button>
-            </div>
-          </ItemContent>
-        </Item>
-      </Card>
-    </SettingsSection>
-
-    <SettingsSection label="Typing" :icon="AudioLines">
-      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-        <Item size="sm">
-          <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
-            <AudioLines aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Typing sound</ItemTitle>
-            <ItemDescription>
-              Plays a soft key sound while you type in the content editor.
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions class="gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              :disabled="soundValue === 'off'"
-              data-testid="appearance-play-sample"
-              @click="playSample"
-            >
-              <Volume2 aria-hidden="true" /> Play sample
-            </Button>
-            <Select :model-value="soundValue" @update:model-value="onSound">
-              <SelectTrigger
-                id="appearance-typing-sound"
-                data-testid="appearance-typing-sound"
-                class="h-8 w-36"
-                aria-label="Typing sound"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="option in SOUND_OPTIONS" :key="option.id" :value="option.id">
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </ItemActions>
-        </Item>
-      </Card>
-    </SettingsSection>
-
-    <SettingsSection label="Chat" :icon="ListChecks">
-      <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-        <div class="divide-y divide-border">
-          <Item size="sm">
-            <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
-              <PanelRight aria-hidden="true" />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Agent panel</ItemTitle>
-              <ItemDescription>
-                Dock the chat in a sidebar, or float it over the page with a bottom bar like Linear.
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Select :model-value="layoutValue" @update:model-value="onLayout">
-                <SelectTrigger
-                  id="appearance-panel-layout"
-                  data-testid="appearance-panel-layout"
-                  class="h-8 w-36"
-                  aria-label="Agent panel"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="option in LAYOUT_OPTIONS" :key="option.id" :value="option.id">
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </ItemActions>
-          </Item>
-          <Item size="sm">
-            <ItemMedia variant="icon" class="size-7 [&_svg:not([class*='size-'])]:size-3.5">
-              <ListChecks aria-hidden="true" />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Show assistant steps</ItemTitle>
-              <ItemDescription>
-                Shows “Worked through N steps” under each reply. Off by default for a quieter chat.
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                :model-value="chatSteps.enabled.value"
-                data-testid="appearance-show-steps"
-                aria-label="Show assistant steps"
-                @update:model-value="chatSteps.set"
-              />
-            </ItemActions>
-          </Item>
+    <SettingsSection label="Light and dark" icon="i-hugeicons-sun-cloud-01">
+      <SettingsRow
+        icon="i-hugeicons-sun-cloud-01"
+        title="Appearance"
+        description="Light, dark, or whatever the Mac is doing."
+        align="start"
+      >
+        <div role="group" aria-label="Appearance" class="mt-1.5 grid w-full grid-cols-3 gap-3">
+          <UButton
+            v-for="option in THEMES"
+            :key="option.id"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            block
+            :active="themeValue === option.id"
+            :aria-pressed="themeValue === option.id"
+            :data-testid="`appearance-theme-${option.id}`"
+            :ui="{ base: 'flex-col gap-1.5 p-1 hover:bg-transparent active:bg-transparent' }"
+            @click="onTheme(option.id)"
+          >
+            <ThemePreview
+              :mode="option.id"
+              class="aspect-video w-full transition-shadow"
+              :class="themeValue === option.id ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-accented'"
+            />
+            <span :class="themeValue === option.id ? 'text-highlighted font-medium' : 'text-muted'">
+              {{ option.label }}
+            </span>
+          </UButton>
         </div>
-      </Card>
+      </SettingsRow>
+    </SettingsSection>
+
+    <SettingsSection label="Typing" icon="i-hugeicons-audio-wave-01">
+      <SettingsRow
+        icon="i-hugeicons-audio-wave-01"
+        title="Typing sound"
+        description="Plays a soft key sound while you type in the content editor."
+      >
+        <template #actions>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-hugeicons-volume-high"
+            label="Play sample"
+            :disabled="soundValue === 'off'"
+            data-testid="appearance-play-sample"
+            @click="playSample"
+          />
+          <USelect
+            id="appearance-typing-sound"
+            :model-value="soundValue"
+            :items="SOUND_OPTIONS"
+            size="sm"
+            class="w-36"
+            aria-label="Typing sound"
+            data-testid="appearance-typing-sound"
+            @update:model-value="onSound"
+          />
+        </template>
+      </SettingsRow>
+    </SettingsSection>
+
+    <SettingsSection label="Chat" icon="i-hugeicons-check-list">
+      <SettingsRow
+        icon="i-hugeicons-sidebar-right"
+        title="Agent panel"
+        description="Dock the chat in a sidebar, or float it over the page with a bottom bar like Linear."
+      >
+        <template #actions>
+          <USelect
+            id="appearance-panel-layout"
+            :model-value="layoutValue"
+            :items="LAYOUT_OPTIONS"
+            size="sm"
+            class="w-36"
+            aria-label="Agent panel"
+            data-testid="appearance-panel-layout"
+            @update:model-value="onLayout"
+          />
+        </template>
+      </SettingsRow>
+      <SettingsRow
+        icon="i-hugeicons-check-list"
+        title="Show assistant steps"
+        description="Shows “Worked through N steps” under each reply. Off by default for a quieter chat."
+      >
+        <template #actions>
+          <USwitch
+            :model-value="chatSteps.enabled.value"
+            aria-label="Show assistant steps"
+            data-testid="appearance-show-steps"
+            @update:model-value="chatSteps.set"
+          />
+        </template>
+      </SettingsRow>
     </SettingsSection>
   </div>
 </template>

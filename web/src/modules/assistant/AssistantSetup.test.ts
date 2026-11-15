@@ -114,7 +114,7 @@ describe("AssistantSetup ordering", () => {
     const w = mountSetup();
     await flushPromises();
 
-    expect(w.get("[data-testid='assistant-installed'] summary").text()).toBe(
+    expect(w.get("[data-testid='assistant-installed-toggle']").text()).toBe(
       "I already installed an assistant",
     );
     expect(w.get("[data-testid='assistant-installed']").text()).toContain(
@@ -237,7 +237,7 @@ describe("AssistantSetup downloads", () => {
     expect(row.text()).toContain("Download failed");
     const error = w.get("[data-testid='assistant-error-opencode']");
     expect(error.text()).toContain("We couldn't download OpenCode. Check your connection and try again.");
-    expect(error.get("details").text()).toContain("The connection dropped.");
+    expect(error.get("[data-testid='assistant-details']").text()).toContain("The connection dropped.");
 
     await w.get("[data-testid='assistant-action-opencode']").trigger("click");
     await flushPromises();
@@ -358,7 +358,7 @@ describe("AssistantSetup sign-in", () => {
 
     const error = w.get("[data-testid='assistant-sign-in-error']");
     expect(error.text()).toContain("Signing in to Claude didn't finish. Please try again.");
-    expect(error.get("details").text()).toContain("The browser was closed.");
+    expect(error.get("[data-testid='assistant-details']").text()).toContain("The browser was closed.");
 
     await w.get("[data-testid='assistant-sign-in-retry']").trigger("click");
     await flushPromises();

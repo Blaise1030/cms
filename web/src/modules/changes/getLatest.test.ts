@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import type { Change, ChangesUpdate } from "@/core/types";
 
-vi.mock("vue-sonner", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
 import { report } from "./getLatest";
 

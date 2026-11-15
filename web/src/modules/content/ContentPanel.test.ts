@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RouterView } from "vue-router";
+import UInput from "@nuxt/ui/components/Input.vue";
 import { contentRouter } from "@/test/contentRouter";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 import { ApiError } from "@/core/api";
@@ -10,8 +11,10 @@ import { useProjectsStore } from "@/modules/projects/store";
 import type { Project } from "@/core/types";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { warning: vi.fn(), success: vi.fn(), error: h.toastError } }));
+vi.mock("@/lib/toast", () => ({ toast: { warning: vi.fn(), success: vi.fn(), error: h.toastError } }));
 import { REFRESH_DELAY_MS, useContentStore } from "./store";
+/** A Nuxt UI component wrapper; its generic props type does not survive `findComponent`. */
+type AnyWrapper = Omit<VueWrapper, "props"> & { props(key: string): unknown };
 beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 /** Emit a file event and let its debounced refresh start. */
@@ -127,7 +130,7 @@ it("labels the collection list and filters it as you type", async () => {
  const help = { ...blog, name: "helpDocs" };
  const w = await setup({ listContentCollections: async () => [blog, help] }); await flushPromises();
  expect(w.text()).toContain("Collections");
- expect(w.get('[data-slot="input-group"]').find("svg.lucide-search").exists()).toBe(true);
+ expect((w.findAllComponents(UInput).find(i => i.find('[data-testid="content-collection-filter"]').exists()) as unknown as AnyWrapper).props("icon")).toBe("i-hugeicons-search-01");
  await w.get('[data-testid="content-collection-filter"]').setValue("help");
  expect(w.findAll("[data-collection-name]").map(c => c.attributes("data-collection-name"))).toEqual(["helpDocs"]);
  await w.get('[data-testid="content-collection-filter"]').setValue("zzz");
@@ -144,7 +147,9 @@ it("renames the document from its slug field", async () => {
   renameContentEntry: rename,
  }, "/p/p/content/blog/welcome"); await flushPromises();
  expect((w.get('[data-testid="content-slug"]').element as HTMLInputElement).value).toBe("welcome");
- expect(w.get('label[for="content-slug"]').text()).toBe("Slug*");
+ // UFormField draws the required asterisk in CSS; the input carries `required`.
+ expect(w.get('label[for="content-slug"]').text()).toBe("Slug");
+ expect(w.get('[data-testid="content-slug"]').attributes("required")).toBeDefined();
  expect(w.find('[data-testid="field-title"]').exists()).toBe(true);
  await w.get('[data-testid="content-slug"]').setValue("welcome-again");
  await w.get('[data-testid="content-slug-apply"]').trigger("click"); await flushPromises();

@@ -1,8 +1,6 @@
 import { computed, shallowRef, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import {
-  BotMessageSquare, Code, File, FileText, Folder, FolderOpen, GitBranch, History, House, Keyboard, Monitor, MonitorPlay, Moon, Palette, Plus, RefreshCw, Settings, Sun, VolumeOff,
-} from "@lucide/vue";
+import { hugeicon } from "@/lib/hugeicon";
 import { useDaemon } from "@/core/daemon";
 import type { ContentEntrySummary } from "@/core/types";
 import { THEME_LABELS, useTheme, type ThemePreference } from "@/lib/theme";
@@ -12,6 +10,26 @@ import { useFilesStore } from "@/modules/files/store";
 import { useProjectsStore } from "@/modules/projects/store";
 import { codePath, contentPath, projectPath, settingsPath, type ProjectTab } from "@/router";
 import type { PaletteGroup, PaletteItem } from "./filter";
+
+const BotMessageSquare = hugeicon("i-hugeicons-chat-bot");
+const Code = hugeicon("i-hugeicons-source-code");
+const File = hugeicon("i-hugeicons-file-01");
+const FileText = hugeicon("i-hugeicons-file-01");
+const Folder = hugeicon("i-hugeicons-folder-01");
+const FolderOpen = hugeicon("i-hugeicons-folder-open");
+const GitBranch = hugeicon("i-hugeicons-git-branch");
+const History = hugeicon("i-hugeicons-clock-04");
+const House = hugeicon("i-hugeicons-home-01");
+const Keyboard = hugeicon("i-hugeicons-keyboard");
+const Monitor = hugeicon("i-hugeicons-computer");
+const MonitorPlay = hugeicon("i-hugeicons-computer-video");
+const Moon = hugeicon("i-hugeicons-moon-02");
+const Palette = hugeicon("i-hugeicons-paint-board");
+const Plus = hugeicon("i-hugeicons-plus-sign");
+const RefreshCw = hugeicon("i-hugeicons-refresh");
+const Settings = hugeicon("i-hugeicons-settings-01");
+const Sun = hugeicon("i-hugeicons-sun-03");
+const VolumeOff = hugeicon("i-hugeicons-volume-off");
 
 const TABS: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "preview", label: "Preview", icon: MonitorPlay },

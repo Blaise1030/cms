@@ -4,11 +4,12 @@
 // "it didn't finish" with a retry. The panel is presentational: the parent owns
 // the store calls, so every button is an event.
 import { computed, ref } from "vue";
-import { CircleAlert, ExternalLink } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UCard from "@nuxt/ui/components/Card.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
 import type { ProviderSignInState } from "@/core/types";
 
 const props = defineProps<{
@@ -34,52 +35,52 @@ function submit() {
 </script>
 
 <template>
-  <div
+  <UCard
     v-if="state.state === 'browser' || state.state === 'code' || state.state === 'failed'"
-    class="bg-card flex flex-col gap-2 rounded-lg border p-3 text-sm"
+    variant="outline"
+    :ui="{ body: 'flex flex-col gap-2 p-3 text-sm sm:p-3' }"
     role="group"
     :aria-label="`Sign in to ${providerName}`"
     :data-state="state.state"
     data-testid="assistant-sign-in"
   >
     <template v-if="state.state === 'browser'">
-      <p class="font-medium">Finish signing in to {{ providerName }}</p>
-      <p class="text-muted-foreground">
-        Complete the sign-in in the browser window orso opened.
-      </p>
-      <p v-if="state.message" class="text-muted-foreground">{{ state.message }}</p>
+      <p class="text-highlighted font-medium">Finish signing in to {{ providerName }}</p>
+      <p class="text-muted">Complete the sign-in in the browser window orso opened.</p>
+      <p v-if="state.message" class="text-muted">{{ state.message }}</p>
       <div class="flex flex-wrap items-center gap-2">
-        <Button
+        <UButton
           v-if="state.url"
-          as="a"
-          :href="state.url"
+          :to="state.url"
           target="_blank"
           rel="noopener noreferrer"
+          color="neutral"
           variant="outline"
           size="sm"
+          icon="i-hugeicons-link-square-02"
+          label="Open the page again"
           data-testid="assistant-sign-in-open"
-        >
-          <ExternalLink aria-hidden="true" /> Open the page again
-        </Button>
-        <Button
+        />
+        <UButton
+          color="neutral"
           variant="ghost"
           size="sm"
+          label="Cancel"
           data-testid="assistant-sign-in-cancel"
           @click="emit('cancel')"
-        >
-          Cancel
-        </Button>
+        />
       </div>
-      <p class="text-muted-foreground flex items-center gap-1.5 text-xs">
-        <Spinner class="size-3.5" aria-hidden="true" /> Waiting for you to finish…
+      <p class="text-muted flex items-center gap-1.5 text-xs">
+        <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" />
+        Waiting for you to finish…
       </p>
     </template>
 
     <template v-else-if="state.state === 'code'">
-      <p class="font-medium">Enter the code to sign in to {{ providerName }}</p>
-      <p v-if="state.message" class="text-muted-foreground">{{ state.message }}</p>
+      <p class="text-highlighted font-medium">Enter the code to sign in to {{ providerName }}</p>
+      <p v-if="state.message" class="text-muted">{{ state.message }}</p>
       <form class="flex flex-wrap items-center gap-2" @submit.prevent="submit">
-        <Input
+        <UInput
           v-model="code"
           class="max-w-52"
           aria-label="Sign-in code"
@@ -87,63 +88,82 @@ function submit() {
           autocomplete="one-time-code"
           data-testid="assistant-sign-in-code"
         />
-        <Button
+        <UButton
           type="submit"
           size="sm"
+          label="Continue"
           :disabled="!canSubmit"
           data-testid="assistant-sign-in-submit"
-        >
-          Continue
-        </Button>
-        <Button
+        />
+        <UButton
           type="button"
+          color="neutral"
           variant="ghost"
           size="sm"
+          label="Cancel"
           data-testid="assistant-sign-in-cancel"
           @click="emit('cancel')"
-        >
-          Cancel
-        </Button>
+        />
       </form>
-      <a
+      <UButton
         v-if="state.url"
-        class="inline-flex items-center gap-1 self-start text-xs underline"
-        :href="state.url"
+        :to="state.url"
         target="_blank"
         rel="noopener noreferrer"
+        variant="link"
+        color="neutral"
+        size="xs"
+        class="self-start px-0 underline"
+        trailing-icon="i-hugeicons-link-square-02"
+        label="Open the sign-in page"
         data-testid="assistant-sign-in-open"
-      >
-        Open the sign-in page <ExternalLink class="size-3" aria-hidden="true" />
-      </a>
-      <p class="text-muted-foreground flex items-center gap-1.5 text-xs">
-        <Spinner class="size-3.5" aria-hidden="true" /> Waiting for you to finish…
+      />
+      <p class="text-muted flex items-center gap-1.5 text-xs">
+        <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" />
+        Waiting for you to finish…
       </p>
     </template>
 
     <template v-else-if="state.state === 'failed'">
-      <Alert variant="destructive" data-testid="assistant-sign-in-error">
-        <CircleAlert aria-hidden="true" />
-        <AlertDescription>
+      <UAlert
+        color="error"
+        variant="subtle"
+        icon="i-hugeicons-alert-circle"
+        data-testid="assistant-sign-in-error"
+      >
+        <template #description>
           <p>Signing in to {{ providerName }} didn't finish. Please try again.</p>
-          <details v-if="state.message" class="mt-1">
-            <summary class="cursor-pointer text-xs underline">Details</summary>
-            <p class="mt-1 text-xs break-words">{{ state.message }}</p>
-          </details>
-        </AlertDescription>
-      </Alert>
+          <UCollapsible v-if="state.message" :unmount-on-hide="false" class="mt-1">
+            <UButton
+              variant="link"
+              color="neutral"
+              size="xs"
+              class="px-0 underline"
+              label="Details"
+              data-testid="assistant-details-toggle"
+            />
+            <template #content>
+              <p class="mt-1 text-xs break-words" data-testid="assistant-details">{{ state.message }}</p>
+            </template>
+          </UCollapsible>
+        </template>
+      </UAlert>
       <div class="flex flex-wrap items-center gap-2">
-        <Button size="sm" data-testid="assistant-sign-in-retry" @click="emit('retry')">
-          Try again
-        </Button>
-        <Button
+        <UButton
+          size="sm"
+          label="Try again"
+          data-testid="assistant-sign-in-retry"
+          @click="emit('retry')"
+        />
+        <UButton
+          color="neutral"
           variant="ghost"
           size="sm"
+          label="Dismiss"
           data-testid="assistant-sign-in-dismiss"
           @click="emit('dismiss')"
-        >
-          Dismiss
-        </Button>
+        />
       </div>
     </template>
-  </div>
+  </UCard>
 </template>

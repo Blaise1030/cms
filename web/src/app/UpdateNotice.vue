@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
-import { Download, X } from "@lucide/vue";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { type DesktopUpdate, UPDATE_EVENT, parseUpdate } from "@/app/desktopUpdate";
 
 const props = withDefaults(defineProps<{ navigate?: (url: string) => void }>(), {
@@ -23,29 +22,33 @@ onBeforeUnmount(() => window.removeEventListener(UPDATE_EVENT, onReady));
 </script>
 
 <template>
-  <Alert
+  <UAlert
     v-if="update && !dismissed"
-    class="fixed right-4 bottom-4 z-50 w-80 pr-9 shadow-md"
+    color="neutral"
+    variant="outline"
+    icon="i-hugeicons-download-01"
+    title="Update ready — restart to apply"
+    close
+    class="bg-default fixed right-4 bottom-4 z-50 w-80 shadow-md"
     role="status"
     data-testid="update-notice"
   >
-    <Download />
-    <AlertTitle>Update ready — restart to apply</AlertTitle>
-    <AlertDescription>
+    <template #description>
       <p>orso {{ update.version }} has been downloaded.</p>
-      <Button size="sm" data-testid="update-restart" @click="props.navigate(update.applyUrl)">
+      <UButton size="sm" class="mt-2" data-testid="update-restart" @click="props.navigate(update.applyUrl)">
         Restart to update
-      </Button>
-    </AlertDescription>
-    <Button
-      variant="ghost"
-      size="icon"
-      class="absolute top-2 right-2 size-6"
-      aria-label="Dismiss"
-      data-testid="update-dismiss"
-      @click="dismissed = true"
-    >
-      <X />
-    </Button>
-  </Alert>
+      </UButton>
+    </template>
+    <template #close>
+      <UButton
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        icon="i-hugeicons-cancel-01"
+        aria-label="Dismiss"
+        data-testid="update-dismiss"
+        @click="dismissed = true"
+      />
+    </template>
+  </UAlert>
 </template>

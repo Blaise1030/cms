@@ -108,6 +108,17 @@ async function toGithub(w: ReturnType<typeof mount>) {
 
 enableAutoUnmount(afterEach);
 
+/** The radio-card option (Nuxt UI `URadioGroup` item) that holds the element with this testid. */
+function option(w: ReturnType<typeof mountCheck>, id: string) {
+  const item = w.findAll("[data-slot='item']").find((i) => i.find(`[data-testid='${id}']`).exists());
+  if (!item) throw new Error(`no radio option holds ${id}`);
+  return item;
+}
+/** The option's radio control, which carries `aria-checked` and takes the click. */
+function radio(w: ReturnType<typeof mountCheck>, id: string) {
+  return option(w, id).get("[role='radio']");
+}
+
 describe("onboarding step 1: assistant", () => {
   it("renders the assistant step with four cards and OpenCode selected", async () => {
     const w = mountCheck({}, fresh());
@@ -123,9 +134,9 @@ describe("onboarding step 1: assistant", () => {
     const ids = ["opencode", "claude", "codex", "cursor"];
     for (const id of ids) expect(w.find(`[data-testid='onboarding-provider-${id}']`).exists()).toBe(true);
 
-    expect(testId(w, "onboarding-provider-opencode").attributes("aria-checked")).toBe("true");
+    expect(radio(w, "onboarding-provider-opencode").attributes("aria-checked")).toBe("true");
     for (const id of ["claude", "codex", "cursor"]) {
-      expect(testId(w, `onboarding-provider-${id}`).attributes("aria-checked")).toBe("false");
+      expect(radio(w, `onboarding-provider-${id}`).attributes("aria-checked")).toBe("false");
     }
     expect(testId(w, "onboarding-setup-opencode").text()).toContain("Set up with OpenCode");
     expect(w.findAll("[data-testid^='onboarding-dot-']")).toHaveLength(3);
@@ -165,12 +176,12 @@ describe("onboarding step 1: assistant", () => {
     await testId(w, "onboarding-dot-1").trigger("click");
     await flushPromises();
 
-    const existing = testId(w, "onboarding-existing-claude");
+    const existing = option(w, "onboarding-existing-claude");
     expect(existing.text()).toContain("Claude");
     expect(existing.text()).toContain("Already on your Mac");
-    await existing.trigger("click");
+    await radio(w, "onboarding-existing-claude").trigger("click");
 
-    expect(testId(w, "onboarding-provider-claude").attributes("aria-checked")).toBe("true");
+    expect(radio(w, "onboarding-provider-claude").attributes("aria-checked")).toBe("true");
     expect(testId(w, "onboarding-setup-claude").text()).toContain("Continue");
   });
 
@@ -178,11 +189,11 @@ describe("onboarding step 1: assistant", () => {
     const w = mountCheck({}, fresh());
     await flushPromises();
 
-    await testId(w, "onboarding-provider-claude").trigger("click");
-    expect(testId(w, "onboarding-provider-claude").attributes("aria-checked")).toBe("true");
-    expect(testId(w, "onboarding-provider-opencode").attributes("aria-checked")).toBe("false");
+    await radio(w, "onboarding-provider-claude").trigger("click");
+    expect(radio(w, "onboarding-provider-claude").attributes("aria-checked")).toBe("true");
+    expect(radio(w, "onboarding-provider-opencode").attributes("aria-checked")).toBe("false");
     expect(testId(w, "onboarding-setup-claude").text()).toContain("Set up with Claude");
-    expect(w.findAll("[data-testid='onboarding-selected-check']")).toHaveLength(1);
+    expect(w.findAll("[role='radio'][aria-checked='true']")).toHaveLength(1);
   });
 
   it("starts a download, shows progress and cancels it", async () => {

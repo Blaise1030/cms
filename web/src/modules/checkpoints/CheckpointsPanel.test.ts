@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
+import { defineComponent, h as el } from "vue";
+import { TooltipProvider } from "reka-ui";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // The panel loads these lazily; stand-ins keep Pierre's renderers out of happy-dom.
 vi.mock("./DiffView.vue", async () => {
   const { defineComponent, h } = await import("vue");
@@ -63,7 +65,11 @@ async function mountPanel(start = "/p/p/history") {
     ],
   });
   await router.push(start);
-  return mount(RouterView, { global: { plugins: [router] }, attachTo: document.body });
+  // Tooltips need the provider `UApp` gives the real app.
+  const Host = defineComponent({
+    setup: () => () => el(TooltipProvider, null, { default: () => el(RouterView) }),
+  });
+  return mount(Host, { global: { plugins: [router] }, attachTo: document.body });
 }
 
 const byText = (text: string) =>

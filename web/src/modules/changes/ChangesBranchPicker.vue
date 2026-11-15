@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ChevronsUpDown, CircleCheck, GitBranch, Plus } from "@lucide/vue";
-import { toast } from "vue-sonner";
-import { Button } from "@/components/ui/button";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { toast } from "@/lib/toast";
+import type { CommandPaletteGroup, CommandPaletteItem, InputProps, PopoverProps } from "@nuxt/ui";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCommandPalette from "@nuxt/ui/components/CommandPalette.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UPopover from "@nuxt/ui/components/Popover.vue";
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "./NewChangeDialog.vue";
 import ConfirmSwitchDialog from "./ConfirmSwitchDialog.vue";
@@ -67,93 +69,114 @@ function onNewChange() {
   open.value = false;
   showNewChange.value = true;
 }
+
+/** Popover panel and search field keep the testids the e2e specs drive. */
+const popoverContent = { align: "start", "data-testid": "changes-menu-content" } as PopoverProps["content"];
+const searchInput = { "data-testid": "changes-search" } as Omit<InputProps, "modelValue" | "defaultValue">;
+
+function prStateLabel(state: keyof typeof PR_STATE_LABEL): string {
+  return PR_STATE_LABEL[state];
+}
+
+/** A row in the menu: Live site, an open change, or the list's loading/empty note. */
+interface ChangeRow extends CommandPaletteItem {
+  checked?: boolean;
+  prState?: keyof typeof PR_STATE_LABEL;
+}
+
+const groups = computed<CommandPaletteGroup<ChangeRow>[]>(() => {
+  const busy = store.switching || store.cleaningUp;
+  const rows: ChangeRow[] = [
+    {
+      label: "Live site",
+      description: "main",
+      slot: "change",
+      checked: !store.active,
+      disabled: busy,
+      "data-testid": "live-site",
+      onSelect: () => void onLiveSite(),
+    },
+  ];
+  if (store.listing || store.items.length === 0) {
+    rows.push({ label: store.listing ? "Loading…" : "No open changes", slot: "note", disabled: true });
+  }
+  for (const c of store.items) {
+    rows.push({
+      label: c.title,
+      // The branch is searchable too, as before.
+      description: `${c.branch}${c.lastEdited != null ? ` · ${formatEdited(c.lastEdited)}` : ""}`,
+      slot: "change",
+      checked: c.branch === store.active?.branch,
+      prState: c.prState ?? undefined,
+      disabled: busy,
+      "data-testid": "change-item",
+      "data-branch": c.branch,
+      onSelect: () => void onSelect(c.branch),
+    });
+  }
+  return [
+    { id: "changes", items: rows },
+    {
+      id: "actions",
+      items: [{ label: "New change", icon: "i-hugeicons-plus-sign", "data-testid": "new-change", onSelect: onNewChange }],
+    },
+  ];
+});
 </script>
 
 <template>
-  <Popover v-model:open="open">
-    <PopoverTrigger as-child>
-      <Button
-        variant="outline"
+  <UPopover v-model:open="open" :content="popoverContent" :ui="{ content: 'w-72' }">
+    <UButton
+      color="neutral"
+      variant="outline"
+      size="sm"
+      icon="i-hugeicons-git-branch"
+      trailing-icon="i-hugeicons-unfold-more"
+      class="max-w-56"
+      :ui="{ leadingIcon: 'text-muted', trailingIcon: 'size-3.5 text-dimmed' }"
+      data-testid="changes-menu"
+    >
+      <span class="truncate" data-testid="active-change">{{ triggerLabel }}</span>
+    </UButton>
+
+    <template #content>
+      <UCommandPalette
+        :groups="groups"
+        placeholder="Search changes…"
+        :input="searchInput"
         size="sm"
-        class="bg-card h-7 max-w-56 gap-1 px-2 text-xs"
-        data-testid="changes-menu"
+        :ui="{ viewport: 'max-h-64 divide-y divide-default' }"
       >
-        <GitBranch class="size-4 shrink-0 opacity-70" />
-        <span class="truncate" data-testid="active-change">{{ triggerLabel }}</span>
-        <ChevronsUpDown class="size-3.5 shrink-0 opacity-50" />
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent align="start" class="w-72 p-0" data-testid="changes-menu-content">
-      <Command>
-        <CommandInput placeholder="Search changes…" data-testid="changes-search" />
-        <CommandList class="max-h-64">
-          <CommandEmpty>No matching changes</CommandEmpty>
-          <CommandGroup>
-            <CommandItem
-              value="live-site main"
-              data-testid="live-site"
-              :disabled="store.switching || store.cleaningUp"
-              class="items-start"
-              @select="onLiveSite"
-            >
-              <CircleCheck
-                class="mt-0.5 size-3.5 shrink-0 fill-foreground text-background"
-                :class="store.active ? 'opacity-0' : 'opacity-100'"
-              />
-              <span class="min-w-0 flex-1">
-                <span class="truncate text-sm">Live site</span>
-                <span class="text-muted-foreground block truncate text-xs">main</span>
-              </span>
-            </CommandItem>
-            <p v-if="store.listing" class="text-muted-foreground px-2 py-1.5 text-xs">Loading…</p>
-            <p
-              v-else-if="store.items.length === 0"
-              class="text-muted-foreground px-2 py-1.5 text-xs"
-            >
-              No open changes
-            </p>
-            <CommandItem
-              v-for="c in store.items"
-              :key="c.branch"
-              :value="`${c.title} ${c.branch}`"
-              data-testid="change-item"
-              :data-branch="c.branch"
-              :disabled="store.switching || store.cleaningUp"
-              class="items-start"
-              @select="onSelect(c.branch)"
-            >
-              <CircleCheck
-                class="mt-0.5 size-3.5 shrink-0 fill-foreground text-background"
-                :class="c.branch === store.active?.branch ? 'opacity-100' : 'opacity-0'"
-              />
-              <span class="min-w-0 flex-1">
-                <span class="flex items-center gap-1.5">
-                  <span class="truncate text-sm">{{ c.title }}</span>
-                  <span
-                    v-if="c.prState"
-                    class="text-muted-foreground ml-auto shrink-0 rounded border px-1 text-[10px] leading-4"
-                    :data-state="c.prState"
-                    data-testid="change-pr-state"
-                    >{{ PR_STATE_LABEL[c.prState] }}</span
-                  >
-                </span>
-                <span class="text-muted-foreground block truncate text-xs">
-                  {{ c.branch }}{{ c.lastEdited != null ? ` · ${formatEdited(c.lastEdited)}` : "" }}
-                </span>
-              </span>
-            </CommandItem>
-          </CommandGroup>
-          <CommandSeparator />
-          <CommandGroup>
-            <CommandItem value="new change" data-testid="new-change" @select="onNewChange">
-              <Plus class="size-3.5" />
-              New change
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
-      </Command>
-    </PopoverContent>
-  </Popover>
+        <!-- Label and description come from the palette's own item layout; only the check and the
+             PR badge are custom. -->
+        <template #change-leading="{ item }">
+          <UIcon
+            name="i-hugeicons-checkmark-circle-02"
+            class="text-primary mt-0.5 size-4 shrink-0"
+            :class="item.checked ? 'opacity-100' : 'opacity-0'"
+          />
+        </template>
+        <template #change-trailing="{ item }">
+          <UBadge
+            v-if="item.prState"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            :data-state="item.prState"
+            data-testid="change-pr-state"
+            :label="prStateLabel(item.prState)"
+          />
+        </template>
+        <template #note="{ item }">
+          <span class="text-muted text-xs">{{ item.label }}</span>
+        </template>
+        <template #empty>
+          <span class="text-sm">No matching changes</span>
+        </template>
+      </UCommandPalette>
+    </template>
+  </UPopover>
 
   <NewChangeDialog v-model:open="showNewChange" :project-id="projectId" />
 

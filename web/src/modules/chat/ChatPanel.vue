@@ -2,26 +2,18 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import type { UIMessage } from "ai";
-import { ArrowUp, CircleAlert, MessageSquare, Minus, Plus, ShieldQuestion, X } from "@lucide/vue";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { errorMessage } from "@orso/utils";
 import { ApiError, mapErrorResponse } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { ChatHistory as ChatHistoryData, UiChunk } from "@/core/types";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import {
-  MessageScroller,
-  MessageScrollerButton,
-  MessageScrollerContent,
-  MessageScrollerItem,
-  MessageScrollerProvider,
-  MessageScrollerViewport,
-} from "@/components/ui/message-scroller";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCard from "@nuxt/ui/components/Card.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UChatShimmer from "@nuxt/ui/components/ChatShimmer.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useAssistantStore } from "@/modules/assistant/store";
 import { openAssistantSetup } from "@/modules/assistant/dialog";
@@ -33,6 +25,7 @@ import { projectTabFromRoute, type ProjectTab } from "@/router";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
 import ChatMessage from "./ChatMessage.vue";
+import ChatTranscript from "./ChatTranscript.vue";
 import { attachmentMessage } from "./attachments";
 import { createTranscript, type Transcript } from "./chunks";
 import {
@@ -88,9 +81,41 @@ function pendingPermissions(history: ChatHistoryData): PermissionChunk[] {
   return history.chunks.filter((c): c is PermissionChunk => c.type === "permission" && pending.has(c.request_id));
 }
 
-function permissionTitle(chunk: PermissionChunk): string {
+/** What kind of tool the agent wants to run, in words. */
+const PERMISSION_KIND: Record<string, string> = {
+  execute: "Run a command",
+  edit: "Edit a file",
+  delete: "Delete a file",
+  move: "Move a file",
+  read: "Read a file",
+  search: "Search",
+  fetch: "Fetch a web page",
+};
+
+function permissionKind(chunk: PermissionChunk): string {
+  const kind = chunk.tool_call.kind;
+  return (typeof kind === "string" && PERMISSION_KIND[kind.toLowerCase()]) || "Run a tool";
+}
+
+/** The exact command (or the tool's title) the agent is asking to run. */
+function permissionCommand(chunk: PermissionChunk): string {
+  const raw = chunk.tool_call.rawInput as { command?: unknown } | null | undefined;
+  if (typeof raw?.command === "string" && raw.command.trim()) return raw.command;
+  if (Array.isArray(raw?.command) && raw.command.length) return raw.command.join(" ");
   const title = chunk.tool_call.title;
   return typeof title === "string" && title ? title : "Run a tool";
+}
+
+/** Commands longer than this many lines start clipped, with "Show all". */
+const PERMISSION_PREVIEW_LINES = 10;
+const expandedPermissions = ref(new Set<string>());
+const permissionIsLong = (chunk: PermissionChunk) =>
+  permissionCommand(chunk).split("\n").length > PERMISSION_PREVIEW_LINES;
+function togglePermission(chunk: PermissionChunk) {
+  const next = new Set(expandedPermissions.value);
+  if (next.has(chunk.request_id)) next.delete(chunk.request_id);
+  else next.add(chunk.request_id);
+  expandedPermissions.value = next;
 }
 
 async function answerPermission(chunk: PermissionChunk, allow: boolean) {
@@ -769,16 +794,11 @@ function loadEarlierMessages() {
   firstVisibleMessage.value = Math.max(0, firstVisibleMessage.value - 10);
 }
 
-function onMessageScroll(event: Event) {
-  const viewport = event.target as HTMLElement;
-  if (viewport.scrollTop <= 80 && firstVisibleMessage.value > 0) loadEarlierMessages();
-}
-
 defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
 </script>
 
 <template>
-  <div data-testid="chat-panel" class="bg-background text-foreground flex h-full min-h-0 flex-col">
+  <div data-testid="chat-panel" class="bg-background text-default flex h-full min-h-0 flex-col">
     <div data-testid="chat-header" class="flex h-11 shrink-0 items-center gap-1 px-1.5">
       <ChatHistory
         v-if="layout !== 'floating'"
@@ -792,105 +812,110 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
       <span class="min-w-0 flex-1 truncate px-1 text-sm">
         {{ activeSummary?.title || "New chat" }}
       </span>
-      <Badge
+      <UBadge
         v-if="syncPhase"
-        :variant="syncPhaseBadge(syncPhase)"
+        color="neutral"
+        :variant="syncPhaseBadge(syncPhase) === 'outline' ? 'outline' : 'soft'"
         data-testid="sync-phase"
         class="shrink-0"
-      >
-        {{ PHASE_LABEL[syncPhase] }}
-      </Badge>
-      <Button
+        :label="PHASE_LABEL[syncPhase]"
+      />
+      <UButton
         v-if="isSync && !syncTerminal"
+        color="neutral"
         variant="ghost"
         size="sm"
         data-testid="sync-end"
+        :label="SYNC_ACTIONS.end"
         @click="changes.endSyncChat(projectId, activeSyncSessionId, activeId ?? undefined)"
-      >
-        {{ SYNC_ACTIONS.end }}
-      </Button>
-      <Button
+      />
+      <UButton
         v-if="layout !== 'floating'"
+        color="neutral"
         variant="ghost"
-        size="icon-sm"
+        size="sm"
+        icon="i-hugeicons-plus-sign"
         aria-label="New chat"
         data-testid="chat-new"
         @click="startNew"
-      >
-        <Plus />
-      </Button>
+      />
       <template v-if="layout === 'floating'">
-        <Button
+        <UButton
+          color="neutral"
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          icon="i-hugeicons-minus-sign"
           aria-label="Minimize agent"
           data-testid="agent-minimize"
           @click="emit('minimize')"
-        >
-          <Minus />
-        </Button>
-        <Button
+        />
+        <UButton
+          color="neutral"
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          icon="i-hugeicons-cancel-01"
           aria-label="Close agent"
           data-testid="agent-close"
           @click="emit('close')"
-        >
-          <X />
-        </Button>
+        />
       </template>
     </div>
 
     <div
       v-if="loadingChat"
-      class="text-muted-foreground flex min-h-0 flex-1 items-start gap-2 p-3 text-sm"
+      class="text-muted flex min-h-0 flex-1 items-start gap-2 p-3 text-sm"
       role="status"
       data-testid="chat-loading"
     >
-      <Spinner class="size-4" aria-hidden="true" />
+      <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" aria-hidden="true" />
       <span>Loading chat…</span>
     </div>
-    <Empty v-else-if="messages.length === 0" class="min-h-0 px-3 md:px-3">
-      <EmptyHeader>
-        <EmptyMedia variant="icon"><MessageSquare /></EmptyMedia>
-        <EmptyTitle>What should we change?</EmptyTitle>
-        <EmptyDescription>Your assistant edits your site and saves a checkpoint after each turn.</EmptyDescription>
-      </EmptyHeader>
-      <EmptyContent class="flex flex-col gap-2">
-        <Button
-          v-for="s in SUGGESTIONS"
-          :key="s"
-          variant="outline"
-          size="sm"
-          class="h-auto w-full justify-start py-2 text-left whitespace-normal"
-          data-testid="chat-suggestion"
-          @click="suggest(s)"
-        >
-          {{ s }}
-        </Button>
-      </EmptyContent>
-    </Empty>
-    <MessageScrollerProvider v-else auto-scroll>
-      <MessageScroller class="min-h-0 flex-1">
-        <MessageScrollerViewport class="scroll-fade-y" data-testid="chat-viewport" @scroll="onMessageScroll">
-          <!-- The working indicator floats over the bottom edge; keep the last line clear of it. -->
-          <MessageScrollerContent
-            data-testid="chat-messages"
-            :class="['flex flex-col gap-4 p-3', streaming && 'pb-10']"
-          >
-            <MessageScrollerItem v-for="m in visibleMessages" :key="m.id" :message-id="m.id">
-              <ChatMessage
-                :project-id="projectId"
-                :message="m"
-                :provider="provider"
-                @assistant-action="handleAssistantAction($event.action, $event.provider)"
-              />
-            </MessageScrollerItem>
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        <MessageScrollerButton class="absolute bottom-2 left-1/2 -translate-x-1/2" />
-      </MessageScroller>
-    </MessageScrollerProvider>
+    <UEmpty
+      v-else-if="messages.length === 0"
+      variant="naked"
+      icon="i-hugeicons-message-01"
+      title="What should we change?"
+      description="Your assistant edits your site and saves a checkpoint after each turn."
+      size="sm"
+      class="min-h-0 flex-1 px-3"
+      :ui="{ body: 'w-full', actions: 'w-full' }"
+    >
+      <template #actions>
+        <div class="flex w-full flex-col gap-2">
+          <UButton
+            v-for="s in SUGGESTIONS"
+            :key="s"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            block
+            class="justify-start py-2 text-left whitespace-normal"
+            data-testid="chat-suggestion"
+            :label="s"
+            @click="suggest(s)"
+          />
+        </div>
+      </template>
+    </UEmpty>
+    <!-- The working indicator floats over the bottom edge; keep the last line clear of it. -->
+    <ChatTranscript
+      v-else
+      :messages="visibleMessages"
+      :streaming="streaming"
+      :can-load-earlier="firstVisibleMessage > 0"
+      :list-class="['gap-4 p-3', streaming && 'pb-10']"
+      @load-earlier="loadEarlierMessages"
+    >
+      <template #default="{ message: m }">
+        <ChatMessage
+          data-testid="chat-message"
+          :project-id="projectId"
+          :message="m"
+          :provider="provider"
+          @assistant-action="handleAssistantAction($event.action, $event.provider)"
+        />
+      </template>
+    </ChatTranscript>
 
     <div class="relative flex shrink-0 flex-col gap-2 p-2">
       <Transition
@@ -901,98 +926,150 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
       >
         <div
           v-if="streaming"
-          class="pointer-events-none absolute bottom-full left-3 flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
+          class="text-muted pointer-events-none absolute bottom-full left-3 flex items-center gap-1.5 py-1 text-xs"
           role="status"
           data-testid="chat-working"
         >
-          <Spinner class="size-4" aria-hidden="true" />
-          <span class="shimmer motion-reduce:shimmer-none">Working on it…</span>
+          <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" aria-hidden="true" />
+          <UChatShimmer text="Working on it…" />
         </div>
       </Transition>
-      <Alert v-if="errorText" variant="destructive">
-        <CircleAlert />
-        <AlertDescription class="flex flex-col items-start gap-2">
-          <span data-testid="chat-error">{{ errorText }}</span>
-          <Button
-            v-if="errorRecovery"
-            size="sm"
-            variant="outline"
-            data-testid="chat-error-action"
-            @click="recoverError"
-          >
-            {{ errorRecovery === "signIn" ? "Sign in" : "Set up" }}
-          </Button>
-        </AlertDescription>
-      </Alert>
-      <div
+      <UAlert v-if="errorText" role="alert" color="error" variant="subtle" icon="i-hugeicons-alert-circle">
+        <template #description>
+          <div class="flex flex-col items-start gap-2">
+            <span data-testid="chat-error">{{ errorText }}</span>
+            <UButton
+              v-if="errorRecovery"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              data-testid="chat-error-action"
+              :label="errorRecovery === 'signIn' ? 'Sign in' : 'Set up'"
+              @click="recoverError"
+            />
+          </div>
+        </template>
+      </UAlert>
+      <!-- Only the frame and icon are amber; the command reads as code, and the actions stay in view. -->
+      <UAlert
         v-for="perm in permissions"
         :key="perm.request_id"
         data-testid="chat-approval"
-        class="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-sm"
         role="alert"
+        color="warning"
+        variant="outline"
+        icon="i-hugeicons-shield-01"
+        title="Approval needed"
+        orientation="vertical"
+        :ui="{ title: 'text-highlighted', description: 'text-muted min-w-0', wrapper: 'min-w-0' }"
       >
-        <div class="flex items-start gap-2">
-          <ShieldQuestion class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <div class="min-w-0 flex-1">
-            <div class="font-medium">Approval needed</div>
-            <div class="text-muted-foreground break-words text-xs" data-testid="chat-approval-title">{{ permissionTitle(perm) }}</div>
+        <template #description>
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <span class="text-xs" data-testid="chat-approval-kind">{{ permissionKind(perm) }}</span>
+            <pre
+              :class="[
+                'bg-muted text-default border-default overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs whitespace-pre',
+                !expandedPermissions.has(perm.request_id) && 'max-h-48',
+              ]"
+            ><code data-testid="chat-approval-title">{{ permissionCommand(perm) }}</code></pre>
+            <UButton
+              v-if="permissionIsLong(perm)"
+              color="neutral"
+              variant="link"
+              size="xs"
+              class="self-start p-0"
+              :label="expandedPermissions.has(perm.request_id) ? 'Show less' : 'Show all'"
+              data-testid="chat-approval-toggle"
+              @click="togglePermission(perm)"
+            />
+          </div>
+        </template>
+        <template #actions>
+          <div class="flex w-full justify-end gap-2">
+            <UButton color="neutral" variant="outline" size="sm" label="Deny" :disabled="answering" data-testid="chat-approval-deny" @click="answerPermission(perm, false)" />
+            <UButton size="sm" label="Allow" :disabled="answering" data-testid="chat-approval-allow" @click="answerPermission(perm, true)" />
+          </div>
+        </template>
+      </UAlert>
+      <UCard
+        v-if="queued.length"
+        data-testid="chat-queued"
+        class="text-xs"
+        :ui="{ header: 'flex items-center justify-between gap-2 px-3 py-2 sm:px-3', body: 'px-3 py-2 sm:p-3 sm:px-3' }"
+      >
+        <template #header>
+          <span class="text-highlighted text-xs font-semibold">Queued ({{ queued.length }})</span>
+          <UButton
+            v-if="queuePaused"
+            variant="link"
+            size="xs"
+            class="p-0"
+            label="Resume queue"
+            data-testid="chat-queue-resume"
+            @click="resumeQueue"
+          />
+        </template>
+        <div class="-m-1 flex max-h-28 flex-col gap-1 overflow-y-auto p-1">
+          <div v-for="item in queued" :key="item.id" data-testid="chat-queued-item" class="flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate">{{ item.preview }}</span>
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="xs"
+              icon="i-hugeicons-arrow-up-01"
+              class="shrink-0"
+              :aria-label="`Send queued message: ${item.preview}`"
+              title="Send next"
+              data-testid="chat-queued-send"
+              @click="sendQueued(item.id)"
+            />
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="xs"
+              icon="i-hugeicons-cancel-01"
+              class="text-muted hover:text-error shrink-0"
+              :aria-label="`Remove queued message: ${item.preview}`"
+              title="Remove"
+              data-testid="chat-queued-remove"
+              @click="removeQueued(item.id)"
+            />
           </div>
         </div>
-        <div class="flex justify-end gap-2">
-          <Button size="sm" variant="outline" :disabled="answering" data-testid="chat-approval-deny" @click="answerPermission(perm, false)">Deny</Button>
-          <Button size="sm" :disabled="answering" data-testid="chat-approval-allow" @click="answerPermission(perm, true)">Allow</Button>
-        </div>
-      </div>
-      <Card v-if="queued.length" data-testid="chat-queued" class="gap-2 py-3 text-xs shadow-none">
-        <CardHeader class="px-3">
-          <CardTitle class="text-xs">Queued ({{ queued.length }})</CardTitle>
-          <CardAction>
-            <button v-if="queuePaused" type="button" class="text-primary hover:underline" data-testid="chat-queue-resume" @click="resumeQueue">Resume queue</button>
-          </CardAction>
-        </CardHeader>
-        <CardContent class="px-3">
-          <div class="-m-1 flex max-h-28 flex-col gap-1 overflow-y-auto p-1">
-            <div v-for="item in queued" :key="item.id" data-testid="chat-queued-item" class="flex items-center gap-2">
-              <span class="min-w-0 flex-1 truncate">{{ item.preview }}</span>
-              <Button variant="outline" size="icon-xs" class="shrink-0" :aria-label="`Send queued message: ${item.preview}`" title="Send next" data-testid="chat-queued-send" @click="sendQueued(item.id)">
-                <ArrowUp class="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button variant="outline" size="icon-xs" class="text-muted-foreground hover:text-destructive shrink-0" :aria-label="`Remove queued message: ${item.preview}`" title="Remove" data-testid="chat-queued-remove" @click="removeQueued(item.id)">
-                <X class="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      </UCard>
       <div v-if="syncFinalActions" data-testid="sync-final" class="flex flex-col gap-2">
-        <Button
+        <UButton
+          color="neutral"
           variant="outline"
           size="sm"
+          block
           data-testid="sync-pick"
+          :label="SYNC_ACTIONS.pick"
           @click="changes.pickMyself(projectId, activeSyncSessionId)"
-        >
-          {{ SYNC_ACTIONS.pick }}
-        </Button>
-        <Button
+        />
+        <UButton
+          color="neutral"
           variant="outline"
           size="sm"
+          block
           data-testid="sync-again"
+          :label="SYNC_ACTIONS.again"
           @click="changes.combineAgain(projectId, activeSyncSessionId)"
-        >
-          {{ SYNC_ACTIONS.again }}
-        </Button>
+        />
       </div>
-      <div
+      <UAlert
         v-if="!provider && !loadingChat && assistant.snapshot && !isSync"
         data-testid="chat-no-assistant"
-        class="flex flex-col items-start gap-2 rounded-lg border p-3 text-sm"
         role="status"
+        color="neutral"
+        variant="outline"
+        description="Your assistant isn’t set up yet. Set one up to start chatting."
+        orientation="vertical"
       >
-        <p class="text-muted-foreground">
-          Your assistant isn’t set up yet. Set one up to start chatting.
-        </p>
-        <Button size="sm" data-testid="chat-setup" @click="openSetup">Set up your assistant</Button>
-      </div>
+        <template #actions>
+          <UButton size="sm" label="Set up your assistant" data-testid="chat-setup" @click="openSetup" />
+        </template>
+      </UAlert>
       <ChatComposer
         v-if="!syncTerminal"
         ref="composer"

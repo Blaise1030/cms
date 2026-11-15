@@ -1,16 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { toast } from "vue-sonner";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { toast } from "@/lib/toast";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
 import { errorMessage } from "@orso/utils";
 import type { Change } from "@/core/types";
 import { useChangesStore } from "./store";
@@ -52,26 +45,26 @@ async function submit() {
 </script>
 
 <template>
-  <Dialog v-model:open="open">
-    <DialogContent>
+  <UModal v-model:open="open" :title="heading" :description="description">
+    <template #body>
+      <!-- The form holds the actions too, so Enter in the field and the submit button both create. -->
       <form class="grid gap-4" @submit.prevent="submit">
-        <DialogHeader>
-          <DialogTitle>{{ heading }}</DialogTitle>
-          <DialogDescription>{{ description }}</DialogDescription>
-        </DialogHeader>
-        <Input
+        <UInput
           v-model="title"
+          class="w-full"
           placeholder="New post: Launch week"
           aria-label="Change title"
           autofocus
         />
-        <DialogFooter>
-          <Button type="button" variant="outline" @click="open = false">Cancel</Button>
-          <Button type="submit" :disabled="!title.trim() || store.creating">
-            {{ store.creating ? "Creating…" : "Create change" }}
-          </Button>
-        </DialogFooter>
+        <div class="flex justify-end gap-2">
+          <UButton type="button" color="neutral" variant="outline" label="Cancel" @click="open = false" />
+          <UButton
+            type="submit"
+            :disabled="!title.trim() || store.creating"
+            :label="store.creating ? 'Creating…' : 'Create change'"
+          />
+        </div>
       </form>
-    </DialogContent>
-  </Dialog>
+    </template>
+  </UModal>
 </template>

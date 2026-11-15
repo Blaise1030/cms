@@ -1,22 +1,26 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import UApp from "@nuxt/ui/components/App.vue";
 import { RouterView } from "vue-router";
 import CommandPalette from "@/app/CommandPalette.vue";
 import DaemonUnreachable from "@/app/DaemonUnreachable.vue";
 import SetupCheck from "@/app/SetupCheck.vue";
 import UpdateNotice from "@/app/UpdateNotice.vue";
 import { SETUP_WAIT_MS, dismissSetup, setupDismissed, setupIncomplete } from "@/app/setup";
-import { Spinner } from "@/components/ui/spinner";
-import { Toaster } from "@/components/ui/sonner";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import { useToast } from "@nuxt/ui/composables/useToast";
 import { useDaemon } from "@/core/daemon";
 import type { SetupStatus } from "@/core/types";
 import { useTheme } from "@/lib/theme";
+import { installToast } from "@/lib/toast";
 import AssistantDialog from "@/modules/assistant/AssistantDialog.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 
 const daemon = useDaemon();
 const projects = useProjectsStore();
-const theme = useTheme();
+// Applies the light/dark class for the whole app (and keeps it in sync with the system).
+useTheme();
+installToast(useToast());
 
 // Keep the offline screen up (with a spinner) while a manual retry is in flight, instead of
 // flashing the app back in.
@@ -88,36 +92,38 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DaemonUnreachable
-    v-if="showOffline"
-    class="bg-background text-foreground"
-    :origin="daemon.config.value.origin"
-    :reason="daemon.reason.value"
-    :connecting="retrying"
-    @retry="retry"
-    @connect="connect"
-  />
-  <div
-    v-else-if="setupPending"
-    class="bg-background text-muted-foreground flex h-svh items-center justify-center gap-2 text-sm"
-    role="status"
-    aria-busy="true"
-    data-testid="setup-pending"
-  >
-    <Spinner class="size-4" aria-hidden="true" />
-    <span>Loading…</span>
-  </div>
-  <SetupCheck
-    v-else-if="showSetup"
-    class="bg-background text-foreground"
-    :initial="setup ?? undefined"
-    @continue="continueFromSetup"
-  />
-  <div v-else class="bg-background text-foreground h-svh overflow-hidden">
-    <RouterView />
-    <CommandPalette />
-    <AssistantDialog />
-    <UpdateNotice />
-    <Toaster :theme="theme.resolved.value" position="top-center" />
-  </div>
+  <!-- Nuxt UI context: tooltips, overlays, portals and the toaster (default look, top centre). -->
+  <UApp :toaster="{ position: 'top-center' }">
+    <DaemonUnreachable
+      v-if="showOffline"
+      class="bg-background text-foreground"
+      :origin="daemon.config.value.origin"
+      :reason="daemon.reason.value"
+      :connecting="retrying"
+      @retry="retry"
+      @connect="connect"
+    />
+    <div
+      v-else-if="setupPending"
+      class="bg-background text-muted-foreground flex h-svh items-center justify-center gap-2 text-sm"
+      role="status"
+      aria-busy="true"
+      data-testid="setup-pending"
+    >
+      <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
+      <span>Loading…</span>
+    </div>
+    <SetupCheck
+      v-else-if="showSetup"
+      class="bg-background text-foreground"
+      :initial="setup ?? undefined"
+      @continue="continueFromSetup"
+    />
+    <div v-else class="bg-background text-foreground h-svh overflow-hidden">
+      <RouterView />
+      <CommandPalette />
+      <AssistantDialog />
+      <UpdateNotice />
+    </div>
+  </UApp>
 </template>

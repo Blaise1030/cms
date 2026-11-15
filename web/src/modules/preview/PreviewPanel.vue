@@ -1,36 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import {
-  ArrowLeft,
-  ArrowRight,
-  ExternalLink,
-  FileSearch,
-  Monitor,
-  Moon,
-  MousePointerClick,
-  PilcrowRight,
-  RotateCw,
-  Smartphone,
-  Sparkles,
-  Sun,
-  Tablet,
-  TriangleAlert,
-  X,
-} from "@lucide/vue";
 import { useElementSize, useEventListener } from "@vueuse/core";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Spinner } from "@/components/ui/spinner";
+import type { DropdownMenuItem, SplitterItem } from "@nuxt/ui";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UChip from "@nuxt/ui/components/Chip.vue";
+import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isCrossSite } from "@/core/config";
 import { useDaemon } from "@/core/daemon";
 import type { DevserverState } from "@/core/types";
@@ -59,7 +39,7 @@ const panelLayout = useChatPanelLayout();
 /** Floating agent chrome sits under the preview, so the shell gets a full radius again. */
 const shellClass = computed(() =>
   cn(
-    "bg-background flex min-h-0 flex-1 flex-col overflow-hidden border shadow-sm",
+    "bg-background flex min-h-0 flex-1 flex-col overflow-hidden border border-default shadow-sm",
     panelLayout.floating.value ? "rounded-xl" : "rounded-t-xl border-b-0",
   ),
 );
@@ -107,17 +87,60 @@ const fit = computed(() =>
 const zoomed = computed(() => fit.value.scale < 1);
 const zoomPercent = computed(() => Math.round(fit.value.scale * 100));
 
-const DEVICES: { id: Device; label: string; icon: typeof Monitor }[] = [
-  { id: "desktop", label: "Desktop", icon: Monitor },
-  { id: "tablet", label: "Tablet", icon: Tablet },
-  { id: "mobile", label: "Mobile", icon: Smartphone },
+const DEVICES: { id: Device; label: string; icon: string }[] = [
+  { id: "desktop", label: "Desktop", icon: "i-hugeicons-computer" },
+  { id: "tablet", label: "Tablet", icon: "i-hugeicons-tablet-01" },
+  { id: "mobile", label: "Mobile", icon: "i-hugeicons-smart-phone-01" },
 ];
 const device = computed(() => DEVICES.find((d) => d.id === store.device) ?? DEVICES[0]!);
 
+const deviceItems = computed<DropdownMenuItem[]>(() =>
+  DEVICES.map((d) => ({
+    type: "checkbox",
+    label: d.label,
+    icon: d.icon,
+    checked: store.device === d.id,
+    width: DEVICE_WIDTH[d.id] ? `${DEVICE_WIDTH[d.id]}px` : `${DESKTOP_MIN_WIDTH}px+`,
+    onUpdateChecked: () => store.setDevice(d.id),
+  })),
+);
+
+/** Light/dark behave as a radio pair; right-to-left is an independent toggle. */
+const appearanceItems = computed<DropdownMenuItem[][]>(() => [
+  [
+    {
+      type: "checkbox",
+      label: "Light",
+      icon: "i-hugeicons-sun-03",
+      testid: "preview-light",
+      checked: !store.dark,
+      onUpdateChecked: () => store.dark && store.toggleDark(),
+    },
+    {
+      type: "checkbox",
+      label: "Dark",
+      icon: "i-hugeicons-moon-02",
+      testid: "preview-dark",
+      checked: store.dark,
+      onUpdateChecked: () => !store.dark && store.toggleDark(),
+    },
+  ],
+  [
+    {
+      type: "checkbox",
+      label: "Right-to-left",
+      icon: "i-hugeicons-paragraph",
+      testid: "preview-rtl",
+      checked: store.rtl,
+      onUpdateChecked: () => store.toggleRtl(),
+    },
+  ],
+]);
+
 const DOT: Record<DevserverState, string> = {
-  starting: "bg-amber-500 animate-pulse",
-  ready: "bg-emerald-500",
-  crashed: "bg-red-500",
+  starting: "bg-warning animate-pulse",
+  ready: "bg-success",
+  crashed: "bg-error",
 };
 const LABEL: Record<DevserverState, string> = {
   starting: "Dev server starting",
@@ -300,6 +323,35 @@ function refreshPageDetails() {
   postToFrame("snapshot", {}, frameOrigin.value);
 }
 
+/** The frame, plus the Page details sidebar beside it when that is open. */
+const splitItems = computed<SplitterItem[]>(() => [
+  {
+    id: "preview-frame",
+    slot: "frame",
+    order: 1,
+    defaultSize: detailsOpen.value ? 72 : 100,
+    minSize: detailsOpen.value ? 40 : 100,
+  },
+  ...(detailsOpen.value
+    ? [
+        {
+          id: "page-details",
+          slot: "details",
+          order: 2,
+          defaultSize: 28,
+          minSize: 16,
+          maxSize: 45,
+          collapsible: true,
+          collapsedSize: 0,
+        },
+      ]
+    : []),
+]);
+
+function onSplitCollapse(index: number) {
+  if (splitItems.value[index]?.id === "page-details") detailsOpen.value = false;
+}
+
 function togglePageDetails() {
   detailsOpen.value = !detailsOpen.value;
   if (detailsOpen.value) refreshPageDetails();
@@ -451,248 +503,219 @@ function openExternal() {
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="preview-panel">
     <div data-testid="preview-shell" :class="shellClass">
-      <TooltipProvider>
-        <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Back"
-                :disabled="!history.canGoBack.value"
-                @click="goBack"
-              >
-                <ArrowLeft />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Forward"
-                :disabled="!history.canGoForward.value"
-                @click="goForward"
-              >
-                <ArrowRight />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Forward</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon-sm" aria-label="Reload preview" @click="store.reload()">
-                <RotateCw />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Reload</TooltipContent>
-          </Tooltip>
+      <div class="bg-background flex h-10 shrink-0 items-center gap-0.5 border-b border-default px-1.5">
+        <UTooltip text="Back">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-hugeicons-arrow-left-01"
+            aria-label="Back"
+            :disabled="!history.canGoBack.value"
+            @click="goBack"
+          />
+        </UTooltip>
+        <UTooltip text="Forward">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-hugeicons-arrow-right-01"
+            aria-label="Forward"
+            :disabled="!history.canGoForward.value"
+            @click="goForward"
+          />
+        </UTooltip>
+        <UTooltip text="Reload">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-hugeicons-arrow-turn-forward"
+            aria-label="Reload preview"
+            @click="store.reload()"
+          />
+        </UTooltip>
 
-          <form class="mx-1 flex min-w-0 flex-1" @submit.prevent="navigate">
-            <div
-              class="bg-card focus-within:border-ring flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5"
-            >
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <span
-                    class="size-1.5 shrink-0 rounded-full"
-                    :class="DOT[state]"
-                    :data-state="state"
-                    role="status"
-                    :aria-label="LABEL[state]"
-                    data-testid="status-dot"
-                  />
-                </TooltipTrigger>
-                <TooltipContent>{{ LABEL[state] }}</TooltipContent>
-              </Tooltip>
-              <input
-                :value="draft ?? currentPath"
-                class="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                aria-label="Preview address"
-                spellcheck="false"
-                autocomplete="off"
-                data-testid="preview-address"
-                @input="draft = ($event.target as HTMLInputElement).value"
-                @focus="($event.target as HTMLInputElement).select()"
-                @blur="draft = null"
-                @keydown.esc="draft = null; ($event.target as HTMLInputElement).blur()"
-              />
-            </div>
-          </form>
-
-          <CleanupChangeButton :project-id="projectId" />
-
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button
-                variant="ghost"
-                :size="zoomed ? 'sm' : 'icon-sm'"
-                :aria-label="`Viewport: ${device.label}${zoomed ? `, ${zoomPercent}%` : ''}`"
-                data-testid="viewport-size"
-              >
-                <component :is="device.icon" />
-                <span v-if="zoomed" class="text-muted-foreground text-xs tabular-nums">{{ zoomPercent }}%</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom">
-              <DropdownMenuRadioGroup
-                :model-value="store.device"
-                @update:model-value="store.setDevice($event as Device)"
-              >
-                <DropdownMenuRadioItem v-for="d in DEVICES" :key="d.id" :value="d.id">
-                  <component :is="d.icon" />
-                  {{ d.label }}
-                  <span class="text-muted-foreground ml-auto pl-3 text-xs">
-                    {{ DEVICE_WIDTH[d.id] ? `${DEVICE_WIDTH[d.id]}px` : `${DESKTOP_MIN_WIDTH}px+` }}
-                  </span>
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button
-                :variant="store.rtl || store.dark ? 'secondary' : 'ghost'"
-                size="icon-sm"
-                aria-label="Appearance"
-                data-testid="preview-appearance"
-              >
-                <Moon v-if="store.dark" />
-                <Sun v-else />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom">
-              <DropdownMenuRadioGroup
-                :model-value="store.dark ? 'dark' : 'light'"
-                @update:model-value="($event === 'dark') !== store.dark && store.toggleDark()"
-              >
-                <DropdownMenuRadioItem value="light" data-testid="preview-light">
-                  <Sun />
-                  Light
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="dark" data-testid="preview-dark">
-                  <Moon />
-                  Dark
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuCheckboxItem
-                :model-value="store.rtl"
-                data-testid="preview-rtl"
-                @update:model-value="store.toggleRtl()"
-              >
-                <PilcrowRight />
-                Right-to-left
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                :variant="store.picking ? 'secondary' : 'ghost'"
-                size="icon-sm"
-                aria-label="Select an element"
-                :aria-pressed="store.picking"
-                :disabled="state !== 'ready' || crossSite"
-                data-testid="element-picker"
-                @click="store.setPicking(!store.picking)"
-              >
-                <MousePointerClick />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {{ store.picking ? "Cancel selection (Esc)" : "Select an element to mention in the chat" }}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                :variant="detailsOpen ? 'secondary' : 'ghost'"
-                size="icon-sm"
-                aria-label="Page details"
-                :aria-pressed="detailsOpen"
-                :disabled="state !== 'ready' || crossSite"
-                data-testid="page-details-toggle"
-                class="relative"
-                @click="togglePageDetails"
-              >
-                <FileSearch />
+        <form class="mx-1 flex min-w-0 flex-1" @submit.prevent="navigate">
+          <UInput
+            :model-value="draft ?? currentPath"
+            size="sm"
+            class="min-w-0 flex-1"
+            aria-label="Preview address"
+            spellcheck="false"
+            autocomplete="off"
+            data-testid="preview-address"
+            @update:model-value="draft = String($event)"
+            @focus="($event.target as HTMLInputElement).select()"
+            @blur="draft = null"
+            @keydown.esc="draft = null; ($event.target as HTMLInputElement).blur()"
+          >
+            <template #leading>
+              <UTooltip :text="LABEL[state]">
                 <span
-                  v-if="errorCount + warningCount > 0"
-                  class="bg-background absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[0.6rem] font-medium tabular-nums leading-none"
-                  :class="errorCount > 0 ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'"
-                  data-testid="page-details-badge"
-                >
-                  {{ errorCount + warningCount }}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Page details</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon-sm" aria-label="Open in new tab" @click="openExternal">
-                <ExternalLink />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open in new tab</TooltipContent>
-          </Tooltip>
-        </div>
-      </TooltipProvider>
+                  class="size-1.5 shrink-0 rounded-full"
+                  :class="DOT[state]"
+                  :data-state="state"
+                  role="status"
+                  :aria-label="LABEL[state]"
+                  data-testid="status-dot"
+                />
+              </UTooltip>
+            </template>
+          </UInput>
+        </form>
 
-      <ResizablePanelGroup
-        direction="horizontal"
+        <CleanupChangeButton :project-id="projectId" />
+
+        <UDropdownMenu :items="deviceItems" :content="{ align: 'end', side: 'bottom' }">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            :icon="device.icon"
+            :square="!zoomed"
+            :aria-label="`Viewport: ${device.label}${zoomed ? `, ${zoomPercent}%` : ''}`"
+            data-testid="viewport-size"
+          >
+            <span v-if="zoomed" class="text-muted text-xs tabular-nums">{{ zoomPercent }}%</span>
+          </UButton>
+          <template #item-trailing="{ item }">
+            <span class="text-muted pl-3 text-xs">{{ item.width }}</span>
+          </template>
+        </UDropdownMenu>
+        <UDropdownMenu :items="appearanceItems" :content="{ align: 'end', side: 'bottom' }">
+          <UButton
+            color="neutral"
+            :variant="store.rtl || store.dark ? 'soft' : 'ghost'"
+            size="sm"
+            :icon="store.dark ? 'i-hugeicons-moon-02' : 'i-hugeicons-sun-03'"
+            aria-label="Appearance"
+            data-testid="preview-appearance"
+          />
+          <template #item-label="{ item }">
+            <span :data-testid="item.testid">{{ item.label }}</span>
+          </template>
+        </UDropdownMenu>
+        <UTooltip :text="store.picking ? 'Cancel selection (Esc)' : 'Select an element to mention in the chat'">
+          <UButton
+            color="neutral"
+            :variant="store.picking ? 'soft' : 'ghost'"
+            size="sm"
+            icon="i-hugeicons-cursor-pointer-01"
+            aria-label="Select an element"
+            :aria-pressed="store.picking"
+            :disabled="state !== 'ready' || crossSite"
+            data-testid="element-picker"
+            @click="store.setPicking(!store.picking)"
+          />
+        </UTooltip>
+        <UTooltip text="Page details">
+          <UChip
+            :show="errorCount + warningCount > 0"
+            :color="errorCount > 0 ? 'error' : 'warning'"
+            size="3xl"
+            inset
+            :ui="{ base: 'px-0.5 tabular-nums' }"
+          >
+            <UButton
+              color="neutral"
+              :variant="detailsOpen ? 'soft' : 'ghost'"
+              size="sm"
+              icon="i-hugeicons-file-search"
+              aria-label="Page details"
+              :aria-pressed="detailsOpen"
+              :disabled="state !== 'ready' || crossSite"
+              data-testid="page-details-toggle"
+              @click="togglePageDetails"
+            />
+            <template #content>
+              <span data-testid="page-details-badge">{{ errorCount + warningCount }}</span>
+            </template>
+          </UChip>
+        </UTooltip>
+        <UTooltip text="Open in new tab">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            icon="i-hugeicons-link-square-02"
+            aria-label="Open in new tab"
+            @click="openExternal"
+          />
+        </UTooltip>
+      </div>
+
+      <USplitter
+        :items="splitItems"
         auto-save-id="preview-page-details"
         class="relative min-h-0 flex-1"
+        :ui="{ handle: 'border-default flex items-center justify-center border-l' }"
+        @collapse="onSplitCollapse"
       >
-        <ResizablePanel
-          id="preview-frame"
-          :default-size="detailsOpen ? 72 : 100"
-          :min-size="detailsOpen ? 40 : 100"
-        >
+        <template #resize-handle>
+          <div
+            class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+            aria-hidden="true"
+          />
+        </template>
+        <template #frame>
           <div class="relative flex h-full min-h-0 min-w-0 flex-col">
             <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
-              <div
+              <UEmpty
                 v-if="state === 'crashed'"
-                class="flex flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+                variant="naked"
+                icon="i-hugeicons-server-stack-03"
+                :title="`The dev server crashed${store.message[projectId] ? `: ${store.message[projectId]}` : '.'}`"
+                :description="store.error ?? undefined"
+                :ui="{ description: 'text-error' }"
                 role="alert"
               >
-                <p>The dev server crashed{{ store.message[projectId] ? `: ${store.message[projectId]}` : "." }}</p>
-                <p v-if="store.error" class="text-destructive">{{ store.error }}</p>
-                <div class="flex gap-2">
-                  <Button :disabled="store.restarting" @click="store.restart(projectId)">
-                    {{ store.restarting ? "Restarting…" : "Restart dev server" }}
-                  </Button>
-                  <Button variant="outline" data-testid="fix-crash" @click="store.fixCrash(projectId)">
-                    <Sparkles />
-                    Fix this with your assistant
-                  </Button>
-                </div>
-              </div>
-              <div
+                <template #actions>
+                  <UButton
+                    :loading="store.restarting"
+                    :label="store.restarting ? 'Restarting…' : 'Restart dev server'"
+                    @click="store.restart(projectId)"
+                  />
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    icon="i-hugeicons-sparkles"
+                    label="Fix this with your assistant"
+                    data-testid="fix-crash"
+                    @click="store.fixCrash(projectId)"
+                  />
+                </template>
+              </UEmpty>
+              <UEmpty
                 v-else-if="state === 'starting'"
-                class="text-muted-foreground flex flex-col items-center justify-center gap-3 text-sm"
+                variant="naked"
+                title="Starting dev server…"
                 data-testid="preview-starting"
               >
-                <Spinner class="size-5" />
-                Starting dev server…
-              </div>
-              <div
+                <template #leading>
+                  <UIcon
+                    name="i-hugeicons-loading-03"
+                    class="text-muted size-5 animate-spin"
+                    role="status"
+                    aria-label="Loading"
+                  />
+                </template>
+              </UEmpty>
+              <UEmpty
                 v-else-if="crossSite"
-                class="flex max-w-md flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+                variant="naked"
+                icon="i-hugeicons-shield-alert"
+                title="Live preview isn't available from this page"
+                :description="`The daemon at ${daemonOrigin} is on a different site than this app, so the browser won't send its session cookie to the preview frame. Open the daemon link directly (the one printed at startup) to use the live preview.`"
+                class="max-w-md"
                 role="note"
                 data-testid="preview-cross-site"
               >
-                <p class="font-medium">Live preview isn't available from this page</p>
-                <p class="text-muted-foreground">
-                  The daemon at {{ daemonOrigin }} is on a different site than this app, so the
-                  browser won't send its session cookie to the preview frame. Open the daemon link
-                  directly (the one printed at startup) to use the live preview.
-                </p>
-                <Button variant="outline" size="sm" @click="forceFrame = true">Try anyway</Button>
-              </div>
+                <template #actions>
+                  <UButton color="neutral" variant="outline" size="sm" label="Try anyway" @click="forceFrame = true" />
+                </template>
+              </UEmpty>
               <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
               <div
                 v-else
@@ -700,6 +723,8 @@ function openExternal() {
                 data-testid="preview-canvas"
                 :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
               >
+                <!-- The frame backdrop stands in for the framed site's own page background in the
+                     chosen preview scheme, not the app theme, so it keeps fixed colours on purpose. -->
                 <iframe
                   ref="frame"
                   :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}`"
@@ -719,60 +744,59 @@ function openExternal() {
                 <!-- A device-sized frame has no visible edge against the panel; outline it. -->
                 <div
                   v-if="store.device !== 'desktop'"
-                  class="border-border pointer-events-none absolute inset-0 border"
+                  class="border-default pointer-events-none absolute inset-0 border"
                   data-testid="preview-boundary"
                   aria-hidden="true"
                 />
               </div>
             </div>
 
-            <div
+            <UAlert
               v-if="pageError && state === 'ready'"
-              class="bg-background absolute inset-x-3 bottom-3 flex items-start gap-3 rounded-lg border p-3 text-sm shadow-lg"
+              color="error"
+              variant="outline"
+              orientation="horizontal"
+              icon="i-hugeicons-alert-02"
+              :title="pageError.kind === 'build' ? 'This page failed to build' : 'This page threw an error'"
+              :description="pageError.message"
+              class="bg-default absolute inset-x-3 bottom-3 w-auto shadow-lg"
+              :ui="{ description: 'text-muted line-clamp-2 font-mono text-xs break-words' }"
               role="alert"
               data-testid="page-error"
             >
-              <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-              <div class="min-w-0 flex-1">
-                <p class="font-medium">
-                  {{ pageError.kind === "build" ? "This page failed to build" : "This page threw an error" }}
-                </p>
-                <p class="text-muted-foreground line-clamp-2 font-mono text-xs break-words">{{ pageError.message }}</p>
-              </div>
-              <Button size="sm" data-testid="fix-page-error" @click="fixPageError">
-                <Sparkles />
-                Fix this with your assistant
-              </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Dismiss error" @click="pageError = null">
-                <X />
-              </Button>
-            </div>
+              <template #actions>
+                <UButton
+                  size="sm"
+                  icon="i-hugeicons-sparkles"
+                  label="Fix this with your assistant"
+                  data-testid="fix-page-error"
+                  @click="fixPageError"
+                />
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-hugeicons-cancel-01"
+                  aria-label="Dismiss error"
+                  @click="pageError = null"
+                />
+              </template>
+            </UAlert>
           </div>
-        </ResizablePanel>
-        <template v-if="detailsOpen">
-          <ResizableHandle with-handle class="bg-border" />
-          <ResizablePanel
-            id="page-details"
-            :default-size="28"
-            :min-size="16"
-            :max-size="45"
-            collapsible
-            :collapsed-size="0"
-            @collapse="detailsOpen = false"
-          >
-            <PageDetailsSidebar
-              :meta="pageMeta"
-              :findings="pageFindings"
-              :resources="pageResources"
-              :path="currentPath"
-              :page-url="hrefFor(currentPath)"
-              @close="detailsOpen = false"
-              @refresh="refreshPageDetails"
-              @fix="store.fixCheck($event)"
-            />
-          </ResizablePanel>
         </template>
-      </ResizablePanelGroup>
+        <template #details>
+          <PageDetailsSidebar
+            :meta="pageMeta"
+            :findings="pageFindings"
+            :resources="pageResources"
+            :path="currentPath"
+            :page-url="hrefFor(currentPath)"
+            @close="detailsOpen = false"
+            @refresh="refreshPageDetails"
+            @fix="store.fixCheck($event)"
+          />
+        </template>
+      </USplitter>
     </div>
   </div>
 </template>

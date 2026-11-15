@@ -12,7 +12,7 @@ import { routes } from "@/router";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon, toastError: vi.fn(), openChat: vi.fn() }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { error: h.toastError } }));
+vi.mock("@/lib/toast", () => ({ toast: { error: h.toastError } }));
 
 import ProjectPage from "./ProjectPage.vue";
 

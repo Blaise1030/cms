@@ -2,19 +2,10 @@
 // App settings → About. Small and factual: the running version, where the data
 // lives, and a way out to the project.
 import { onMounted, ref } from "vue";
-import { ExternalLink, HardDrive, Info } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import ULink from "@nuxt/ui/components/Link.vue";
 import { useDaemon } from "@/core/daemon";
+import SettingsRow from "./SettingsRow.vue";
 import SettingsSection from "./SettingsSection.vue";
 
 const REPO_URL = "https://github.com/Blaise1030/cms";
@@ -35,51 +26,35 @@ onMounted(async () => {
 </script>
 
 <template>
-  <SettingsSection label="About" :icon="Info" data-testid="about-settings">
-    <Card class="gap-0 overflow-hidden border-border/50 p-0 shadow-xs">
-      <ItemGroup class="divide-y divide-border">
-        <Item>
-          <ItemMedia variant="icon">
-            <Info aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Version</ItemTitle>
-            <ItemDescription>The version of orso running on this Mac.</ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <Badge variant="secondary" data-testid="about-version">
-              {{ version ? `v${version.replace(/^v/, "")}` : unavailable ? "Unknown" : "Checking…" }}
-            </Badge>
-          </ItemActions>
-        </Item>
+  <SettingsSection label="About" icon="i-hugeicons-information-circle" data-testid="about-settings">
+    <SettingsRow
+      icon="i-hugeicons-information-circle"
+      title="Version"
+      description="The version of orso running on this Mac."
+    >
+      <template #actions>
+        <UBadge color="neutral" variant="subtle" data-testid="about-version">
+          {{ version ? `v${version.replace(/^v/, "")}` : unavailable ? "Unknown" : "Checking…" }}
+        </UBadge>
+      </template>
+    </SettingsRow>
 
-        <Item>
-          <ItemMedia variant="icon">
-            <HardDrive aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Your data stays local</ItemTitle>
-            <ItemDescription>
-              Sites, content, and history live on this Mac. Nothing is uploaded unless you publish
-              or share.
-            </ItemDescription>
-          </ItemContent>
-        </Item>
+    <SettingsRow
+      icon="i-hugeicons-hard-drive"
+      title="Your data stays local"
+      description="Sites, content, and history live on this Mac. Nothing is uploaded unless you publish or share."
+    />
 
-        <Item>
-          <ItemMedia variant="icon">
-            <ExternalLink aria-hidden="true" />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>Links</ItemTitle>
-            <ItemDescription>
-              <a :href="DOCS_URL" target="_blank" rel="noopener noreferrer">Documentation</a>
-              and
-              <a :href="REPO_URL" target="_blank" rel="noopener noreferrer">orso on GitHub</a>.
-            </ItemDescription>
-          </ItemContent>
-        </Item>
-      </ItemGroup>
-    </Card>
+    <SettingsRow icon="i-hugeicons-link-square-02" title="Links">
+      <template #description>
+        <ULink :to="DOCS_URL" target="_blank" class="text-highlighted underline underline-offset-4">
+          Documentation
+        </ULink>
+        and
+        <ULink :to="REPO_URL" target="_blank" class="text-highlighted underline underline-offset-4">
+          orso on GitHub
+        </ULink>.
+      </template>
+    </SettingsRow>
   </SettingsSection>
 </template>

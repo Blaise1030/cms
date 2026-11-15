@@ -1,6 +1,6 @@
 import type { AnyExtension, JSONContent } from "@tiptap/core";
 import { Editor, mergeAttributes } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
+import StarterKit, { type StarterKitOptions } from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
@@ -20,19 +20,47 @@ encodeProto.encodeTextForMarkdown = function (this: MarkdownManager, text, node,
 };
 
 /**
- * The rich editor's node set: StarterKit without underline (no Markdown syntax) or the trailing
- * empty paragraph (it would add blank lines to the output), plus images and GFM tables,
- * read and written through the official `@tiptap/markdown` extension.
+ * StarterKit for the rich editor: without underline (no Markdown syntax), the trailing empty
+ * paragraph (it would add blank lines to the output) or its letter-reading ordered list.
+ * Passed to Nuxt UI's `UEditor` as `starter-kit`.
  */
-export function markdownExtensions(resolveImage?: (src: string) => string): AnyExtension[] {
+export const STARTER_KIT: Partial<StarterKitOptions> = {
+  underline: false,
+  trailingNode: false,
+  orderedList: false,
+  link: { openOnClick: false, autolink: false, linkOnPaste: false },
+};
+
+/** The extensions the rich editor adds on top of what `UEditor` builds in: lists, tables and images. */
+export function bodyExtensions(resolveImage?: (src: string) => string): AnyExtension[] {
   return [
-    StarterKit.configure({ underline: false, trailingNode: false, orderedList: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
     NumericOrderedList,
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
     resolveImage ? SafeImage.configure({ resolveSrc: resolveImage }) : SafeImage,
-    Markdown,
+  ];
+}
+
+/** One of StarterKit's own extensions, built the way StarterKit builds it (the packages are not direct dependencies). */
+function kitExtension(name: "code" | "horizontalRule"): AnyExtension {
+  const addExtensions = StarterKit.config.addExtensions as unknown as (this: { options: object }) => AnyExtension[];
+  return addExtensions.call({ options: {} }).find(extension => extension.name === name)!;
+}
+
+/**
+ * The rich editor's exact schema, for use outside `UEditor` (the round-trip check, tests).
+ * `UEditor` (content-type markdown) adds `Markdown` with GFM, StarterKit with its own code mark
+ * (which may share text with other marks) and horizontal rule appended after it, then
+ * `bodyExtensions`; this mirrors that order so marks serialize the same way.
+ */
+export function markdownExtensions(resolveImage?: (src: string) => string): AnyExtension[] {
+  return [
+    Markdown.configure({ markedOptions: { gfm: true } }),
+    StarterKit.configure({ ...STARTER_KIT, code: false, horizontalRule: false }),
+    kitExtension("code").extend({ excludes: "code" }),
+    kitExtension("horizontalRule"),
+    ...bodyExtensions(resolveImage),
   ];
 }
 

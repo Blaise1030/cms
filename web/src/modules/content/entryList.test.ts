@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { mount, type VueWrapper } from "@vue/test-utils";
 import type { ContentCollection, ContentEntrySummary } from "@/core/types";
 import type { EntryAction } from "./entryList";
 import { entryActions } from "./entryList";
+import UInput from "@nuxt/ui/components/Input.vue";
 import EntryList from "./EntryList.vue";
+/** A Nuxt UI component wrapper; its generic props type does not survive `findComponent`. */
+type AnyWrapper = Omit<VueWrapper, "props"> & { props(key: string): unknown };
 
 const blog: ContentCollection = { name: "blog", kind: "markdown", loader: {}, editable: true, reason: null };
 const row = (id: string): ContentEntrySummary => ({ collection: "blog", id, path: `src/content/blog/${id}.md`, kind: "markdown" });
@@ -15,16 +18,14 @@ const menu: EntryAction[] = [
   { id: "delete", label: "Delete", run: remove },
 ];
 
-/** Render the menu inline (no portal, always open); items emit `select` on click. */
+/** Render the menu inline (no portal, always open); items run `onSelect` on click. */
 const stubs = {
-  DropdownMenu: { template: "<div><slot /></div>" },
-  DropdownMenuTrigger: { template: "<div><slot /></div>" },
-  DropdownMenuContent: { template: "<div><slot /></div>" },
-  DropdownMenuSeparator: { template: "<hr />" },
-  DropdownMenuItem: {
-    props: ["disabled", "asChild"],
-    emits: ["select"],
-    template: `<div v-if="!asChild" :data-disabled="disabled || undefined" @click="$emit('select')"><slot /></div>`,
+  UDropdownMenu: {
+    props: ["items"],
+    template: `<div><slot /><template v-for="(item, i) in items" :key="i">
+      <hr v-if="item.type === 'separator'" />
+      <div v-else :data-testid="item['data-testid']" :data-disabled="item.disabled || undefined" @click="item.onSelect?.($event)">{{ item.label }}</div>
+    </template></div>`,
   },
 };
 
@@ -43,8 +44,7 @@ it("lists every entry with its slug as an addressable row", () => {
 
 it("puts a search icon in the filter and matches the visible names", () => {
   const w = mountList();
-  const group = w.get('[data-slot="input-group"]');
-  expect(group.find("svg.lucide-search").exists()).toBe(true);
+  expect((w.getComponent(UInput) as unknown as AnyWrapper).props("icon")).toBe("i-hugeicons-search-01");
   expect(w.get('[data-testid="content-filter"]').attributes("placeholder")).toBe("Filter entries");
 });
 

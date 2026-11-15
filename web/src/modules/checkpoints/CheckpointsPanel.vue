@@ -1,31 +1,19 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
-import { ArrowLeft, ChevronRight, GitCommitVertical, RotateCcw } from "@lucide/vue";
 import { useRouter } from "vue-router";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { historyPath } from "@/router";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Stepper,
-  StepperIndicator,
-  StepperItem,
-  StepperSeparator,
-} from "@/components/ui/stepper";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { SplitterItem } from "@nuxt/ui";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UAvatar from "@nuxt/ui/components/Avatar.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
+import USeparator from "@nuxt/ui/components/Separator.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { errorMessage } from "@orso/utils";
 import { useCheckpointsStore } from "./store";
 
@@ -72,6 +60,11 @@ function dayLabel(ts: number) {
 /** A day heading goes above the newest checkpoint of each day. */
 const startsDay = (i: number) => i === 0 || day(list.value[i]!.ts) !== day(list.value[i - 1]!.ts);
 
+const SPLIT: SplitterItem[] = [
+  { id: "checkpoint-files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
+  { id: "checkpoint-diffs", slot: "diffs", defaultSize: 80, minSize: 40 },
+];
+
 /** Scroll a file's diff into view when it is picked in the changed-files tree. */
 function reveal(path: string) {
   const section = [...(diffs.value?.querySelectorAll<HTMLElement>("section[data-path]") ?? [])].find(
@@ -99,80 +92,79 @@ async function restore() {
   <div class="relative flex h-full min-h-0 flex-col" data-testid="checkpoints-panel">
     <template v-if="selected">
       <div class="flex min-h-10 shrink-0 items-center gap-3 px-2 py-1.5">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                class="self-start"
-                aria-label="Back to timeline"
-                @click="open()"
-              >
-                <ArrowLeft />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back to timeline</TooltipContent>
-          </Tooltip>
-          <div class="min-w-0 flex-1 space-y-1">
-            <p class="truncate text-base font-medium">{{ selected.summary }}</p>
-            <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-              <Badge variant="secondary" class="max-w-40 truncate font-normal">
-                {{ selected.author }}
-              </Badge>
-              <Badge variant="outline" class="font-mono font-normal">
-                {{ short(selected.sha) }}
-              </Badge>
-              <Badge variant="outline" class="font-normal">
-                {{ when(selected.ts) }}
-              </Badge>
-              <Badge v-if="isCurrent" variant="secondary" class="font-normal">Current</Badge>
-            </div>
+        <UTooltip text="Back to timeline">
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-hugeicons-arrow-left-01"
+            class="self-start"
+            aria-label="Back to timeline"
+            @click="open()"
+          />
+        </UTooltip>
+        <div class="min-w-0 flex-1 space-y-1">
+          <p class="text-highlighted truncate text-base font-medium">{{ selected.summary }}</p>
+          <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+            <UBadge color="neutral" variant="soft" class="max-w-40 truncate" :label="selected.author" />
+            <UBadge color="neutral" variant="outline" class="font-mono" :label="short(selected.sha)" />
+            <UBadge color="neutral" variant="outline" :label="when(selected.ts)" />
+            <UBadge v-if="isCurrent" color="neutral" variant="soft" label="Current" />
           </div>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                class="shrink-0"
-                :disabled="isCurrent || store.restoring"
-                :aria-label="isCurrent ? 'Current checkpoint' : 'Restore checkpoint'"
-                data-testid="restore"
-                @click="confirming = true"
-              >
-                <RotateCcw />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {{ isCurrent ? "Current checkpoint" : "Restore checkpoint" }}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        </div>
+        <UTooltip :text="isCurrent ? 'Current checkpoint' : 'Restore checkpoint'">
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-hugeicons-arrow-turn-backward"
+            class="shrink-0"
+            :disabled="isCurrent || store.restoring"
+            :aria-label="isCurrent ? 'Current checkpoint' : 'Restore checkpoint'"
+            data-testid="restore"
+            @click="confirming = true"
+          />
+        </UTooltip>
       </div>
-      <p v-if="store.diffLoading" class="text-muted-foreground p-3 text-sm">Loading diff…</p>
-      <p v-else-if="store.diffError" class="text-destructive p-3 text-sm" role="alert">
-        {{ store.diffError }}
+      <p v-if="store.diffLoading" class="text-muted flex items-center gap-2 p-3 text-sm">
+        <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
+        Loading diff…
       </p>
-      <p
+      <div v-else-if="store.diffError" class="p-3">
+        <UAlert
+          color="error"
+          variant="subtle"
+          icon="i-hugeicons-alert-circle"
+          :description="store.diffError"
+          role="alert"
+        />
+      </div>
+      <UEmpty
         v-else-if="store.diff && store.diff.files.length === 0"
-        class="text-muted-foreground p-3 text-sm"
-      >
-        No file changes in this checkpoint.
-      </p>
-      <ResizablePanelGroup
+        variant="naked"
+        icon="i-hugeicons-file-validation"
+        title="No file changes in this checkpoint."
+      />
+      <USplitter
         v-else-if="store.diff"
-        direction="horizontal"
+        :items="SPLIT"
         auto-save-id="checkpoint-files-sidebar"
         class="min-h-0 flex-1"
+        :ui="{ handle: 'flex items-center justify-center' }"
       >
-        <ResizablePanel id="checkpoint-files-tree" :default-size="20" :min-size="12" :max-size="45">
-          <aside class="flex h-full flex-col overflow-hidden px-1 pt-1">
+        <template #resize-handle>
+          <div
+            class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+            aria-hidden="true"
+          />
+        </template>
+        <template #tree>
+          <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
             <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
           </aside>
-        </ResizablePanel>
-        <ResizableHandle with-handle class="bg-transparent" />
-        <ResizablePanel id="checkpoint-diffs" :default-size="80" :min-size="40">
-          <ScrollArea class="bg-background h-full min-h-0">
+        </template>
+        <template #diffs>
+          <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
             <div ref="diffs" class="flex flex-col gap-3 p-3">
               <section
                 v-for="file in store.diff.files"
@@ -181,110 +173,106 @@ async function restore() {
                 class="flex scroll-mt-3 flex-col gap-1.5"
               >
                 <template v-if="file.binary">
-                  <div class="flex items-center justify-between gap-2 font-mono text-xs">
+                  <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
                     <span class="truncate">{{ file.path }}</span>
                   </div>
-                  <p class="text-muted-foreground text-xs">Binary file changed.</p>
+                  <p class="text-muted text-xs">Binary file changed.</p>
                 </template>
                 <DiffView v-else :diff="file.meta" />
               </section>
             </div>
-          </ScrollArea>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          </div>
+        </template>
+      </USplitter>
     </template>
 
     <template v-else>
       <div class="pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-      <ScrollArea class="min-h-0 flex-1">
+      <div class="min-h-0 flex-1 overflow-y-auto">
         <div class="p-3">
-          <p v-if="store.loading && list.length === 0" class="text-muted-foreground flex items-center gap-2 text-sm">
-            <Spinner class="size-4" />
+          <p v-if="store.loading && list.length === 0" class="text-muted flex items-center gap-2 text-sm">
+            <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
             Loading checkpoints…
           </p>
-          <p v-else-if="store.error" class="text-destructive text-sm" role="alert">{{ store.error }}</p>
-          <p v-else-if="list.length === 0" class="text-muted-foreground text-sm">
-            No checkpoints yet. One is saved after each assistant turn that changes files.
-          </p>
-          <!-- Newest first; the current checkpoint is the active step. Non-linear so every step
-               stays clickable (linear steppers disable steps past the next one). -->
-          <Stepper
-            v-else
-            orientation="vertical"
-            :model-value="1"
-            :linear="false"
-            class="flex w-full flex-col gap-[8px]"
-            data-testid="timeline"
-          >
+          <UAlert
+            v-else-if="store.error"
+            color="error"
+            variant="subtle"
+            icon="i-hugeicons-alert-circle"
+            :description="store.error"
+            role="alert"
+          />
+          <UEmpty
+            v-else-if="list.length === 0"
+            variant="naked"
+            icon="i-hugeicons-clock-04"
+            title="No checkpoints yet"
+            description="One is saved after each assistant turn that changes files."
+          />
+          <!-- Newest first; the current checkpoint's node is highlighted. -->
+          <ol v-else class="m-0 flex w-full list-none flex-col gap-2 p-0" data-testid="timeline">
             <template v-for="(cp, i) in list" :key="cp.sha">
-            <h3
-              v-if="startsDay(i)"
-              class="text-muted-foreground px-1 pb-1 text-xs font-medium"
-              :class="{ 'pt-4': i > 0 }"
-              data-testid="checkpoint-day"
-            >
-              {{ dayLabel(cp.ts) }}
-            </h3>
-            <StepperItem
-              :step="i + 1"
-              class="relative w-full items-start gap-2"
-            >
-              <!-- Nodes sit 13px down (the item's border and top padding) to line up with the title;
-                   the line runs from 4px below this node, across the 8px row gap, to 4px above the
-                   next row's node. -->
-              <StepperSeparator
-                v-if="i < list.length - 1 && !startsDay(i + 1)"
-                class="bg-border absolute top-[41px] -bottom-[17px] left-[11.5px] w-px"
-              />
-              <StepperIndicator
-                class="bg-muted text-muted-foreground mt-[13px] size-6 shrink-0 group-data-[state=active]:bg-primary"
-              >
-                <GitCommitVertical class="size-3.5" />
-              </StepperIndicator>
-              <Item
-                as="button"
-                type="button"
-                size="sm"
-                class="hover:bg-accent/60 min-w-0 flex-1 flex-nowrap px-2.5 text-left"
-                data-testid="checkpoint-item"
-                @click="open(cp.sha)"
-              >
-                <ItemContent class="min-w-0 gap-0.5">
-                  <ItemTitle class="w-full text-base">
-                    <span class="truncate">{{ cp.summary }}</span>
-                  </ItemTitle>
-                  <ItemDescription class="text-xs">
-                    <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ time(cp.ts) }}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Badge v-if="i === 0" variant="secondary">Current</Badge>
-                  <ChevronRight class="text-muted-foreground size-4" />
-                </ItemActions>
-              </Item>
-            </StepperItem>
+              <li v-if="startsDay(i)" class="px-1 pb-1" :class="{ 'pt-4': i > 0 }">
+                <h3 class="text-muted m-0 text-xs font-medium" data-testid="checkpoint-day">{{ dayLabel(cp.ts) }}</h3>
+              </li>
+              <li class="relative flex w-full items-start gap-2">
+                <!-- The line runs from below this node, across the row gap, to the next row's node. -->
+                <USeparator
+                  v-if="i < list.length - 1 && !startsDay(i + 1)"
+                  orientation="vertical"
+                  class="absolute top-10 -bottom-4 left-3 h-auto w-px"
+                  aria-hidden="true"
+                />
+                <UAvatar
+                  icon="i-hugeicons-git-commit"
+                  size="xs"
+                  class="mt-3"
+                  :class="i === 0 ? 'bg-primary text-inverted' : 'bg-elevated'"
+                  :ui="i === 0 ? { icon: 'text-inverted' } : undefined"
+                  aria-hidden="true"
+                />
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  class="min-w-0 flex-1 gap-2 px-2.5 py-2.5 text-left"
+                  data-testid="checkpoint-item"
+                  @click="open(cp.sha)"
+                >
+                  <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span class="text-highlighted truncate text-base font-medium">{{ cp.summary }}</span>
+                    <span class="text-muted text-xs font-normal">
+                      <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ time(cp.ts) }}
+                    </span>
+                  </span>
+                  <span class="flex shrink-0 items-center gap-2">
+                    <UBadge v-if="i === 0" color="neutral" variant="soft" label="Current" />
+                    <UIcon name="i-hugeicons-arrow-right-01" class="text-muted size-4" />
+                  </span>
+                </UButton>
+              </li>
             </template>
-          </Stepper>
+          </ol>
         </div>
-      </ScrollArea>
+      </div>
     </template>
 
-    <AlertDialog v-model:open="confirming">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Restore this checkpoint?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The project's files go back to {{ selected ? short(selected.sha) : "" }}. Later
-            checkpoints and any uncommitted changes are discarded.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" :disabled="store.restoring" data-testid="confirm-restore" @click="restore">
-            {{ store.restoring ? "Restoring…" : "Restore" }}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <UModal
+      v-model:open="confirming"
+      title="Restore this checkpoint?"
+      :description="`The project's files go back to ${selected ? short(selected.sha) : ''}. Later checkpoints and any uncommitted changes are discarded.`"
+      :close="false"
+      :ui="{ footer: 'justify-end' }"
+    >
+      <template #footer>
+        <UButton color="neutral" variant="outline" label="Cancel" @click="confirming = false" />
+        <UButton
+          color="error"
+          :loading="store.restoring"
+          :label="store.restoring ? 'Restoring…' : 'Restore'"
+          data-testid="confirm-restore"
+          @click="restore"
+        />
+      </template>
+    </UModal>
   </div>
 </template>

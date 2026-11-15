@@ -7,7 +7,7 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { createMemoryHistory, createRouter } from "vue-router";
 import ChatPanel from "./ChatPanel.vue";
@@ -408,6 +408,58 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
   });
 
+  it("shows the approval's command as code, clipped with Show all, and keeps the actions", async () => {
+    const command = Array.from({ length: 14 }, (_, i) => `echo line ${i}`).join("\n");
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: true }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: true,
+      chunks: [
+        { type: "user_text", session_id: "s", text: "go" },
+        {
+          type: "permission", session_id: "s", request_id: "8",
+          tool_call: { title: command, kind: "execute", rawInput: { command } }, options: [],
+        },
+      ],
+      pendingPermissions: ["8"],
+    } as History;
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    const card = w.get("[data-testid='chat-approval']");
+    expect(card.text()).toContain("Approval needed");
+    expect(card.get("[data-testid='chat-approval-kind']").text()).toBe("Run a command");
+    const code = card.get("[data-testid='chat-approval-title']");
+    expect(code.element.tagName).toBe("CODE");
+    expect(code.element.parentElement!.tagName).toBe("PRE");
+    expect(code.text()).toBe(command);
+    const pre = code.element.parentElement!;
+    expect(pre.className).toContain("font-mono");
+    expect(pre.className).toContain("max-h-48");
+    expect(pre.className).not.toContain("text-warning");
+    const toggle = card.get("[data-testid='chat-approval-toggle']");
+    expect(toggle.text()).toBe("Show all");
+    await toggle.trigger("click");
+    expect(pre.className).not.toContain("max-h-48");
+    expect(card.get("[data-testid='chat-approval-toggle']").text()).toBe("Show less");
+    expect(card.find("[data-testid='chat-approval-allow']").exists()).toBe(true);
+    expect(card.find("[data-testid='chat-approval-deny']").exists()).toBe(true);
+  });
+
+  it("shows a short approval without a Show all toggle", async () => {
+    chats = [{ id: "c1", provider: "cursor", model: null, title: "Chat", updatedAt: 1, live: true, running: true }];
+    histories.c1 = {
+      provider: "cursor", model: null, running: true,
+      chunks: [
+        { type: "permission", session_id: "s", request_id: "9", tool_call: { title: "Run npm install" }, options: [] },
+      ],
+      pendingPermissions: ["9"],
+    } as History;
+    useChatStore().setActive("p1", "c1");
+    const w = await mountPanel();
+    expect(w.get("[data-testid='chat-approval-kind']").text()).toBe("Run a tool");
+    expect(w.get("[data-testid='chat-approval-title']").element.tagName).toBe("CODE");
+    expect(w.find("[data-testid='chat-approval-toggle']").exists()).toBe(false);
+  });
+
   it("offers tool approvals beside the agent picker", async () => {
     const w = await mountPanel();
     expect(w.find("[data-testid='chat-header'] [data-testid='chat-auto-approve']").exists()).toBe(false);
@@ -428,20 +480,20 @@ describe("ChatPanel", () => {
     };
     useChatStore().setActive("p1", "c1");
     const w = await mountPanel();
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(10);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(10);
     expect(w.find("[data-testid='chat-load-earlier']").exists()).toBe(false);
     expect(w.text()).toContain("Reply 11");
     expect(w.text()).not.toContain("Prompt 0");
     const viewport = w.get<HTMLElement>("[data-testid='chat-viewport']");
     viewport.element.scrollTop = 200;
     await viewport.trigger("scroll");
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(10);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(10);
     viewport.element.scrollTop = 60;
     await viewport.trigger("scroll");
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(20);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(20);
     viewport.element.scrollTop = 0;
     await viewport.trigger("scroll");
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(24);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(24);
     expect(w.text()).toContain("Prompt 0");
   });
 
@@ -843,7 +895,7 @@ describe("ChatPanel", () => {
     await vi.waitFor(() => expect(w.text()).toContain("Streamed reply"));
     expect(w.find("[data-testid='chat-working']").exists()).toBe(true);
     // The optimistic bubble was replaced by the echoed user_text, not added next to it.
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(2);
 
     src.frame({ type: "turn_end", session_id: "s", stop_reason: "end_turn" });
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
@@ -866,14 +918,14 @@ describe("ChatPanel", () => {
     src.frame({ type: "user_text", session_id: "s", text: "hi" });
     src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
     await flushPromises();
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(2);
 
     // EventSource reconnected: the replay starts again from the first chunk.
     src.open();
     src.frame({ type: "user_text", session_id: "s", text: "hi" });
     src.frame({ type: "text_delta", session_id: "s", text: "Hello there" });
     await flushPromises();
-    expect(w.findAll("[data-slot='message-scroller-item']")).toHaveLength(2);
+    expect(w.findAll("[data-testid='chat-message']")).toHaveLength(2);
     expect(w.text()).toContain("Hello there");
   });
 
@@ -1369,6 +1421,8 @@ describe("ChatPanel", () => {
     await send(w, "hi");
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(true));
     expect(w.find("[data-testid='chat-working']").text()).toBe("Working on it…");
+    // The running text shimmers through Nuxt UI's UChatShimmer.
+    expect(w.find("[data-testid='chat-working'] [data-slot='base']").text()).toBe("Working on it…");
     expect(w.find("[data-testid='chat-messages']").classes()).toContain("pb-10");
     const id = useChatStore().activeChatId("p1")!;
     finish(id, [{ type: "text_delta", session_id: "s", text: "Done" }]);
@@ -1449,8 +1503,9 @@ describe("ChatPanel", () => {
         expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.combined),
       );
       const badge = w.find("[data-testid='sync-phase']");
-      expect(badge.attributes("data-slot")).toBe("badge");
-      expect(badge.classes()).toContain("bg-secondary");
+      // Nuxt UI badge (root slot "base"), soft = quiet.
+      expect(badge.attributes("data-slot")).toBe("base");
+      expect(badge.classes()).toContain("bg-elevated");
     });
 
     it("keeps a combining phase in a quiet badge", async () => {
@@ -1459,8 +1514,9 @@ describe("ChatPanel", () => {
         expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.working),
       );
       const badge = w.find("[data-testid='sync-phase']");
-      expect(badge.attributes("data-slot")).toBe("badge");
-      expect(badge.classes()).toContain("bg-secondary");
+      // Nuxt UI badge (root slot "base"), soft = quiet.
+      expect(badge.attributes("data-slot")).toBe("base");
+      expect(badge.classes()).toContain("bg-elevated");
     });
 
     it("keeps a stopped phase in an outline badge", async () => {
@@ -1469,8 +1525,10 @@ describe("ChatPanel", () => {
         expect(w.find("[data-testid='sync-phase']").text()).toBe(PHASE_LABEL.expired),
       );
       const badge = w.find("[data-testid='sync-phase']");
-      expect(badge.attributes("data-slot")).toBe("badge");
-      expect(badge.classes()).toContain("bg-background");
+      // Nuxt UI badge (root slot "base"), outline variant.
+      expect(badge.attributes("data-slot")).toBe("base");
+      expect(badge.classes()).toContain("ring");
+      expect(badge.classes()).not.toContain("bg-elevated");
     });
 
     it("hides a raw agent error and its path from a sync transcript", async () => {

@@ -1,7 +1,12 @@
 import type { Component } from "vue";
-import { Copy, FileText, Link, Trash2 } from "@lucide/vue";
+import { hugeicon } from "@/lib/hugeicon";
 import type { ContentEntrySummary } from "@/core/types";
 import { humanize } from "./labels";
+
+const Copy = hugeicon("i-hugeicons-copy-01");
+const FileText = hugeicon("i-hugeicons-file-01");
+const Link = hugeicon("i-hugeicons-link-01");
+const Trash2 = hugeicon("i-hugeicons-delete-02");
 
 /** One row of an entry's menu; `"separator"` draws a divider. */
 export type EntryAction = "separator" | {

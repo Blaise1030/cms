@@ -11,7 +11,7 @@ const h = vi.hoisted(() => ({
   toastError: vi.fn(),
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { error: h.toastError, success: vi.fn(), info: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { error: h.toastError, success: vi.fn(), info: vi.fn() } }));
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -68,7 +68,8 @@ describe("ChangesBranchPicker", () => {
     const search = document.body.querySelector<HTMLInputElement>('[data-testid="changes-search"]');
     expect(search).toBeTruthy();
     expect(search?.placeholder).toBe("Search changes…");
-    expect(document.body.querySelector('[data-slot="command"]')).toBeTruthy();
+    // The search field filters a listbox of changes (the command palette).
+    expect(search?.closest('[role="listbox"], :has([role="listbox"])')?.querySelector('[data-testid="change-item"], [data-testid="live-site"]')).toBeTruthy();
   });
 
   it("creates a change through the API instead of asking the agent", async () => {

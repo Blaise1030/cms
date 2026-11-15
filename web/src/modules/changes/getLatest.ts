@@ -1,4 +1,4 @@
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import type { Change, ChangesUpdate } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "./store";

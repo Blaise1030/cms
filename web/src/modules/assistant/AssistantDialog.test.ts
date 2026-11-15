@@ -54,6 +54,7 @@ describe("AssistantDialog", () => {
     await flushPromises();
 
     expect(document.body.textContent).toContain("Set up your assistant");
+    expect(el("assistant-dialog")).not.toBeNull();
     expect(el("assistant-setup")).not.toBeNull();
 
     el("assistant-continue")!.click();

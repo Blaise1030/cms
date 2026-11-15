@@ -1,4 +1,4 @@
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
 
 /** The site's `@theme` follows DESIGN.md through the agent, not through the daemon. */

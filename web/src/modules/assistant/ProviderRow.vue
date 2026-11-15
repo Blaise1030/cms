@@ -4,20 +4,22 @@
 // the one action the user picked. It never talks to the daemon itself, so the
 // same row works inside SetupCheck and inside a dialog.
 import { computed } from "vue";
-import { CircleAlert, Download, LogIn, RefreshCw, RotateCcw, X } from "@lucide/vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Spinner } from "@/components/ui/spinner";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UProgress from "@nuxt/ui/components/Progress.vue";
 import { LABELS, type AssistantRow, type RowAction } from "./rows";
-import { formatDownloadSize, sourceLabel, toneBadge } from "./presentation";
+import { formatDownloadSize, sourceLabel } from "./presentation";
 
 const props = defineProps<{
   /** A row built by `rows.ts` (`deriveRow` / `buildRows` / `siteBuilderRow`). */
   row: AssistantRow;
   /** The host is doing something with this row (opening chat); don't fire twice. */
   busy?: boolean;
+  /** Hide the "Connect" button on a ready row where there is no chat to open (settings). */
+  hideConnectedAction?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -35,10 +37,26 @@ const size = computed(() =>
 const source = computed(() => (showVersion.value ? sourceLabel(props.row.source) : null));
 const percent = computed(() => props.row.progress ?? 0);
 
-const statusBadge = computed(() => {
+type BadgeLook = { color: "success" | "warning" | "error"; variant: "subtle" | "outline" };
+
+const statusBadge = computed<BadgeLook | null>(() => {
   if (!props.row.status || downloading.value || props.row.phase === "finishing") return null;
-  return toneBadge(props.row.tone);
+  switch (props.row.tone) {
+    case "success":
+      return { color: "success", variant: "subtle" };
+    case "warning":
+      return { color: "warning", variant: "outline" };
+    case "destructive":
+      return { color: "error", variant: "subtle" };
+    default:
+      return null;
+  }
 });
+
+const showAction = computed(
+  () =>
+    props.row.action !== "none" && !(props.hideConnectedAction && props.row.action === "connect"),
+);
 
 /**
  * The plan's row machine labels the signed-out row "Connect" (it opens the
@@ -49,9 +67,28 @@ const actionLabel = computed(() =>
   props.row.signInRequired && props.row.action === "signIn" ? LABELS.connect : props.row.actionLabel,
 );
 
-const actionVariant = computed<"default" | "outline">(() =>
-  props.row.action === "cancel" || props.row.action === "retry" ? "outline" : "default",
+/** Cancel and retry are secondary; every other action is the row's primary step. */
+const actionSecondary = computed(
+  () => props.row.action === "cancel" || props.row.action === "retry",
 );
+
+const actionIcon = computed(() => {
+  switch (props.row.action) {
+    case "download":
+      return "i-hugeicons-download-01";
+    case "update":
+      return "i-hugeicons-refresh";
+    case "cancel":
+      return "i-hugeicons-cancel-01";
+    case "retry":
+      return "i-hugeicons-arrow-turn-backward";
+    case "signIn":
+    case "connect":
+      return "i-hugeicons-login-03";
+    default:
+      return undefined;
+  }
+});
 
 const actionAria = computed(() => {
   switch (props.row.action) {
@@ -86,22 +123,22 @@ const actionAria = computed(() => {
     <div class="flex items-start gap-3">
       <div class="flex min-w-0 flex-1 flex-col gap-1">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="font-medium">{{ row.name }}</span>
-          <Badge v-if="row.recommended" variant="secondary" data-testid="assistant-recommended">
-            Recommended
-          </Badge>
+          <span class="text-highlighted text-sm font-medium">{{ row.name }}</span>
+          <UBadge
+            v-if="row.recommended"
+            color="neutral"
+            variant="subtle"
+            label="Recommended"
+            data-testid="assistant-recommended"
+          />
         </div>
-        <p v-if="row.description" class="text-muted-foreground text-sm">{{ row.description }}</p>
-        <p
-          v-if="size"
-          class="text-muted-foreground text-xs"
-          :data-testid="`assistant-size-${row.id}`"
-        >
+        <p v-if="row.description" class="text-muted text-sm">{{ row.description }}</p>
+        <p v-if="size" class="text-muted text-xs" :data-testid="`assistant-size-${row.id}`">
           {{ size }}
         </p>
         <p
           v-if="showVersion && row.version"
-          class="text-muted-foreground text-xs"
+          class="text-muted text-xs"
           :data-testid="`assistant-version-${row.id}`"
         >
           Version {{ row.version }}<template v-if="source"> · {{ source }}</template>
@@ -109,39 +146,35 @@ const actionAria = computed(() => {
       </div>
 
       <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        <Badge
+        <UBadge
           v-if="statusBadge"
+          :color="statusBadge.color"
           :variant="statusBadge.variant"
-          :class="statusBadge.class"
+          :label="row.status"
           :data-testid="`assistant-status-${row.id}`"
-        >
-          {{ row.status }}
-        </Badge>
+        />
         <span
           v-else-if="row.phase === 'finishing'"
-          class="text-muted-foreground inline-flex items-center gap-1.5 text-sm"
+          class="text-muted inline-flex items-center gap-1.5 text-sm"
           :data-testid="`assistant-status-${row.id}`"
         >
-          <Spinner class="size-3.5" aria-hidden="true" /> {{ row.status }}
+          <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" aria-hidden="true" />
+          {{ row.status }}
         </span>
 
-        <Button
-          v-if="row.action !== 'none'"
+        <UButton
+          v-if="showAction"
           size="sm"
-          :variant="actionVariant"
+          :color="actionSecondary ? 'neutral' : 'primary'"
+          :variant="actionSecondary ? 'outline' : 'solid'"
+          :icon="busy && row.action === 'connect' ? 'i-hugeicons-loading-03' : actionIcon"
+          :ui="busy && row.action === 'connect' ? { leadingIcon: 'animate-spin' } : undefined"
+          :label="actionLabel"
           :disabled="busy"
           :aria-label="actionAria"
           :data-testid="`assistant-action-${row.id}`"
           @click="emit('action', row.action)"
-        >
-          <Spinner v-if="busy && row.action === 'connect'" class="size-3.5" aria-hidden="true" />
-          <Download v-else-if="row.action === 'download'" aria-hidden="true" />
-          <RefreshCw v-else-if="row.action === 'update'" aria-hidden="true" />
-          <X v-else-if="row.action === 'cancel'" aria-hidden="true" />
-          <RotateCcw v-else-if="row.action === 'retry'" aria-hidden="true" />
-          <LogIn v-else-if="row.action === 'signIn' || row.action === 'connect'" aria-hidden="true" />
-          {{ actionLabel }}
-        </Button>
+        />
       </div>
     </div>
 
@@ -150,27 +183,38 @@ const actionAria = computed(() => {
       class="flex items-center gap-2"
       :data-testid="`assistant-progress-${row.id}`"
     >
-      <Progress
+      <UProgress
         :model-value="percent"
-        :aria-label="`Downloading ${row.name}: ${row.status}`"
+        size="sm"
+        :get-value-label="() => `Downloading ${row.name}: ${row.status}`"
         class="max-w-48"
       />
-      <span class="text-muted-foreground text-xs tabular-nums">{{ row.status }}</span>
+      <span class="text-muted text-xs tabular-nums">{{ row.status }}</span>
     </div>
 
-    <Alert
+    <UAlert
       v-if="row.phase === 'downloadError'"
-      variant="destructive"
+      color="error"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
       :data-testid="`assistant-error-${row.id}`"
     >
-      <CircleAlert aria-hidden="true" />
-      <AlertDescription>
+      <template #description>
         <p>We couldn't download {{ row.name }}. Check your connection and try again.</p>
-        <details v-if="row.message" class="mt-1">
-          <summary class="cursor-pointer text-xs underline">Details</summary>
-          <p class="mt-1 text-xs break-words">{{ row.message }}</p>
-        </details>
-      </AlertDescription>
-    </Alert>
+        <UCollapsible v-if="row.message" :unmount-on-hide="false" class="mt-1">
+            <UButton
+              variant="link"
+              color="neutral"
+              size="xs"
+              class="px-0 underline"
+              label="Details"
+              data-testid="assistant-details-toggle"
+            />
+            <template #content>
+              <p class="mt-1 text-xs break-words" data-testid="assistant-details">{{ row.message }}</p>
+            </template>
+          </UCollapsible>
+      </template>
+    </UAlert>
   </li>
 </template>

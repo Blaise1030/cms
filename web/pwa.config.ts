@@ -27,7 +27,6 @@ export const pwaOptions: Partial<VitePWAOptions> = {
   registerType: "autoUpdate",
   // The manifest is a static file in `public/` (linked from index.html).
   manifest: false,
-  includeAssets: ["icons/*.png"],
   workbox: {
     globPatterns: SHELL_GLOB_PATTERNS,
     navigateFallback: "/index.html",

@@ -86,7 +86,7 @@ describe("SettingsPanel", () => {
     await el(w, "settings-root").setValue("site");
     await el(w, "settings-save").trigger("click");
     await flushPromises();
-    expect(w.get('[data-testid="settings-needs-change"] p').text()).toBe("Settings can't be edited on the live site. Create a change.");
+    expect(w.get('[data-testid="settings-needs-change"]').text()).toContain("Settings can't be edited on the live site. Create a change.");
     await el(w, "settings-create-change").trigger("click");
     await el(w, "new-change-stub").trigger("click");
     await flushPromises();
@@ -98,7 +98,7 @@ describe("SettingsPanel", () => {
 
   it("warns when the file on disk has errors", async () => {
     const { w } = await setup({ settings: vi.fn(async () => doc({ errors: { _file: "expected value at line 1 column 1" } })) });
-    expect(w.get('[data-testid="settings-file-errors"] p').text()).toBe("orso.json has errors — the dev server won't start until they're fixed.");
+    expect(w.get('[data-testid="settings-file-errors"]').text()).toContain("orso.json has errors — the dev server won't start until they're fixed.");
     expect(el(w, "settings-file-errors").text()).toContain("expected value at line 1 column 1");
     w.unmount();
   });

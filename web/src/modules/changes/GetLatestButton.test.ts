@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import { TooltipProvider } from "reka-ui";
+import { defineComponent, h as render } from "vue";
 import { createPinia, setActivePinia } from "pinia";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
 import GetLatestButton from "./GetLatestButton.vue";
 import { useChangesStore } from "./store";
@@ -17,7 +19,9 @@ function mountButton() {
   const updateChanges = vi.fn();
   h.daemon = createFakeDaemon({ updateChanges });
   setActivePinia(createPinia());
-  return { w: mount(GetLatestButton, { props: { projectId: "site" } }), updateChanges };
+  // UTooltip needs a TooltipProvider; `UApp` supplies one in the app.
+  const Host = defineComponent(() => () => render(TooltipProvider, null, () => render(GetLatestButton, { projectId: "site" })));
+  return { w: mount(Host), updateChanges };
 }
 
 beforeEach(() => {

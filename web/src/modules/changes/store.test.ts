@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
   toastError: vi.fn(),
 }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({
+vi.mock("@/lib/toast", () => ({
   toast: {
     loading: h.toastLoading,
     info: h.toastInfo,

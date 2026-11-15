@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
-import { ListboxFilter } from "reka-ui";
-import { Check, GitBranch, Search } from "@lucide/vue";
-import { toast } from "vue-sonner";
-import { CommandDialog, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
+import { hugeicon } from "@/lib/hugeicon";
+import { toast } from "@/lib/toast";
+import type { CommandPaletteGroup, CommandPaletteItem, InputProps } from "@nuxt/ui";
+import UCommandPalette from "@nuxt/ui/components/CommandPalette.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
 import { errorMessage } from "@orso/utils";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useChangesStore } from "@/modules/changes/store";
 import { openAssistantSetup } from "@/modules/assistant/dialog";
 import { filterGroups, type PaletteGroup, type PaletteItem } from "./palette/filter";
 import { usePaletteGroups } from "./palette/usePaletteGroups";
+
+const GitBranch = hugeicon("i-hugeicons-git-branch");
 
 const open = ref(false);
 const query = ref("");
@@ -83,41 +87,62 @@ function pick(item: PaletteItem) {
 function onInputKeydown(e: KeyboardEvent) {
   if (e.key === "Backspace" && !query.value && page.value !== "root") page.value = "root";
 }
+
+/** Filtering stays ours (`filterGroups`), so Nuxt UI's fuzzy search is switched off per group. */
+const paletteGroups = computed<CommandPaletteGroup[]>(() =>
+  visible.value.map((group) => ({
+    id: `${page.value}:${group.heading}`,
+    label: group.heading,
+    ignoreFilter: true,
+    items: group.items.map<CommandPaletteItem>((item) => ({
+      id: item.id,
+      label: item.label,
+      suffix: item.hint,
+      icon: item.icon,
+      checked: item.checked,
+      "data-testid": `command-${item.id}`,
+      onSelect: () => pick(item),
+    })),
+  })),
+);
+
+// `input` is bound onto UInput, which passes non-prop attrs (the testid, the keydown listener)
+// through to the <input> itself.
+const inputProps = {
+  "data-testid": "command-palette-input",
+  onKeydown: onInputKeydown,
+} as unknown as InputProps;
 </script>
 
 <template>
-  <CommandDialog v-model:open="open" title="Command palette" description="Search commands, content and files">
-    <div class="flex h-9 items-center gap-2 border-b px-3">
-      <Search class="size-4 shrink-0 opacity-50" />
-      <ListboxFilter
-        v-model="query"
-        auto-focus
-        data-testid="command-palette-input"
+  <UModal
+    v-model:open="open"
+    title="Command palette"
+    description="Search commands, content and files"
+    :ui="{ content: 'top-[15vh] translate-y-0 overflow-hidden sm:max-w-2xl' }"
+  >
+    <template #content>
+      <UCommandPalette
+        v-model:search-term="query"
+        data-testid="command-palette"
+        :groups="paletteGroups"
+        :fuse="{ resultLimit: Infinity }"
+        preserve-group-order
+        :input="inputProps"
         :placeholder="page === 'changes' ? 'Switch to change…' : 'Type a command or search…'"
-        class="placeholder:text-muted-foreground flex h-10 w-full bg-transparent py-3 text-sm outline-hidden"
-        @keydown="onInputKeydown"
-      />
-    </div>
-    <CommandList data-testid="command-palette" class="max-h-[min(480px,60vh)]">
-      <p v-if="!visible.length" class="text-muted-foreground py-6 text-center text-sm">
-        {{ page === "changes" && changes.listing ? "Loading…" : "No results found." }}
-      </p>
-      <CommandGroup v-for="group in visible" :key="`${page}:${group.heading}`" :heading="group.heading">
-        <CommandItem
-          v-for="item in group.items"
-          :key="item.id"
-          :value="item.id"
-          :data-testid="`command-${item.id}`"
-          @select="pick(item)"
-        >
-          <component :is="item.icon" v-if="item.icon" />
-          <span class="truncate">{{ item.label }}</span>
-          <span v-if="item.hint" class="text-muted-foreground truncate text-xs">{{ item.hint }}</span>
-          <Check v-if="item.checked" class="ml-auto" />
-        </CommandItem>
-      </CommandGroup>
-    </CommandList>
-  </CommandDialog>
+        :ui="{ content: 'max-h-[min(480px,60vh)]', itemLabelSuffix: 'text-xs' }"
+      >
+        <template #empty>
+          <p class="text-muted py-6 text-center text-sm">
+            {{ page === "changes" && changes.listing ? "Loading…" : "No results found." }}
+          </p>
+        </template>
+        <template #item-trailing="{ item }">
+          <UIcon v-if="item.checked" name="i-hugeicons-tick-02" class="size-4" />
+        </template>
+      </UCommandPalette>
+    </template>
+  </UModal>
 
   <NewChangeDialog v-if="projectId" v-model:open="showNewChange" :project-id="projectId" />
 </template>

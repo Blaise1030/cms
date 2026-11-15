@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ExternalLink, Globe, LogIn, RefreshCw, Share2 } from "@lucide/vue";
-import { toast } from "vue-sonner";
-import { Button } from "@/components/ui/button";
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
-import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/lib/toast";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UFieldGroup from "@nuxt/ui/components/FieldGroup.vue";
 import { errorMessage } from "@orso/utils";
 import PrMenu from "@/modules/changes/PrMenu.vue";
 import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
@@ -22,6 +20,9 @@ const label = computed(() => {
   if (changes.prUrl) return changes.sharing ? "Updating…" : "Update preview";
   return changes.sharing ? "Sharing…" : "Share preview";
 });
+
+/** Share starts the PR (solid primary); once it exists, sharing again is the quieter action. */
+const shareIcon = computed(() => (changes.prUrl ? "i-hugeicons-refresh" : "i-hugeicons-share-08"));
 
 /** Nothing to push once the branch tip is the PR head; hide rather than offer a no-op. */
 const showShare = computed(() => changes.active !== null && !changes.status?.upToDate);
@@ -70,65 +71,59 @@ async function onShare() {
 
 <template>
   <div class="relative flex items-center gap-2">
-    <ButtonGroup v-if="showGroup" data-testid="share-publish-group">
-      <Button
+    <UFieldGroup v-if="showGroup" data-testid="share-publish-group">
+      <UButton
         v-if="showShare"
-        :variant="variant"
+        :color="variant === 'default' ? 'primary' : 'neutral'"
+        :variant="variant === 'default' ? 'solid' : 'outline'"
         size="sm"
-        class="h-7 gap-1.5 px-2.5 text-xs"
+        :icon="shareIcon"
+        :loading="changes.sharing"
+        :label="label"
         data-testid="share-preview"
         :disabled="changes.sharing"
         @click="onShare"
-      >
-        <Spinner v-if="changes.sharing" class="size-4" />
-        <RefreshCw v-else-if="changes.prUrl" class="size-4" />
-        <Share2 v-else class="size-4" />
-        {{ label }}
-      </Button>
-      <ButtonGroupSeparator
+      />
+      <span
         v-if="showShare && (changes.prUrl || showPublish)"
-        :class="!changes.prUrl ? 'bg-primary-foreground/25' : undefined"
+        aria-hidden="true"
+        class="w-px self-stretch"
+        :class="changes.prUrl ? 'bg-accented' : 'bg-default/25'"
       />
       <PrMenu v-if="changes.prUrl" :variant="variant" />
-      <ButtonGroupSeparator v-if="changes.prUrl && showPublish" />
+      <span v-if="changes.prUrl && showPublish" aria-hidden="true" class="bg-accented w-px self-stretch" />
       <PublishButton
         v-if="showPublish"
         :project-id="projectId"
         :repo="repo ?? null"
       />
-    </ButtonGroup>
+    </UFieldGroup>
 
-    <Button
+    <UButton
       v-else-if="liveHref"
-      as-child
+      color="neutral"
       variant="outline"
       size="sm"
-      class="h-7 gap-1.5 px-2.5 text-xs"
-    >
-      <a
-        :href="liveHref"
-        target="_blank"
-        rel="noopener noreferrer"
-        data-testid="live-site-link"
-        @click="openLive"
-      >
-        <Globe class="size-4" />
-        Open live site
-        <ExternalLink class="size-3.5 opacity-60" />
-      </a>
-    </Button>
+      icon="i-hugeicons-globe-02"
+      trailing-icon="i-hugeicons-link-square-02"
+      :ui="{ trailingIcon: 'size-3.5 opacity-60' }"
+      label="Open live site"
+      :to="liveHref"
+      target="_blank"
+      data-testid="live-site-link"
+      @click="openLive"
+    />
 
-    <Button
+    <UButton
       v-if="changes.needsSignIn"
+      color="neutral"
       variant="outline"
       size="sm"
-      class="h-7 gap-1.5 px-2 text-xs"
+      icon="i-hugeicons-login-03"
+      label="Sign in with GitHub"
       data-testid="share-sign-in"
       @click="github.signIn()"
-    >
-      <LogIn class="size-4" />
-      Sign in with GitHub
-    </Button>
+    />
 
     <ProtectionHint :project-id="projectId" />
   </div>

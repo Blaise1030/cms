@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { nextTick, ref, useSlots, watch } from "vue";
-import { BotMessageSquare } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
+import { computed, nextTick, ref, useSlots, watch } from "vue";
+import type { SplitterItem } from "@nuxt/ui";
+import UButton from "@nuxt/ui/components/Button.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
 import { isMacDesktop } from "@/lib/desktop";
 
 const props = withDefaults(
@@ -23,8 +19,30 @@ const slots = useSlots();
 const macDesktop = isMacDesktop();
 const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7 fullscreen:pl-3" : "pr-3 pl-20 fullscreen:pl-3";
 
-const chatPanel = ref<{ collapse: () => void; expand: () => void } | null>(null);
-const workspacePanel = ref<{ getSize: () => number; resize: (size: number) => void } | null>(null);
+// Panel ids and the auto-save id match the old resizable layout, so saved widths carry over.
+const panels = computed<SplitterItem[]>(() => [
+  {
+    id: "workspace",
+    slot: "workspace-panel",
+    defaultSize: props.showChat ? 65 : 100,
+    minSize: props.showChat ? 30 : 100,
+    class: "min-w-0",
+  },
+  ...(props.showChat
+    ? [{ id: "chat", slot: "chat-panel", defaultSize: 35, minSize: 22, collapsible: true, collapsedSize: 0, class: "min-w-0" }]
+    : []),
+]);
+
+/** reka-ui's SplitterPanel instances, in `panels` order. */
+interface PanelHandle {
+  collapse: () => void;
+  expand: () => void;
+  getSize: () => number;
+  resize: (size: number) => void;
+}
+const splitter = ref<{ panelsRef: PanelHandle[] } | null>(null);
+const workspacePanel = computed(() => splitter.value?.panelsRef[0] ?? null);
+const chatPanel = computed(() => (props.showChat ? splitter.value?.panelsRef[1] ?? null : null));
 /** The workspace's split before a page without chat takes the full width. */
 let workspaceSize = 65;
 const chatOpen = ref(true);
@@ -42,6 +60,13 @@ watch(
     }
   },
 );
+function onCollapse(index: number) {
+  if (index === 1) chatOpen.value = false;
+}
+function onExpand(index: number) {
+  if (index === 1) chatOpen.value = true;
+}
+
 function toggleChat() {
   if (chatOpen.value) chatPanel.value?.collapse();
   else chatPanel.value?.expand();
@@ -65,18 +90,22 @@ watch(
   <div class="flex h-full overflow-hidden">
     <slot name="rail" />
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <ResizablePanelGroup
-        direction="horizontal"
+      <USplitter
+        ref="splitter"
+        :items="panels"
         auto-save-id="orso-shell"
         class="min-h-0 flex-1"
+        :ui="{
+          handle: [
+            'flex w-px items-center justify-center bg-transparent after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2',
+            chatDetached ? 'hidden' : '',
+          ].join(' '),
+        }"
+        @collapse="onCollapse"
+        @expand="onExpand"
       >
-        <ResizablePanel
-          id="workspace"
-          ref="workspacePanel"
-          :default-size="showChat ? 65 : 100"
-          :min-size="showChat ? 30 : 100"
-        >
-          <div class="flex h-full min-h-0 flex-col overflow-hidden">
+        <template #workspace-panel>
+          <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
             <header
               :class="['bg-background flex h-11 shrink-0 items-center gap-3', topBarPadding]"
               :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
@@ -87,43 +116,36 @@ watch(
               </div>
               <div class="flex shrink-0 items-center gap-3">
                 <slot name="actions" />
-                <Button
+                <UButton
                   v-if="showChat && !chatDetached"
                   type="button"
+                  color="neutral"
                   variant="ghost"
-                  size="icon-sm"
+                  icon="i-hugeicons-chat-bot"
                   :aria-label="chatOpen ? 'Hide chat' : 'Show chat'"
                   :aria-pressed="chatOpen"
                   data-testid="chat-toggle"
                   @click="toggleChat"
-                >
-                  <BotMessageSquare />
-                </Button>
+                />
               </div>
             </header>
             <div class="min-h-0 flex-1 overflow-hidden">
               <slot name="workspace" />
             </div>
           </div>
-        </ResizablePanel>
-        <template v-if="showChat">
-          <ResizableHandle v-show="!chatDetached" with-handle class="bg-transparent" />
-          <ResizablePanel
-            id="chat"
-            ref="chatPanel"
-            :default-size="35"
-            :min-size="22"
-            collapsible
-            :collapsed-size="0"
-            @collapse="chatOpen = false"
-            @expand="chatOpen = true"
-          >
-            <div class="bg-background h-full min-h-0 overflow-hidden">
-              <slot name="chat" />
-            </div>
-          </ResizablePanel>
         </template>
-      </ResizablePanelGroup>
+        <template #resize-handle>
+          <div
+            class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted z-10 h-8 w-1 shrink-0 rounded-full transition-colors"
+            aria-hidden="true"
+          />
+        </template>
+        <template #chat-panel>
+          <div class="bg-background h-full min-h-0 w-full overflow-hidden">
+            <slot name="chat" />
+          </div>
+        </template>
+      </USplitter>
     </div>
   </div>
 </template>

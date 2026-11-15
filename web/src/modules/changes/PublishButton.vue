@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Rocket } from "@lucide/vue";
-import { toast } from "vue-sonner";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/lib/toast";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { errorMessage } from "@orso/utils";
 import { useChangesStore } from "./store";
 
@@ -29,8 +27,8 @@ const canMerge = computed(() => {
 /** Explained on hover, so a disabled Publish still says why. */
 const disabledReason = computed(() =>
   store.status?.state === "closed"
-    ? "This pull request is closed."
-    : "This pull request can't be merged yet.",
+    ? "This change was closed without publishing."
+    : "This change can't be published yet.",
 );
 
 async function onPublish() {
@@ -46,17 +44,15 @@ async function onPublish() {
 </script>
 
 <template>
-  <Button
+  <UButton
     v-if="visible"
     size="sm"
-    class="h-7 gap-1.5 px-2.5 text-xs"
+    icon="i-hugeicons-rocket-01"
     data-testid="publish-change"
     :title="canMerge ? undefined : disabledReason"
+    :loading="store.publishing"
     :disabled="store.publishing || !canMerge"
+    :label="store.publishing ? 'Publishing…' : 'Publish'"
     @click="onPublish"
-  >
-    <Spinner v-if="store.publishing" class="size-4" />
-    <Rocket v-else class="size-4" />
-    {{ store.publishing ? "Publishing…" : "Publish" }}
-  </Button>
+  />
 </template>

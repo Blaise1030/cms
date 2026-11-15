@@ -65,7 +65,7 @@ describe("ProviderRow phases", () => {
     );
 
     expect(w.get("[data-testid='assistant-progress-opencode']").text()).toContain("42%");
-    expect(w.find("[data-testid='assistant-progress-opencode'] [data-slot='progress']").exists()).toBe(
+    expect(w.find("[data-testid='assistant-progress-opencode'] [role='progressbar']").exists()).toBe(
       true,
     );
     expect(w.get("[data-testid='assistant-action-opencode']").text()).toBe(LABELS.cancel);
@@ -80,7 +80,7 @@ describe("ProviderRow phases", () => {
     );
 
     expect(w.get("[data-testid='assistant-status-opencode']").text()).toBe(LABELS.settingUp);
-    expect(w.find("[data-testid='assistant-status-opencode'] [role='status']").exists()).toBe(true);
+    expect(w.find("[data-testid='assistant-status-opencode'] .animate-spin").exists()).toBe(true);
     expect(w.find("[data-testid='assistant-action-opencode']").exists()).toBe(false);
     expect(w.attributes("data-action")).toBe("none");
   });
@@ -98,8 +98,8 @@ describe("ProviderRow phases", () => {
     expect(error.text()).toContain(
       "We couldn't download OpenCode. Check your connection and try again.",
     );
-    expect(error.get("details summary").text()).toBe("Details");
-    expect(error.get("details").text()).toContain("The connection dropped.");
+    expect(error.get("[data-testid='assistant-details-toggle']").text()).toBe("Details");
+    expect(error.get("[data-testid='assistant-details']").text()).toContain("The connection dropped.");
     expect(w.get("[data-testid='assistant-action-opencode']").text()).toBe(LABELS.retry);
 
     await action(w).trigger("click");

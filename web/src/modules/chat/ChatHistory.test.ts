@@ -6,10 +6,9 @@ import ChatHistory from "./ChatHistory.vue";
 
 enableAutoUnmount(afterEach);
 
+/** Render the popover's trigger and content inline. */
 const stubs = {
-  Popover: { template: "<div><slot /></div>" },
-  PopoverTrigger: { template: "<div><slot /></div>" },
-  PopoverContent: { template: "<div><slot /></div>" },
+  UPopover: { template: "<div><slot /><slot name='content' /></div>" },
 };
 
 function chat(over: Partial<ChatSummary> & Pick<ChatSummary, "id" | "title">): ChatSummary {

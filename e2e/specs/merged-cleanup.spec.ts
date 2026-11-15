@@ -67,7 +67,7 @@ test("merged change shows as merged; Clean up returns to updated main", async ({
 
   await openPrMenu(page);
   const pill = page.getByTestId("pr-status");
-  await expect(pill).toHaveText("Merged", { timeout: 30_000 });
+  await expect(pill).toHaveText("Published", { timeout: 30_000 });
   await page.keyboard.press("Escape");
   const cleanup = page.getByTestId("cleanup-change");
   await expect(cleanup).toBeVisible();

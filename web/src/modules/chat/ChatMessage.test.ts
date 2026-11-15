@@ -7,7 +7,7 @@ import { useChatSteps } from "@/lib/chatSteps";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import ChatMessage from "./ChatMessage.vue";
 
@@ -35,10 +35,10 @@ const byText = (text: string) =>
 
 /** Expands the collapsed steps group, then the step inside it at `index`. */
 async function openStep(w: Awaited<ReturnType<typeof render>>, index = 0) {
-  const group = w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']");
+  const group = w.find("[data-testid='chat-steps'] > [data-slot='trigger']");
   if (group.attributes("aria-expanded") !== "true") await group.trigger("click");
   await flushPromises();
-  await w.findAll("[data-testid='chat-steps'] [data-slot='trace-collapsible-content'] [data-slot='trace-collapsible-trigger']")[index]!.trigger("click");
+  await w.findAll("[data-testid='chat-steps'] [data-testid='chat-step'] > [data-slot='trigger']")[index]!.trigger("click");
   await flushPromises();
 }
 
@@ -103,7 +103,7 @@ describe("ChatMessage", () => {
       [{ type: "text", text: `Please fix this\n${dir}/5d83a351365d7d18.png\n${dir}/0123456789abcdef.pdf` }],
       "user",
     );
-    const bubbles = w.findAll('[data-slot="bubble"]');
+    const bubbles = w.findAll("[data-testid='chat-bubble']");
     expect(bubbles).toHaveLength(3);
     expect(bubbles[0]!.find("[data-testid='message-attachment'] img").exists()).toBe(true);
     expect(bubbles[0]!.text()).not.toContain("Please fix this");
@@ -164,7 +164,7 @@ describe("ChatMessage", () => {
     const line = w.find("[data-testid='sync-status']");
     expect(line.text()).toBe("Reading your pages…");
     expect(line.classes()).toContain("text-xs");
-    expect(line.attributes("data-slot")).not.toBe("alert");
+    expect(line.attributes("role")).not.toBe("alert");
     expect(w.find("[data-testid='chat-steps']").exists()).toBe(false);
     w.unmount();
   });
@@ -177,10 +177,11 @@ describe("ChatMessage", () => {
       },
     ]);
     const alert = w.find("[data-testid='sync-status']");
-    expect(alert.attributes("data-slot")).toBe("alert");
+    expect(alert.attributes("role")).toBe("alert");
     expect(alert.text()).toBe("Done. Your changes and the latest site are combined.");
     expect(alert.find("svg").exists()).toBe(true);
-    expect(alert.classes()).toContain("border");
+    // Outlined callout (Nuxt UI draws the outline as a ring).
+    expect(alert.classes()).toContain("ring");
     w.unmount();
   });
 
@@ -189,7 +190,7 @@ describe("ChatMessage", () => {
       { type: "data-sync-status", data: { phase: "ended", text: "You ended this combine. Nothing changed." } },
     ]);
     const alert = w.find("[data-testid='sync-status']");
-    expect(alert.attributes("data-slot")).toBe("alert");
+    expect(alert.attributes("role")).toBe("alert");
     expect(alert.text()).toBe("You ended this combine. Nothing changed.");
     w.unmount();
   });
@@ -205,12 +206,13 @@ describe("ChatMessage", () => {
     const steps = w.findAll("[data-testid='chat-steps']");
     expect(steps).toHaveLength(1);
     expect(steps[0]!.text()).toContain("Worked through 3 steps");
-    expect(w.text()).not.toContain("Thinking");
+    // UChatReasoning labels finished reasoning "Thought" ("Thinking…" while it streams).
+    expect(w.text()).not.toContain("Thought");
     expect(w.text()).not.toContain("Ran ls");
     expect(w.text()).toContain("Fixed it");
-    await w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']").trigger("click");
+    await w.find("[data-testid='chat-steps'] > [data-slot='trigger']").trigger("click");
     await flushPromises();
-    expect(w.text()).toContain("Thinking");
+    expect(w.text()).toContain("Thought");
     expect(w.text()).toContain("Ran ls");
     expect(w.text()).toContain("Read a.md");
     w.unmount();
@@ -221,7 +223,9 @@ describe("ChatMessage", () => {
       { type: "dynamic-tool", toolName: "shell", toolCallId: "t1", state: "input-available", input: { command: "ls" } },
     ]);
     expect(w.find("[data-testid='chat-steps']").text()).toContain("Working…");
-    expect(w.find("[data-testid='chat-steps'] [data-slot='trace-line']").attributes("data-status")).toBe("running");
+    expect(w.find("[data-testid='chat-steps']").attributes("data-status")).toBe("running");
+    // The running label shimmers (UChatShimmer) and the leading icon spins.
+    expect(w.find("[data-testid='chat-steps'] [data-slot='label'] [data-slot='base']").text()).toBe("Working…");
     w.unmount();
   });
 
@@ -243,11 +247,11 @@ describe("ChatMessage", () => {
     running.unmount();
   });
 
-  it("shows reasoning behind a collapsed Thinking trigger", async () => {
+  it("shows reasoning behind a collapsed Thought trigger", async () => {
     const w = await render([{ type: "step-start" }, { type: "reasoning", text: "Pondering the layout" }]);
     expect(w.text()).not.toContain("Pondering the layout");
     await openStep(w);
-    expect(w.text()).toContain("Thinking");
+    expect(w.text()).toContain("Thought");
     expect(w.text()).toContain("Pondering the layout");
     w.unmount();
   });
@@ -263,12 +267,12 @@ describe("ChatMessage", () => {
         output: { exitCode: 0, stdout: "built in 2s" },
       },
     ]);
-    await w.find("[data-testid='chat-steps'] [data-slot='trace-collapsible-trigger']").trigger("click");
+    await w.find("[data-testid='chat-steps'] > [data-slot='trigger']").trigger("click");
     await flushPromises();
     expect(w.text()).toContain("Ran pnpm build");
-    expect(w.find("[data-slot='code-block']").exists()).toBe(false);
+    expect(w.find("[data-testid='tool-code']").exists()).toBe(false);
     await openStep(w);
-    const blocks = w.findAll("[data-slot='code-block']");
+    const blocks = w.findAll("[data-testid='tool-code']");
     expect(blocks.map((b) => b.text()).join("\n")).toContain('"command": "pnpm build"');
     expect(blocks.map((b) => b.text()).join("\n")).toContain('"stdout": "built in 2s"');
     w.unmount();

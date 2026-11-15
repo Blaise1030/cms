@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RefreshCw } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { getLatest } from "./getLatest";
 import { useChangesStore } from "./store";
 
@@ -18,24 +17,21 @@ const disabled = computed(
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="300">
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <span class="inline-flex">
-          <Button
-            variant="outline"
-            size="icon"
-            class="bg-card size-7"
-            data-testid="get-latest"
-            :aria-label="title"
-            :disabled="disabled"
-            @click="getLatest(projectId)"
-          >
-            <RefreshCw class="size-4" :class="store.updating ? 'animate-spin' : ''" />
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{{ title }}</TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
+  <UTooltip :text="title" :delay-duration="300">
+    <!-- A disabled button gets no pointer events; the span keeps the tooltip working. -->
+    <span class="inline-flex">
+      <UButton
+        color="neutral"
+        variant="outline"
+        size="sm"
+        square
+        icon="i-hugeicons-refresh"
+        :ui="{ leadingIcon: store.updating ? 'animate-spin' : undefined }"
+        data-testid="get-latest"
+        :aria-label="title"
+        :disabled="disabled"
+        @click="getLatest(projectId)"
+      />
+    </span>
+  </UTooltip>
 </template>

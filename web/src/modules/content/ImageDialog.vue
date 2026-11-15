@@ -34,11 +34,13 @@ function newClientId(): string {
 </script>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Image as ImageIcon, ImagePlus } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
+import type { ModalProps } from "@nuxt/ui";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UFormField from "@nuxt/ui/components/FormField.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
 
 /**
  * The one preview and alt-text dialog behind paste, drop, and the file picker. `file` is the
@@ -49,6 +51,10 @@ const open = defineModel<boolean>("open", { default: false });
 const props = defineProps<{ file?: File | null }>();
 const emit = defineEmits<{ insert: [image: PendingImage] }>();
 
+/** Nuxt UI passes extra `content` keys to the dialog panel as attributes; this one names it for tests. */
+const dialogContent = { "data-testid": "image-dialog" } as ModalProps["content"];
+/** The footer's Insert button submits the body's form through this id. */
+const formId = useId();
 const chosen = ref<File | null>(null);
 const preview = ref<string | null>(null);
 const alt = ref("");
@@ -87,15 +93,16 @@ function insert() {
 </script>
 
 <template>
-  <Dialog v-model:open="open">
-    <DialogContent data-testid="image-dialog">
-      <form class="grid gap-4" @submit.prevent="insert">
-        <DialogHeader>
-          <DialogTitle>Add image</DialogTitle>
-          <DialogDescription>PNG, JPEG, WebP, or GIF up to 10 MiB. It is uploaded when you save.</DialogDescription>
-        </DialogHeader>
+  <UModal
+    v-model:open="open"
+    title="Add image"
+    description="PNG, JPEG, WebP, or GIF up to 10 MiB. It is uploaded when you save."
+    :content="dialogContent"
+  >
+    <template #body>
+      <form :id="formId" class="grid gap-4" @submit.prevent="insert">
         <label
-          class="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+          class="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-default transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary"
           :class="[preview ? 'bg-muted/40' : 'border-dashed hover:bg-muted/40', dragging && 'border-primary bg-muted/60']"
           @dragover.prevent="dragging = true"
           @dragleave="dragging = false"
@@ -106,28 +113,30 @@ function insert() {
             <div class="flex h-56 items-center justify-center p-4">
               <img :src="preview" alt="" data-testid="image-preview" class="max-h-full max-w-full rounded object-contain shadow-sm" />
             </div>
-            <div class="flex items-center gap-2 border-t bg-background/60 px-3 py-2 text-xs">
-              <ImageIcon class="size-3.5 shrink-0 text-muted-foreground" />
-              <span class="min-w-0 flex-1 truncate font-medium">{{ chosen?.name }}</span>
-              <span class="shrink-0 text-muted-foreground">{{ chosen ? fileSize(chosen.size) : "" }}</span>
-              <span class="shrink-0 text-muted-foreground underline-offset-2 group-hover:text-foreground group-hover:underline">Replace</span>
+            <div class="flex items-center gap-2 border-t border-default bg-default/60 px-3 py-2 text-xs">
+              <UIcon name="i-hugeicons-image-01" class="text-muted size-3.5 shrink-0" />
+              <span class="text-highlighted min-w-0 flex-1 truncate font-medium">{{ chosen?.name }}</span>
+              <span class="text-muted shrink-0">{{ chosen ? fileSize(chosen.size) : "" }}</span>
+              <span class="text-muted shrink-0 underline-offset-2 group-hover:text-highlighted group-hover:underline">Replace</span>
             </div>
           </template>
-          <div v-else class="flex h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span class="flex size-10 items-center justify-center rounded-full bg-muted"><ImagePlus class="size-5" /></span>
-            <span><span class="font-medium text-foreground">Choose an image</span> or drop it here</span>
+          <div v-else class="text-muted flex h-40 flex-col items-center justify-center gap-2 text-sm">
+            <span class="bg-elevated flex size-10 items-center justify-center rounded-full"><UIcon name="i-hugeicons-image-add-01" class="size-5" /></span>
+            <span><span class="text-highlighted font-medium">Choose an image</span> or drop it here</span>
             <span v-if="chosen" class="max-w-full truncate px-4 text-xs">{{ chosen.name }}</span>
           </div>
         </label>
-        <p v-if="error" role="alert" class="text-sm text-destructive" data-testid="image-error">{{ error }}</p>
-        <label class="grid gap-1 text-xs font-medium">Alt text (required)
-          <Input v-model="alt" data-testid="image-alt" placeholder="Describe the image" />
-        </label>
-        <DialogFooter>
-          <Button type="button" variant="outline" data-testid="image-cancel" @click="open = false">Cancel</Button>
-          <Button type="submit" data-testid="image-insert" :disabled="!canInsert">Insert</Button>
-        </DialogFooter>
+        <p v-if="error" role="alert" class="text-error text-sm" data-testid="image-error">{{ error }}</p>
+        <UFormField label="Alt text" required>
+          <UInput v-model="alt" class="w-full" data-testid="image-alt" placeholder="Describe the image" />
+        </UFormField>
       </form>
-    </DialogContent>
-  </Dialog>
+    </template>
+    <template #footer>
+      <div class="flex w-full justify-end gap-2">
+        <UButton type="button" color="neutral" variant="outline" label="Cancel" data-testid="image-cancel" @click="open = false" />
+        <UButton type="submit" :form="formId" label="Insert" data-testid="image-insert" :disabled="!canInsert" />
+      </div>
+    </template>
+  </UModal>
 </template>

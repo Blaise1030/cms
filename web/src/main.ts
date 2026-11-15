@@ -1,3 +1,4 @@
+import ui from "@nuxt/ui/vue-plugin";
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 import "@fontsource-variable/geist";
@@ -13,4 +14,4 @@ import { createAppRouter } from "./router";
 useDaemon();
 installScrollbarHiding();
 
-createApp(App).use(createPinia()).use(createAppRouter()).mount("#app");
+createApp(App).use(createPinia()).use(createAppRouter()).use(ui).mount("#app");

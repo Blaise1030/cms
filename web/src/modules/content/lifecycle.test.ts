@@ -35,7 +35,8 @@ async function setup(api: Record<string, unknown> = {}, collection: object = blo
   const router = await contentRouter();
   w = mount(RouterView, { global: { plugins: [router] }, attachTo: document.body }); mounted.push(w);
   await flushPromises();
-  await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises();
+  // The panel auto-opens the first collection; a singleton lands straight on its entry.
+  if (w.find('[data-testid="content-collection"]').exists()) { await w.get('[data-testid="content-collection"]').trigger("click"); await flushPromises(); }
   if (w.find('[data-testid="content-entry"]').exists()) await w.get('[data-testid="content-entry"]').trigger("click"); await flushPromises();
   return w;
 }

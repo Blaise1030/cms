@@ -8,7 +8,7 @@ import type { GithubUser, Project } from "@/core/types";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
-vi.mock("vue-sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { useGithubStore } from "@/modules/github/store";
 import ProjectsGrid from "./ProjectsGrid.vue";

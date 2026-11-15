@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { Check, ExternalLink, Pencil, Unlink } from "@lucide/vue";
-import { Input } from "@/components/ui/input";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
 
 /**
  * Floating link card for the rich editor. Viewing shows the link under the cursor with Edit and
@@ -30,20 +30,30 @@ defineExpose({ root });
 </script>
 
 <template>
-  <div ref="root" data-testid="link-popover" class="w-80 rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-lg">
+  <div ref="root" data-testid="link-popover" class="w-80 rounded-lg border border-default bg-default p-1 text-sm text-default shadow-lg">
     <form v-if="editing" class="grid gap-1 p-1" @submit.prevent="apply" @keydown.esc.prevent="emit('cancel')">
       <div class="flex items-center gap-1">
-        <Input v-model="url" data-testid="link-url" placeholder="Paste a URL, /path, or #heading" class="h-8" />
-        <button type="submit" title="Apply" aria-label="Apply" data-testid="link-apply" :disabled="!canApply" class="flex size-8 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50 disabled:opacity-40"><Check class="size-4" /></button>
+        <UInput v-model="url" data-testid="link-url" placeholder="Paste a URL, /path, or #heading" size="sm" class="flex-1" />
+        <UButton type="submit" color="neutral" variant="ghost" size="sm" square icon="i-hugeicons-tick-02" title="Apply" aria-label="Apply" data-testid="link-apply" :disabled="!canApply" />
       </div>
-      <Input v-if="askText" v-model="text" data-testid="link-text" placeholder="Link text (defaults to the URL)" class="h-8" />
+      <UInput v-if="askText" v-model="text" data-testid="link-text" placeholder="Link text (defaults to the URL)" size="sm" />
     </form>
     <div v-else class="flex items-center gap-0.5">
-      <a :href="href" target="_blank" rel="noopener noreferrer" data-testid="link-open" class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-all hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50">
-        <ExternalLink class="size-3.5 shrink-0" /><span class="truncate">{{ href }}</span>
-      </a>
-      <button type="button" title="Edit link" aria-label="Edit link" data-testid="link-edit" class="flex size-7 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50" @mousedown.prevent @click="emit('edit')"><Pencil class="size-3.5" /></button>
-      <button type="button" title="Remove link" aria-label="Remove link" data-testid="link-remove" class="flex size-7 shrink-0 items-center justify-center rounded-md transition-all hover:bg-background hover:btn-raised-soft active:translate-y-px dark:hover:bg-accent/50" @mousedown.prevent @click="emit('remove')"><Unlink class="size-3.5" /></button>
+      <UButton
+        :to="href"
+        target="_blank"
+        rel="noopener noreferrer"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        icon="i-hugeicons-link-square-02"
+        :label="href"
+        class="text-muted min-w-0 flex-1"
+        :ui="{ label: 'truncate' }"
+        data-testid="link-open"
+      />
+      <UButton type="button" color="neutral" variant="ghost" size="xs" square icon="i-hugeicons-pencil-edit-02" title="Edit link" aria-label="Edit link" data-testid="link-edit" @mousedown.prevent @click="emit('edit')" />
+      <UButton type="button" color="neutral" variant="ghost" size="xs" square icon="i-hugeicons-unlink-01" title="Remove link" aria-label="Remove link" data-testid="link-remove" @mousedown.prevent @click="emit('remove')" />
     </div>
   </div>
 </template>

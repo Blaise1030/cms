@@ -36,7 +36,7 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   });
   await page.reload();
   await openPrMenu(page);
-  await expect(pill).toHaveText("Open · Checks passing", { timeout: 30_000 });
+  await expect(pill).toHaveText("Waiting for greenlight · Checks passing", { timeout: 30_000 });
   const link = page.getByTestId("preview-deploy-link");
   await expect(link).toHaveAttribute("href", "https://content-launch-week.site.pages.dev");
   await expect(link).toHaveAttribute("target", "_blank");
@@ -45,11 +45,11 @@ test("browser bar shows PR state, checks and preview link; changes menu shows PR
   github.setPrStatus({ reviews: [{ user: { login: "grace" }, state: "APPROVED" }] });
   await page.reload();
   await openPrMenu(page);
-  await expect(pill).toHaveText("Approved · Checks passing", { timeout: 30_000 });
+  await expect(pill).toHaveText("Greenlit · Checks passing", { timeout: 30_000 });
   await page.keyboard.press("Escape");
 
   // The changes menu shows each change's PR state.
   await page.getByTestId("changes-menu").click();
   const item = page.locator('[data-testid="change-item"][data-branch="content/launch-week"]');
-  await expect(item.getByTestId("change-pr-state")).toHaveText("Approved");
+  await expect(item.getByTestId("change-pr-state")).toHaveText("Greenlit");
 });

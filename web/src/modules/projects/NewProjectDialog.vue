@@ -1,15 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
 import { errorMessage } from "@orso/utils";
 import type { Project } from "@/core/types";
 import { useProjectsStore } from "./store";
@@ -42,24 +35,34 @@ async function submit() {
 </script>
 
 <template>
-  <Dialog v-model:open="open">
-    <DialogContent>
-      <form class="grid gap-4" @submit.prevent="submit">
-        <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
-          <DialogDescription>
-            Scaffolds a marketing site from the template and starts its dev server.
-          </DialogDescription>
-        </DialogHeader>
-        <Input v-model="name" placeholder="Project name" aria-label="Project name" autofocus />
-        <p v-if="error" class="text-destructive text-sm" role="alert">{{ error }}</p>
-        <DialogFooter>
-          <Button type="button" variant="outline" @click="open = false">Cancel</Button>
-          <Button type="submit" :disabled="!name.trim() || store.creating">
-            {{ store.creating ? "Creating…" : "Create project" }}
-          </Button>
-        </DialogFooter>
+  <UModal
+    v-model:open="open"
+    title="New project"
+    description="Scaffolds a marketing site from the template and starts its dev server."
+  >
+    <template #body>
+      <form id="new-project-form" class="grid gap-2" @submit.prevent="submit">
+        <UInput
+          v-model="name"
+          class="w-full"
+          placeholder="Project name"
+          aria-label="Project name"
+          autofocus
+        />
+        <p v-if="error" class="text-error text-sm" role="alert">{{ error }}</p>
       </form>
-    </DialogContent>
-  </Dialog>
+    </template>
+    <template #footer>
+      <div class="flex w-full justify-end gap-2">
+        <UButton type="button" color="neutral" variant="outline" label="Cancel" @click="open = false" />
+        <UButton
+          type="submit"
+          form="new-project-form"
+          :loading="store.creating"
+          :disabled="!name.trim() || store.creating"
+          :label="store.creating ? 'Creating…' : 'Create project'"
+        />
+      </div>
+    </template>
+  </UModal>
 </template>

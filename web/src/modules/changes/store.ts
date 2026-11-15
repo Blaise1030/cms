@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { ApiError } from "@/core/api";
 import { useDaemon } from "@/core/daemon";
 import type { Change, ChangesUpdate, ConflictCandidate, ConflictChoice, ConflictSession, DeployState, PrStatus, ProtectionHint, SyncChangedEvent } from "@/core/types";

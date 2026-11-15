@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { ref, watch } from "vue"
-import { ImageOff, ImageUp, RefreshCw, Trash2 } from "@lucide/vue"
+import { hugeicon } from "@/lib/hugeicon";
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+
+const ImageOff = hugeicon("i-hugeicons-image-not-found-01");
+const ImageUp = hugeicon("i-hugeicons-image-upload");
+const RefreshCw = hugeicon("i-hugeicons-refresh");
+const Trash2 = hugeicon("i-hugeicons-delete-02");
 
 const props = withDefaults(defineProps<{
   /** URL to preview; empty shows the drop zone. */

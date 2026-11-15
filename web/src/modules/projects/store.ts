@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { onScopeDispose, ref } from "vue";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
 import { useDaemon } from "@/core/daemon";
 import type { Project } from "@/core/types";
 import { errorMessage } from "@orso/utils";

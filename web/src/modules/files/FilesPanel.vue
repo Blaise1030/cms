@@ -2,7 +2,9 @@
 import { watch } from "vue";
 import { useRouter } from "vue-router";
 import { codePath } from "@/router";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import type { SplitterItem } from "@nuxt/ui";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
 import ProjectFilesTree from "./ProjectFilesTree.vue";
 import FileViewer from "./FileViewer.vue";
 import { useFilesStore } from "./store";
@@ -10,6 +12,12 @@ import { useFilesStore } from "./store";
 const props = defineProps<{ projectId: string; path?: string }>();
 const store = useFilesStore();
 const router = useRouter();
+
+// Panel ids and the auto-save id match the old resizable layout, so saved widths carry over.
+const panels: SplitterItem[] = [
+  { id: "files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
+  { id: "files-viewer", slot: "viewer", defaultSize: 80, minSize: 40 },
+];
 
 watch(
   () => props.projectId,
@@ -31,14 +39,23 @@ watch(
 </script>
 
 <template>
-  <ResizablePanelGroup direction="horizontal" auto-save-id="files-sidebar" class="h-full min-h-0" data-testid="files-panel">
-    <ResizablePanel id="files-tree" :default-size="20" :min-size="12" :max-size="45">
-      <aside class="flex h-full flex-col overflow-hidden">
-        <p v-if="store.treeError" class="text-destructive p-3 text-xs" role="alert">
+  <USplitter
+    :items="panels"
+    auto-save-id="files-sidebar"
+    class="h-full min-h-0"
+    :ui="{ handle: 'flex items-center justify-center' }"
+    data-testid="files-panel"
+  >
+    <template #tree>
+      <aside class="flex h-full w-full flex-col overflow-hidden">
+        <p v-if="store.treeError" class="text-error p-3 text-xs" role="alert">
           {{ store.treeError }}
         </p>
-        <p v-else-if="store.treeLoading && store.paths.length === 0" class="text-muted-foreground p-3 text-xs">
-          Loading files…
+        <p
+          v-else-if="store.treeLoading && store.paths.length === 0"
+          class="text-muted flex items-center gap-2 p-3 text-xs"
+        >
+          <UIcon name="i-hugeicons-loading-03" class="size-3.5 animate-spin" /> Loading files…
         </p>
         <ProjectFilesTree
           v-else
@@ -48,12 +65,17 @@ watch(
           @select="router.push(codePath(projectId, $event))"
         />
       </aside>
-    </ResizablePanel>
-    <ResizableHandle with-handle class="bg-transparent" />
-    <ResizablePanel id="files-viewer" :default-size="80" :min-size="40">
-      <div class="h-full min-w-0">
+    </template>
+    <template #resize-handle>
+      <div
+        class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+        aria-hidden="true"
+      />
+    </template>
+    <template #viewer>
+      <div class="h-full w-full min-w-0">
         <FileViewer />
       </div>
-    </ResizablePanel>
-  </ResizablePanelGroup>
+    </template>
+  </USplitter>
 </template>

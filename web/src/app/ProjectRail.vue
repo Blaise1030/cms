@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, type Component } from "vue";
-import { RouterLink, useRoute } from "vue-router";
-import { Code, Cog, FileText, History, House, MonitorPlay, Palette, Settings } from "@lucide/vue";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { computed } from "vue";
+import { useRoute } from "vue-router";
+import { TooltipProvider } from "reka-ui";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
@@ -12,25 +13,25 @@ const props = defineProps<{ projectId: string }>();
 const route = useRoute();
 const active = computed(() => projectTabFromRoute(route.name));
 
-const tabs: { id: ProjectTab; label: string; icon: Component }[] = [
-  { id: "preview", label: "Preview", icon: MonitorPlay },
-  { id: "content", label: "Content", icon: FileText },
-  { id: "design", label: "Design", icon: Palette },
-  { id: "code", label: "Code", icon: Code },
-  { id: "history", label: "History", icon: History },
-  { id: "settings", label: "Settings", icon: Settings },
+/** `icon` is an Iconify Lucide name. */
+const tabs: { id: ProjectTab; label: string; icon: string }[] = [
+  { id: "preview", label: "Preview", icon: "i-hugeicons-computer-video" },
+  { id: "content", label: "Content", icon: "i-hugeicons-file-01" },
+  { id: "design", label: "Design", icon: "i-hugeicons-paint-board" },
+  { id: "code", label: "Code", icon: "i-hugeicons-source-code" },
+  { id: "history", label: "History", icon: "i-hugeicons-clock-04" },
+  { id: "settings", label: "Settings", icon: "i-hugeicons-settings-01" },
 ];
 
 // On desktop the rail starts at the top bar's height (pt-11), below the traffic lights, except
 // in full screen where they are hidden.
 const macDesktop = isMacDesktop();
 
-const item = "relative flex size-9 items-center justify-center rounded-lg text-muted-foreground outline-none transition-all active:translate-y-px hover:bg-background hover:text-foreground hover:btn-raised-soft dark:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5";
-/** The home link sits raised, like the app's other buttons. */
-const raised = "bg-background text-foreground btn-raised-soft dark:bg-accent/50";
-/** Selected tab: primary tint + raised gloss. */
-const current =
-  "bg-primary/12 text-primary btn-raised-soft hover:bg-primary/16 hover:text-primary dark:bg-primary/25 dark:text-primary-foreground dark:hover:bg-primary/30";
+/** Rail links: 36px square icon buttons. */
+const ui = { base: "size-9 justify-center rounded-lg", leadingIcon: "size-5" };
+/** Selected tab: primary tint. */
+const current = "dark:bg-primary/25 dark:text-highlighted dark:hover:bg-primary/30";
+const tooltipContent = { side: "right" } as const;
 </script>
 
 <template>
@@ -41,44 +42,54 @@ const current =
       :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
       data-testid="project-rail"
     >
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <RouterLink to="/" :class="[item, raised, 'mb-2']" aria-label="All projects" data-testid="project-rail-home">
-            <House />
-          </RouterLink>
-        </TooltipTrigger>
-        <TooltipContent side="right">All projects</TooltipContent>
-      </Tooltip>
+      <!-- The home link sits raised, like the app's other buttons. -->
+      <UTooltip text="All projects" :content="tooltipContent">
+        <UButton
+          to="/"
+          color="neutral"
+          variant="outline"
+          square
+          icon="i-hugeicons-home-01"
+          :active="false"
+          :ui="ui"
+          class="mb-2 shadow-xs"
+          aria-label="All projects"
+          data-testid="project-rail-home"
+        />
+      </UTooltip>
 
-      <Tooltip v-for="tab in tabs" :key="tab.id">
-        <TooltipTrigger as-child>
-          <RouterLink
-            :to="projectPath(props.projectId, tab.id)"
-            :class="cn(item, active === tab.id && current)"
-            :aria-label="tab.label"
-            :aria-current="active === tab.id ? 'page' : undefined"
-            :data-testid="`workspace-tab-${tab.id}`"
-          >
-            <component :is="tab.icon" />
-          </RouterLink>
-        </TooltipTrigger>
-        <TooltipContent side="right">{{ tab.label }}</TooltipContent>
-      </Tooltip>
+      <UTooltip v-for="tab in tabs" :key="tab.id" :text="tab.label" :content="tooltipContent">
+        <UButton
+          :to="projectPath(props.projectId, tab.id)"
+          color="neutral"
+          variant="ghost"
+          active-color="primary"
+          active-variant="soft"
+          square
+          :icon="tab.icon"
+          :active="active === tab.id"
+          :ui="ui"
+          :class="cn(active === tab.id && current)"
+          :aria-label="tab.label"
+          :aria-current="active === tab.id ? 'page' : undefined"
+          :data-testid="`workspace-tab-${tab.id}`"
+        />
+      </UTooltip>
 
       <div class="mt-auto flex flex-col items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <RouterLink
-              to="/settings"
-              :class="item"
-              aria-label="App settings"
-              data-testid="project-rail-app-settings"
-            >
-              <Cog />
-            </RouterLink>
-          </TooltipTrigger>
-          <TooltipContent side="right">App settings</TooltipContent>
-        </Tooltip>
+        <UTooltip text="App settings" :content="tooltipContent">
+          <UButton
+            to="/settings"
+            color="neutral"
+            variant="ghost"
+            square
+            icon="i-hugeicons-settings-02"
+            :active="false"
+            :ui="ui"
+            aria-label="App settings"
+            data-testid="project-rail-app-settings"
+          />
+        </UTooltip>
         <slot name="footer" />
       </div>
     </nav>

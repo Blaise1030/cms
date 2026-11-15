@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "reka-ui";
+import UChip from "@nuxt/ui/components/Chip.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import type { ConnectionStatus } from "@/core/types";
 
 defineProps<{ status: ConnectionStatus }>();
@@ -10,20 +12,18 @@ function statusLabel(status: ConnectionStatus) {
 </script>
 
 <template>
+  <!-- Own provider: UApp's covers the app, this one keeps the status dot working when mounted alone. -->
   <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <span
-          role="status"
-          tabindex="0"
-          class="flex size-9 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          :data-status="status"
-          :aria-label="statusLabel(status)"
-        >
-          <span class="size-2.5 rounded-full" :class="status === 'open' ? 'bg-emerald-500' : 'bg-amber-500'" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">{{ statusLabel(status) }}</TooltipContent>
-    </Tooltip>
+    <UTooltip :text="statusLabel(status)" :content="{ side: 'right' }">
+      <span
+        role="status"
+        tabindex="0"
+        class="focus-visible:ring-primary flex size-9 items-center justify-center rounded-lg outline-none focus-visible:ring-2"
+        :data-status="status"
+        :aria-label="statusLabel(status)"
+      >
+        <UChip standalone inset size="xl" :color="status === 'open' ? 'success' : 'warning'" />
+      </span>
+    </UTooltip>
   </TooltipProvider>
 </template>

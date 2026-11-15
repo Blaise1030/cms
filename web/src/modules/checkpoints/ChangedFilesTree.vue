@@ -74,7 +74,7 @@ onBeforeUnmount(() => {
   <div
     ref="host"
     class="changed-files-tree overflow-hidden"
-    :class="fill ? 'w-full' : 'rounded-md border'"
+    :class="fill ? 'w-full' : 'rounded-md border border-default'"
     :style="{ height: `${height}px` }"
     data-testid="changed-files-tree"
   />

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { PlugZap } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCard from "@nuxt/ui/components/Card.vue";
+import UFormField from "@nuxt/ui/components/FormField.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
 import type { UnreachableReason } from "@/core/daemon";
 
 const props = defineProps<{
@@ -35,49 +36,48 @@ function submit() {
 
 <template>
   <div class="flex h-full min-h-screen items-center justify-center p-6">
-    <Card class="w-full max-w-md" role="alert">
-      <CardHeader>
-        <div class="text-muted-foreground mb-2 flex items-center gap-2">
-          <PlugZap class="size-5" />
-          <span class="text-xs tracking-wide uppercase">Offline</span>
-        </div>
-        <CardTitle>
-          {{ props.reason === "rejected" ? "Daemon refused the connection" : "Daemon unreachable" }}
-        </CardTitle>
-        <CardDescription>
-          <template v-if="props.reason === 'rejected'">
-            The daemon at <code class="text-foreground">{{ props.origin }}</code> is running but
-            rejected this app. Open the link printed by <code>orso serve</code> to refresh the
-            token, or paste it below.
-          </template>
-          <template v-else>
-            Nothing is answering at <code class="text-foreground">{{ props.origin }}</code>. Start
-            it with <code class="text-foreground">orso serve</code>, then retry.
-          </template>
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="flex flex-col gap-4">
-        <Button :disabled="props.connecting" @click="emit('retry')">
+    <UCard class="w-full max-w-md" role="alert" :ui="{ title: 'flex flex-col items-start gap-3' }">
+      <template #title>
+        <UBadge color="neutral" variant="subtle" icon="i-hugeicons-plug-01" class="uppercase">Offline</UBadge>
+        {{ props.reason === "rejected" ? "Daemon refused the connection" : "Daemon unreachable" }}
+      </template>
+      <template #description>
+        <template v-if="props.reason === 'rejected'">
+          The daemon at <code class="text-highlighted">{{ props.origin }}</code> is running but
+          rejected this app. Open the link printed by <code>orso serve</code> to refresh the
+          token, or paste it below.
+        </template>
+        <template v-else>
+          Nothing is answering at <code class="text-highlighted">{{ props.origin }}</code>. Start
+          it with <code class="text-highlighted">orso serve</code>, then retry.
+        </template>
+      </template>
+      <div class="flex flex-col gap-4">
+        <UButton block :loading="props.connecting" :disabled="props.connecting" @click="emit('retry')">
           {{ props.connecting ? "Connecting…" : "Retry" }}
-        </Button>
-        <form class="flex flex-col gap-2" @submit.prevent="submit">
-          <label for="daemon-link" class="text-muted-foreground text-xs">
-            Daemon link (from the terminal)
-          </label>
-          <div class="flex gap-2">
-            <Input
-              id="daemon-link"
-              v-model="link"
-              placeholder="http://127.0.0.1:7800/?t=…"
-              :aria-invalid="invalid"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <Button type="submit" variant="secondary">Connect</Button>
-          </div>
-          <p v-if="invalid" class="text-destructive text-xs">Enter a valid http(s) URL.</p>
+        </UButton>
+        <form @submit.prevent="submit">
+          <UFormField
+            label="Daemon link (from the terminal)"
+            :error="invalid ? 'Enter a valid http(s) URL.' : false"
+            size="xs"
+          >
+            <div class="flex gap-2">
+              <UInput
+                id="daemon-link"
+                v-model="link"
+                class="flex-1"
+                size="md"
+                placeholder="http://127.0.0.1:7800/?t=…"
+                :aria-invalid="invalid"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <UButton type="submit" color="neutral" variant="outline">Connect</UButton>
+            </div>
+          </UFormField>
         </form>
-      </CardContent>
-    </Card>
+      </div>
+    </UCard>
   </div>
 </template>

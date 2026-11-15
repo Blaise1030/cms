@@ -1,20 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { History, MessageSquare, RefreshCw, Search, Trash2 } from "@lucide/vue";
 import type { ChatSummary } from "@/core/types";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Spinner } from "@/components/ui/spinner";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
+import UPopover from "@nuxt/ui/components/Popover.vue";
 
 const props = defineProps<{ chats: ChatSummary[]; activeId: string | null; runningIds: string[] }>();
 const emit = defineEmits<{ pick: [id: string]; remove: [id: string] }>();
@@ -63,49 +54,45 @@ function confirmDelete() {
 </script>
 
 <template>
-  <Popover v-model:open="open">
-    <PopoverTrigger as-child>
-      <Button
-        :variant="open ? 'secondary' : 'ghost'"
-        size="icon-sm"
-        aria-label="Chat history"
-        data-testid="chat-history-toggle"
-      >
-        <History />
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent align="start" class="flex w-72 flex-col p-0">
-      <div class="border-b p-2">
-        <InputGroup class="h-8">
-          <InputGroupAddon align="inline-start">
-            <Search class="size-4 opacity-50" aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            v-model="query"
-            placeholder="Search chats…"
-            aria-label="Search chats"
-            class="h-8"
-            data-testid="chat-history-search"
-            @keydown.stop
-          />
-        </InputGroup>
+  <UPopover v-model:open="open" :content="{ align: 'start' }" :ui="{ content: 'flex w-72 flex-col' }">
+    <UButton
+      color="neutral"
+      :variant="open ? 'soft' : 'ghost'"
+      size="sm"
+      icon="i-hugeicons-clock-04"
+      aria-label="Chat history"
+      data-testid="chat-history-toggle"
+    />
+    <template #content>
+      <div class="border-default border-b p-2">
+        <UInput
+          v-model="query"
+          icon="i-hugeicons-search-01"
+          size="sm"
+          placeholder="Search chats…"
+          aria-label="Search chats"
+          class="w-full"
+          data-testid="chat-history-search"
+          @keydown.stop
+        />
       </div>
       <nav
         aria-label="Chat history"
         data-testid="chat-history"
         class="flex max-h-72 flex-col gap-1 overflow-y-auto p-1.5"
       >
-        <p v-if="chats.length === 0" class="text-muted-foreground p-2 text-sm">No chats yet</p>
-        <p v-else-if="filtered.length === 0" class="text-muted-foreground p-2 text-sm">No matching chats</p>
+        <p v-if="chats.length === 0" class="text-muted p-2 text-sm">No chats yet</p>
+        <p v-else-if="filtered.length === 0" class="text-muted p-2 text-sm">No matching chats</p>
         <div
           v-for="c in filtered"
           :key="c.id"
-          class="group hover:bg-background hover:btn-raised-soft dark:hover:bg-accent/50 relative flex items-center rounded-md transition-all"
-          :class="{ 'bg-primary/12 hover:bg-primary/16 btn-raised-soft dark:bg-primary/25 dark:hover:bg-primary/30': c.id === activeId }"
+          class="group relative flex items-center rounded-md transition-colors"
+          :class="c.id === activeId ? 'bg-primary/10 hover:bg-primary/15' : 'hover:bg-elevated'"
         >
-          <button
-            type="button"
-            class="flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left text-sm active:translate-y-px"
+          <UButton
+            color="neutral"
+            variant="link"
+            class="text-default hover:text-default flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left text-sm font-normal"
             :aria-current="c.id === activeId ? 'true' : undefined"
             :aria-label="`${titleOf(c)}, ${statusLabel[statusOf(c)]}`"
             data-testid="chat-history-item"
@@ -113,48 +100,53 @@ function confirmDelete() {
             @click="pick(c.id)"
           >
             <span class="mt-0.5 shrink-0" :title="statusLabel[statusOf(c)]" data-testid="chat-history-status">
-              <Spinner v-if="statusOf(c) === 'running'" class="size-3.5" />
-              <RefreshCw
-                v-else-if="statusOf(c) === 'combining'"
-                class="text-muted-foreground size-3.5 animate-spin"
+              <UIcon
+                v-if="statusOf(c) === 'running'"
+                name="i-hugeicons-loading-03"
+                class="size-3.5 animate-spin"
                 aria-hidden="true"
               />
-              <MessageSquare v-else class="text-muted-foreground size-3.5 opacity-70" aria-hidden="true" />
+              <UIcon
+                v-else-if="statusOf(c) === 'combining'"
+                name="i-hugeicons-refresh"
+                class="text-muted size-3.5 animate-spin"
+                aria-hidden="true"
+              />
+              <UIcon v-else name="i-hugeicons-message-01" class="text-muted size-3.5 opacity-70" aria-hidden="true" />
             </span>
             <span class="min-w-0 flex-1">
               <span class="block w-full truncate">{{ titleOf(c) }}</span>
-              <span class="text-muted-foreground block truncate text-xs">{{ when(c.updatedAt) }}</span>
+              <span class="text-muted block truncate text-xs">{{ when(c.updatedAt) }}</span>
             </span>
-          </button>
-          <Button
+          </UButton>
+          <UButton
             v-if="!runningIds.includes(c.id)"
+            color="neutral"
             variant="ghost"
-            size="icon-sm"
-            class="text-muted-foreground hover:text-destructive mr-1 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            size="sm"
+            icon="i-hugeicons-delete-02"
+            class="text-muted hover:text-error mr-1 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             :aria-label="`Delete ${titleOf(c)}`"
             data-testid="chat-history-delete"
             @click="pendingDelete = c"
-          >
-            <Trash2 />
-          </Button>
+          />
         </div>
       </nav>
-    </PopoverContent>
-  </Popover>
+    </template>
+  </UPopover>
 
-  <AlertDialog :open="pendingDelete !== null" @update:open="(o) => !o && (pendingDelete = null)">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
-        <AlertDialogDescription>
-          “{{ pendingDelete && titleOf(pendingDelete) }}” and its messages will be removed. Changes your
-          assistant made to your site stay.
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>Cancel</AlertDialogCancel>
-        <Button variant="destructive" data-testid="chat-delete-confirm" @click="confirmDelete">Delete chat</Button>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
+  <UModal
+    :open="pendingDelete !== null"
+    title="Delete this chat?"
+    :description="`“${pendingDelete ? titleOf(pendingDelete) : ''}” and its messages will be removed. Changes your assistant made to your site stay.`"
+    :close="false"
+    @update:open="(o) => !o && (pendingDelete = null)"
+  >
+    <template #footer>
+      <div class="flex w-full justify-end gap-2">
+        <UButton color="neutral" variant="outline" label="Cancel" @click="pendingDelete = null" />
+        <UButton color="error" label="Delete chat" data-testid="chat-delete-confirm" @click="confirmDelete" />
+      </div>
+    </template>
+  </UModal>
 </template>

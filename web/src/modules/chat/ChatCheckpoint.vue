@@ -1,19 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { CircleSlash, GitCommitVertical, RotateCcw } from "@lucide/vue";
-import { toast } from "vue-sonner";
+import { toast } from "@/lib/toast";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import UModal from "@nuxt/ui/components/Modal.vue";
+import USeparator from "@nuxt/ui/components/Separator.vue";
 import { useDaemon } from "@/core/daemon";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { errorMessage } from "@orso/utils";
 import type { CheckpointData } from "./parts";
 
@@ -46,34 +38,53 @@ async function restore() {
 </script>
 
 <template>
-  <Marker v-if="checkpoint.blocked" data-testid="checkpoint">
-    <MarkerIcon><CircleSlash /></MarkerIcon>
-    <MarkerContent>Not saved: {{ checkpoint.blocked }}</MarkerContent>
-  </Marker>
-  <Marker v-else-if="checkpoint.sha" data-testid="checkpoint">
-    <MarkerIcon><GitCommitVertical /></MarkerIcon>
-    <MarkerContent :title="checkpoint.files.join('\n')">{{ saved }}</MarkerContent>
-    <Button variant="ghost" size="xs" :disabled="restoring" @click="confirming = true">
-      <RotateCcw />
-      Restore
-    </Button>
+  <!-- An inline event row in the transcript: a labelled rule, with Restore at its end. -->
+  <div v-if="checkpoint.blocked || checkpoint.sha" data-testid="checkpoint" class="flex items-center gap-2">
+    <USeparator
+      position="start"
+      decorative
+      class="min-w-0 flex-1"
+      :ui="{ container: 'text-muted min-w-0 items-center gap-1.5 pe-2 font-normal', border: 'border-muted' }"
+    >
+      <UIcon
+        :name="checkpoint.blocked ? 'i-hugeicons-unavailable' : 'i-hugeicons-git-commit'"
+        class="size-4 shrink-0"
+        aria-hidden="true"
+      />
+      <span v-if="checkpoint.blocked" class="truncate text-xs">Not saved: {{ checkpoint.blocked }}</span>
+      <span v-else class="truncate text-xs" :title="checkpoint.files.join('\n')">{{ saved }}</span>
+    </USeparator>
+    <UButton
+      v-if="!checkpoint.blocked"
+      color="neutral"
+      variant="ghost"
+      size="xs"
+      icon="i-hugeicons-arrow-turn-backward"
+      label="Restore"
+      :disabled="restoring"
+      @click="confirming = true"
+    />
 
-    <AlertDialog v-model:open="confirming">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Restore this checkpoint?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The project's files go back to {{ short }}. Later checkpoints and any uncommitted changes are
-            discarded.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" :disabled="restoring" data-testid="confirm-restore" @click="restore">
-            {{ restoring ? "Restoring…" : "Restore" }}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  </Marker>
+    <UModal
+      v-if="!checkpoint.blocked"
+      v-model:open="confirming"
+      title="Restore this checkpoint?"
+      :description="`The project's files go back to ${short}. Later checkpoints and any uncommitted changes are discarded.`"
+      :close="false"
+      :dismissible="!restoring"
+    >
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="outline" label="Cancel" @click="confirming = false" />
+          <UButton
+            color="error"
+            :label="restoring ? 'Restoring…' : 'Restore'"
+            :disabled="restoring"
+            data-testid="confirm-restore"
+            @click="restore"
+          />
+        </div>
+      </template>
+    </UModal>
+  </div>
 </template>

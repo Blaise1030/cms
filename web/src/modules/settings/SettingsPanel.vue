@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UFormField from "@nuxt/ui/components/FormField.vue";
+import UInput from "@nuxt/ui/components/Input.vue";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useProjectsStore } from "@/modules/projects/store";
@@ -63,65 +64,122 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="settings-panel">
     <template v-if="store.doc">
-      <header class="relative z-10 flex h-11 shrink-0 items-center gap-1 bg-background px-2">
-        <div class="pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b from-background to-transparent" aria-hidden="true" />
-        <h2 class="truncate px-1 text-sm font-medium">orso.json</h2>
-        <p class="truncate text-xs text-muted-foreground">{{ store.doc.branch }}</p>
+      <header class="bg-background relative z-10 flex h-11 shrink-0 items-center gap-1 px-2">
+        <div class="from-background pointer-events-none absolute inset-x-0 top-full h-6 bg-linear-to-b to-transparent" aria-hidden="true" />
+        <h2 class="text-highlighted truncate px-1 text-sm font-medium">orso.json</h2>
+        <p class="text-muted truncate text-xs">{{ store.doc.branch }}</p>
         <div class="ml-auto flex shrink-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" data-testid="settings-discard" :disabled="!store.dirty || store.saving" @click="store.discard()">Discard</Button>
-          <Button type="button" variant="outline" size="sm" data-testid="settings-save" :disabled="!store.canSave || store.saving || devMissingPort" @click="save">{{ store.saving ? "Saving…" : "Save" }}</Button>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            label="Discard"
+            data-testid="settings-discard"
+            :disabled="!store.dirty || store.saving"
+            @click="store.discard()"
+          />
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :label="store.saving ? 'Saving…' : 'Save'"
+            data-testid="settings-save"
+            :disabled="!store.canSave || store.saving || devMissingPort"
+            @click="save"
+          />
         </div>
       </header>
       <div class="min-h-0 flex-1 overflow-auto">
-        <div class="mx-auto w-full max-w-2xl px-4 pt-4 pb-8">
-          <p v-if="store.error" role="alert" class="mb-3 text-sm text-destructive" data-testid="settings-error">{{ store.error }}</p>
-          <section v-if="store.needsChange" role="alert" class="mb-3 rounded-md border p-3 text-sm" data-testid="settings-needs-change">
-            <p>Settings can't be edited on the live site. Create a change.</p>
-            <Button type="button" size="sm" class="mt-2" data-testid="settings-create-change" @click="showNewChange = true">Create change</Button>
-          </section>
-          <section v-if="fileErrors" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="settings-file-errors">
-            <p>orso.json has errors — the dev server won't start until they're fixed.</p>
-            <p v-if="store.doc.errors._file" class="mt-1 text-xs text-muted-foreground">{{ store.doc.errors._file }}</p>
-          </section>
-          <section v-if="store.changedOnDisk" role="status" class="mb-3 rounded-md border p-3 text-sm" data-testid="settings-changed-on-disk">
-            <p>orso.json changed on disk. Your unsaved draft is preserved.</p>
-            <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="settings-reload" @click="store.reloadFromDisk()">Reload</Button>
-          </section>
-          <section v-if="store.conflict" role="alert" class="mb-3 rounded-md border border-destructive p-3 text-sm" data-testid="settings-conflict">
-            <p>{{ store.conflict.message }}. Your edits are kept.</p>
-            <Button type="button" variant="outline" size="sm" class="mt-2" data-testid="settings-reload" @click="store.reloadFromDisk()">Reload</Button>
-          </section>
+        <div class="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pt-4 pb-8">
+          <p v-if="store.error" role="alert" class="text-error text-sm" data-testid="settings-error">{{ store.error }}</p>
+          <UAlert
+            v-if="store.needsChange"
+            role="alert"
+            color="neutral"
+            variant="outline"
+            icon="i-hugeicons-git-branch"
+            description="Settings can't be edited on the live site. Create a change."
+            data-testid="settings-needs-change"
+          >
+            <template #actions>
+              <UButton size="sm" label="Create change" data-testid="settings-create-change" @click="showNewChange = true" />
+            </template>
+          </UAlert>
+          <UAlert
+            v-if="fileErrors"
+            role="alert"
+            color="error"
+            variant="subtle"
+            icon="i-hugeicons-alert-circle"
+            title="orso.json has errors — the dev server won't start until they're fixed."
+            :description="store.doc.errors._file"
+            data-testid="settings-file-errors"
+          />
+          <UAlert
+            v-if="store.changedOnDisk"
+            role="status"
+            color="neutral"
+            variant="outline"
+            icon="i-hugeicons-git-compare"
+            description="orso.json changed on disk. Your unsaved draft is preserved."
+            data-testid="settings-changed-on-disk"
+          >
+            <template #actions>
+              <UButton color="neutral" variant="outline" size="sm" label="Reload" data-testid="settings-reload" @click="store.reloadFromDisk()" />
+            </template>
+          </UAlert>
+          <UAlert
+            v-if="store.conflict"
+            role="alert"
+            color="error"
+            variant="subtle"
+            icon="i-hugeicons-alert-circle"
+            :description="`${store.conflict.message}. Your edits are kept.`"
+            data-testid="settings-conflict"
+          >
+            <template #actions>
+              <UButton color="neutral" variant="outline" size="sm" label="Reload" data-testid="settings-reload" @click="store.reloadFromDisk()" />
+            </template>
+          </UAlert>
 
-          <form class="grid gap-4" @submit.prevent="save">
-            <div v-for="field in FIELDS" :key="field.key">
-              <Label :for="`settings-${field.key}`" class="mb-1.5 text-xs">{{ field.label }}</Label>
-              <Input
+          <form class="mt-1 grid gap-4" @submit.prevent="save">
+            <UFormField
+              v-for="field in FIELDS"
+              :key="field.key"
+              :label="field.label"
+              :name="field.key"
+              size="sm"
+            >
+              <UInput
                 :id="`settings-${field.key}`"
                 :data-testid="`settings-${field.key}`"
                 type="text"
-                class="font-mono text-xs"
+                class="w-full"
+                :ui="{ base: 'font-mono' }"
                 :placeholder="store.doc.defaults[field.key]"
                 :model-value="store.draft[field.key]"
                 @update:model-value="store.setField(field.key, String($event))"
               />
-              <p v-if="field.key === 'dev'" class="mt-1 text-xs text-muted-foreground">
-                <code>{port}</code> is replaced with the preview port and <code>{host}</code> with 127.0.0.1. The command must contain <code>{port}</code>.
-              </p>
-              <p v-if="field.key === 'dev' && devHint" class="mt-1 text-xs text-muted-foreground" data-testid="settings-dev-hint">
-                This looks like Astro without <code>--ignore-lock</code>; without it a restart can be blocked by the previous dev server.
-              </p>
-              <p v-if="errorFor(field.key)" role="alert" class="mt-1 text-xs text-destructive" :data-testid="`settings-error-${field.key}`">{{ errorFor(field.key) }}</p>
-            </div>
+              <template v-if="field.key === 'dev'" #help>
+                <span class="block">
+                  <code>{port}</code> is replaced with the preview port and <code>{host}</code> with 127.0.0.1. The command must contain <code>{port}</code>.
+                </span>
+                <span v-if="devHint" class="mt-1 block" data-testid="settings-dev-hint">
+                  This looks like Astro without <code>--ignore-lock</code>; without it a restart can be blocked by the previous dev server.
+                </span>
+              </template>
+              <p v-if="errorFor(field.key)" role="alert" class="text-error mt-1 text-xs" :data-testid="`settings-error-${field.key}`">{{ errorFor(field.key) }}</p>
+            </UFormField>
           </form>
 
-          <p v-if="saved && devserver" role="status" class="mt-6 text-sm text-muted-foreground" data-testid="settings-devserver">
+          <p v-if="saved && devserver" role="status" class="text-muted mt-3 text-sm" data-testid="settings-devserver">
             Dev server: {{ devserver }}<template v-if="devserver === 'crashed' && message"> — {{ message }}</template>
           </p>
         </div>
       </div>
       <NewChangeDialog v-model:open="showNewChange" :project-id="props.projectId" @created="resume" />
     </template>
-    <p v-else-if="store.loading" class="p-4 text-sm text-muted-foreground">Loading settings…</p>
-    <p v-else-if="store.error" role="alert" class="p-4 text-sm text-destructive" data-testid="settings-error">{{ store.error }}</p>
+    <p v-else-if="store.loading" class="text-muted p-4 text-sm">Loading settings…</p>
+    <p v-else-if="store.error" role="alert" class="text-error p-4 text-sm" data-testid="settings-error">{{ store.error }}</p>
   </div>
 </template>
