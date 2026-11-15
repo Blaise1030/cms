@@ -67,7 +67,8 @@ test("shares a preview: push, draft PR, link; re-share advances remote without s
     .toBe(localTip);
 
   expect(github.pullsPosts()).toHaveLength(1);
-  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  // Shared and up to date: there is nothing left to push, so Share steps aside.
+  await expect(page.getByTestId("share-preview")).toBeHidden();
   await openPrMenu(page);
   await expect(page.getByTestId("pr-link")).toHaveAttribute(
     "href",

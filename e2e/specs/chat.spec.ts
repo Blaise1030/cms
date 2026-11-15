@@ -23,6 +23,8 @@ test("chat sends a message, shows the reply and a checkpoint", async ({ page, or
   const { origin, token, projectId } = orso;
   const reply = fixtureReply();
 
+  // Step traces are off by default; this test checks them, so it switches them on.
+  await page.addInitScript(() => localStorage.setItem("orso.chat.showSteps", "1"));
   await page.goto(`${origin}/?t=${token}`);
   await startChange(orso, "Chat e2e");
   await page.goto(`${origin}/p/${projectId}`);

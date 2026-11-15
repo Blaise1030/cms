@@ -269,7 +269,7 @@ test("content editor saves a blog article with an image on a change branch and p
   await expect(page.getByTestId("content-unsaved")).toHaveCount(0);
 });
 
-test("welcome entry Open in preview navigates the preview to /blog/welcome/", async ({
+test("welcome entry Open preview opens /blog/welcome/ in a new tab", async ({
   page,
   orso,
   templateProject,
@@ -287,11 +287,14 @@ test("welcome entry Open in preview navigates the preview to /blog/welcome/", as
   await expect(page.getByTestId("body-rich")).toBeVisible();
   await expect(page.getByTestId("content-open-preview")).toBeVisible({ timeout: 120_000 });
 
-  await page.getByTestId("content-open-preview").click();
-
-  const address = page.getByTestId("preview-address");
-  await expect(address).toHaveValue("/blog/welcome/", { timeout: 180_000 });
-  await expect(frame(page).getByRole("heading", { level: 1 })).toHaveText("Welcome to the blog", {
+  // The entry opens in its own browser tab, so the writer keeps their place in the editor.
+  const [tab] = await Promise.all([
+    page.context().waitForEvent("page"),
+    page.getByTestId("content-open-preview").click(),
+  ]);
+  await tab.waitForLoadState();
+  expect(new URL(tab.url()).pathname).toMatch(/\/preview\/.+\/blog\/welcome\/$/);
+  await expect(tab.getByRole("heading", { level: 1 })).toHaveText("Welcome to the blog", {
     timeout: 180_000,
   });
 });

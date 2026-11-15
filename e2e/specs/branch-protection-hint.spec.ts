@@ -50,9 +50,11 @@ test("unprotected main: hint after share, dismissal survives reload", async ({
   await expect(page.getByTestId("protection-hint")).toBeHidden();
 
   // Sharing again on the same project does not bring the hint back.
+  await chatCheckpoint(orso, "edit again");
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  // Shared and up to date: there is nothing left to push, so Share steps aside.
+  await expect(page.getByTestId("share-preview")).toBeHidden();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   // Dismissed: the daemon no longer asks GitHub at all.
   expect(github.protectionGets()).toBe(1);
@@ -64,7 +66,8 @@ test("protected main: no hint after share", async ({ page, orso }) => {
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  // Shared and up to date: there is nothing left to push, so Share steps aside.
+  await expect(page.getByTestId("share-preview")).toBeHidden();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   expect(orso.github.protectionGets()).toBeGreaterThan(0);
 });
@@ -79,7 +82,8 @@ test("main protected by a ruleset requiring PRs: no hint after share", async ({
 
   await page.getByTestId("share-preview").click();
   await expect(page.getByTestId("pr-menu")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("share-preview")).toBeEnabled();
+  // Shared and up to date: there is nothing left to push, so Share steps aside.
+  await expect(page.getByTestId("share-preview")).toBeHidden();
   await expect(page.getByTestId("protection-hint")).toBeHidden();
   expect(orso.github.protectionGets()).toBeGreaterThan(0);
 });
