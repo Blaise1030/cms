@@ -253,6 +253,12 @@ export function auditPage(doc, { path }) {
 
   const huge = [];
   for (const el of doc.querySelectorAll("script:not([src]), style")) {
+    // Vite inlines processed CSS into <style data-vite-dev-id> during `astro
+    // dev` for HMR. Production ships a linked stylesheet; skip the false
+    // positive so preview checks match what visitors get.
+    if (el.tagName === "STYLE" && el.hasAttribute("data-vite-dev-id")) continue;
+    const type = (el.getAttribute("type") ?? "").toLowerCase();
+    if (el.tagName === "SCRIPT" && type === "application/ld+json") continue;
     const bytes = new TextEncoder().encode(el.textContent ?? "").length;
     if (bytes > HUGE_INLINE_BYTES) {
       huge.push(el);

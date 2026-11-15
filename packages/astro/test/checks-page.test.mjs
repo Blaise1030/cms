@@ -147,6 +147,18 @@ test("sync-script: blocking script in head", () => {
   );
 });
 
+test("huge-inline: skips Vite's dev-only inline CSS and JSON-LD data", () => {
+  const big = "x".repeat(50 * 1024 + 1);
+  expectNoRule(
+    wrap("<h1>x</h1>", `<title>Hi</title><style data-vite-dev-id="/src/a.css">${big}</style>`),
+    "huge-inline",
+  );
+  expectNoRule(
+    wrap("<h1>x</h1>", `<title>Hi</title><script type="application/ld+json">"${big}"</script>`),
+    "huge-inline",
+  );
+});
+
 test("huge-inline: script over 50 KiB", () => {
   const big = "x".repeat(50 * 1024 + 1);
   expectRule(
