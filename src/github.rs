@@ -1176,7 +1176,7 @@ impl GithubAuth {
         head_branch: &str,
     ) -> Result<PrStatus, ApiError> {
         let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
-            ApiError::enoent("this change has no open pull request — share it first")
+            ApiError::enoent("This change hasn't been shared yet — share it first")
         })?;
         if pull.draft {
             self.mark_ready_mutation(&pull.node_id).await?;
@@ -1203,9 +1203,9 @@ impl GithubAuth {
     }
 
     async fn mark_ready_mutation(&self, node_id: &str) -> Result<(), ApiError> {
-        const WHAT: &str = "GitHub could not mark the pull request ready for review";
+        const WHAT: &str = "GitHub couldn't send this change for a greenlight";
         if node_id.is_empty() {
-            return Err(ApiError::github(format!("{WHAT}: no pull request id")));
+            return Err(ApiError::github(format!("{WHAT}: no GitHub id for it")));
         }
         let payload = serde_json::json!({
             "query": MARK_READY_MUTATION,
@@ -1252,7 +1252,7 @@ impl GithubAuth {
             |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
         if status == reqwest::StatusCode::FORBIDDEN {
             return Err(ApiError::sandbox(
-                "You don't have permission to mark this pull request ready for review",
+                "You don't have permission to send this change for a greenlight",
             ));
         }
         if !status.is_success() {
@@ -1271,7 +1271,7 @@ impl GithubAuth {
                     .is_some_and(|k| PERMISSION_ERRORS.contains(&k))
                 {
                     ApiError::sandbox(format!(
-                        "You don't have permission to mark this pull request ready for review: {msg}"
+                        "You don't have permission to send this change for a greenlight: {msg}"
                     ))
                 } else {
                     ApiError::github(format!("{WHAT}: {msg}"))
@@ -1857,7 +1857,7 @@ fn github_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
     }
     if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
         let text: String = String::from_utf8_lossy(body).chars().take(200).collect();
-        return ApiError::conflict(format!("GitHub could not open the pull request: {text}"));
+        return ApiError::conflict(format!("GitHub couldn't share this change: {text}"));
     }
     let text: String = String::from_utf8_lossy(body).chars().take(300).collect();
     ApiError::github(format!("GitHub returned {status}: {text}"))
@@ -3788,7 +3788,7 @@ esac"#,
             let err = mark_ready_err(graphql_answers(true, body), tag).await;
             assert_eq!(err.code, ErrorCode::GithubErr, "{tag}");
             assert!(
-                err.message.contains("ready for review"),
+                err.message.contains("for a greenlight"),
                 "{tag}: {}",
                 err.message
             );
@@ -3830,7 +3830,7 @@ esac"#,
             );
             let err = mark_ready_err(routes, tag).await;
             assert!(
-                err.message.contains("ready for review"),
+                err.message.contains("for a greenlight"),
                 "{tag}: {}",
                 err.message
             );
@@ -3840,7 +3840,7 @@ esac"#,
                 err.message
             );
             assert!(
-                !err.message.contains("open the pull request"),
+                !err.message.contains("share this change"),
                 "{tag}: {}",
                 err.message
             );

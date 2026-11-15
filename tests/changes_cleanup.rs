@@ -114,7 +114,7 @@ async fn cleanup_refuses_unmerged_branch() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert!(
-        err.message.to_lowercase().contains("not been merged"),
+        err.message.to_lowercase().contains("isn't published yet"),
         "{}",
         err.message
     );
@@ -251,7 +251,7 @@ async fn cleanup_refuses_edits_made_after_the_pr_merged() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert!(
-        err.message.contains("after its pull request was merged"),
+        err.message.contains("after it was published"),
         "{}",
         err.message
     );
@@ -275,7 +275,7 @@ async fn cleanup_refuses_edits_made_after_the_merge_without_github() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
     assert!(
-        err.message.contains("after its pull request was merged"),
+        err.message.contains("after it was published"),
         "{}",
         err.message
     );

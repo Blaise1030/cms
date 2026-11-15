@@ -925,14 +925,14 @@ pub async fn cleanup(
             };
         if merged_before_tip {
             return Err(ApiError::conflict(
-                "This change has edits made after its pull request was merged — \
+                "This change has edits made after it was published — \
                  share them before cleaning up",
             ));
         }
         return Err(match pr {
             PrMerge::Unknown(e) => e,
             _ => ApiError::conflict(
-                "This change has not been merged yet — merge its pull request first",
+                "This change isn't published yet — publish it first",
             ),
         });
     }
