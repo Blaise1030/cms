@@ -86,7 +86,7 @@ describe("ProjectsGrid", () => {
     expect(header.classes()).toEqual(expect.arrayContaining(["relative", "z-10", "bg-background"]));
     expect(header.find("[aria-hidden='true'].bg-linear-to-b").exists()).toBe(true);
     expect(header.find("[data-testid='account-slot'] [data-testid='github-account']").exists()).toBe(true);
-    expect(header.find("svg.paw-mark").exists()).toBe(false);
+    expect(header.find("svg.bear-mark").exists()).toBe(false);
     w.unmount();
   });
 

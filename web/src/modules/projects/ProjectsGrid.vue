@@ -9,7 +9,7 @@ import UChip from "@nuxt/ui/components/Chip.vue";
 import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 import USkeleton from "@nuxt/ui/components/Skeleton.vue";
-import PawMark from "@/app/PawMark.vue";
+import BearMark from "@/app/BearMark.vue";
 import type { Project } from "@/core/types";
 import { isMacDesktop } from "@/lib/desktop";
 import { errorMessage } from "@orso/utils";
@@ -100,7 +100,7 @@ function open(project: Project) {
       <div class="mx-auto flex w-full max-w-2xl flex-col gap-8 px-10 pt-16 pb-16">
         <div class="flex flex-col gap-8">
           <header class="mb-2 flex items-center gap-4" data-testid="home-brand">
-            <PawMark class="text-muted size-7 shrink-0" data-testid="home-logo" />
+            <BearMark class="text-muted size-7 shrink-0" data-testid="home-logo" />
             <div class="min-w-0 leading-tight">
               <h1 class="text-highlighted text-lg font-semibold tracking-tight">orso</h1>
               <p class="text-muted text-sm">Build and edit your sites with your assistant</p>

@@ -19,7 +19,7 @@ import UProgress from "@nuxt/ui/components/Progress.vue";
 import USeparator from "@nuxt/ui/components/Separator.vue";
 import { useDaemon } from "@/core/daemon";
 import type { ProviderSignInState, RuntimeStatus, SetupProvider, SetupStatus } from "@/core/types";
-import PawMark from "@/app/PawMark.vue";
+import BearMark from "@/app/BearMark.vue";
 import ProviderIcon from "@/modules/chat/ProviderIcon.vue";
 import {
   PROVIDER_NAMES,
@@ -911,7 +911,7 @@ function dotLabel(n: Step): string {
 
       <footer class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pt-5">
         <div class="flex items-center">
-          <PawMark class="text-muted size-5" />
+          <BearMark class="text-muted size-5" />
         </div>
 
         <div class="flex items-center justify-center gap-2" aria-label="Setup steps">
