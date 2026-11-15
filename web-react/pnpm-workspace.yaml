@@ -1,0 +1,4 @@
+minimumReleaseAgeExclude:
+  - '@lenso/glass@0.2.1'
+  - '@lenso/tokens@0.11.1'
+  - '@lenso/ui@0.11.1'

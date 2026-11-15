@@ -18,6 +18,13 @@ dev:
     pnpm -C web dev & \
     wait
 
+# Daemon + React/Lenso spike on :5174 (Vue app unchanged; does not embed).
+dev-lenso:
+    trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT; \
+    cargo run -- serve --ui-url http://localhost:5174 & \
+    pnpm -C web-react dev & \
+    wait
+
 # Build the SPA (+ PWA service worker, checked), then the release binary that embeds it
 build:
     pnpm -C web install --frozen-lockfile

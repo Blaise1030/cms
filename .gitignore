@@ -4,6 +4,8 @@ target/
 node_modules/
 web/dist/
 web/node_modules/
+web-react/dist/
+web-react/node_modules/
 templates/astro-marketing/node_modules/
 templates/astro-marketing/dist/
 templates/astro-marketing/.astro/

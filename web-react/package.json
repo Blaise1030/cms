@@ -1,0 +1,30 @@
+{
+  "name": "orso-web-react",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lenso/glass": "0.2.1",
+    "@lenso/tokens": "0.11.1",
+    "@lenso/ui": "0.11.1",
+    "@stylexjs/stylex": "0.19.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@stylexjs/unplugin": "0.19.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "~5.9.0",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.2"
+  }
+}
