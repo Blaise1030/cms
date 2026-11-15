@@ -443,6 +443,11 @@ impl RuntimeResolver {
 
     fn managed_acp_argv(&self, provider_id: &str) -> Option<Vec<String>> {
         let id = RuntimeId::from_provider(provider_id)?;
+        // The Claude/Codex adapter runs on managed Node and drives either a managed or the
+        // writer's own CLI, so it does not need a managed copy of the CLI itself.
+        if matches!(id, RuntimeId::Claude | RuntimeId::Codex) {
+            return self.managed_adapter_argv(id);
+        }
         let install = self.managed_install(id)?;
         let spec = RuntimeSpec::for_target(id, self.target, &self.lock).ok()?;
         match id {
@@ -923,6 +928,47 @@ mod tests {
 
         let resolver = resolver.with_acp_env(Some(vec!["env".into()]));
         assert_eq!(resolver.acp("claude").unwrap().source, AcpSource::Env);
+    }
+
+    #[test]
+    fn managed_adapter_drives_a_system_cli() {
+        // The writer's own `claude` CLI (no managed copy) still chats through the pinned adapter
+        // on managed Node; it must not fall through to the unpinned `npx` system adapter.
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("store");
+        install(&store, "node", "26.13.0", "bin/node");
+        let prefix = store.join("acp/claude");
+        let bin = prefix.join("node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js");
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::write(
+            prefix.join("orso-adapter.json"),
+            serde_json::json!({
+                "schemaVersion": 1,
+                "provider": "claude",
+                "package": "@agentclientprotocol/claude-agent-acp",
+                "version": "0.100.0",
+                "bin": "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js",
+                "installedAt": 0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(&bin, "#!/usr/bin/env node\n").unwrap();
+
+        let resolver =
+            RuntimeResolver::new(&store, lock(), RuntimeTarget::DarwinArm64).with_acp_env(None);
+        let acp = resolver.acp("claude").unwrap();
+        assert_eq!(acp.source, AcpSource::Managed);
+        assert_eq!(
+            acp.argv,
+            [
+                store
+                    .join("node/26.13.0/bin/node")
+                    .to_string_lossy()
+                    .into_owned(),
+                bin.to_string_lossy().into_owned(),
+            ]
+        );
     }
 
     #[test]
