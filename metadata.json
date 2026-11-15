@@ -1,0 +1,65 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M7EDVYAQY430CPTX1CZ4DYJM",
+  "strategy": "manual-commit",
+  "branch": "spike/lenso-web-react",
+  "checkpoints_count": 13,
+  "files_touched": [
+    ".gitignore",
+    "docs/plans/lenso-spike-findings.md",
+    "justfile",
+    "web-react/README.md",
+    "web-react/index.html",
+    "web-react/package.json",
+    "web-react/pnpm-lock.yaml",
+    "web-react/pnpm-workspace.yaml",
+    "web-react/src/App.tsx",
+    "web-react/src/app.css",
+    "web-react/src/app/ConnectionGate.tsx",
+    "web-react/src/app/HomePage.tsx",
+    "web-react/src/app/Shell.tsx",
+    "web-react/src/core/api.ts",
+    "web-react/src/core/config.test.ts",
+    "web-react/src/core/config.ts",
+    "web-react/src/core/daemon.ts",
+    "web-react/src/core/socket.ts",
+    "web-react/src/core/types.ts",
+    "web-react/src/core/useDaemon.ts",
+    "web-react/src/main.tsx",
+    "web-react/src/vite-env.d.ts",
+    "web-react/tsconfig.app.json",
+    "web-react/tsconfig.json",
+    "web-react/tsconfig.node.json",
+    "web-react/vite.config.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 524142,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 8559360,
+    "output_tokens": 43063,
+    "api_call_count": 12
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
