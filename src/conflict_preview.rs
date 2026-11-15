@@ -187,7 +187,9 @@ impl ConflictPreviewManager {
                 let html = String::from_utf8_lossy(&bytes);
                 if html.matches(&format!("id=\"{id}\"")).count() == 1 {
                     let style = format!(
-                        r#"<style data-conflict-highlight>section[id="{id}"]{{outline:3px solid #f59e0b!important;outline-offset:4px!important}}</style>"#
+                        // A band as wide as the preview, so the changed section reads edge to edge
+                        // even when the site insets it with margins.
+                        r#"<style data-conflict-highlight>html{{overflow-x:clip!important}}section[id="{id}"]{{position:relative!important}}section[id="{id}"]::after{{content:"";position:absolute;top:-4px;bottom:-4px;left:calc(50% - 50vw);width:100vw;box-sizing:border-box;border:3px solid #f59e0b;pointer-events:none;z-index:2147483647}}</style>"#
                     );
                     bytes = html
                         .replace("</head>", &format!("{style}</head>"))

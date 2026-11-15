@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { defineAsyncComponent, shallowRef, watch } from "vue";
-import { Button } from "@/components/ui/button";
-import type { ConflictChoice, ConflictFile } from "@/core/types";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import type { ConflictFile } from "@/core/types";
 import type { FileDiff } from "@/modules/checkpoints/diff";
 
-const props = defineProps<{ file: ConflictFile; choice?: ConflictChoice }>();
-const emit = defineEmits<{ choose: [choice: ConflictChoice] }>();
+/** The text comparison behind a combine choice, collapsed by default: writers decide from the previews. */
+const props = defineProps<{ file: ConflictFile }>();
 const DiffView = defineAsyncComponent(() => import("@/modules/checkpoints/DiffView.vue"));
 const parsed = shallowRef<FileDiff | null>(null);
 let parseRun = 0;
@@ -19,22 +19,19 @@ watch(() => props.file.patch, async (patch) => {
 </script>
 
 <template>
-  <div class="space-y-4" data-testid="conflict-file">
-    <div>
-      <p class="font-medium">{{ file.path.split("/").at(-1) }}</p>
-      <p class="text-muted-foreground font-mono text-xs">{{ file.path }}</p>
+  <details class="group" data-testid="conflict-code">
+    <summary class="text-muted hover:text-default flex cursor-pointer list-none items-center gap-1.5 text-sm select-none">
+      <UIcon name="i-hugeicons-arrow-right-01" class="size-4 transition-transform group-open:rotate-90" />
+      Show code
+      <span class="font-mono text-xs">{{ file.path }}</span>
+    </summary>
+    <div class="mt-3">
+      <p v-if="file.binary" class="text-muted text-sm">This file can't be shown as text.</p>
+      <template v-else-if="parsed">
+        <p class="text-muted mb-2 text-xs">Red lines are your version, green lines are the live site's.</p>
+        <DiffView :diff="parsed.meta" />
+      </template>
+      <p v-else class="text-muted text-sm">No text to compare for this file.</p>
     </div>
-    <p class="text-muted-foreground text-sm">
-      Choose the version to keep in this file. Keep both places your text before the latest text in each conflicting region.
-      <span v-if="file.oursDeleted || file.theirsDeleted"> One version deleted this file.</span>
-    </p>
-    <div class="flex flex-wrap gap-2">
-      <Button size="sm" :variant="choice === 'yours' ? 'default' : 'outline'" data-testid="keep-yours" @click="emit('choose', 'yours')">{{ file.oursDeleted ? 'Keep your deletion' : 'Keep yours' }}</Button>
-      <Button size="sm" :variant="choice === 'latest' ? 'default' : 'outline'" data-testid="use-latest" @click="emit('choose', 'latest')">{{ file.theirsDeleted ? 'Use latest deletion' : 'Use latest' }}</Button>
-      <Button size="sm" :variant="choice === 'both' ? 'default' : 'outline'" :disabled="file.binary || file.oursDeleted || file.theirsDeleted" data-testid="keep-both" @click="emit('choose', 'both')">Keep both</Button>
-    </div>
-    <p v-if="file.binary" class="text-muted-foreground text-sm">This file cannot be compared as text.</p>
-    <DiffView v-else-if="parsed" :diff="parsed.meta" />
-    <p v-else class="text-muted-foreground text-sm">No text comparison available for this file.</p>
-  </div>
+  </details>
 </template>

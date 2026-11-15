@@ -200,7 +200,7 @@ impl ConflictSessions {
         )
         .await?;
         if !candidate.complete {
-            return Err(ApiError::conflict("Choose a resolution for every file"));
+            return Err(ApiError::conflict("Choose a version for every part first"));
         }
         if let Some(previews) = previews {
             let preview_commit =

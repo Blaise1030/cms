@@ -478,7 +478,7 @@ pub async fn conflict_previews(
             .remove_source(&id, Source::Result)
             .await;
         PreviewState::Unavailable {
-            reason: "Choose a resolution for every file to preview the result".into(),
+            reason: "Choose a version for every part to see the result".into(),
         }
     };
     Ok(Json(

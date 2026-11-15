@@ -45,6 +45,39 @@ describe("ConflictView", () => {
     expect(store.selectedConflictId).toBeNull();
   });
 
+  it("speaks in pages and versions, never git terms or paths up front", async () => {
+    const store = useChangesStore();
+    await store.openConflict("site", "s1");
+    const wrapper = mount(ConflictView, { props: { projectId: "site" } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("You and a teammate both changed the Hero section.");
+    expect(wrapper.get("[data-testid='conflict-item']").text()).toContain("Hero section");
+    expect(wrapper.get("[data-testid='conflict-item']").text()).toContain("Needs a decision");
+    expect(wrapper.get("[data-testid='conflict-progress']").text()).toBe("0 of 1 decided");
+    expect(wrapper.get("[data-testid='finish-conflict']").attributes("title")).toBe("Choose a version for every part first.");
+    // Everything outside the collapsed code block avoids the implementation's words.
+    const visible = wrapper.text().replace(wrapper.get("[data-testid='conflict-code']").text(), "");
+    expect(visible).not.toMatch(/\bmain\b|branch|merge|commit|conflict|content\/page|src\//i);
+
+    await wrapper.get("[data-testid='use-latest']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='conflict-progress']").text()).toBe("1 of 1 decided");
+    expect(wrapper.get("[data-testid='conflict-item']").text()).toContain("Live site version");
+    expect(wrapper.get("[data-testid='use-latest']").attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get("[data-testid='keep-yours']").attributes("aria-pressed")).toBe("false");
+  });
+
+  it("offers Keep both only when both sides are text that still exists", async () => {
+    const store = useChangesStore();
+    await store.openConflict("site", "s1");
+    store.currentConflict!.files[0]!.oursDeleted = true;
+    const wrapper = mount(ConflictView, { props: { projectId: "site" } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='keep-yours']").text()).toBe("Keep your deletion");
+    expect(wrapper.get("[data-testid='keep-both']").attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("You removed this, but it was changed on the live site since.");
+  });
+
   it("abandon leaves the branch alone and closes the view", async () => {
     const store = useChangesStore();
     await store.openConflict("site", "s1");
