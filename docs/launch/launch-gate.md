@@ -2,7 +2,7 @@
 
 Recomputed every Thursday. Only the user closes an item.
 
-**Last checked:** 14 Nov 2026 — 0 of 6.
+**Last checked:** 15 Nov 2026 — 1 of 6.
 
 | # | Gate | State | Evidence |
 |---|---|---|---|
@@ -10,8 +10,8 @@ Recomputed every Thursday. Only the user closes an item.
 | 2 | Content editor shipped (#22) | ✗ | open |
 | 3 | Localisation shipped (#23) | ✗ | open |
 | 4 | Three-minute demo showing the agent resolving a real conflict | ✗ | — |
-| 5 | Docs good enough that nobody emails in week one | ✗ | — |
-| 6 | A price, or an explicit decision to be free and open source | ✗ | no licence in repo |
+| 5 | Docs good enough that nobody emails in week one | ✗ | README rewritten as a getting-started page (15 Nov); no separate user guide yet |
+| 6 | A price, or an explicit decision to be free and open source | ✓ | Closed by the user 15 Nov: free and open source, MIT (`LICENSE`, [decision 001](decisions/001-price-or-open-source.md)) |
 
 ## Why each matters
 
