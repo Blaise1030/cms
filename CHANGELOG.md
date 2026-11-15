@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.6
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.5...v0.1.6)
+
+### Features
+
+- Talk about sharing and greenlights instead of pull requests in daemon messages ([852b1f1](https://github.com/Blaise1030/CMS/commit/852b1f1))
+- **web:** Redesign the conflict screen around pages and versions ([ba451f6](https://github.com/Blaise1030/CMS/commit/ba451f6))
+
+### Fixes
+
+- **runtime:** Drive the writer's own Claude/Codex CLI through the pinned managed adapter ([098b64b](https://github.com/Blaise1030/CMS/commit/098b64b))
+- **web:** Show chat approvals one at a time instead of stacking them ([d505854](https://github.com/Blaise1030/CMS/commit/d505854))
+
 ## v0.1.5
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.4...v0.1.5)
