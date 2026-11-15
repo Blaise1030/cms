@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.8
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.7...v0.1.8)
+
+### Features
+
+- **web:** Bring back the bear as orso's icon everywhere ([b598a97](https://github.com/Blaise1030/CMS/commit/b598a97))
+
 ## v0.1.7
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.5...v0.1.7)
