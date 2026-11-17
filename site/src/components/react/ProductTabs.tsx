@@ -74,7 +74,9 @@ function PaintedStage({ children }: { children: ReactNode }) {
 
 function PanelCard({ children }: { children: ReactNode }) {
   return (
-    <Card className="min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0 shadow-none ring-0">{children}</Card>
+    <Card className="aspect-video h-full w-auto max-w-full min-h-0 overflow-hidden rounded-md border border-line p-0 shadow-none ring-0">
+      {children}
+    </Card>
   );
 }
 
@@ -163,7 +165,7 @@ export function ProductTabs() {
         })}
       </TabsList>
       <PaintedStage>
-        <TabsContent value="content" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="content" className="mt-0 flex min-h-0 flex-1 flex-col items-center justify-center">
           <PanelCard>
             <WindowChrome crumbs={["site", "content", "blog"]} action={<StatusBadge tone="neutral" label="All content" />} />
             <div className="grid md:grid-cols-[12.5rem_minmax(0,1fr)]" aria-hidden="true">
@@ -220,7 +222,7 @@ export function ProductTabs() {
           </PanelCard>
         </TabsContent>
 
-        <TabsContent value="preview" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="preview" className="mt-0 flex min-h-0 flex-1 flex-col items-center justify-center">
           <PanelCard>
             <WindowChrome
               crumbs={["site", "preview", "home"]}
@@ -258,7 +260,7 @@ export function ProductTabs() {
           </PanelCard>
         </TabsContent>
 
-        <TabsContent value="publish" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="publish" className="mt-0 flex min-h-0 flex-1 flex-col items-center justify-center">
           <PanelCard>
             <WindowChrome crumbs={["site", "publish"]} action={<StatusBadge tone="review" label="Ready to publish" />} />
             <div className="grid place-items-center p-6" aria-hidden="true">
@@ -288,7 +290,7 @@ export function ProductTabs() {
           </PanelCard>
         </TabsContent>
 
-        <TabsContent value="agent" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="agent" className="mt-0 flex min-h-0 flex-1 flex-col items-center justify-center">
           <PanelCard>
             <WindowChrome crumbs={["site", "agent"]} action={<StatusBadge tone="draft" label="Draft ready" />} />
             <div className="grid md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
@@ -329,7 +331,7 @@ export function ProductTabs() {
           </PanelCard>
         </TabsContent>
 
-        <TabsContent value="history" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="history" className="mt-0 flex min-h-0 flex-1 flex-col items-center justify-center">
           <PanelCard>
             <WindowChrome crumbs={["site", "history"]} action={<StatusBadge tone="live" label="Live" />} />
             <div className="p-5 md:p-7" aria-hidden="true">

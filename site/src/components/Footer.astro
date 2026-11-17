@@ -19,46 +19,48 @@ const groups = [
 ].filter((group) => group.links.length > 0);
 ---
 
-<footer class="relative overflow-hidden bg-night text-on-night">
-  <div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 select-none text-center">
-    <span class="block font-display text-watermark font-medium uppercase tracking-display text-night-ghost">
-      Orso
-    </span>
-  </div>
-
-  <div class="page relative z-10 grid gap-14 pb-14 pt-20 md:grid-cols-12 md:gap-10 md:pb-20 md:pt-24">
-    <div class="md:col-span-4">
-      <a
-        class="inline-flex size-16 items-center justify-center rounded-md border border-night-line bg-night-raised text-on-night transition-colors duration-quick ease-gentle hover:border-on-night-muted"
-        href={base}
-        aria-label={`${site.name} home`}
-      >
-        <BearMark class="h-7 w-auto" />
-      </a>
-      <p class="mt-5 max-w-xs text-sm text-on-night-muted">{site.tagline}.</p>
+<footer class="bg-night text-on-night" id="site-footer">
+  <div class="relative overflow-hidden">
+    <div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 select-none text-center">
+      <span class="block font-display text-watermark font-medium uppercase tracking-display text-night-ghost">
+        Orso
+      </span>
     </div>
 
-    <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:col-span-8" aria-label="Footer">
-      {groups.map((group) => (
-        <div>
-          <p class="text-xs font-medium text-on-night-muted">{group.title}</p>
-          <ul class="mt-5 space-y-3 text-sm">
-            {group.links.map((link) => (
-              <li>
-                <a
-                  class="text-on-night transition-colors duration-quick ease-gentle hover:text-on-night-muted"
-                  href={href(link.href)}
-                  rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
-                >
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </nav>
+    <div class="page relative z-10 grid gap-14 pb-14 pt-20 md:grid-cols-12 md:gap-10 md:pb-20 md:pt-24">
+      <div class="md:col-span-4">
+        <a
+          class="inline-flex size-16 items-center justify-center rounded-md border border-night-line bg-night-raised text-on-night transition-colors duration-quick ease-gentle hover:border-on-night-muted"
+          href={base}
+          aria-label={`${site.name} home`}
+        >
+          <BearMark class="h-7 w-auto" />
+        </a>
+        <p class="mt-5 max-w-xs text-sm text-on-night-muted">{site.tagline}.</p>
+      </div>
+
+      <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:col-span-8" aria-label="Footer">
+        {groups.map((group) => (
+          <div>
+            <p class="text-xs font-medium text-on-night-muted">{group.title}</p>
+            <ul class="mt-5 space-y-3 text-sm">
+              {group.links.map((link) => (
+                <li>
+                  <a
+                    class="text-on-night transition-colors duration-quick ease-gentle hover:text-on-night-muted"
+                    href={href(link.href)}
+                    rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
+                  >
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </div>
   </div>
 
-  <div class="relative z-10 border-t border-night-line">
+  <div class="relative border-t border-night-line">
     <div class="page grid gap-6 py-6 md:grid-cols-12 md:items-center">
       <ul class="flex items-center gap-4 md:col-span-3" aria-label="Social">
         {site.socials.map((social) => (
