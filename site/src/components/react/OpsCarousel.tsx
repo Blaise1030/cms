@@ -161,7 +161,7 @@ export function OpsCarousel() {
                 index === last && "pr-gutter md:pr-gutter-wide",
               )}
             >
-              <Card className="flex h-full flex-col gap-0 rounded-md border border-line py-0 shadow-soft">
+              <Card className="flex h-full flex-col gap-0 rounded-md border border-line py-0 shadow-none">
                 <CardContent className="relative aspect-3/2 min-h-0 flex-1 overflow-hidden p-0" aria-hidden="true">
                   <img
                     src={paintingUrl(slide.painting)}
