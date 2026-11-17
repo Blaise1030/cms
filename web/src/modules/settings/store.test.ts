@@ -11,7 +11,7 @@ import { useSettingsStore } from "./store";
 
 const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock" };
 const doc = (over: Partial<SettingsDoc> = {}): SettingsDoc => ({
-  exists: true, settings: { root: "apps/web", extra: { keep: true } }, defaults, hash: "h1", branch: "content/a", errors: {}, ...over,
+  exists: true, settings: { root: "apps/web", extra: { keep: true } }, defaults, hash: "h1", branch: "content/a", errors: {}, siteRoot: "apps/web", ...over,
 });
 
 function setup(api: Record<string, unknown> = {}) {

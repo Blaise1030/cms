@@ -202,14 +202,32 @@ pub(crate) async fn require_change(state: &AppState, project_id: &str) -> Result
     changes::require_change(&project.dir, project.repo.as_deref()).await
 }
 
-/// `GET /api/checkpoints?project=` → `{ checkpoints: [{ sha, summary, ts }] }` (newest first).
+/// The folder History is scoped to: the configured site `root` from `orso.json` (as a
+/// `site/` prefix), or the whole repo (`""`) when it is `.` or the settings are missing/invalid.
+fn history_scope(dir: &std::path::Path) -> String {
+    crate::settings::site_prefix(dir)
+}
+
+/// `GET /api/checkpoints?project=` → `{ checkpoints: [{ sha, summary, ts }], root, head }`
+/// (newest first). With a site `root` other than `.` only commits touching it are listed, so
+/// the newest one need not be `head` (the commit the project is at, `null` before the first).
 pub async fn list(
     State(state): State<AppState>,
     q: Result<Query<ProjectQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let q = query_or_badreq(q)?;
     let dir = project_dir(&state, &q.project).await?;
-    Ok(Json(json!({ "checkpoints": git::log(&dir).await? })))
+    let scope = history_scope(&dir);
+    let checkpoints = git::log(&dir, &scope).await?;
+    let root = match scope.trim_end_matches('/') {
+        "" => ".",
+        root => root,
+    };
+    Ok(Json(json!({
+        "checkpoints": checkpoints,
+        "root": root,
+        "head": git::head(&dir).await,
+    })))
 }
 
 /// `GET /api/checkpoints/{sha}/diff?project=` → the commit's unified diff (`text/plain`).
@@ -220,7 +238,8 @@ pub async fn diff(
 ) -> Result<Response, ApiError> {
     let q = query_or_badreq(q)?;
     let dir = project_dir(&state, &q.project).await?;
-    let text = git::diff(&dir, &sha).await?;
+    let scope = history_scope(&dir);
+    let text = git::diff(&dir, &sha, &scope).await?;
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
 }
 

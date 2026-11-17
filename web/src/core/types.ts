@@ -41,6 +41,14 @@ export interface Project {
   repo: string | null;
 }
 
+/** `GET /api/checkpoints`: the history of the site `root` (`.` = whole repo), newest first. */
+export interface CheckpointLog {
+  checkpoints: Checkpoint[];
+  root: string;
+  /** The commit the project is at; with a site root it can be newer than every listed checkpoint. */
+  head: string | null;
+}
+
 export interface Checkpoint {
   sha: string;
   summary: string;
@@ -643,4 +651,6 @@ export interface ProjectSettings { root: string; installDir: string; install: st
 export interface SettingsDoc {
   exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;
   errors: Record<string, string>;
+  /** The site folder the daemon uses: the normalized `root`, or `.` when the file is missing or invalid. */
+  siteRoot: string;
 }

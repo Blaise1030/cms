@@ -43,12 +43,17 @@ import { useCheckpointsStore } from "./store";
 const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-x\n+y\n";
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
-async function mountPanel(start = "/p/p/history") {
+const CHECKPOINTS = [
+  { sha: "aaaaaaa111", summary: "checkpoint: initial", author: "Ada", ts: 100 },
+  { sha: "bbbbbbb222", summary: "checkpoint: hero", author: "orso", ts: 200 },
+];
+
+async function mountPanel(
+  start = "/p/p/history",
+  log: { root: string; head: string | null } = { root: ".", head: "bbbbbbb222" },
+) {
   api = {
-    listCheckpoints: vi.fn(async () => [
-      { sha: "aaaaaaa111", summary: "checkpoint: initial", author: "Ada", ts: 100 },
-      { sha: "bbbbbbb222", summary: "checkpoint: hero", author: "orso", ts: 200 },
-    ]),
+    listCheckpoints: vi.fn(async () => ({ checkpoints: CHECKPOINTS, ...log })),
     checkpointDiff: vi.fn(async () => DIFF),
     restoreCheckpoint: vi.fn(async () => ({ restored: "aaaaaaa111" })),
   };
@@ -84,6 +89,7 @@ describe("CheckpointsPanel", () => {
   it("shows the timeline newest first", async () => {
     const w = await mountPanel();
     await flushPromises();
+    expect(w.find("[data-testid='history-scope']").exists()).toBe(false);
     const items = w.findAll("[data-testid='checkpoint-item']");
     expect(items.map((i) => i.text())).toEqual([
       expect.stringContaining("checkpoint: hero"),
@@ -128,9 +134,11 @@ describe("CheckpointsPanel", () => {
   it("reloads the timeline on events.lagged and reconnect", async () => {
     const w = await mountPanel();
     await flushPromises();
-    api.listCheckpoints!.mockResolvedValueOnce([
-      { sha: "ddddddd444", summary: "checkpoint: missed", author: "orso", ts: 300 },
-    ]);
+    api.listCheckpoints!.mockResolvedValueOnce({
+      checkpoints: [{ sha: "ddddddd444", summary: "checkpoint: missed", author: "orso", ts: 300 }],
+      root: ".",
+      head: "ddddddd444",
+    });
     h.daemon.emit({ type: "events.lagged", missed: 2 });
     await flushPromises();
     expect(api.listCheckpoints).toHaveBeenCalledTimes(2);
@@ -199,5 +207,44 @@ describe("CheckpointsPanel", () => {
     await flushPromises();
     expect(w.find("[data-testid='restore']").attributes("disabled")).toBeDefined();
     w.unmount();
+  });
+
+  describe("with a site folder set", () => {
+    const scoped = { root: "site", head: "fffffff999" };
+
+    it("labels the timeline and marks no checkpoint current when HEAD is outside the site", async () => {
+      const w = await mountPanel("/p/p/history", scoped);
+      await flushPromises();
+      expect(w.find("[data-testid='history-scope']").text()).toBe("Changes to site/");
+      expect(w.findAll("[data-testid='checkpoint-item']")).toHaveLength(2);
+      expect(w.text()).not.toContain("Current");
+      await w.findAll("[data-testid='checkpoint-item']")[0]!.trigger("click");
+      await flushPromises();
+      expect(w.find("[data-testid='restore']").attributes("disabled")).toBeUndefined();
+      await w.find("[data-testid='restore']").trigger("click");
+      await flushPromises();
+      expect(document.body.textContent).toContain("including files outside site/");
+      w.unmount();
+    });
+
+    it("marks the newest checkpoint current when it is HEAD", async () => {
+      const w = await mountPanel("/p/p/history", { root: "site", head: "bbbbbbb222" });
+      await flushPromises();
+      expect(w.findAll("[data-testid='checkpoint-item']")[0]!.text()).toContain("Current");
+      w.unmount();
+    });
+
+    it("reloads instead of prepending checkpoint.created events", async () => {
+      const w = await mountPanel("/p/p/history", scoped);
+      await flushPromises();
+      h.daemon.emit({
+        type: "checkpoint.created", projectId: "p", sha: "ccccccc333", summary: "checkpoint: outside",
+        author: "Grace", ts: 400,
+      });
+      await flushPromises();
+      expect(api.listCheckpoints).toHaveBeenCalledTimes(2);
+      expect(w.text()).not.toContain("checkpoint: outside");
+      w.unmount();
+    });
   });
 });

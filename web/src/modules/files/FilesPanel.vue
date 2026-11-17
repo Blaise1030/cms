@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { computed, watch } from "vue";
 import { useRouter } from "vue-router";
 import { codePath } from "@/router";
 import type { SplitterItem } from "@nuxt/ui";
@@ -18,6 +18,21 @@ const panels: SplitterItem[] = [
   { id: "files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
   { id: "files-viewer", slot: "viewer", defaultSize: 80, minSize: 40 },
 ];
+
+// With a site folder set, the tree is rooted there: it shows paths relative to the folder,
+// while the store, the URL and file reads keep repo-relative paths.
+const prefix = computed(() => (store.root ? `${store.root}/` : ""));
+const treePaths = computed(() =>
+  prefix.value ? store.paths.map((p) => p.slice(prefix.value.length)) : store.paths,
+);
+const treeSelected = computed(() => {
+  const path = store.selectedPath;
+  if (!path || !prefix.value) return path;
+  return path.startsWith(prefix.value) ? path.slice(prefix.value.length) : null;
+});
+const treeStorageKey = computed(() =>
+  store.root ? `files:${props.projectId}:${store.root}` : `files:${props.projectId}`,
+);
 
 watch(
   () => props.projectId,
@@ -59,10 +74,10 @@ watch(
         </p>
         <ProjectFilesTree
           v-else
-          :paths="store.paths"
-          :selected-path="store.selectedPath"
-          :storage-key="`files:${projectId}`"
-          @select="router.push(codePath(projectId, $event))"
+          :paths="treePaths"
+          :selected-path="treeSelected"
+          :storage-key="treeStorageKey"
+          @select="router.push(codePath(projectId, prefix + $event))"
         />
       </aside>
     </template>

@@ -134,8 +134,21 @@ async fn get_without_file() {
         "npm run dev -- --port {port} --host {host} --ignore-lock"
     );
     assert_eq!(v["defaults"]["root"], ".");
+    assert_eq!(v["siteRoot"], ".");
     assert_eq!(v["errors"], json!({}));
     assert!(v.get("hash").is_none() || v["hash"].is_null(), "{v}");
+}
+
+#[tokio::test]
+async fn get_reports_the_normalized_site_root() {
+    let e = env(false).await;
+    std::fs::create_dir_all(e.dir.join("site")).unwrap();
+    std::fs::write(e.dir.join("site/astro.config.mjs"), "export default {};\n").unwrap();
+    std::fs::write(e.file(), r#"{"root":"./site/"}"#).unwrap();
+    let (s, v) = get(&e).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["errors"], json!({}), "{v}");
+    assert_eq!(v["siteRoot"], "site");
 }
 
 #[tokio::test]
@@ -148,6 +161,10 @@ async fn get_reports_field_errors() {
     assert!(
         v["errors"]["dev"].as_str().unwrap().contains("{port}"),
         "{v}"
+    );
+    assert_eq!(
+        v["siteRoot"], ".",
+        "invalid settings fall back to the repo root"
     );
 
     std::fs::write(e.file(), "nope").unwrap();

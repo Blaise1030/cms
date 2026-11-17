@@ -61,7 +61,7 @@ After adding or renaming content (or when the Content sidebar looks stale), run 
 
 ## Deployment
 
-Static `dist/` only (no SSR adapter). Default CI is Cloudflare Workers via `.github/workflows/deploy.yml` + `wrangler.toml` (secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) — see `README.md`.
+Static `dist/` only (no SSR adapter). Default CI is Cloudflare Workers via the repo-root `.github/workflows/deploy-site.yml` in orso's repo + `wrangler.toml` (secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) — see `README.md`.
 
 **Any host is fine** if the deploy workflow records GitHub Deployments: on success, set status `success` with an `http(s)` `environment_url` (PR head SHA → Preview link; `main` tip → Open live site). Without that URL, orso has nothing to link. When editing or replacing the workflow, always keep those deployment statuses.
 

@@ -169,6 +169,8 @@ async fn log_and_diff_endpoints_match_git() {
         .as_str()
         .unwrap()
         .starts_with("Initial commit"));
+    assert_eq!(body["root"], ".");
+    assert_eq!(body["head"], cp.sha);
 
     let (s, headers, bytes) = raw(
         &app,
@@ -208,6 +210,85 @@ async fn log_and_diff_endpoints_match_git() {
     .await;
     assert_eq!(s, StatusCode::OK);
     assert!(String::from_utf8(bytes).unwrap().contains("new file mode"));
+}
+
+async fn history(app: &axum::Router) -> (Value, Vec<String>) {
+    let (s, body) = call(app, req("GET", "/api/checkpoints?project=site", None)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let summaries = body["checkpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["summary"].as_str().unwrap().to_string())
+        .collect();
+    (body, summaries)
+}
+
+async fn diff_text(app: &axum::Router, sha: &str) -> String {
+    let (s, _, bytes) = raw(
+        app,
+        req(
+            "GET",
+            &format!("/api/checkpoints/{sha}/diff?project=site"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    String::from_utf8(bytes).unwrap()
+}
+
+#[tokio::test]
+async fn history_is_scoped_to_the_configured_site_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, dir) = project(tmp.path()).await;
+    std::fs::create_dir_all(dir.join("site")).unwrap();
+    std::fs::write(dir.join("site/astro.config.mjs"), "export default {};\n").unwrap();
+    std::fs::write(dir.join("orso.json"), r#"{ "root": "site" }"#).unwrap();
+    git::checkpoint(&dir, "Add site").await.unwrap().unwrap();
+    std::fs::write(dir.join("outside.txt"), "one\n").unwrap();
+    git::checkpoint(&dir, "Outside edit")
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(dir.join("site/page.md"), "hello\n").unwrap();
+    std::fs::write(dir.join("outside.txt"), "two\n").unwrap();
+    let mixed = git::checkpoint(&dir, "Site and outside edit")
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(dir.join("outside.txt"), "three\n").unwrap();
+    let last = git::checkpoint(&dir, "Later outside edit")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Only commits touching site/ are listed; head still names the real HEAD.
+    let (body, summaries) = history(&app).await;
+    assert_eq!(summaries, ["Site and outside edit", "Add site"]);
+    assert_eq!(body["root"], "site");
+    assert_eq!(body["head"], last.sha);
+
+    // The diff of a mixed commit shows only the site's files.
+    let diff = diff_text(&app, &mixed.sha).await;
+    assert!(diff.contains("site/page.md"), "{diff}");
+    assert!(!diff.contains("outside.txt"), "{diff}");
+    // A commit outside the root (reachable from HEAD) diffs as empty rather than erroring.
+    assert_eq!(diff_text(&app, &last.sha).await.trim(), "");
+
+    // Invalid settings fall back to the whole repo.
+    std::fs::write(dir.join("orso.json"), r#"{ "root": "missing" }"#).unwrap();
+    let (body, summaries) = history(&app).await;
+    assert_eq!(body["root"], ".");
+    assert_eq!(summaries.len(), 5, "{summaries:?}");
+    assert_eq!(summaries[0], "Later outside edit");
+    assert!(diff_text(&app, &mixed.sha).await.contains("outside.txt"));
+
+    // Root "." lists everything too.
+    std::fs::write(dir.join("orso.json"), r#"{ "root": "." }"#).unwrap();
+    let (body, summaries) = history(&app).await;
+    assert_eq!(body["root"], ".");
+    assert_eq!(summaries.len(), 5);
 }
 
 #[tokio::test]
