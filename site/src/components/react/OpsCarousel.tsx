@@ -122,7 +122,7 @@ export function OpsCarousel() {
 
   return (
     <Carousel opts={{ align: "start", loop: false }} className="w-full">
-      <div className="page mb-6 flex items-center justify-start gap-2">
+      <div className="page mb-6 flex items-center justify-start gap-2 md:justify-end">
         <CarouselPrevious size="icon-lg" className="static translate-y-0" />
         <CarouselNext size="icon-lg" className="static translate-y-0" />
       </div>
