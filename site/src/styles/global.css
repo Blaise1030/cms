@@ -114,7 +114,6 @@
   --motion-stagger: 45ms;
   --animate-rise: rise var(--transition-duration-slow) var(--ease-settle) both;
   --animate-word: word-rise 900ms var(--ease-settle) both;
-  --animate-painting-drift: painting-drift 44s var(--ease-gentle) infinite alternate;
 
   @keyframes rise {
     from { opacity: 0; translate: 0 var(--spacing-rise); }
@@ -126,10 +125,6 @@
     to { opacity: 1; translate: 0 0; filter: blur(0); }
   }
 
-  @keyframes painting-drift {
-    from { scale: 1.02; translate: 0 0; }
-    to { scale: 1.07; translate: -1.5% 1%; }
-  }
 }
 
 /* Dark mode: the same tokens with neutral values, following the visitor's system setting. */
@@ -367,11 +362,6 @@
   .rise-3 {
     animation: var(--animate-rise);
     animation-delay: calc(var(--motion-stagger) * 6);
-  }
-  /* The hero painting drifts, so the painted stage reads as a film still rather than a photo. */
-  .painting-drift {
-    animation: var(--animate-painting-drift);
-    will-change: scale, translate;
   }
   /* FAQ answers open smoothly where the browser supports animating to height: auto. */
   :root {

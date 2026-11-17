@@ -32,6 +32,6 @@ export const site = {
   },
   socials: [
     { label: "GitHub", href: "https://github.com/Blaise1030/cms", icon: "github" as const },
-    { label: "Blaise", href: "https://blaisetiong.dev", icon: "globe" as const },
+    { label: "Portfolio", href: "https://blaisetiong.dev", icon: "globe" as const },
   ],
 };
