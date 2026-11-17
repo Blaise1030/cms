@@ -141,7 +141,7 @@ export function ProductTabs() {
     >
       <TabsList
         variant="line"
-        className="flex h-auto! w-full items-stretch gap-0 overflow-x-auto rounded-none border-b border-line bg-transparent p-0 md:overflow-visible"
+        className="relative z-10 flex h-auto! w-full items-stretch gap-0 overflow-x-auto rounded-none border-b border-line bg-transparent p-0 md:overflow-visible"
       >
         {tabs.map((tab, index) => {
           const fill = index < activeIndex ? 1 : index === activeIndex ? (reducedMotion ? 1 : progress) : 0;
@@ -153,7 +153,7 @@ export function ProductTabs() {
             >
               <span className="text-base font-medium text-ink">{tab.title}</span>
               <span className="text-sm leading-snug font-normal whitespace-normal text-muted">{tab.description}</span>
-              <span className="absolute inset-x-0 bottom-0 h-0.5 bg-line" aria-hidden="true">
+              <span className="absolute inset-x-0 bottom-0 z-10 h-0.5 bg-line" aria-hidden="true">
                 <span className="block h-full origin-left bg-ink" style={{ width: `${fill * 100}%` }} />
               </span>
             </TabsTrigger>
