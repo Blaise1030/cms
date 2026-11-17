@@ -59,7 +59,7 @@ const navLink = "group block border-t border-line pt-6";
     </nav>
     <div class="mt-10 grid gap-12 lg:grid-cols-12 lg:gap-10">
       <div class="min-w-0 lg:col-span-8">
-        <h1 class="rise text-4xl font-light tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
+        <h1 class="rise text-4xl tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
         <p class="rise-2 mt-6 max-w-prose text-xl text-muted">{entry.data.description}</p>
         {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
         <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>

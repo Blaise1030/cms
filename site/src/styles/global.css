@@ -33,6 +33,7 @@
   --color-status-draft: #b45309;
   --color-status-review: #2563eb;
   --color-status-live: #15803d;
+  --color-status-danger: #b91c1c;
 
   /* Type: one family (Geist, loaded by Astro's font API as --font-geist). */
   --font-*: initial;
@@ -139,6 +140,7 @@
     --color-status-draft: #fbbf24;
     --color-status-review: #60a5fa;
     --color-status-live: #4ade80;
+    --color-status-danger: #f87171;
   }
 }
 

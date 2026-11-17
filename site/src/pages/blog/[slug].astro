@@ -49,7 +49,7 @@ const navLink = "group block border-t border-line pt-6";
           <a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
         ))}
       </div>
-      <h1 class="rise mt-4 text-4xl font-light tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
+      <h1 class="rise mt-4 text-4xl tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
       <p class="rise-2 mt-6 text-xl text-muted">{entry.data.description}</p>
     </div>
     {entry.data.coverImage && (
@@ -71,8 +71,8 @@ const navLink = "group block border-t border-line pt-6";
     </div>
   </article>
   {more.length > 0 && (
-    <section class="page mt-section" aria-labelledby="keep-reading" data-reveal>
-      <h2 class="border-t border-line pt-12 text-3xl font-light tracking-display text-ink" id="keep-reading">Keep reading</h2>
+    <section class="page mt-section" aria-labelledby="keep-reading">
+      <h2 class="border-t border-line pt-12 text-3xl tracking-display text-ink" id="keep-reading">Keep reading</h2>
       <div class="mt-12 grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} />)}</div>
     </section>
   )}

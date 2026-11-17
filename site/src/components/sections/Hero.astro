@@ -26,7 +26,7 @@ const posts = [
     <div class="md:col-span-8">
       <h1 class="max-w-4xl text-display font-medium tracking-display text-ink">
         {words.map((word, index) => (
-          <span class="word" style={`--word-delay: ${index * 45}ms`}>{word}{index < words.length - 1 ? " " : ""}</span>
+          <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
         ))}
       </h1>
     </div>
@@ -44,8 +44,8 @@ const posts = [
   </div>
 
   <div class="rise-3 mt-12 md:mt-16" role="img" aria-label="The Orso editor open on a blog post, with its fields on the right and a draft ready to publish.">
-    <AppWindow crumbs={["site", "blog", "welcome"]} class="h-[30rem] shadow-soft md:h-[34rem]">
-      <div slot="actions">
+    <AppWindow crumbs={["site", "blog", "welcome"]} class="h-auto shadow-soft md:h-[38rem]">
+      <div slot="actions" class="flex items-center gap-3">
         <span class="hidden text-xs text-muted sm:block">Saved a moment ago</span>
         <StatusChip tone="draft" label="Draft" />
         <span class="flex size-6 items-center justify-center rounded-full border border-line bg-sand text-[0.625rem] font-medium text-muted" aria-hidden="true">BT</span>
@@ -125,7 +125,7 @@ const posts = [
         </aside>
       </div>
 
-      <div slot="footer">
+      <div slot="footer" class="flex w-full items-center gap-3">
         <StatusChip tone="draft" label="Draft" />
         <span class="text-xs text-muted">3 checkpoints</span>
         <div class="ml-auto flex items-center gap-2">

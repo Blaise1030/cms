@@ -8,7 +8,7 @@ const steps = [
   },
   {
     number: "02",
-    title: "Or point at the page in the visual builder",
+    title: "Point at the page you want changed",
     description:
       "Browse the live preview, click the part you want changed and tell the agent what to do. It edits the repo, the preview reloads, and you check it on desktop and mobile.",
   },
@@ -16,25 +16,31 @@ const steps = [
     number: "03",
     title: "Publish to main",
     description:
-      "Happy with the draft? Press Publish. Orso merges the change into main, your host rebuilds, and the live site updates. Every earlier version stays in History.",
+      "Happy with the draft? Press Publish. Orso saves a checkpoint, merges the change into main, your host rebuilds, and the live site updates.",
   },
 ];
 ---
 
-<section class="page py-section" id="how-it-works" data-reveal>
-  <div class="max-w-2xl">
-    <h2 class="text-3xl font-light tracking-display text-ink md:text-4xl">
-      Whoever makes the change, it goes live the same way.
-    </h2>
-    <p class="mt-5 text-muted">
-      Write it yourself or ask the agent. Either way you get a draft to check, and one button puts it on the live site.
-    </p>
+<section class="page py-section" id="how-it-works">
+  <div class="grid gap-8 md:grid-cols-12 md:gap-10">
+    <div class="md:col-span-7">
+      <h2 class="text-3xl tracking-display text-ink md:text-4xl">
+        Whoever makes the change, it goes live the same way.
+      </h2>
+    </div>
+    <div class="md:col-span-5 md:pt-1">
+      <p class="max-w-measure text-muted">
+        Write it yourself or ask the agent. Either way you get a draft to check, and one button puts it on the live
+        site.
+      </p>
+    </div>
   </div>
-  <ol class="mt-14 grid gap-10 md:grid-cols-3 md:gap-8">
+
+  <ol class="mt-14 grid border-t border-line md:grid-cols-3">
     {steps.map((step) => (
-      <li class="border-t border-line pt-8">
-        <p class="label">{step.number}</p>
-        <h3 class="mt-4 text-xl font-medium tracking-tight text-ink">{step.title}</h3>
+      <li class="border-b border-line py-8 md:border-b-0 md:border-r md:pr-8 md:last:border-r-0 md:[&:not(:first-child)]:pl-8">
+        <p class="font-mono text-xs text-muted">{step.number}</p>
+        <h3 class="mt-5 text-xl font-medium tracking-tight text-ink">{step.title}</h3>
         <p class="mt-3 text-muted">{step.description}</p>
       </li>
     ))}

@@ -8,75 +8,35 @@ const mapping = [
   { from: "coding agent", to: "Ask in plain English" },
   { from: "frontmatter", to: "A form with real fields" },
 ];
-
-const features = [
-  {
-    title: "No more tickets for a typo",
-    description:
-      "If only engineers can change the site, everyone else files a ticket and waits. With Orso, the person who owns the words ships them.",
-  },
-  {
-    title: "People and agents, same rules",
-    description:
-      "Whoever starts the change, a teammate or an agent, it ends the same way: a draft, a preview, and a person who hits Publish.",
-  },
-  {
-    title: "One place for the content",
-    description:
-      "No second system to keep in sync and nothing to migrate later. The agent, the developer and the marketer all edit the same files.",
-  },
-  {
-    title: "Forms, not frontmatter",
-    description: "Blog posts, help docs and page copy get real fields. Markdown is still one click away.",
-  },
-  {
-    title: "Every draft, previewed",
-    description:
-      "Each change gets its own draft with a live desktop and mobile preview, so nothing ships early.",
-  },
-  {
-    title: "Static files, any host",
-    description: "Publish plain static output through the workflow you already have. No runtime, no lock-in.",
-  },
-];
 ---
 
-<section class="page grid gap-16 py-section md:grid-cols-12 md:gap-10" id="features" data-reveal>
-  <div class="md:col-span-12">
-    <h2 class="max-w-3xl text-3xl font-light tracking-display text-ink md:text-4xl">
-      Your site runs on developer tools. Your team never sees them.
-    </h2>
-    <p class="mt-5 max-w-measure text-muted">
-      Agents made changing a site cheap. Handing it to the people who own the words still isn't. Orso gives marketers,
-      writers and founders drafts, previews and a Publish button. Each one needs a GitHub account, and that's the last
-      they'll see of GitHub.
-    </p>
-  </div>
+<section class="bg-sand" id="features">
+  <div class="page grid gap-12 py-section md:grid-cols-12 md:gap-10">
+    <div class="md:col-span-4">
+      <h2 class="text-3xl tracking-display text-ink md:text-4xl">The repo stays. The jargon doesn't.</h2>
+      <p class="mt-5 max-w-measure text-muted">
+        Content teams are told to learn branches, reviews and deploys. None of that is the work. Orso keeps the same
+        files, history and deploy, and gives the people writing the words a surface they can actually use.
+      </p>
+      <p class="mt-8 border-t border-line pt-5 text-sm text-muted">
+        One repository. One source of truth. No migration, no second system to keep in sync.
+      </p>
+    </div>
 
-  <div class="md:col-span-5">
-    <p class="label">Content ops run on GitHub</p>
-    <div class="mt-6 text-sm">
-      <div class="grid grid-cols-2 gap-x-4">
-        <p class="font-medium text-muted">in your repo</p>
-        <p class="font-medium text-muted">in Orso</p>
+    <div class="md:col-span-7 md:col-start-6">
+      <div class="grid grid-cols-2 gap-4 border-b border-line pb-3 text-sm font-medium text-muted">
+        <p>In your repo</p>
+        <p>In Orso</p>
       </div>
       <ul>
         {mapping.map((row) => (
-          <li class="grid grid-cols-2 gap-x-4 border-t border-line py-3">
-            <span class="font-mono text-xs text-ink">{row.from}</span>
+          <li class="grid grid-cols-2 items-baseline gap-4 border-b border-line py-4">
+            <span class="font-mono text-xs text-muted sm:text-sm">{row.from}</span>
             <span class="text-ink">{row.to}</span>
           </li>
         ))}
       </ul>
+      <p class="mt-5 text-sm text-muted">Same files. Same history. Same deploy.</p>
     </div>
   </div>
-
-  <ul class="md:col-span-6 md:col-start-7">
-    {features.map((feature) => (
-      <li class="grid gap-2 border-t border-line py-8 last:border-b sm:grid-cols-5 sm:gap-8">
-        <h3 class="text-lg font-medium text-ink sm:col-span-2">{feature.title}</h3>
-        <p class="text-muted sm:col-span-3">{feature.description}</p>
-      </li>
-    ))}
-  </ul>
 </section>

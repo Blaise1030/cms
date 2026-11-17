@@ -1,21 +1,30 @@
 ---
+const facts = [
+  { title: "Free and open source", detail: "MIT licence, no paid tier." },
+  { title: "Content stays in your repo", detail: "Plain Markdown you already own." },
+  { title: "Static files, any host", detail: "No runtime and no lock-in." },
+];
 ---
 
-<section class="page" id="cta" data-reveal>
-  <div class="relative overflow-hidden rounded-xl bg-mist px-6 pt-16 pb-32 text-center md:pt-24 md:pb-40">
-    <h2 class="mx-auto max-w-2xl text-3xl font-light tracking-display text-ink md:text-4xl">
-      Let your team run the site. The repo stays yours.
-    </h2>
-    <p class="mx-auto mt-5 max-w-measure text-muted">
-      Free and open source. Your developer connects the repo once, and everyone else is editing in minutes.
-    </p>
-    <div class="mt-10 flex flex-col items-center gap-4">
-      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Project Orso on GitHub</a>
-      <p class="text-sm text-muted">MIT licence. No paid tier.</p>
+<section class="page py-section" id="cta">
+  <div class="grid gap-10 border-y border-line py-14 md:grid-cols-12 md:items-end md:py-20">
+    <div class="md:col-span-8">
+      <h2 class="text-4xl tracking-display text-ink md:text-5xl">Let your team run the site. The repo stays yours.</h2>
     </div>
-    <svg class="absolute inset-x-0 bottom-0 h-20 w-full md:h-28" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
-      <path class="fill-ridge" d="M0 70 120 40l90 30 150-56 120 48 140-38 160 52 130-34 140 30 150-30v138H0Z" />
-      <path class="fill-accent" d="M0 120V92c160-26 320-30 470-8 120 18 230 20 330 6 140-20 280-22 400-2v32Z" />
-    </svg>
+    <div class="flex flex-col items-start gap-4 md:col-span-4 md:items-end">
+      <p class="max-w-sm text-muted md:text-right">
+        Your developer connects the repo once, and everyone else is editing in minutes.
+      </p>
+      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso on GitHub</a>
+    </div>
   </div>
+
+  <ul class="grid gap-6 pt-8 md:grid-cols-3">
+    {facts.map((fact) => (
+      <li class="border-l border-line pl-4">
+        <p class="text-sm font-medium text-ink">{fact.title}</p>
+        <p class="mt-1 text-sm text-muted">{fact.detail}</p>
+      </li>
+    ))}
+  </ul>
 </section>

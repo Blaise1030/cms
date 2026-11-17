@@ -1,11 +1,11 @@
 ---
-import Agent from "../components/sections/Agent.astro";
 import Cta from "../components/sections/Cta.astro";
 import Faq from "../components/sections/Faq.astro";
 import Features from "../components/sections/Features.astro";
 import Hero from "../components/sections/Hero.astro";
 import HowItWorks from "../components/sections/HowItWorks.astro";
 import Logos from "../components/sections/Logos.astro";
+import Platform from "../components/sections/Platform.astro";
 import Proof from "../components/sections/Proof.astro";
 import Base from "../layouts/Base.astro";
 import { organization, website } from "../lib/seo";
@@ -15,9 +15,9 @@ import { site } from "../site";
 <Base description={site.description} jsonLd={[website(), organization()]}>
   <Hero />
   <Logos />
+  <Platform />
   <Features />
   <HowItWorks />
-  <Agent />
   <Proof />
   <Faq />
   <Cta />

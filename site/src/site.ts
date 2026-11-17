@@ -11,7 +11,7 @@ export const site = {
   /** Default social card, served from `public/`. */
   ogImage: "/og-default.png",
   nav: [
-    { label: "Features", href: "#features" },
+    { label: "Platform", href: "#platform" },
     { label: "How it works", href: "#how-it-works" },
     { label: "FAQ", href: "#faq" },
     { label: "Blog", href: "/blog/" },

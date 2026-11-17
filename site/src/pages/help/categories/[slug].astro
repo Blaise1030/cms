@@ -22,6 +22,6 @@ const description = topic.description ?? `Help articles about ${topic.title.toLo
 >
   <PageHeader title={topic.title} description={topic.description} back={{ label: "All topics", href: "/help/categories/" }} />
   <div class="page mt-12">
-    {topic.docs.length === 0 ? <p class="text-muted">No articles on this topic yet.</p> : <div class="max-w-3xl" data-reveal><DocList docs={topic.docs} /></div>}
+    {topic.docs.length === 0 ? <p class="text-muted">No articles on this topic yet.</p> : <div class="max-w-3xl"><DocList docs={topic.docs} /></div>}
   </div>
 </Base>

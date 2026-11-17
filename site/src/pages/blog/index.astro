@@ -18,9 +18,9 @@ const [lead, ...rest] = posts;
     {posts.length === 0 ? <p class="text-muted">No blog posts yet. Check back soon for news and stories.</p> : (
       <>
         <BlogFilters categories={categories} />
-        <div class="mt-12" data-reveal><BlogCard post={lead} categories={categories} variant="lead" /></div>
+        <div class="mt-12"><BlogCard post={lead} categories={categories} variant="lead" /></div>
         {rest.length > 0 && (
-          <div class="mt-20 grid gap-x-8 gap-y-16 border-t border-line pt-16 sm:grid-cols-2 lg:grid-cols-3" data-reveal>
+          <div class="mt-20 grid gap-x-8 gap-y-16 border-t border-line pt-16 sm:grid-cols-2 lg:grid-cols-3">
             {rest.map((post) => <BlogCard post={post} categories={categories} />)}
           </div>
         )}

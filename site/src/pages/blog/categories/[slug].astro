@@ -25,7 +25,7 @@ const description = category.description ?? `Blog posts about ${category.title.t
   <div class="page mt-12">
     <BlogFilters categories={categories} active={category.id} />
     {category.posts.length === 0 ? <p class="mt-12 text-muted">No posts in this category yet.</p> : (
-      <div class="mt-12 grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3" data-reveal>{category.posts.map((post) => <BlogCard post={post} categories={categories} />)}</div>
+      <div class="mt-12 grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3">{category.posts.map((post) => <BlogCard post={post} categories={categories} />)}</div>
     )}
   </div>
 </Base>

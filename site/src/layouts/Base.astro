@@ -86,12 +86,12 @@ const external = (link: string) => /^https?:\/\//.test(link);
       href="#main">Skip to content</a
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
-      <div class="page flex min-h-header flex-wrap items-center gap-x-10 gap-y-1 py-3 md:flex-nowrap">
+      <div class="page flex min-h-header flex-wrap items-center gap-x-8 gap-y-1 py-2 md:flex-nowrap">
         <a class="-m-1 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
-        <nav class="order-last -mx-2 flex w-full gap-1 overflow-x-auto md:order-none md:w-auto" aria-label="Main">
+        <nav class="order-last -mx-1 flex w-full gap-5 overflow-x-auto md:order-none md:ml-auto md:w-auto" aria-label="Main">
           {site.nav.map((link) => (
             <a
-              class="shrink-0 rounded-sm px-2 py-1 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
+              class="shrink-0 py-1 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
               href={href(link.href)}
               aria-current={isCurrent(link.href) ? "page" : undefined}>{link.label}</a
             >
@@ -99,7 +99,7 @@ const external = (link: string) => /^https?:\/\//.test(link);
         </nav>
         {site.cta && (
           <a
-            class="ml-auto shrink-0 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-on-accent transition-colors duration-quick ease-gentle hover:bg-accent-hover"
+            class="ml-auto shrink-0 rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-quick ease-gentle hover:opacity-85 md:ml-0"
             href={href(site.cta.href)}>{site.cta.label}</a
           >
         )}
@@ -109,7 +109,7 @@ const external = (link: string) => /^https?:\/\//.test(link);
     <main id="main" class="flex-1"><slot /></main>
 
     <footer class="mt-section border-t border-line">
-      <div class="page grid gap-12 py-16 md:grid-cols-12">
+      <div class="page grid gap-12 py-14 md:grid-cols-12">
         <div class="md:col-span-5">
           <Wordmark />
           <p class="mt-4 max-w-sm text-sm text-muted">{site.description}</p>
@@ -143,32 +143,5 @@ const external = (link: string) => /^https?:\/\//.test(link);
       </div>
     </footer>
 
-    <script>
-      // Sections marked data-reveal fade in when they first scroll into view. Only sections
-      // that start below the fold are hidden, and only once this script runs, so content is
-      // always visible without JavaScript. Runs again after every client-side navigation.
-      const reveal = () => {
-        if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-        const observer = new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              entry.target.classList.add("reveal-in");
-              entry.target.classList.remove("reveal-pending");
-              observer.unobserve(entry.target);
-            }
-          },
-          // The huge top margin counts anything above the viewport as seen, so sections skipped
-          // by a jump (an anchor link, the End key) are never left hidden.
-          { rootMargin: "100000px 0px -8% 0px" },
-        );
-        for (const element of document.querySelectorAll<HTMLElement>("[data-reveal]")) {
-          if (element.getBoundingClientRect().top < window.innerHeight * 0.92) continue;
-          element.classList.add("reveal-pending");
-          observer.observe(element);
-        }
-      };
-      document.addEventListener("astro:page-load", reveal);
-    </script>
   </body>
 </html>

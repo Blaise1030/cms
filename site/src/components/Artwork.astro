@@ -1,6 +1,6 @@
 ---
-// A small landscape (sky, sun, ridge, water) drawn from the design tokens, used where a post has
-// no cover image. `seed` picks one of a few compositions so neighbouring cards differ.
+// An editorial placeholder for posts without a cover: a proof sheet of ruled lines with one
+// pencil mark, drawn from the design tokens. `seed` varies the composition between cards.
 interface Props {
   seed: string;
   class?: string;
@@ -8,21 +8,23 @@ interface Props {
 const { seed, class: className } = Astro.props;
 // FNV-1a: a small, stable hash so each post id gets its own composition.
 const n = [...seed].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0, 2166136261);
-const ridges = [
-  "M0 128 44 102 80 116 126 76 170 112 214 84 256 110 300 92V160H0Z",
-  "M0 120c40-18 72-30 110-14 34 14 62-26 104-30 36-4 58 26 86 20v64H0Z",
-  "M0 132 60 96l40 22 50-46 46 40 36-18 68 34v32H0Z",
-];
-const sky = ["bg-mist", "bg-sand"][(n >>> 4) % 2];
-const sun = { cx: 60 + ((n >>> 8) % 180), cy: 40 + ((n >>> 16) % 3) * 12 };
+const lines = 6 + (n % 4);
+const title = 30 + ((n >>> 6) % 40);
+const markX = 26 + ((n >>> 12) % 120);
 ---
 
-<div class:list={["overflow-hidden", sky, className]} aria-hidden="true">
+<div class:list={["overflow-hidden bg-sand", className]} aria-hidden="true">
   <svg class="size-full" viewBox="0 0 300 200" preserveAspectRatio="xMidYMid slice">
-    <circle class="fill-glow" cx={sun.cx} cy={sun.cy} r="20" />
-    <path class="fill-ridge" d={ridges[n % ridges.length]} />
-    <path class="fill-accent" d={["M0 160c50-22 110-26 160-6v6Z", "M140 160c50-26 110-30 160-12v12Z", "M0 160c70-16 160-18 300-6v6Z"][(n >>> 12) % 3]} />
-    <rect class="fill-ridge/40" x="0" y="160" width="300" height="40" />
-    <path class="stroke-glow" d={`M${sun.cx - 22} 174h44M${sun.cx - 12} 184h24`} stroke-width="2" stroke-linecap="round" />
+    <rect class="fill-surface-raised" x="28" y="24" width="244" height="152" rx="2" />
+    <rect class="fill-ink" x="50" y="48" width={title} height="7" rx="1" />
+    <rect class="fill-line" x="50" y="66" width="150" height="3" rx="1" />
+    <rect class="fill-line" x="50" y="78" width="182" height="3" rx="1" />
+    <rect class="fill-line" x="50" y="90" width="128" height="3" rx="1" />
+    {Array.from({ length: lines }).map((_, index) => (
+      <rect class="fill-line" x="50" y={110 + index * 9} width={index === lines - 1 ? 96 : 190 - (index % 3) * 18} height="3" rx="1" />
+    ))}
+    <path class="stroke-accent" d={`M${markX} 104c18-6 38-6 56 0`} fill="none" stroke-width="2" stroke-linecap="round" />
+    <rect class="fill-sand" x="212" y="48" width="40" height="40" rx="2" />
+    <path class="stroke-line-strong" d="M222 58h20M222 66h14M222 74h18" fill="none" stroke-width="2" stroke-linecap="round" />
   </svg>
 </div>
