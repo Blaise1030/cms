@@ -58,7 +58,7 @@ export function ProductTabs() {
     <Tabs defaultValue="content" className="gap-0">
       <TabsList
         variant="line"
-        className="grid h-auto w-full grid-cols-2 rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
+        className="grid h-auto! w-full grid-cols-2 items-stretch rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
       >
         {tabs.map((tab) => (
           <TabsTrigger
