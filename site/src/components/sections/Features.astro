@@ -38,8 +38,8 @@ const cards = [
   <ul class="mt-12 grid gap-3 md:grid-cols-3">
     {cards.map((card) => (
       <li>
-        <Card class="h-full gap-3 rounded-sm border border-line py-3 ring-0">
-          <CardContent class="px-3 pt-0">
+        <Card class="h-full gap-3 rounded-sm border border-line py-2 ring-0">
+          <CardContent class="px-2 pt-0">
             <div class="relative aspect-4/3 overflow-hidden rounded-sm border border-line" aria-hidden="true">
               <Painting id={card.painting} />
               <div class="absolute inset-0 bg-night/20"></div>
@@ -53,7 +53,7 @@ const cards = [
               </div>
             </div>
           </CardContent>
-          <CardHeader class="px-3">
+          <CardHeader class="px-2">
             <CardTitle class="text-xl text-ink">{card.title}</CardTitle>
             <CardDescription class="text-sm leading-6 text-muted">{card.description}</CardDescription>
           </CardHeader>
