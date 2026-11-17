@@ -22,14 +22,16 @@ export const site = {
   /** Header call to action; set to `null` to hide it. */
   cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
   footer: {
-    text: "© 2026 Project Orso. Free and open source under the MIT licence.",
+    text: "© 2026 Project Orso",
     links: [
       { label: "Privacy", href: "/privacy/" },
       { label: "Terms", href: "/terms/" },
     ],
+    source: { label: "Open source", href: "https://github.com/Blaise1030/cms" },
+    license: { label: "MIT licence", href: "https://github.com/Blaise1030/cms/blob/main/LICENSE" },
   },
   socials: [
-    { label: "GitHub", href: "https://github.com/Blaise1030/cms" },
-    { label: "Blaise", href: "https://blaisetiong.dev" },
+    { label: "GitHub", href: "https://github.com/Blaise1030/cms", icon: "github" as const },
+    { label: "Blaise", href: "https://blaisetiong.dev", icon: "globe" as const },
   ],
 };

@@ -1,0 +1,115 @@
+---
+// Site footer: a night band with a ghost wordmark, the brand lockup, link columns and a
+// utility row. Group and link data live in `src/site.ts`.
+import BearMark from "./BearMark.astro";
+import Icon from "./Icon.astro";
+import { href } from "../lib/href";
+import { site } from "../site";
+
+const base = import.meta.env.BASE_URL;
+const external = (link: string) => /^https?:\/\//.test(link);
+// In-page product destinations versus the resource pages (Blog, Help).
+const product = site.nav.filter((link) => link.href.startsWith("#"));
+const resources = site.nav.filter((link) => !link.href.startsWith("#"));
+const groups = [
+  { title: "Product", links: product },
+  { title: "Resources", links: resources },
+  { title: "Company", links: site.footer.links },
+  { title: "Follow", links: site.socials },
+].filter((group) => group.links.length > 0);
+---
+
+<footer class="relative overflow-hidden bg-night text-on-night">
+  <div aria-hidden="true" class="pointer-events-none absolute inset-x-0 top-0 select-none text-center">
+    <span class="block font-display text-watermark font-medium uppercase tracking-display text-night-ghost">
+      Orso
+    </span>
+  </div>
+
+  <div class="page relative z-10 grid gap-14 pb-14 pt-20 md:grid-cols-12 md:gap-10 md:pb-20 md:pt-24">
+    <div class="md:col-span-4">
+      <a
+        class="inline-flex size-16 items-center justify-center rounded-md border border-night-line bg-night-raised text-on-night transition-colors duration-quick ease-gentle hover:border-on-night-muted"
+        href={base}
+        aria-label={`${site.name} home`}
+      >
+        <BearMark class="h-7 w-auto" />
+      </a>
+      <p class="mt-5 max-w-xs text-sm text-on-night-muted">{site.tagline}.</p>
+    </div>
+
+    <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:col-span-8" aria-label="Footer">
+      {groups.map((group) => (
+        <div>
+          <p class="text-xs font-medium text-on-night-muted">{group.title}</p>
+          <ul class="mt-5 space-y-3 text-sm">
+            {group.links.map((link) => (
+              <li>
+                <a
+                  class="text-on-night transition-colors duration-quick ease-gentle hover:text-on-night-muted"
+                  href={href(link.href)}
+                  rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
+                >
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  </div>
+
+  <div class="relative z-10 border-t border-night-line">
+    <div class="page grid gap-6 py-6 md:grid-cols-12 md:items-center">
+      <ul class="flex items-center gap-4 md:col-span-3" aria-label="Social">
+        {site.socials.map((social) => (
+          <li>
+            <a
+              class="inline-flex size-8 items-center justify-center rounded-sm text-on-night-muted transition-colors duration-quick ease-gentle hover:text-on-night"
+              href={social.href}
+              rel="noopener noreferrer"
+              aria-label={social.label}
+            >
+              {social.icon === "github" ? (
+                <svg class="size-4" viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    fill-rule="evenodd"
+                    clip-rule="evenodd"
+                    d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.528 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
+                  ></path>
+                </svg>
+              ) : (
+                <Icon name="globe" class="size-4" />
+              )}
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      <p class="text-xs text-on-night-muted md:col-span-3">{site.footer.text}</p>
+
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-on-night-muted md:col-span-6 md:justify-end">
+        <a
+          class="transition-colors duration-quick ease-gentle hover:text-on-night"
+          href={site.footer.source.href}
+          rel="noopener noreferrer">{site.footer.source.label}</a
+        >
+        <a
+          class="transition-colors duration-quick ease-gentle hover:text-on-night"
+          href={site.footer.license.href}
+          rel="noopener noreferrer">{site.footer.license.label}</a
+        >
+        <ul class="flex items-center gap-3">
+          {site.footer.links.map((link, index) => (
+            <li class="flex items-center gap-3">
+              {index > 0 && <span aria-hidden="true">|</span>}
+              <a class="transition-colors duration-quick ease-gentle hover:text-on-night" href={href(link.href)}>
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+</footer>

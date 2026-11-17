@@ -125,6 +125,7 @@ Light mode is the default; dark mode follows the visitor's system setting by giv
 | `--color-night` | `bg-night` | `#18181b` | `#1b1b1e` | The proof band and code-style surfaces |
 | `--color-night-raised` | `bg-night-raised` | `#242427` | `#232326` | Raised detail inside the proof band |
 | `--color-night-line` | `border-night-line` | `#3f3f46` | `#3f3f46` | Hairlines on night |
+| `--color-night-ghost` | `text-night-ghost` | `#2f2f36` | `#2f2f36` | The oversized wordmark behind the footer |
 | `--color-on-night` | `text-on-night` | `#fafafa` | `#fafafa` | Type on night |
 | `--color-on-night-muted` | `text-on-night-muted` | `#a1a1aa` | `#a1a1aa` | Supporting type on night |
 | `--color-status-draft` | `text-status-draft` | `#b45309` | `#fbbf24` | Waiting for a person |
@@ -138,7 +139,7 @@ Status colours are information, never decoration. They appear in small dots, pil
 
 One family: **Geist** (Vercel), self-hosted from `@fontsource-variable/geist` through Astro's font API (`--font-geist`). Astro preloads the upright variable file, uses `font-display: swap`, and generates a metric-matched fallback. `--font-sans` and `--font-display` both point at it; `--font-mono` is the system monospace stack for repo paths, hashes and field values.
 
-The scale steps by about 1.22 from a 16px body (`--text-*`): `xs` 0.75rem through `5xl` 3.75rem, plus a responsive `display` step (`clamp(2.75rem, 6vw, 4.75rem)`) for the home hero only. Display type is weight 500 with tight tracking (`tracking-display`, -0.035em); body copy is 400. `label` is a small sentence-case supporting label, never uppercase.
+The scale steps by about 1.22 from a 16px body (`--text-*`): `xs` 0.75rem through `5xl` 3.75rem, plus a responsive `display` step (`clamp(2.75rem, 6vw, 4.75rem)`) for the home hero only. The footer wordmark uses its own `watermark` step (`clamp(7rem, 36vw, 40rem)`, line-height 0.78) so it can run almost the full width of the band. Display type is weight 500 with tight tracking (`tracking-display`, -0.035em); body copy is 400. `label` is a small sentence-case supporting label, never uppercase.
 
 ## Layout
 
@@ -188,6 +189,7 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 - **FAQ**: hairline `<details>` accordion with FAQPage JSON-LD.
 - **Blog**: one text-only featured post (date · category, large headline, excerpt) above a "Recent posts" bar with rounded category filters and a client-side search. Posts sit in a hairline grid — three columns on wide screens, two on tablet, one on mobile — with the cover or proof-sheet artwork at the top of each padded cell.
 - **Closing CTA**: left-aligned headline and supporting copy on a 12-column split, one action, and three plain facts in a hairline-divided strip, each led by a small monochrome icon in a hairline tile.
+- **Footer**: a full-bleed night band. An oversized ghost `ORSO` wordmark sits behind a hairline brand tile with the tagline, four link columns, and a hairline-divided utility row with social icons, copyright, source and licence links, and the legal links.
 
 ## Do's and Don'ts
 

@@ -1,6 +1,7 @@
 ---
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
+import Footer from "../components/Footer.astro";
 import Wordmark from "../components/Wordmark.astro";
 import { SiteNavLinks, SiteNavMenu } from "../components/react/SiteNav";
 import { buttonVariants } from "../components/ui/button";
@@ -53,9 +54,6 @@ const navItems = site.nav.map((link) => ({
   href: href(link.href),
   current: isCurrent(link.href),
 }));
-// Footer groups: in-page product destinations versus the resource pages (Blog, Help).
-const product = site.nav.filter((link) => link.href.startsWith("#"));
-const resources = site.nav.filter((link) => !link.href.startsWith("#"));
 ---
 
 <html lang="en">
@@ -133,40 +131,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
 
     <main id="main" class="flex-1"><slot /></main>
 
-    <footer class="mt-section">
-      <div class="page grid gap-12 py-14 md:grid-cols-12">
-        <div class="md:col-span-5">
-          <Wordmark />
-          <p class="mt-4 max-w-sm text-sm text-muted">{site.description}</p>
-        </div>
-        <nav class="grid grid-cols-2 gap-8 sm:grid-cols-4 md:col-span-7" aria-label="Footer">
-          {[
-            { title: "Product", links: product },
-            { title: "Resources", links: resources },
-            { title: "Company", links: site.footer.links },
-            { title: "Follow", links: site.socials },
-          ].filter((group) => group.links.length > 0).map((group) => (
-            <div>
-              <p class="label">{group.title}</p>
-              <ul class="mt-4 space-y-2 text-sm">
-                {group.links.map((link) => (
-                  <li>
-                    <a
-                      class="text-muted transition-colors duration-quick ease-gentle hover:text-ink"
-                      href={href(link.href)}
-                      rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
-                    >
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </nav>
-      </div>
-      <div class="page">
-        <p class="py-6 text-xs text-muted">{site.footer.text}</p>
-      </div>
-    </footer>
+    <Footer />
 
   </body>
 </html>

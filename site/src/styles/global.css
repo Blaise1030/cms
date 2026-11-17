@@ -34,6 +34,7 @@
   --color-night: #18181b;
   --color-night-raised: #242427;
   --color-night-line: #3f3f46;
+  --color-night-ghost: #2f2f36;
   --color-on-night: #fafafa;
   --color-on-night-muted: #a1a1aa;
   --color-status-draft: #b45309;
@@ -73,6 +74,8 @@
   --text-5xl--line-height: 1.04;
   --text-display: clamp(2.75rem, 6vw, 4.75rem);
   --text-display--line-height: 1.02;
+  --text-watermark: clamp(7rem, 36vw, 40rem);
+  --text-watermark--line-height: 0.78;
   --tracking-display: -0.035em;
   --tracking-tight: -0.015em;
   --tracking-label: 0.02em;
@@ -148,6 +151,7 @@
     --color-night: #1b1b1e;
     --color-night-raised: #232326;
     --color-night-line: #3f3f46;
+    --color-night-ghost: #2f2f36;
     --color-on-night: #fafafa;
     --color-on-night-muted: #a1a1aa;
     --color-status-draft: #fbbf24;
