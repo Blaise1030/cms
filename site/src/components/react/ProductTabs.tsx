@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { paintingUrl } from "@/lib/paintings";
 import { StatusBadge } from "./StatusBadge";
 
 const tabs = [
@@ -53,9 +54,31 @@ function WindowChrome({ crumbs, action }: { crumbs: string[]; action: ReactNode 
   );
 }
 
+function PaintedCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative overflow-hidden">
+      <img
+        src={paintingUrl("patinir")}
+        alt=""
+        aria-hidden="true"
+        loading="eager"
+        decoding="async"
+        className="absolute inset-0 size-full object-cover"
+      />
+      <div className="absolute inset-0 bg-night/25" aria-hidden="true" />
+      <div className="relative p-4 md:p-6">
+        <Card className="overflow-hidden rounded-md p-0 ring-line">{children}</Card>
+      </div>
+    </div>
+  );
+}
+
 export function ProductTabs() {
   return (
-    <Tabs defaultValue="content" className="gap-0">
+    <Tabs
+      defaultValue="content"
+      className="gap-0 overflow-hidden rounded-lg bg-surface shadow-raised ring-1 ring-line"
+    >
       <TabsList
         variant="line"
         className="grid h-auto! w-full grid-cols-2 items-stretch rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
@@ -73,7 +96,7 @@ export function ProductTabs() {
       </TabsList>
 
       <TabsContent value="content" className="mt-0">
-        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
+        <PaintedCard>
           <WindowChrome crumbs={["site", "content", "blog"]} action={<StatusBadge tone="neutral" label="All content" />} />
           <div className="grid md:grid-cols-[12.5rem_minmax(0,1fr)]" aria-hidden="true">
             <aside className="hidden border-r border-line p-3 md:block">
@@ -126,11 +149,11 @@ export function ProductTabs() {
               </div>
             </div>
           </div>
-        </Card>
+        </PaintedCard>
       </TabsContent>
 
       <TabsContent value="preview" className="mt-0">
-        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
+        <PaintedCard>
           <WindowChrome
             crumbs={["site", "preview", "home"]}
             action={<StatusBadge tone="review" label="Preview" />}
@@ -164,11 +187,11 @@ export function ProductTabs() {
               </div>
             </aside>
           </div>
-        </Card>
+        </PaintedCard>
       </TabsContent>
 
       <TabsContent value="publish" className="mt-0">
-        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
+        <PaintedCard>
           <WindowChrome crumbs={["site", "publish"]} action={<StatusBadge tone="review" label="Ready to publish" />} />
           <div className="grid place-items-center p-6" aria-hidden="true">
             <div className="w-full max-w-lg rounded-md border border-line bg-surface-raised p-6">
@@ -194,11 +217,11 @@ export function ProductTabs() {
               </div>
             </div>
           </div>
-        </Card>
+        </PaintedCard>
       </TabsContent>
 
       <TabsContent value="agent" className="mt-0">
-        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
+        <PaintedCard>
           <WindowChrome crumbs={["site", "agent"]} action={<StatusBadge tone="draft" label="Draft ready" />} />
           <div className="grid md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
             <div className="flex min-w-0 flex-col p-4 md:p-6">
@@ -235,11 +258,11 @@ export function ProductTabs() {
               </p>
             </aside>
           </div>
-        </Card>
+        </PaintedCard>
       </TabsContent>
 
       <TabsContent value="history" className="mt-0">
-        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
+        <PaintedCard>
           <WindowChrome crumbs={["site", "history"]} action={<StatusBadge tone="live" label="Live" />} />
           <div className="p-5 md:p-7" aria-hidden="true">
             <div className="flex items-end justify-between gap-4">
@@ -262,7 +285,7 @@ export function ProductTabs() {
               ))}
             </ol>
           </div>
-        </Card>
+        </PaintedCard>
       </TabsContent>
     </Tabs>
   );

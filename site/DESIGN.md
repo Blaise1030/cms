@@ -154,7 +154,7 @@ Depth comes from tone (surface, sand, night), 1px hairlines, and a black-tinted 
 
 ## Art
 
-Public-domain Renaissance paintings sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Patinir's *Landscape with the Flight into Egypt*; the three feature cards use Bruegel, Giorgione and Altdorfer; the ops carousel cycles all five; the agent band uses Leonardo's *The Virgin of the Rocks*. Each image is cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
+Public-domain Renaissance paintings sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Patinir's *Landscape with the Flight into Egypt* inside the active tab panel, not as a band around the tabs; the three feature cards use Bruegel, Giorgione and Altdorfer; the ops carousel cycles all five; the agent band uses Leonardo's *The Virgin of the Rocks*. Each image is cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
 
 
 ## Shapes
@@ -178,7 +178,7 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 ## Components
 
 - **Header**: wordmark plus name, plain muted nav, outline secondary CTA and ink primary CTA. No pill buttons.
-- **Hero**: left-aligned display headline, lead, dual CTAs, then a painted band holding five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath.
+- **Hero**: left-aligned display headline, lead, dual CTAs, then five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath. The tab rail sits in a framed surface, and the active panel floats on a painted stage inside the content area.
 - **Logo grid**: bordered cells for Astro, Markdown, GitHub, Claude, Cursor, Codex, plus a one-line git vocabulary note.
 - **Ops carousel**: “Handle content work at scale” with prev/next controls and horizontal product slides (collections, preview, publish, agent, history), each floating on its own painting.
 - **Feature cards**: three equal frames — Drafts and checkpoints, Previews and review, Agent in plain English — each holding a mini preview over a painting.
