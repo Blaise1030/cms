@@ -1,10 +1,11 @@
 ---
 import { buttonVariants } from "../ui/button";
+import Icon from "../Icon.astro";
 
 const facts = [
-  { title: "Free and open source", detail: "MIT licence, no paid tier." },
-  { title: "Content stays in your repo", detail: "Plain Markdown you already own." },
-  { title: "Static files, any host", detail: "No runtime and no lock-in." },
+  { title: "Free and open source", detail: "MIT licence, no paid tier.", icon: "scale" as const },
+  { title: "Content stays in your repo", detail: "Plain Markdown you already own.", icon: "file-text" as const },
+  { title: "Static files, any host", detail: "No runtime and no lock-in.", icon: "globe" as const },
 ];
 ---
 
@@ -29,7 +30,10 @@ const facts = [
     <ul class="mt-16 grid divide-y divide-line border-t border-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
       {facts.map((fact) => (
         <li class="py-6 sm:px-6 sm:first:pl-0 sm:last:pr-0">
-          <p class="text-sm font-medium text-ink">{fact.title}</p>
+          <span class="flex size-9 items-center justify-center rounded-md border border-line bg-surface-raised text-ink">
+            <Icon name={fact.icon} class="size-5" />
+          </span>
+          <p class="mt-4 text-sm font-medium text-ink">{fact.title}</p>
           <p class="mt-1 text-sm text-muted">{fact.detail}</p>
         </li>
       ))}
