@@ -132,7 +132,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
 
     <main id="main" class="flex-1"><slot /></main>
 
-    <footer class="mt-section border-t border-line">
+    <footer class="mt-section">
       <div class="page grid gap-12 py-14 md:grid-cols-12">
         <div class="md:col-span-5">
           <Wordmark />
@@ -163,7 +163,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
         </nav>
       </div>
       <div class="page">
-        <p class="border-t border-line py-6 text-xs text-muted">{site.footer.text}</p>
+        <p class="py-6 text-xs text-muted">{site.footer.text}</p>
       </div>
     </footer>
 
