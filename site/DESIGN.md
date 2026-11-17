@@ -172,15 +172,15 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 
 ## Components
 
-- **Header**: wordmark plus name, plain muted nav, ink `Get Project Orso` button. No pill CTA.
-- **Hero**: responsive display headline, short lead, one ink action and one outline action, then a full-width Orso editor mock. The mock shows the real model: content rail, Markdown body, fields, draft status, checkpoints, Preview and Publish.
-- **Logo strip**: tools the product works with (Astro, Markdown, GitHub, Claude, Cursor, Codex) on a hairline rail.
-- **Platform tabs**: Content, Preview, Publish, Agent and History. Each tab opens a full product panel: the collection table, a desktop preview with comments, a publish checklist and diff, an agent transcript with a draft summary, and a checkpoint timeline.
-- **Git, translated**: a two-column ledger mapping repo vocabulary to the words the team uses, on a sand band.
-- **How it works**: a real three-step sequence with mono step numbers on a hairline rail.
-- **Proof**: the one night band: Lee Robinson's quote and a note from the maker.
+- **Header**: wordmark plus name, plain muted nav, outline secondary CTA and ink primary CTA. No pill buttons.
+- **Hero**: left-aligned display headline, lead, dual CTAs, then five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath.
+- **Logo grid**: bordered cells for Astro, Markdown, GitHub, Claude, Cursor, Codex, plus a one-line git vocabulary note.
+- **Ops carousel**: “Handle content work at scale” with prev/next controls and horizontal product slides (collections, preview, publish, agent, history).
+- **Feature cards**: three equal frames — Drafts and checkpoints, Previews and review, Agent in plain English.
+- **Agent band**: wide framed agent transcript mock with draft summary.
+- **Proof**: the one night band — Lee Robinson's quote and a note from the maker.
 - **FAQ**: hairline `<details>` accordion with FAQPage JSON-LD.
-- **Closing CTA**: an ink headline, one action, and three plain facts on a hairline rule.
+- **Closing CTA**: centred headline, one action, and three plain facts on a hairline rule.
 
 ## Do's and Don'ts
 
