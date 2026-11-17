@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,6 +14,8 @@ const tabs = [
   { value: "agent", title: "Agent", description: "Ask for a page, a pass or a whole new section." },
   { value: "history", title: "History", description: "Every save is a checkpoint you can go back to." },
 ];
+
+const SLIDE_MS = 6000;
 
 const entries = [
   { title: "Welcome to Orso", tone: "draft" as const, label: "Draft", updated: "2 min ago", author: "Blaise" },
@@ -74,25 +76,88 @@ function PaintedCard({ children }: { children: ReactNode }) {
 }
 
 export function ProductTabs() {
+  const [value, setValue] = useState(tabs[0].value);
+  const [progress, setProgress] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const progressRef = useRef(0);
+  const activeIndex = tabs.findIndex((tab) => tab.value === value);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (reducedMotion || paused) return;
+
+    let frame = 0;
+    let last = performance.now();
+
+    const tick = (now: number) => {
+      const next = Math.min(1, progressRef.current + (now - last) / SLIDE_MS);
+      last = now;
+      progressRef.current = next;
+      setProgress(next);
+      if (next >= 1) {
+        progressRef.current = 0;
+        setProgress(0);
+        setValue((current) => {
+          const index = tabs.findIndex((tab) => tab.value === current);
+          return tabs[(index + 1) % tabs.length].value;
+        });
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, paused, reducedMotion]);
+
+  const onValueChange = (next: string) => {
+    progressRef.current = 0;
+    setProgress(0);
+    setValue(next);
+  };
+
   return (
     <Tabs
-      defaultValue="content"
+      value={value}
+      onValueChange={onValueChange}
       className="gap-0 overflow-hidden rounded-lg bg-surface shadow-raised ring-1 ring-line"
+      onPointerEnter={() => setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setPaused(false);
+        }
+      }}
     >
       <TabsList
         variant="line"
-        className="grid h-auto! w-full grid-cols-2 items-stretch rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
+        className="grid h-auto! w-full grid-cols-2 items-stretch gap-0 rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
       >
-        {tabs.map((tab) => (
-          <TabsTrigger
-            key={tab.value}
-            value={tab.value}
-            className="h-auto flex-col items-start gap-1 rounded-none border-r border-line px-4 py-4 text-left last:border-r-0 data-active:shadow-none md:px-6 md:py-5"
-          >
-            <span className="text-base font-medium text-ink">{tab.title}</span>
-            <span className="text-sm leading-snug font-normal whitespace-normal text-muted">{tab.description}</span>
-          </TabsTrigger>
-        ))}
+        {tabs.map((tab, index) => {
+          const fill = index < activeIndex ? 1 : index === activeIndex ? (reducedMotion ? 1 : progress) : 0;
+          return (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="relative h-auto flex-col items-start gap-1 rounded-none border-r border-line px-4 py-4 pb-5 text-left after:hidden last:border-r-0 data-active:shadow-none md:px-6 md:py-5 md:pb-6"
+            >
+              <span className="text-base font-medium text-ink">{tab.title}</span>
+              <span className="text-sm leading-snug font-normal whitespace-normal text-muted">{tab.description}</span>
+              <span className="absolute inset-x-0 bottom-0 h-0.5 bg-line" aria-hidden="true">
+                <span className="block h-full origin-left bg-ink" style={{ width: `${fill * 100}%` }} />
+              </span>
+            </TabsTrigger>
+          );
+        })}
       </TabsList>
 
       <TabsContent value="content" className="mt-0">
