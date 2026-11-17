@@ -131,41 +131,47 @@ export function OpsCarousel() {
         <CarouselPrevious className="static translate-y-0" />
         <CarouselNext className="static translate-y-0" />
       </div>
-      <CarouselContent className="-ml-5 items-stretch">
-        {slides.map((slide) => (
-          <CarouselItem key={slide.kind} className="basis-4/5 py-1 pl-5 md:basis-2/3">
-            <Card className="flex h-full flex-col rounded-md border border-line shadow-soft">
-              <CardHeader className="flex flex-row items-center gap-2 border-b border-line py-3">
-                <span className="font-mono text-xs text-muted">orso</span>
-                <span className="text-line-strong" aria-hidden="true">
-                  /
-                </span>
-                <span className="text-xs text-muted">{slide.kind}</span>
-                <span className="ml-auto">{slideBadge(slide.kind)}</span>
-              </CardHeader>
-              <CardContent className="relative min-h-56 flex-1 overflow-hidden p-0" aria-hidden="true">
-                <img
-                  src={paintingUrl(slide.painting)}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="absolute inset-0 size-full object-cover"
-                />
-                <div className="absolute inset-0 bg-night/20" />
-                <div className="relative flex h-full min-h-56 items-start p-6">
-                  <div className="w-full">
-                    <SlideBody kind={slide.kind} />
+      <div className="relative">
+        <CarouselContent className="-ml-5 items-stretch">
+          {slides.map((slide) => (
+            <CarouselItem key={slide.kind} className="basis-4/5 py-1 pl-5 md:basis-2/3">
+              <Card className="flex h-full flex-col rounded-md border border-line shadow-soft">
+                <CardHeader className="flex flex-row items-center gap-2 border-b border-line py-3">
+                  <span className="font-mono text-xs text-muted">orso</span>
+                  <span className="text-line-strong" aria-hidden="true">
+                    /
+                  </span>
+                  <span className="text-xs text-muted">{slide.kind}</span>
+                  <span className="ml-auto">{slideBadge(slide.kind)}</span>
+                </CardHeader>
+                <CardContent className="relative aspect-3/2 overflow-hidden p-0" aria-hidden="true">
+                  <img
+                    src={paintingUrl(slide.painting)}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="absolute inset-0 size-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-night/20" />
+                  <div className="relative flex size-full items-start overflow-hidden p-6">
+                    <div className="w-full">
+                      <SlideBody kind={slide.kind} />
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-              <CardHeader className="mt-auto min-h-28 border-t border-line">
-                <CardTitle className="text-base text-ink">{slide.title}</CardTitle>
-                <CardDescription className="text-muted">{slide.caption}</CardDescription>
-              </CardHeader>
-            </Card>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
+                </CardContent>
+                <CardHeader className="mt-auto min-h-28 border-t border-line">
+                  <CardTitle className="text-base text-ink">{slide.title}</CardTitle>
+                  <CardDescription className="text-muted">{slide.caption}</CardDescription>
+                </CardHeader>
+              </Card>
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-linear-to-l from-surface to-transparent md:w-24"
+          aria-hidden="true"
+        />
+      </div>
     </Carousel>
   );
 }
