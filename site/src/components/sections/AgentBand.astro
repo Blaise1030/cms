@@ -3,7 +3,7 @@ import AppWindow from "../AppWindow.astro";
 import Painting from "../Painting.astro";
 import StatusChip from "../StatusChip.astro";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { Button, buttonVariants } from "../ui/button";
 import { href } from "../../lib/href";
 ---
 
@@ -14,9 +14,9 @@ import { href } from "../../lib/href";
         Ship pages faster with an agent on your repo
       </h2>
     </div>
-    <div class="flex flex-wrap gap-x-6 gap-y-2 md:col-span-5 md:justify-end">
-      <a class="link text-ink" href={href("#product")}>Agentic editing</a>
-      <a class="link text-ink" href={href("#faq")}>Which agents work</a>
+    <div class="flex flex-wrap gap-2 md:col-span-5 md:justify-end">
+      <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#product")}>Agentic editing</a>
+      <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#faq")}>Which agents work</a>
     </div>
   </div>
 
