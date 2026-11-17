@@ -17,6 +17,7 @@ import { PHASE_LABEL, SYNC_ACTIONS } from "./parts";
 import { useChatSteps } from "@/lib/chatSteps";
 import { useAgentProvidersStore } from "./providers";
 import { useChatStore } from "./store";
+import { useProjectsStore } from "@/modules/projects/store";
 import { useChangesStore } from "@/modules/changes/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { routes } from "@/router";
@@ -527,9 +528,36 @@ describe("ChatPanel", () => {
     expect(w.find("[data-testid='chat-page-context']").text()).toContain("Preview · /about");
     await send(w, "hi");
     expect(rawTextOf(messagePosts()[0]!)).toBe(
-      `hi\n${formatPageContext({ tab: "preview", fields: { path: "/about" } })}`,
+      `hi\n${formatPageContext({ tab: "preview", fields: { path: "/about", viewport: "desktop" } })}`,
     );
     expect(textOf(messagePosts()[0]!)).toBe("hi");
+  });
+
+  it("shows the preview device as its own chip and sends it unless removed", async () => {
+    usePreviewStore().setFramePath("p1", "/about");
+    usePreviewStore().device = "mobile";
+    const w = await mountPanel();
+    expect(w.get("[data-testid='chat-device']").text()).toBe("Mobile");
+    await send(w, "hi");
+    expect(rawTextOf(messagePosts()[0]!)).toBe(
+      `hi\n${formatPageContext({ tab: "preview", fields: { path: "/about", viewport: "mobile (390px wide)" } })}`,
+    );
+
+    finish(useChatStore().activeChatId("p1")!, [{ type: "text_delta", session_id: "s", text: "ok" }]);
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-send']").exists()).toBe(true));
+    await w.get("[data-testid='chat-device-remove']").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid='chat-device']").exists()).toBe(false);
+    expect(w.find("[data-testid='chat-page-context']").exists()).toBe(true);
+    await send(w, "again");
+    expect(rawTextOf(messagePosts()[1]!)).toBe(
+      `again\n${formatPageContext({ tab: "preview", fields: { path: "/about" } })}`,
+    );
+
+    // Picking another device brings the chip back.
+    usePreviewStore().device = "tablet";
+    await flushPromises();
+    expect(w.get("[data-testid='chat-device']").text()).toBe("Tablet");
   });
 
   it("injects content collection and entry from the route", async () => {
@@ -923,6 +951,38 @@ describe("ChatPanel", () => {
 
     src.frame({ type: "turn_end", session_id: "s", stop_reason: "end_turn" });
     await vi.waitFor(() => expect(w.find("[data-testid='chat-working']").exists()).toBe(false));
+  });
+
+  it("drops a streamed approval once its tool runs, and clears approvals at turn end", async () => {
+    const w = await mountPanel();
+    await send(w, "hello");
+    const id = useChatStore().activeChatId("p1")!;
+    const src = await streamFor(id);
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hello" });
+    src.frame({ type: "permission", session_id: "s", request_id: "1", tool_call: { toolCallId: "t1", title: "Read a.md" }, options: [] });
+    src.frame({ type: "permission", session_id: "s", request_id: "2", tool_call: { toolCallId: "t2", title: "Read b.md" }, options: [] });
+    await vi.waitFor(() => expect(w.get("[data-testid='chat-approval']").text()).toContain("1 more waiting"));
+    // Answered elsewhere: the tool ran, so its card goes.
+    src.frame({ type: "tool_call_update", session_id: "s", tool_call: { toolCallId: "t1", status: "completed" } });
+    await vi.waitFor(() => expect(w.get("[data-testid='chat-approval-title']").text()).toBe("Read b.md"));
+    expect(w.get("[data-testid='chat-approval']").text()).not.toContain("more waiting");
+    src.frame({ type: "turn_end", session_id: "s", stop_reason: "end_turn" });
+    await vi.waitFor(() => expect(w.find("[data-testid='chat-approval']").exists()).toBe(false));
+  });
+
+  it("shows no approval card for streamed requests when auto-approve is on", async () => {
+    useProjectsStore().projects = [{ id: "p1", name: "p1", port: 1, autoApprove: true } as never];
+    const w = await mountPanel();
+    await send(w, "hello");
+    const id = useChatStore().activeChatId("p1")!;
+    const src = await streamFor(id);
+    src.open();
+    src.frame({ type: "user_text", session_id: "s", text: "hello" });
+    src.frame({ type: "permission", session_id: "s", request_id: "1", tool_call: { toolCallId: "t1", title: "Read a.md" }, options: [] });
+    src.frame({ type: "text_delta", session_id: "s", text: "Still going" });
+    await vi.waitFor(() => expect(w.text()).toContain("Still going"));
+    expect(w.find("[data-testid='chat-approval']").exists()).toBe(false);
   });
 
   it("skips history it already rendered, and rebuilds from the replay after a reconnect", async () => {

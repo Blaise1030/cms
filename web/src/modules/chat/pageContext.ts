@@ -30,7 +30,11 @@ const TAB_LABEL: Record<ProjectTab, string> = {
  */
 export const PAGE_CONTEXT_PROVIDERS: Partial<Record<ProjectTab, PageContextProvider>> = {
   preview: {
-    fields: (params) => ({ path: params.path?.trim() || "/" }),
+    fields: (params) => {
+      const fields: Record<string, string> = { path: params.path?.trim() || "/" };
+      if (params.viewport) fields.viewport = params.viewport;
+      return fields;
+    },
     badge: (fields) => fields.path ?? "/",
   },
   content: {
@@ -68,6 +72,29 @@ export function pageContextBadge(ctx: PageContext): string {
   const detail = provider?.badge(ctx.fields) ?? "";
   const tab = TAB_LABEL[ctx.tab];
   return detail ? `${tab} · ${detail}` : tab;
+}
+
+/** Field holding the preview's device (`mobile (390px wide)`); shown as its own chip. */
+export const VIEWPORT_FIELD = "viewport";
+
+/** Wire value for a preview device: `desktop`, or `mobile (390px wide)` when it has a fixed width. */
+export function viewportValue(device: string, width: number | null): string {
+  return width ? `${device} (${width}px wide)` : device;
+}
+
+/** Chip label for the context's viewport (`Mobile`), or null when it has none. */
+export function viewportBadge(ctx: PageContext | null): string | null {
+  const value = ctx?.fields[VIEWPORT_FIELD];
+  if (!value) return null;
+  const device = value.split(" ")[0] ?? value;
+  return device.charAt(0).toUpperCase() + device.slice(1);
+}
+
+/** The context without its viewport (the user removed that chip). */
+export function withoutViewport(ctx: PageContext | null): PageContext | null {
+  if (!ctx || !(VIEWPORT_FIELD in ctx.fields)) return ctx;
+  const { [VIEWPORT_FIELD]: _, ...fields } = ctx.fields;
+  return { ...ctx, fields };
 }
 
 /** Undo [withPageContext] for display. */

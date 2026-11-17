@@ -10,7 +10,7 @@ import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import UTextarea from "@nuxt/ui/components/Textarea.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
-import { pageContextBadge, type PageContext } from "./pageContext";
+import { pageContextBadge, viewportBadge, type PageContext } from "./pageContext";
 import { groupModels, type GroupedModel } from "./modelGroups";
 import ProviderIcon from "./ProviderIcon.vue";
 
@@ -41,6 +41,12 @@ const props = defineProps<{
   /** Run the assistant's tools without asking. */
   autoApprove: boolean;
 }>();
+const VIEWPORT_ICON: Record<string, string> = {
+  desktop: "i-hugeicons-computer",
+  tablet: "i-hugeicons-tablet-01",
+  mobile: "i-hugeicons-smart-phone-01",
+};
+
 const emit = defineEmits<{
   submit: [text: string];
   stop: [];
@@ -48,6 +54,7 @@ const emit = defineEmits<{
   removeAttachment: [index: number];
   removeReference: [index: number];
   clearPageContext: [];
+  clearViewport: [];
   setAutoApprove: [on: boolean];
   /** The user wants to set up another assistant; the caller opens its setup. */
   setup: [];
@@ -262,6 +269,27 @@ defineExpose({ focus: () => textarea.value?.textareaRef?.focus() });
             />
             <UIcon name="i-hugeicons-location-01" class="size-3 shrink-0" aria-hidden="true" />
             <span class="min-w-0 truncate">{{ pageContextBadge(pageContext) }}</span>
+          </UBadge>
+          <UBadge
+            v-if="viewportBadge(pageContext ?? null)"
+            color="neutral"
+            variant="soft"
+            data-testid="chat-device"
+            class="max-w-full gap-1 pl-0.5"
+          >
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-cancel-01"
+              class="shrink-0 p-0.5"
+              :ui="{ leadingIcon: 'size-3' }"
+              :aria-label="`Remove ${viewportBadge(pageContext ?? null)}`"
+              data-testid="chat-device-remove"
+              @click="emit('clearViewport')"
+            />
+            <UIcon :name="VIEWPORT_ICON[pageContext?.fields.viewport?.split(' ')[0] ?? ''] ?? 'i-hugeicons-computer'" class="size-3 shrink-0" aria-hidden="true" />
+            <span class="min-w-0 truncate">{{ viewportBadge(pageContext ?? null) }}</span>
           </UBadge>
           <UBadge
             v-for="(reference, i) in references"

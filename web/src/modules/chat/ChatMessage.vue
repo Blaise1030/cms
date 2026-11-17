@@ -16,7 +16,7 @@ import { useChatSteps } from "@/lib/chatSteps";
 import ChatCheckpoint from "./ChatCheckpoint.vue";
 import { splitAttachments } from "./attachments";
 import { openWebLink } from "./links";
-import { pageContextBadge, splitPageContext } from "./pageContext";
+import { pageContextBadge, splitPageContext, viewportBadge } from "./pageContext";
 import {
   formatValue,
   groupSteps,
@@ -166,6 +166,14 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
         data-testid="message-page-context"
         class="max-w-full"
         :label="pageContextBadge(sent.context)"
+      />
+      <UBadge
+        v-if="viewportBadge(sent.context)"
+        color="neutral"
+        variant="soft"
+        data-testid="message-viewport"
+        class="max-w-full"
+        :label="viewportBadge(sent.context)!"
       />
       <UChatMessage
         v-if="sent.text"
