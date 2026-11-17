@@ -102,13 +102,13 @@ const external = (link: string) => /^https?:\/\//.test(link);
         <div class="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
           {site.secondaryCta && (
             <a
-              class={cn(buttonVariants({ variant: "outline", size: "sm" }), "hidden sm:inline-flex")}
+              class={cn(buttonVariants({ variant: "outline", size: "lg" }), "hidden sm:inline-flex")}
               href={href(site.secondaryCta.href)}>{site.secondaryCta.label}</a
             >
           )}
           {site.cta && (
             <a
-              class={buttonVariants({ size: "sm" })}
+              class={buttonVariants({ size: "lg" })}
               href={href(site.cta.href)}
               rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>{site.cta.label}</a
             >
