@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.9
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.8...v0.1.9)
+
+### Features
+
+- Give a change a description that becomes its GitHub description ([693007d](https://github.com/Blaise1030/CMS/commit/693007d))
+
+### Fixes
+
+- **astro:** Skip Vite's dev-only inline CSS and JSON-LD in the huge-inline check ([5e329e7](https://github.com/Blaise1030/CMS/commit/5e329e7))
+- **preview:** Forward every root /@ Vite module to the dev server ([3a1ed4d](https://github.com/Blaise1030/CMS/commit/3a1ed4d))
+- **chat:** Drop stale approvals and send the preview device with prompts ([61657dc](https://github.com/Blaise1030/CMS/commit/61657dc))
+
 ## v0.1.8
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.7...v0.1.8)
