@@ -128,7 +128,7 @@ export function ProductTabs() {
     <Tabs
       value={value}
       onValueChange={onValueChange}
-      className="gap-0 overflow-hidden rounded-lg bg-surface shadow-raised ring-1 ring-line"
+      className="gap-0 overflow-hidden rounded-none bg-surface shadow-raised ring-1 ring-line"
       onPointerEnter={() => setPaused(true)}
       onPointerLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
