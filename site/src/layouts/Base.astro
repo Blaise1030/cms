@@ -53,6 +53,9 @@ const navItems = site.nav.map((link) => ({
   href: href(link.href),
   current: isCurrent(link.href),
 }));
+// Footer groups: in-page product destinations versus the resource pages (Blog, Help).
+const product = site.nav.filter((link) => link.href.startsWith("#"));
+const resources = site.nav.filter((link) => !link.href.startsWith("#"));
 ---
 
 <html lang="en">
