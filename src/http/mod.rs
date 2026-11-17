@@ -30,7 +30,6 @@ use crate::auth;
 use crate::error::ApiError;
 use crate::preview;
 use crate::state::AppState;
-use crate::static_files;
 
 pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
@@ -191,7 +190,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/publish", post(changes::publish))
         .route("/api/tree", get(files::tree))
         .route("/api/file", get(files::file))
-        .fallback(static_files::serve)
+        .fallback(preview::fallback)
         .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.
         .layer(middleware::from_fn_with_state(

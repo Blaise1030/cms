@@ -1613,11 +1613,21 @@ mod tests {
             .draft_checkpoint_subject("proj", "chat-1", &["src/pages/sitemap.xml.ts".into()])
             .await;
         assert_eq!(subject.as_deref(), Some("Add sitemap and robots"));
-        assert_eq!(hooks.load(Ordering::SeqCst), 1, "draft must not re-enter turn-end hook");
+        assert_eq!(
+            hooks.load(Ordering::SeqCst),
+            1,
+            "draft must not re-enter turn-end hook"
+        );
         let after = chats.history("proj", "chat-1");
-        assert_eq!(before.len(), after.len(), "draft must stay out of the transcript");
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "draft must stay out of the transcript"
+        );
         assert!(
-            !after.iter().any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("COMMIT:"))),
+            !after
+                .iter()
+                .any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("COMMIT:"))),
             "draft text leaked into history: {after:?}"
         );
         chats.shutdown().await;
@@ -1659,8 +1669,9 @@ mod tests {
             .await
             .unwrap();
         wait_until(&chats, "proj", "chat-1", |h| {
-            h.iter()
-                .any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("slow started")))
+            h.iter().any(
+                |c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains("slow started")),
+            )
         })
         .await;
         assert!(chats.any_running("proj"));

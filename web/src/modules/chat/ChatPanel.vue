@@ -20,7 +20,7 @@ import { openAssistantSetup } from "@/modules/assistant/dialog";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useAgentProvidersStore } from "@/modules/chat/providers";
 import { useChangesStore } from "@/modules/changes/store";
-import { usePreviewStore } from "@/modules/preview/store";
+import { DEVICE_WIDTH, usePreviewStore } from "@/modules/preview/store";
 import { projectTabFromRoute, type ProjectTab } from "@/router";
 import ChatComposer, { type ChatAttachment, type ChatReference } from "./ChatComposer.vue";
 import ChatHistory from "./ChatHistory.vue";
@@ -33,7 +33,9 @@ import {
   nextStickyPageContext,
   resolvePageContext,
   splitPageContext,
+  viewportValue,
   withPageContext,
+  withoutViewport,
   type StickyPageContext,
 } from "./pageContext";
 import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal, syncPhaseBadge } from "./parts";
@@ -344,12 +346,19 @@ function applyChunk(id: string, chunk: UiChunk) {
   if (chunk.type === "turn_end") {
     // The turn is over even if its `chat.turn` event never arrives.
     store.clearChatSending(props.projectId, id);
+    // Nothing can still be waiting once the turn is over.
+    permissions.value = [];
     void drainQueue();
-  } else if (
-    chunk.type === "permission"
-    && !permissions.value.some((p) => p.request_id === chunk.request_id)
-  ) {
-    permissions.value.push(chunk);
+  } else if (chunk.type === "permission") {
+    // With auto-approve on, the daemon has already allowed it; there is nothing to ask.
+    if (!autoApprove.value && !permissions.value.some((p) => p.request_id === chunk.request_id))
+      permissions.value.push(chunk);
+  } else if (chunk.type === "tool_call_update" && permissions.value.length) {
+    // The tool started or finished, so its request was answered (here, elsewhere, or by
+    // auto-approve). Drop it so the card never shows a request that is no longer open.
+    const { toolCallId, status } = chunk.tool_call;
+    if (typeof status === "string" && status !== "pending")
+      permissions.value = permissions.value.filter((p) => p.tool_call.toolCallId !== toolCallId);
   }
 }
 
@@ -612,7 +621,11 @@ watch([streaming, loadingChat, activeId], () => void drainQueue(), { flush: "pos
 
 /** Sticky page context: live on Preview/Content, frozen after leaving those modules. */
 const stickyPageContext = ref<StickyPageContext>({ context: null, frozen: false });
-const pageContext = computed(() => stickyPageContext.value.context);
+/** The user removed the device chip; it comes back when they pick another device. */
+const viewportDismissed = ref(false);
+const pageContext = computed(() =>
+  viewportDismissed.value ? withoutViewport(stickyPageContext.value.context) : stickyPageContext.value.context,
+);
 
 function currentPageTab(): ProjectTab {
   return projectTabFromRoute(route?.name);
@@ -624,6 +637,7 @@ function resolvedPageContext() {
     tab,
     params: {
       path: preview.framePathFor(props.projectId),
+      viewport: viewportValue(preview.device, DEVICE_WIDTH[preview.device]),
       collection: typeof route?.params?.collection === "string" ? route.params.collection : undefined,
       entry: typeof route?.params?.entry === "string" ? route.params.entry : undefined,
     },
@@ -644,14 +658,21 @@ watch(
     route?.params?.collection,
     route?.params?.entry,
     preview.framePathFor(props.projectId),
+    preview.device,
     props.projectId,
   ],
   syncStickyPageContext,
   { immediate: true },
 );
 
+watch(() => preview.device, () => (viewportDismissed.value = false));
+
 function clearPageContext() {
   stickyPageContext.value = clearStickyPageContext();
+}
+
+function clearViewport() {
+  viewportDismissed.value = true;
 }
 
 async function send(text: string, previewText = text) {
@@ -1094,6 +1115,7 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
         @remove-attachment="attachments.splice($event, 1)"
         @remove-reference="references.splice($event, 1)"
         @clear-page-context="clearPageContext"
+        @clear-viewport="clearViewport"
         @set-auto-approve="setAutoApprove"
         @setup="openSetup"
       />

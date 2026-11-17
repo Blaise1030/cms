@@ -772,10 +772,11 @@ pub async fn live(
         return Ok(Json(json!({ "url": null })));
     };
     let worker = github::worker_name_from_wrangler(&project.dir);
-    let url = match state.github.live_url(repo, worker.as_deref()).await {
-        Ok(url) => url,
-        Err(_) => None,
-    };
+    let url = state
+        .github
+        .live_url(repo, worker.as_deref())
+        .await
+        .unwrap_or_default();
     Ok(Json(json!({ "url": url })))
 }
 

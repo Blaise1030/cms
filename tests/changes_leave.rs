@@ -102,7 +102,10 @@ async fn leave_refuses_a_dirty_tree() {
 
     let err = changes::leave_to_main(&dir).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
-    assert!(err.message.contains("Uncommitted"), "{err:?}");
+    assert!(
+        err.message.contains("Save or discard your edits"),
+        "{err:?}"
+    );
     assert_eq!(git_cli(&dir, &["branch", "--show-current"]), change.branch);
 }
 

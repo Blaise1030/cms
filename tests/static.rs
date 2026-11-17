@@ -137,7 +137,7 @@ async fn root_serves_index_html_without_a_token_and_never_caches_it() {
         .unwrap()
         .starts_with("text/html"));
     assert_eq!(headers[header::CACHE_CONTROL], "no-cache");
-    assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\">"));
+    assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\""));
 }
 
 #[tokio::test]
@@ -219,7 +219,7 @@ async fn client_routes_fall_back_to_index_but_missing_files_and_daemon_paths_404
             .to_str()
             .unwrap()
             .starts_with("text/html"));
-        assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\">"));
+        assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\""));
         // Project routes can end in a file name (an open file in the Code tab).
         let (status, _, body) = send(req(
             Method::GET,
@@ -227,7 +227,7 @@ async fn client_routes_fall_back_to_index_but_missing_files_and_daemon_paths_404
         ))
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\">"));
+        assert!(String::from_utf8_lossy(&body).contains("<div id=\"app\""));
     }
     let (status, _, _) = send(req(Method::GET, "/assets/missing-abc.js")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);

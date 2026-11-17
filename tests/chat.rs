@@ -680,7 +680,7 @@ async fn turn_end_appends_checkpoint_chunk() {
     );
     assert!(checkpoint.get("blocked").is_none(), "{checkpoint}");
     assert_eq!(
-        checkpoint["summary"], "fake reply: edit something (done)",
+        checkpoint["summary"], "Add sitemap and robots",
         "{checkpoint}"
     );
 
