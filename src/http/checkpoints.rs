@@ -277,7 +277,10 @@ mod tests {
     #[test]
     fn commit_message_falls_back_to_changed_paths() {
         assert_eq!(
-            commit_message(None, &["a.md".into(), "b.md".into(), "c.md".into(), "d.md".into()]),
+            commit_message(
+                None,
+                &["a.md".into(), "b.md".into(), "c.md".into(), "d.md".into()]
+            ),
             "Update 4 files: a.md, b.md, c.md"
         );
     }

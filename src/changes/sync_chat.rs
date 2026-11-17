@@ -250,11 +250,7 @@ fn update_live(
 ) -> Result<Option<SessionRecord>, ApiError> {
     let mut skipped = false;
     let updated = history::update(&state_dir(state), project, chat, |record| {
-        if !record
-            .sync
-            .as_ref()
-            .is_some_and(|st| !st.phase.is_terminal())
-        {
+        if record.sync.as_ref().is_none_or(|st| st.phase.is_terminal()) {
             skipped = true;
             return;
         }

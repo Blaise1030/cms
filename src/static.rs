@@ -310,7 +310,11 @@ mod tests {
         assert!(safe_join(Path::new("/x"), "a/b.txt").is_ok());
     }
 
-    fn collect_js_relative_paths(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+    fn collect_js_relative_paths(
+        dir: &Path,
+        base: &Path,
+        out: &mut Vec<PathBuf>,
+    ) -> io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -335,9 +339,7 @@ mod tests {
 
         for must_have in ["checks/page.js", "checks/meta.js", "bridge.js"] {
             assert!(
-                rel_paths
-                    .iter()
-                    .any(|p| p.to_str() == Some(must_have)),
+                rel_paths.iter().any(|p| p.to_str() == Some(must_have)),
                 "canonical missing {must_have}"
             );
         }

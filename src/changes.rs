@@ -320,7 +320,9 @@ pub async fn set_description(dir: &Path, branch: &str, text: &str) -> Result<(),
 
 /// The change's description, if the writer gave one.
 pub async fn description(dir: &Path, branch: &str) -> Option<String> {
-    let text = run(dir, &["config", "--get", &description_key(branch)]).await.ok()?;
+    let text = run(dir, &["config", "--get", &description_key(branch)])
+        .await
+        .ok()?;
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
 }
@@ -955,9 +957,7 @@ pub async fn cleanup(
         }
         return Err(match pr {
             PrMerge::Unknown(e) => e,
-            _ => ApiError::conflict(
-                "This change isn't published yet — publish it first",
-            ),
+            _ => ApiError::conflict("This change isn't published yet — publish it first"),
         });
     }
 

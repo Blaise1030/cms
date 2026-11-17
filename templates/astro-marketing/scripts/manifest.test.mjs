@@ -10,7 +10,7 @@ const root = resolve(import.meta.dirname, "..");
 test("astro sync writes the orso content manifest", () => {
   const dir = mkdtempSync(join(tmpdir(), "orso-manifest-"));
   try {
-    for (const path of ["src", "astro.config.mjs", "package.json"]) cpSync(join(root, path), join(dir, path), { recursive: true });
+    for (const path of ["src", "integrations", "astro.config.mjs", "package.json"]) cpSync(join(root, path), join(dir, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(dir, "node_modules"), "dir");
     const result = spawnSync(process.execPath, [join(root, "node_modules/astro/bin/astro.mjs"), "sync"], {
       cwd: dir, encoding: "utf8", env: { ...process.env, PUBLIC_BASE: "/" },

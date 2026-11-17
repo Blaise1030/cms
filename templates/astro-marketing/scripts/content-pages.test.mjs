@@ -10,7 +10,7 @@ const html = (dir, path) => readFileSync(join(dir, "dist", path, "index.html"), 
 function fixture(run) {
   const dir = mkdtempSync(join(tmpdir(), "content-pages-"));
   try {
-    for (const path of ["src", "astro.config.mjs", "package.json"]) cpSync(join(root, path), join(dir, path), { recursive: true });
+    for (const path of ["src", "integrations", "astro.config.mjs", "package.json"]) cpSync(join(root, path), join(dir, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(dir, "node_modules"), "dir");
     run(dir);
   } finally { rmSync(dir, { recursive: true, force: true }); }

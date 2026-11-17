@@ -1381,13 +1381,10 @@ impl GithubAuth {
         repo: &str,
         worker_name: Option<&str>,
     ) -> Result<Option<String>, ApiError> {
-        match self.main_head(repo).await {
-            Ok(sha) => {
-                if let Some(url) = self.preview_url(repo, &sha).await? {
-                    return Ok(Some(url));
-                }
+        if let Ok(sha) = self.main_head(repo).await {
+            if let Some(url) = self.preview_url(repo, &sha).await? {
+                return Ok(Some(url));
             }
-            Err(_) => {}
         }
         let Some(worker) = worker_name.filter(|n| !n.is_empty()) else {
             return Ok(None);
@@ -2032,9 +2029,18 @@ mod tests {
     #[test]
     fn draft_pr_copy_uses_change_title() {
         assert_eq!(pr_title("Launch week"), "Launch week");
-        assert_eq!(pr_body("Launch week", None), "Preview of change: Launch week");
-        assert_eq!(pr_body("Launch week", Some("  ")), "Preview of change: Launch week");
-        assert_eq!(pr_body("Launch week", Some(" New hero copy and pricing table. ")), "New hero copy and pricing table.");
+        assert_eq!(
+            pr_body("Launch week", None),
+            "Preview of change: Launch week"
+        );
+        assert_eq!(
+            pr_body("Launch week", Some("  ")),
+            "Preview of change: Launch week"
+        );
+        assert_eq!(
+            pr_body("Launch week", Some(" New hero copy and pricing table. ")),
+            "New hero copy and pricing table."
+        );
     }
 
     #[test]
@@ -2907,7 +2913,7 @@ esac"#,
                 "/repos/acme/site/deployments",
                 get(|Query(q): Query<HashMap<String, String>>| async move {
                     // Main tip has no deployment; unfiltered list still has PR previews.
-                    if q.get("sha").is_some() {
+                    if q.contains_key("sha") {
                         return Json(serde_json::json!([]));
                     }
                     Json(serde_json::json!([{ "id": 1, "sha": "previewsha" }]))
