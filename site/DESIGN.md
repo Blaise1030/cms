@@ -154,7 +154,7 @@ Depth comes from tone (surface, sand, night), 1px hairlines, and a black-tinted 
 
 ## Art
 
-Public-domain Renaissance paintings sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Patinir's *Landscape with the Flight into Egypt* inside the active tab panel, not as a band around the tabs; the three feature cards use Bruegel, Giorgione and Altdorfer; the ops carousel cycles all five; the agent band uses Leonardo's *The Virgin of the Rocks*. Each image is cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
+Public-domain Renaissance landscapes sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Altdorfer's *Danube Landscape with Wörth Castle* inside the active tab panel, not as a band around the tabs; the three feature cards use Altdorfer's *Landscape with a Footbridge*, El Greco's *View of Toledo* and Valckenborch's *Mountainous Landscape*; the ops carousel cycles all five; the agent band uses Verhaecht's *Alpine Landscape*. Every image is a landscape with no figures (some are cropped details), cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
 
 
 ## Shapes

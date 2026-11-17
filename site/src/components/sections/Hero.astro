@@ -9,13 +9,13 @@ const words = headline.split(" ");
 
 <section class="pt-14 md:pt-20" id="product">
   <div class="page">
-    <div class="max-w-3/4">
-      <h1 class="text-display font-medium tracking-display text-ink">
+    <div class="w-full md:max-w-3/4">
+      <h1 class="text-4xl font-medium tracking-display text-ink md:text-display">
         {words.map((word, index) => (
           <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
         ))}
       </h1>
-      <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
+      <p class="rise-2 mt-5 max-w-measure text-base text-muted md:mt-6 md:text-lg">
         Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
         by asking an agent. Every change is a draft you preview before it goes live.
       </p>
