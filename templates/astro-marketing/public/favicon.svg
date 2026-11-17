@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .sky { fill: #dde5ea; } .sea { fill: #3b5a72; } .line { stroke: #f6f4ef; }
+    @media (prefers-color-scheme: dark) { .sky { fill: #2f3b45; } .sea { fill: #a3bdd1; } .line { stroke: #25272a; } }
+  </style>
+  <circle class="sky" cx="12" cy="12" r="11"/>
+  <path class="sea" d="M1 12a11 11 0 0 0 22 0Z"/>
+  <path class="line" d="M6 16h12M9 19h6" stroke-width="1.25" stroke-linecap="round" fill="none"/>
+</svg>

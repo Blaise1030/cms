@@ -75,7 +75,10 @@ export { collections } from "virtual:orso/collections";
 ```
 
 `integrations/orso/marketing.js` (synced from this package) exports `marketingCollections` for
-the Astro marketing template (`blog` and `helpDocs` with site-relative `previewPath` helpers).
+the Astro marketing template: `blog` and `helpDocs`, plus `blogCategories`, `helpCategories`
+(Help sections), `helpSubcategories` and `helpDocsCategories` (Help topics) that they reference.
+Every routed collection gets a site-relative `previewPath` helper; `helpSubcategories` has no page.
+`attachMarketingPreviewPaths(collections)` wraps any subset of these names the same way.
 Custom sites can define their own `collections` object with the same `{ collection, previewPath? }`
 shape.
 

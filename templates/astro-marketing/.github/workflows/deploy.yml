@@ -64,8 +64,11 @@ jobs:
 
       - run: npm ci
 
-      # Fails on content-schema errors and missing section ids.
+      # Fails on content-schema errors and missing section ids. PUBLIC_SITE_URL (a repo
+      # variable) sets the absolute URL used in canonical links, the sitemap and social cards.
       - run: npm run build
+        env:
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
 
       - name: Start GitHub deployment (preview)
         id: preview_deployment

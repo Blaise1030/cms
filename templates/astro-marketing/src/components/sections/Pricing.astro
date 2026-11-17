@@ -4,34 +4,48 @@ import { href } from "../../lib/href";
 const plans = [
   {
     name: "Starter",
+    summary: "For a team finding its rhythm.",
     price: "$0",
-    period: "forever",
-    features: ["One site", "Community support"],
+    period: "for up to 5 people",
+    features: ["3 active projects", "Milestones, tasks and decisions", "Read-only share links"],
     cta: { label: "Start free", href: "#" },
     highlighted: false,
   },
   {
-    name: "Pro",
-    price: "$19",
-    period: "per month",
-    features: ["Unlimited sites", "Custom domain", "Priority support"],
-    cta: { label: "Go Pro", href: "#" },
+    name: "Team",
+    summary: "For teams running several projects at once.",
+    price: "$8",
+    period: "per person, per month",
+    features: ["Unlimited projects", "Friday summary emails", "Priority email support"],
+    cta: { label: "Start a 14-day trial", href: "#" },
     highlighted: true,
   },
 ];
 ---
 
-<section class="mx-auto max-w-5xl px-8 py-16" id="pricing">
-  <h2 class="mb-6 text-3xl font-bold tracking-tight">Simple, honest pricing</h2>
-  <div class="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-6">
-    {plans.map((p) => (
-      <div class:list={["flex flex-col rounded-xl border p-5", p.highlighted ? "border-current" : "border-neutral-400/30"]}>
-        <h3 class="text-lg font-semibold">{p.name}</h3>
-        <p class="mt-2"><strong class="text-3xl font-bold">{p.price}</strong> {p.period}</p>
-        <ul class="my-4 flex-1 list-disc space-y-1 pl-5">{p.features.map((f) => <li>{f}</li>)}</ul>
-        <a class="inline-block rounded-lg border border-current px-5 py-2.5 text-center font-semibold" href={href(p.cta.href)}>
-          {p.cta.label}
-        </a>
+<section class="page py-section" id="pricing" data-reveal>
+  <div class="max-w-xl">
+    <h2 class="text-3xl font-light tracking-display text-ink">Start free. Pay when the team grows.</h2>
+    <p class="mt-5 text-muted">Prices in US dollars, billed monthly. Change or cancel your plan at any time.</p>
+  </div>
+  <div class="mt-14 grid gap-6 md:grid-cols-2">
+    {plans.map((plan) => (
+      <div class:list={["flex flex-col rounded-xl p-8 md:p-10", plan.highlighted ? "bg-sand" : "border border-line"]}>
+        <h3 class="text-xl font-medium text-ink">{plan.name}</h3>
+        <p class="mt-1 text-muted">{plan.summary}</p>
+        <p class="mt-8 flex items-baseline gap-3">
+          <span class="text-5xl font-light tracking-display text-ink">{plan.price}</span>
+          <span class="text-sm text-muted">{plan.period}</span>
+        </p>
+        <ul class="mt-8 flex-1 space-y-3 border-t border-line pt-8">
+          {plan.features.map((feature) => (
+            <li class="flex items-start gap-3">
+              <svg class="mt-1.5 size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true"><path class="stroke-accent" d="m3.5 8.5 3 3 6-7" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <span>{feature}</span>
+            </li>
+          ))}
+        </ul>
+        <a class:list={["mt-10 self-start", plan.highlighted ? "button" : "button-quiet"]} href={href(plan.cta.href)}>{plan.cta.label}</a>
       </div>
     ))}
   </div>

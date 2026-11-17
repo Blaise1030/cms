@@ -9,6 +9,11 @@ npm run dev     # local dev server
 npm run build   # static build into ./dist
 ```
 
+Set `PUBLIC_SITE_URL` (for example `https://www.example.com`) when you build for production, or
+change `url` in `src/site.ts`: canonical links, Open Graph tags, `sitemap.xml`, `robots.txt` and
+`llms.txt` all use it. The look is defined by design tokens in `src/styles/global.css` and
+documented in `DESIGN.md`; `npm test` checks that components use only those tokens.
+
 ## Deploys
 
 The site is a static `dist/` build. The starter ships Cloudflare Workers CI; any other static

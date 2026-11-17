@@ -1,7 +1,8 @@
 ---
 title: Getting started
 description: Learn the basics and make your first changes.
-section: Getting started
+section: basics
+category: setup
 order: 1
 ---
 
@@ -12,3 +13,8 @@ Explore the site, read our guides, and start shaping your product story.
 1. Review your site settings.
 2. Update your home page sections.
 3. Share your work with your team.
+
+## Where to go next
+
+- **Create your account** if you have not signed up yet.
+- **Invite your team** once you are ready to work together.

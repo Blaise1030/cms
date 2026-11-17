@@ -1,0 +1,48 @@
+---
+import { Image } from "astro:assets";
+import Artwork from "./Artwork.astro";
+import { href } from "../lib/href";
+import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
+
+interface Props {
+  post: Post;
+  categories: BlogCategory[];
+  /** Heading level for the title: 2 in a page's main list, 3 under another section heading. */
+  level?: 2 | 3;
+  /** `lead` shows the post large, image beside the text (used for the newest post). */
+  variant?: "default" | "lead";
+}
+const { post, categories, level = 2, variant = "default" } = Astro.props;
+const Heading = level === 3 ? "h3" : "h2";
+const postCategories = categoriesOf(post, categories);
+const lead = variant === "lead";
+const media = lead ? "aspect-3/2 rounded-lg md:col-span-7" : "aspect-3/2 rounded-lg";
+---
+
+<article class:list={["group relative", lead ? "grid items-center gap-8 md:grid-cols-12 md:gap-12" : "flex flex-col gap-5"]}>
+  <div class:list={["overflow-hidden", media]}>
+    {post.data.coverImage ? (
+      <Image
+        class="size-full object-cover transition-transform duration-slow ease-settle group-hover:scale-102"
+        src={post.data.coverImage}
+        alt={post.data.coverAlt!}
+        widths={lead ? [600, 900, 1200] : [400, 800]}
+        sizes={lead ? "(min-width: 768px) 40rem, 100vw" : "(min-width: 1024px) 22rem, (min-width: 640px) 50vw, 100vw"}
+      />
+    ) : (
+      <Artwork seed={post.id} class="size-full transition-transform duration-slow ease-settle group-hover:scale-102" />
+    )}
+  </div>
+  <div class:list={["flex flex-col gap-3", lead && "md:col-span-5"]}>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+      <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
+      {postCategories.map((category) => (
+        <a class="label relative z-10 text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
+      ))}
+    </div>
+    <Heading class:list={["text-ink", lead ? "text-3xl font-light tracking-display" : "text-xl font-medium tracking-tight"]}>
+      <a class="decoration-line-strong decoration-1 underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+    </Heading>
+    <p class:list={["text-muted", lead && "text-lg"]}>{post.data.description}</p>
+  </div>
+</article>
