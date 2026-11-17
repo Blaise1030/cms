@@ -22,6 +22,7 @@ const ChangedFilesTree = defineAsyncComponent(() => import("./ChangedFilesTree.v
 const DiffView = defineAsyncComponent(() => import("./DiffView.vue"));
 
 const props = defineProps<{ projectId: string; sha?: string }>();
+const short = (sha: string) => sha.slice(0, 7);
 const store = useCheckpointsStore();
 const router = useRouter();
 
@@ -30,7 +31,21 @@ const diffs = ref<HTMLElement | null>(null);
 
 const list = computed(() => store.byProject[props.projectId] ?? []);
 const selected = computed(() => list.value.find((c) => c.sha === store.selectedSha) ?? null);
-const isCurrent = computed(() => !!selected.value && list.value[0]?.sha === selected.value.sha);
+/** The folder the timeline covers; `.` is the whole repo. */
+const root = computed(() => store.rootByProject[props.projectId] ?? ".");
+/** The commit the project is at. A site-scoped timeline may not list it (it changed only files outside the site). */
+const currentSha = computed(() => {
+  const head = store.headByProject[props.projectId];
+  return head === undefined ? list.value[0]?.sha : head;
+});
+const isCurrent = computed(() => !!selected.value && currentSha.value === selected.value.sha);
+const restoreDescription = computed(() => {
+  const target = selected.value ? short(selected.value.sha) : "";
+  const base = `The project's files go back to ${target}. Later checkpoints and any uncommitted changes are discarded.`;
+  return root.value === "."
+    ? base
+    : `${base} This resets the whole repository, including files outside ${root.value}/.`;
+});
 
 watch(
   () => props.projectId,
@@ -46,7 +61,6 @@ watch(
 
 const open = (sha?: string) => router.push(historyPath(props.projectId, sha));
 
-const short = (sha: string) => sha.slice(0, 7);
 const when = (ts: number) => new Date(ts * 1000).toLocaleString();
 const time = (ts: number) => new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const day = (ts: number) => new Date(ts * 1000).toDateString();
@@ -209,49 +223,55 @@ async function restore() {
             title="No checkpoints yet"
             description="One is saved after each assistant turn that changes files."
           />
-          <!-- Newest first; the current checkpoint's node is highlighted. -->
-          <ol v-else class="m-0 flex w-full list-none flex-col gap-2 p-0" data-testid="timeline">
-            <template v-for="(cp, i) in list" :key="cp.sha">
-              <li v-if="startsDay(i)" class="px-1 pb-1" :class="{ 'pt-4': i > 0 }">
-                <h3 class="text-muted m-0 text-xs font-medium" data-testid="checkpoint-day">{{ dayLabel(cp.ts) }}</h3>
-              </li>
-              <li class="relative flex w-full items-start gap-2">
-                <!-- The line runs from below this node, across the row gap, to the next row's node. -->
-                <USeparator
-                  v-if="i < list.length - 1 && !startsDay(i + 1)"
-                  orientation="vertical"
-                  class="absolute top-10 -bottom-4 left-3 h-auto w-px"
-                  aria-hidden="true"
-                />
-                <UAvatar
-                  icon="i-hugeicons-git-commit"
-                  size="xs"
-                  class="mt-3"
-                  :class="i === 0 ? 'bg-primary text-inverted' : 'bg-elevated'"
-                  :ui="i === 0 ? { icon: 'text-inverted' } : undefined"
-                  aria-hidden="true"
-                />
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  class="min-w-0 flex-1 gap-2 px-2.5 py-2.5 text-left"
-                  data-testid="checkpoint-item"
-                  @click="open(cp.sha)"
-                >
-                  <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span class="text-highlighted truncate text-base font-medium">{{ cp.summary }}</span>
-                    <span class="text-muted text-xs font-normal">
-                      <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ time(cp.ts) }}
+          <template v-else>
+            <!-- A site folder is set in orso.json: only commits touching it are listed. -->
+            <p v-if="root !== '.'" class="text-muted m-0 px-1 pb-2 text-xs" data-testid="history-scope">
+              Changes to {{ root }}/
+            </p>
+            <!-- Newest first; the current checkpoint's node is highlighted. -->
+            <ol class="m-0 flex w-full list-none flex-col gap-2 p-0" data-testid="timeline">
+              <template v-for="(cp, i) in list" :key="cp.sha">
+                <li v-if="startsDay(i)" class="px-1 pb-1" :class="{ 'pt-4': i > 0 }">
+                  <h3 class="text-muted m-0 text-xs font-medium" data-testid="checkpoint-day">{{ dayLabel(cp.ts) }}</h3>
+                </li>
+                <li class="relative flex w-full items-start gap-2">
+                  <!-- The line runs from below this node, across the row gap, to the next row's node. -->
+                  <USeparator
+                    v-if="i < list.length - 1 && !startsDay(i + 1)"
+                    orientation="vertical"
+                    class="absolute top-10 -bottom-4 left-3 h-auto w-px"
+                    aria-hidden="true"
+                  />
+                  <UAvatar
+                    icon="i-hugeicons-git-commit"
+                    size="xs"
+                    class="mt-3"
+                    :class="cp.sha === currentSha ? 'bg-primary text-inverted' : 'bg-elevated'"
+                    :ui="cp.sha === currentSha ? { icon: 'text-inverted' } : undefined"
+                    aria-hidden="true"
+                  />
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    class="min-w-0 flex-1 gap-2 px-2.5 py-2.5 text-left"
+                    data-testid="checkpoint-item"
+                    @click="open(cp.sha)"
+                  >
+                    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span class="text-highlighted truncate text-base font-medium">{{ cp.summary }}</span>
+                      <span class="text-muted text-xs font-normal">
+                        <span data-testid="checkpoint-author">{{ cp.author }}</span> · {{ short(cp.sha) }} · {{ time(cp.ts) }}
+                      </span>
                     </span>
-                  </span>
-                  <span class="flex shrink-0 items-center gap-2">
-                    <UBadge v-if="i === 0" color="neutral" variant="soft" label="Current" />
-                    <UIcon name="i-hugeicons-arrow-right-01" class="text-muted size-4" />
-                  </span>
-                </UButton>
-              </li>
-            </template>
-          </ol>
+                    <span class="flex shrink-0 items-center gap-2">
+                      <UBadge v-if="cp.sha === currentSha" color="neutral" variant="soft" label="Current" />
+                      <UIcon name="i-hugeicons-arrow-right-01" class="text-muted size-4" />
+                    </span>
+                  </UButton>
+                </li>
+              </template>
+            </ol>
+          </template>
         </div>
       </div>
     </template>
@@ -259,7 +279,7 @@ async function restore() {
     <UModal
       v-model:open="confirming"
       title="Restore this checkpoint?"
-      :description="`The project's files go back to ${selected ? short(selected.sha) : ''}. Later checkpoints and any uncommitted changes are discarded.`"
+      :description="restoreDescription"
       :close="false"
       :ui="{ footer: 'justify-end' }"
     >

@@ -49,7 +49,33 @@ import { useFilesStore } from "./store";
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
 
-async function mountPanel(start = "/p/p/code") {
+/** A `/api/tree` stub over a flat list of repo-relative files. */
+function treeOf(files: string[]) {
+  return vi.fn(async (_p: string, dir: string) => {
+    const prefix = dir ? `${dir}/` : "";
+    const entries = new Map<string, { name: string; path: string; kind: "file" | "dir"; size: number | null }>();
+    for (const file of files) {
+      if (!file.startsWith(prefix)) continue;
+      const [name, ...rest] = file.slice(prefix.length).split("/");
+      const path = `${prefix}${name}`;
+      entries.set(path, { name: name!, path, kind: rest.length ? "dir" : "file", size: rest.length ? null : 1 });
+    }
+    return { path: dir, entries: [...entries.values()] };
+  });
+}
+
+const SCOPED_FILES = ["README.md", "crates/cli/main.rs", "site/index.astro", "site/pages/a.md"];
+
+async function mountScoped(siteRoot: string, start = "/p/p/code") {
+  const w = await mountPanel(start, {
+    tree: treeOf(SCOPED_FILES),
+    settings: vi.fn(async () => ({ siteRoot })),
+  });
+  await flushPromises();
+  return w;
+}
+
+async function mountPanel(start = "/p/p/code", overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   api = {
     tree: vi.fn(async (_p: string, path: string) =>
       path === ""
@@ -70,6 +96,7 @@ async function mountPanel(start = "/p/p/code") {
         ? { path, size: 3, content: null, binary: true }
         : { path, size: 9, content: "# Hello", binary: false },
     ),
+    ...overrides,
   };
   hDaemon.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
@@ -172,6 +199,82 @@ describe("FilesPanel", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(api.tree.mock.calls.length).toBeGreaterThan(treesBefore);
     expect(api.file).toHaveBeenCalledTimes(2);
+    w.unmount();
+  });
+
+  describe("site folder from orso.json", () => {
+    const treeProps = (w: Awaited<ReturnType<typeof mountPanel>>) =>
+      w.findComponent({ name: "ProjectFilesTree" }).props() as { paths: string[]; selectedPath: string | null };
+
+    it("walks the whole repo when the root is '.'", async () => {
+      const w = await mountScoped(".");
+      expect(api.tree).toHaveBeenCalledWith("p", "");
+      expect(useFilesStore().root).toBe("");
+      expect(useFilesStore().paths).toEqual(SCOPED_FILES);
+      expect(treeProps(w).paths).toEqual(SCOPED_FILES);
+      w.unmount();
+    });
+
+    it("walks only the site folder and shows the tree rooted there", async () => {
+      const w = await mountScoped("site");
+      expect(api.tree.mock.calls.map((c) => c[1])).toEqual(["site", "site/pages"]);
+      expect(useFilesStore().paths).toEqual(["site/index.astro", "site/pages/a.md"]);
+      expect(treeProps(w).paths).toEqual(["index.astro", "pages/a.md"]);
+
+      await w.find("[data-testid='tree-pages/a.md']").trigger("click");
+      await flushPromises();
+      expect(w.vm.$route.path).toBe("/p/p/code/site/pages/a.md");
+      expect(api.file).toHaveBeenCalledWith("p", "site/pages/a.md");
+      expect(treeProps(w).selectedPath).toBe("pages/a.md");
+      w.unmount();
+    });
+
+    it("opens a site file named in the URL by its repo path", async () => {
+      const w = await mountScoped("site", "/p/p/code/site/index.astro");
+      expect(api.file).toHaveBeenCalledWith("p", "site/index.astro");
+      expect(treeProps(w).selectedPath).toBe("index.astro");
+      w.unmount();
+    });
+
+    it("falls back to the repo root when settings cannot be read", async () => {
+      const w = await mountPanel("/p/p/code", {
+        tree: treeOf(SCOPED_FILES),
+        settings: vi.fn(async () => { throw new Error("boom"); }),
+      });
+      await flushPromises();
+      expect(useFilesStore().paths).toEqual(SCOPED_FILES);
+      w.unmount();
+    });
+
+    it("re-reads the site folder when files change", async () => {
+      const w = await mountScoped("site");
+      api.settings!.mockResolvedValue({ siteRoot: "." });
+      hDaemon.daemon.emit({ type: "events.lagged", missed: 1 });
+      await flushPromises();
+      expect(useFilesStore().paths).toEqual(SCOPED_FILES);
+      expect(treeProps(w).paths).toEqual(SCOPED_FILES);
+      w.unmount();
+    });
+  });
+
+  it("lists sibling folders in parallel, at most 8 requests at once", async () => {
+    const files = Array.from({ length: 20 }, (_, i) => `d${i}/f.txt`);
+    const list = treeOf(files);
+    let active = 0;
+    let peak = 0;
+    const w = await mountPanel("/p/p/code", {
+      tree: vi.fn(async (p: string, dir: string) => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 1));
+        active--;
+        return list(p, dir);
+      }),
+    });
+    await vi.waitFor(() => expect(useFilesStore().paths).toHaveLength(20));
+    expect(useFilesStore().paths).toEqual(files);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(8);
     w.unmount();
   });
 });

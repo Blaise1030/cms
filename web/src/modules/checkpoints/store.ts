@@ -10,6 +10,9 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
 
   /** Newest first. */
   const byProject = ref<Record<string, Checkpoint[]>>({});
+  /** The folder each timeline covers (`.` = whole repo) and the commit its project is at. */
+  const rootByProject = ref<Record<string, string>>({});
+  const headByProject = ref<Record<string, string | null>>({});
   const loading = ref(false);
   const error = ref<string | null>(null);
   const selectedSha = ref<string | null>(null);
@@ -27,7 +30,10 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
     loading.value = true;
     error.value = null;
     try {
-      byProject.value[projectId] = newestFirst(await daemon.api.listCheckpoints(projectId));
+      const log = await daemon.api.listCheckpoints(projectId);
+      byProject.value[projectId] = newestFirst(log.checkpoints);
+      rootByProject.value[projectId] = log.root;
+      headByProject.value[projectId] = log.head;
     } catch (e) {
       error.value = errorMessage(e);
     } finally {
@@ -78,6 +84,10 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
     daemon.on("checkpoint.created", (e) => {
       const list = byProject.value[e.projectId];
       if (!list) return; // never opened; loaded fresh on first view
+      // A site-scoped timeline lists only commits touching the site folder; the event does
+      // not say which files changed, so ask the daemon again.
+      if ((rootByProject.value[e.projectId] ?? ".") !== ".") return void load(e.projectId);
+      headByProject.value[e.projectId] = e.sha;
       if (list.some((c) => c.sha === e.sha)) return;
       byProject.value[e.projectId] = [
         { sha: e.sha, summary: e.summary, author: e.author, ts: e.ts },
@@ -91,6 +101,8 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
 
   return {
     byProject,
+    rootByProject,
+    headByProject,
     loading,
     error,
     selectedSha,
