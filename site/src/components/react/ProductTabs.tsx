@@ -55,7 +55,7 @@ function WindowChrome({ crumbs, action }: { crumbs: string[]; action: ReactNode 
   );
 }
 
-function PaintedCard({ children }: { children: ReactNode }) {
+function PaintedStage({ children }: { children: ReactNode }) {
   return (
     <div className="relative aspect-video overflow-hidden">
       <img
@@ -64,15 +64,17 @@ function PaintedCard({ children }: { children: ReactNode }) {
         aria-hidden="true"
         loading="eager"
         decoding="async"
-        className="absolute inset-0 size-full object-cover"
+        className="painting-drift absolute inset-0 size-full object-cover"
       />
       <div className="absolute inset-0 bg-night/25" aria-hidden="true" />
-      <div className="relative flex size-full flex-col p-4 md:p-6">
-        <Card className="min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0 shadow-none ring-0">
-          {children}
-        </Card>
-      </div>
+      <div className="relative flex size-full flex-col p-4 md:p-6">{children}</div>
     </div>
+  );
+}
+
+function PanelCard({ children }: { children: ReactNode }) {
+  return (
+    <Card className="min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0 shadow-none ring-0">{children}</Card>
   );
 }
 
@@ -160,199 +162,200 @@ export function ProductTabs() {
           );
         })}
       </TabsList>
-
-      <TabsContent value="content" className="mt-0">
-        <PaintedCard>
-          <WindowChrome crumbs={["site", "content", "blog"]} action={<StatusBadge tone="neutral" label="All content" />} />
-          <div className="grid md:grid-cols-[12.5rem_minmax(0,1fr)]" aria-hidden="true">
-            <aside className="hidden border-r border-line p-3 md:block">
-              <p className="px-2 text-xs text-muted">cms / site</p>
-              <ul className="mt-3 space-y-0.5 text-sm">
-                {["Content", "Pages", "Media", "History"].map((item, i) => (
-                  <li key={item} className={`rounded px-2 py-1.5 ${i === 0 ? "bg-sand font-medium text-ink" : "text-muted"}`}>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </aside>
-            <div className="min-w-0 p-5 md:p-7">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-medium tracking-tight text-ink">Blog posts</h3>
-                  <p className="mt-1 text-xs text-muted">5 of 12 shown · sorted by last saved</p>
-                </div>
-                <Button size="sm">New post</Button>
-              </div>
-              <div className="mt-5 flex flex-wrap gap-1.5">
-                <Badge>All 12</Badge>
-                <Badge variant="outline">Drafts 3</Badge>
-                <Badge variant="outline">In review 2</Badge>
-                <Badge variant="outline">Published 7</Badge>
-              </div>
-              <div className="mt-5">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-line pb-2 text-xs text-muted sm:grid-cols-[minmax(0,1fr)_7rem_auto]">
-                  <span>Title</span>
-                  <span className="hidden sm:block">Updated</span>
-                  <span className="text-right">Status</span>
-                </div>
-                <ul>
-                  {entries.map((entry) => (
-                    <li
-                      key={entry.title}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-line py-3 sm:grid-cols-[minmax(0,1fr)_7rem_auto]"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-ink">{entry.title}</p>
-                        <p className="text-xs text-muted">
-                          {entry.author} · content/blog/en
-                        </p>
-                      </div>
-                      <span className="hidden text-xs text-muted sm:block">{entry.updated}</span>
-                      <StatusBadge tone={entry.tone} label={entry.label} />
+      <PaintedStage>
+        <TabsContent value="content" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <PanelCard>
+            <WindowChrome crumbs={["site", "content", "blog"]} action={<StatusBadge tone="neutral" label="All content" />} />
+            <div className="grid md:grid-cols-[12.5rem_minmax(0,1fr)]" aria-hidden="true">
+              <aside className="hidden border-r border-line p-3 md:block">
+                <p className="px-2 text-xs text-muted">cms / site</p>
+                <ul className="mt-3 space-y-0.5 text-sm">
+                  {["Content", "Pages", "Media", "History"].map((item, i) => (
+                    <li key={item} className={`rounded px-2 py-1.5 ${i === 0 ? "bg-sand font-medium text-ink" : "text-muted"}`}>
+                      {item}
                     </li>
                   ))}
                 </ul>
+              </aside>
+              <div className="min-w-0 p-5 md:p-7">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-medium tracking-tight text-ink">Blog posts</h3>
+                    <p className="mt-1 text-xs text-muted">5 of 12 shown · sorted by last saved</p>
+                  </div>
+                  <Button size="sm">New post</Button>
+                </div>
+                <div className="mt-5 flex flex-wrap gap-1.5">
+                  <Badge>All 12</Badge>
+                  <Badge variant="outline">Drafts 3</Badge>
+                  <Badge variant="outline">In review 2</Badge>
+                  <Badge variant="outline">Published 7</Badge>
+                </div>
+                <div className="mt-5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-line pb-2 text-xs text-muted sm:grid-cols-[minmax(0,1fr)_7rem_auto]">
+                    <span>Title</span>
+                    <span className="hidden sm:block">Updated</span>
+                    <span className="text-right">Status</span>
+                  </div>
+                  <ul>
+                    {entries.map((entry) => (
+                      <li
+                        key={entry.title}
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-line py-3 sm:grid-cols-[minmax(0,1fr)_7rem_auto]"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-ink">{entry.title}</p>
+                          <p className="text-xs text-muted">
+                            {entry.author} · content/blog/en
+                          </p>
+                        </div>
+                        <span className="hidden text-xs text-muted sm:block">{entry.updated}</span>
+                        <StatusBadge tone={entry.tone} label={entry.label} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
-        </PaintedCard>
-      </TabsContent>
+          </PanelCard>
+        </TabsContent>
 
-      <TabsContent value="preview" className="mt-0">
-        <PaintedCard>
-          <WindowChrome
-            crumbs={["site", "preview", "home"]}
-            action={<StatusBadge tone="review" label="Preview" />}
-          />
-          <div className="grid md:grid-cols-[minmax(0,1fr)_17rem]" aria-hidden="true">
-            <div className="bg-sand p-4">
-              <div className="overflow-hidden rounded-md border border-line bg-surface-raised">
-                <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-                  <span className="text-xs font-medium text-ink">Orso</span>
-                  <Button size="xs">Get Orso</Button>
+        <TabsContent value="preview" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <PanelCard>
+            <WindowChrome
+              crumbs={["site", "preview", "home"]}
+              action={<StatusBadge tone="review" label="Preview" />}
+            />
+            <div className="grid md:grid-cols-[minmax(0,1fr)_17rem]" aria-hidden="true">
+              <div className="bg-sand p-4">
+                <div className="overflow-hidden rounded-md border border-line bg-surface-raised">
+                  <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+                    <span className="text-xs font-medium text-ink">Orso</span>
+                    <Button size="xs">Get Orso</Button>
+                  </div>
+                  <div className="p-5 md:p-7">
+                    <p className="max-w-md text-xl font-medium leading-tight tracking-tight text-ink md:text-2xl">
+                      Let your content team edit the site with an agent.
+                    </p>
+                    <p className="mt-3 max-w-sm text-xs leading-5 text-muted">
+                      Drafts, previews and a Publish button on the repo your developer already set up.
+                    </p>
+                  </div>
                 </div>
-                <div className="p-5 md:p-7">
-                  <p className="max-w-md text-xl font-medium leading-tight tracking-tight text-ink md:text-2xl">
-                    Let your content team edit the site with an agent.
-                  </p>
-                  <p className="mt-3 max-w-sm text-xs leading-5 text-muted">
-                    Drafts, previews and a Publish button on the repo your developer already set up.
-                  </p>
+              </div>
+              <aside className="hidden border-l border-line p-4 md:block">
+                <p className="text-xs font-medium text-ink">Comments</p>
+                <div className="mt-3 rounded-md border border-line bg-surface p-3">
+                  <p className="text-xs font-medium text-ink">Ana</p>
+                  <p className="mt-1 text-xs leading-5 text-muted">Can we make this line shorter?</p>
+                </div>
+                <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
+                  <span className="text-xs text-muted">2 comments</span>
+                  <Button size="xs">Approve</Button>
+                </div>
+              </aside>
+            </div>
+          </PanelCard>
+        </TabsContent>
+
+        <TabsContent value="publish" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <PanelCard>
+            <WindowChrome crumbs={["site", "publish"]} action={<StatusBadge tone="review" label="Ready to publish" />} />
+            <div className="grid place-items-center p-6" aria-hidden="true">
+              <div className="w-full max-w-lg rounded-md border border-line bg-surface-raised p-6">
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  <span className="font-mono">draft/pricing-faq</span>
+                  <span>→</span>
+                  <span className="font-mono">main</span>
+                </div>
+                <h3 className="mt-3 text-xl font-medium tracking-tight text-ink">Publish 3 changes</h3>
+                <p className="mt-1 text-sm text-muted">This saves a checkpoint, merges the draft and lets your host rebuild.</p>
+                <div className="my-4 border-t border-line" />
+                <ul className="space-y-2.5">
+                  {checks.map((check) => (
+                    <li key={check} className="flex items-center gap-2.5 text-sm text-ink">
+                      <span className="size-1.5 rounded-full bg-status-live" />
+                      {check}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <Button>Publish to main</Button>
+                  <Button variant="outline">Keep as draft</Button>
                 </div>
               </div>
             </div>
-            <aside className="hidden border-l border-line p-4 md:block">
-              <p className="text-xs font-medium text-ink">Comments</p>
-              <div className="mt-3 rounded-md border border-line bg-surface p-3">
-                <p className="text-xs font-medium text-ink">Ana</p>
-                <p className="mt-1 text-xs leading-5 text-muted">Can we make this line shorter?</p>
-              </div>
-              <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
-                <span className="text-xs text-muted">2 comments</span>
-                <Button size="xs">Approve</Button>
-              </div>
-            </aside>
-          </div>
-        </PaintedCard>
-      </TabsContent>
+          </PanelCard>
+        </TabsContent>
 
-      <TabsContent value="publish" className="mt-0">
-        <PaintedCard>
-          <WindowChrome crumbs={["site", "publish"]} action={<StatusBadge tone="review" label="Ready to publish" />} />
-          <div className="grid place-items-center p-6" aria-hidden="true">
-            <div className="w-full max-w-lg rounded-md border border-line bg-surface-raised p-6">
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <span className="font-mono">draft/pricing-faq</span>
-                <span>→</span>
-                <span className="font-mono">main</span>
+        <TabsContent value="agent" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <PanelCard>
+            <WindowChrome crumbs={["site", "agent"]} action={<StatusBadge tone="draft" label="Draft ready" />} />
+            <div className="grid md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
+              <div className="flex min-w-0 flex-col p-4 md:p-6">
+                <div className="flex items-center gap-2 border-b border-line pb-3">
+                  <span className="text-xs font-medium text-ink">Agent</span>
+                  <Badge variant="outline">Claude</Badge>
+                  <Badge variant="outline">Cursor</Badge>
+                  <Badge variant="outline">Codex</Badge>
+                </div>
+                <div className="space-y-4 py-4">
+                  <div className="ml-auto max-w-md rounded-md bg-sand px-3 py-2.5 text-sm text-ink">
+                    Build a landing page for group bookings with our usual hero and FAQ.
+                  </div>
+                  <div className="max-w-md">
+                    <p className="text-xs font-medium text-ink">Orso</p>
+                    <p className="mt-1 text-sm leading-6 text-muted">
+                      Done. I reused the hero, pricing table and FAQ from the site, and left the copy as placeholders for
+                      review.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm">Open preview</Button>
+                      <Button size="sm" variant="outline">
+                        View changes
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <h3 className="mt-3 text-xl font-medium tracking-tight text-ink">Publish 3 changes</h3>
-              <p className="mt-1 text-sm text-muted">This saves a checkpoint, merges the draft and lets your host rebuild.</p>
-              <div className="my-4 border-t border-line" />
-              <ul className="space-y-2.5">
-                {checks.map((check) => (
-                  <li key={check} className="flex items-center gap-2.5 text-sm text-ink">
-                    <span className="size-1.5 rounded-full bg-status-live" />
-                    {check}
+              <aside className="hidden border-l border-line p-4 md:block">
+                <p className="text-xs font-medium text-ink">This draft</p>
+                <p className="mt-4 text-xs text-muted">3 files · +46 −2</p>
+                <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-muted">
+                  Use the agent your team already pays for. Orso only needs the repo.
+                </p>
+              </aside>
+            </div>
+          </PanelCard>
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <PanelCard>
+            <WindowChrome crumbs={["site", "history"]} action={<StatusBadge tone="live" label="Live" />} />
+            <div className="p-5 md:p-7" aria-hidden="true">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-medium tracking-tight text-ink">History</h3>
+                  <p className="mt-1 text-xs text-muted">Every save is a checkpoint. Nothing is lost.</p>
+                </div>
+                <Badge variant="outline">main</Badge>
+              </div>
+              <ol className="mt-6">
+                {history.map((item) => (
+                  <li key={item.title} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 border-t border-line py-4">
+                    <span className={`mt-1.5 size-2 rounded-full ${item.live ? "bg-status-live" : "bg-line-strong"}`} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink">{item.title}</p>
+                      <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">{item.detail}</p>
+                    </div>
+                    <span className="text-xs text-muted">{item.live ? "Live" : "Restore"}</span>
                   </li>
                 ))}
-              </ul>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button>Publish to main</Button>
-                <Button variant="outline">Keep as draft</Button>
-              </div>
+              </ol>
             </div>
-          </div>
-        </PaintedCard>
-      </TabsContent>
-
-      <TabsContent value="agent" className="mt-0">
-        <PaintedCard>
-          <WindowChrome crumbs={["site", "agent"]} action={<StatusBadge tone="draft" label="Draft ready" />} />
-          <div className="grid md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
-            <div className="flex min-w-0 flex-col p-4 md:p-6">
-              <div className="flex items-center gap-2 border-b border-line pb-3">
-                <span className="text-xs font-medium text-ink">Agent</span>
-                <Badge variant="outline">Claude</Badge>
-                <Badge variant="outline">Cursor</Badge>
-                <Badge variant="outline">Codex</Badge>
-              </div>
-              <div className="space-y-4 py-4">
-                <div className="ml-auto max-w-md rounded-md bg-sand px-3 py-2.5 text-sm text-ink">
-                  Build a landing page for group bookings with our usual hero and FAQ.
-                </div>
-                <div className="max-w-md">
-                  <p className="text-xs font-medium text-ink">Orso</p>
-                  <p className="mt-1 text-sm leading-6 text-muted">
-                    Done. I reused the hero, pricing table and FAQ from the site, and left the copy as placeholders for
-                    review.
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    <Button size="sm">Open preview</Button>
-                    <Button size="sm" variant="outline">
-                      View changes
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <aside className="hidden border-l border-line p-4 md:block">
-              <p className="text-xs font-medium text-ink">This draft</p>
-              <p className="mt-4 text-xs text-muted">3 files · +46 −2</p>
-              <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-muted">
-                Use the agent your team already pays for. Orso only needs the repo.
-              </p>
-            </aside>
-          </div>
-        </PaintedCard>
-      </TabsContent>
-
-      <TabsContent value="history" className="mt-0">
-        <PaintedCard>
-          <WindowChrome crumbs={["site", "history"]} action={<StatusBadge tone="live" label="Live" />} />
-          <div className="p-5 md:p-7" aria-hidden="true">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-medium tracking-tight text-ink">History</h3>
-                <p className="mt-1 text-xs text-muted">Every save is a checkpoint. Nothing is lost.</p>
-              </div>
-              <Badge variant="outline">main</Badge>
-            </div>
-            <ol className="mt-6">
-              {history.map((item) => (
-                <li key={item.title} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 border-t border-line py-4">
-                  <span className={`mt-1.5 size-2 rounded-full ${item.live ? "bg-status-live" : "bg-line-strong"}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-ink">{item.title}</p>
-                    <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">{item.detail}</p>
-                  </div>
-                  <span className="text-xs text-muted">{item.live ? "Live" : "Restore"}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </PaintedCard>
-      </TabsContent>
+          </PanelCard>
+        </TabsContent>
+      </PaintedStage>
     </Tabs>
   );
 }

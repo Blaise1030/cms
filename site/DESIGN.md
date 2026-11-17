@@ -154,7 +154,7 @@ Depth comes from tone (surface, sand, night), 1px hairlines, and a black-tinted 
 
 ## Art
 
-Public-domain Renaissance landscapes sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Altdorfer's *Danube Landscape with Wörth Castle* inside the active tab panel, not as a band around the tabs; the three feature cards use Altdorfer's *Landscape with a Footbridge*, El Greco's *View of Toledo* and Valckenborch's *Mountainous Landscape*; the ops carousel cycles all five; the agent band uses Verhaecht's *Alpine Landscape*. Every image is a landscape with no figures (some are cropped details), cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
+Public-domain Renaissance landscapes sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Altdorfer's *Danube Landscape with Wörth Castle* inside the active tab panel, not as a band around the tabs; it drifts slowly so the panel reads as moving footage. The three feature cards use Altdorfer's *Landscape with a Footbridge*, El Greco's *View of Toledo* and Valckenborch's *Mountainous Landscape*; the ops carousel cycles all five; the agent band uses Verhaecht's *Alpine Landscape*. Every image is a landscape with no figures (some are cropped details), cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
 
 
 ## Shapes
@@ -170,10 +170,11 @@ Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels,
 | `--transition-duration-slow` | 700ms | Hero words, section entrances |
 | `--ease-gentle` | cubic-bezier(0.22, 0.61, 0.36, 1) | Hovers |
 | `--ease-settle` | cubic-bezier(0.16, 1, 0.3, 1) | The hero sequence |
+| `--animate-painting-drift` | 44s, alternate | The hero painting's slow drift |
 | `--motion-stagger` | 45ms | Delay between hero words |
 | `--spacing-rise` | 0.75rem | Entrance travel |
 
-There is one orchestrated page-load moment: the hero headline arrives word by word with a short blur, followed by the lead, actions and product panel. Nothing fades in on scroll. Motion after load answers an action (a tab click, an FAQ opening, a page change). Under `prefers-reduced-motion: reduce` every animation, transition, view transition and smooth scroll is switched off.
+There is one orchestrated page-load moment: the hero headline arrives word by word with a short blur, followed by the lead, actions and product panel. Nothing fades in on scroll. Motion after load answers an action (a tab click, an FAQ opening, a page change) — with one ambient exception: the hero painting drifts a few percent over 44 seconds, so the painted stage behind the tabs reads like a film still instead of a photograph. Under `prefers-reduced-motion: reduce` every animation, transition, view transition and smooth scroll is switched off.
 
 ## Components
 
