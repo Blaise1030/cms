@@ -10,11 +10,11 @@ interface Props {
 const { categories, active } = Astro.props;
 const shown = categories.filter((category) => category.posts.length > 0 || category.id === active);
 const item =
-  "-mb-px shrink-0 border-b border-transparent py-3 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:border-accent aria-[current=page]:text-ink";
+  "shrink-0 rounded-full border border-transparent px-3 py-1 text-sm whitespace-nowrap text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink aria-[current=page]:border-line aria-[current=page]:bg-surface-raised aria-[current=page]:text-ink";
 ---
 
 {shown.length > 0 && (
-  <nav class="flex gap-8 overflow-x-auto border-b border-line" aria-label="Blog categories">
+  <nav class="-mx-1 flex gap-2 overflow-x-auto px-1 py-1" aria-label="Blog categories">
     <a class={item} href={href("/blog/")} aria-current={active ? undefined : "page"}>All posts</a>
     {shown.map((category) => (
       <a class={item} href={href(`/blog/categories/${category.id}/`)} aria-current={category.id === active ? "page" : undefined}>{category.title}</a>

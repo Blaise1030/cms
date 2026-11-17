@@ -71,9 +71,9 @@ const navLink = "group block border-t border-line pt-6";
     </div>
   </article>
   {more.length > 0 && (
-    <section class="page mt-section" aria-labelledby="keep-reading">
-      <h2 class="border-t border-line pt-12 text-3xl tracking-display text-ink" id="keep-reading">Keep reading</h2>
-      <div class="mt-12 grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} />)}</div>
+    <section class="mt-section" aria-labelledby="keep-reading">
+      <div class="page"><h2 class="border-t border-line pt-12 text-3xl tracking-display text-ink" id="keep-reading">Keep reading</h2></div>
+      <div class="mt-12 grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} class="border-b border-line sm:border-r" />)}</div>
     </section>
   )}
 </Base>

@@ -154,12 +154,12 @@ Depth comes from tone (surface, sand, night), 1px hairlines, and a black-tinted 
 
 ## Art
 
-Public-domain Renaissance landscapes sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Altdorfer's *Danube Landscape with Wörth Castle* inside the active tab panel, not as a band around the tabs; it drifts slowly so the panel reads as moving footage. The three feature cards use Altdorfer's *Landscape with a Footbridge*, El Greco's *View of Toledo* and Valckenborch's *Mountainous Landscape*; the ops carousel cycles all five; the agent band uses Verhaecht's *Alpine Landscape*. Every image is a landscape with no figures (some are cropped details), cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
+Public-domain Renaissance landscapes sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Altdorfer's *Danube Landscape with Wörth Castle* as the stage behind the tab panels, not as a band around the tabs; it drifts slowly so the panel reads as moving footage. The three feature cards use Altdorfer's *Landscape with a Footbridge*, El Greco's *View of Toledo* and Valckenborch's *Mountainous Landscape*; the ops carousel cycles all five; the agent band uses Verhaecht's *Alpine Landscape*. Every image is a landscape with no figures (some are cropped details), cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
 
 
 ## Shapes
 
-Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels, carousel cards and the tab frame use `--radius-md`; large bands and the three feature cards are square-edged frames. `full` is reserved for status pills, tags, avatars and carousel arrows.
+Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels, carousel cards and the tab frame use `--radius-md`; large bands and the three feature cards are square-edged frames. `full` is reserved for status pills, tags, avatars, carousel arrows and the blog category filters.
 
 ## Motion
 
@@ -179,13 +179,14 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 ## Components
 
 - **Header**: wordmark plus name, plain muted nav, outline secondary CTA and ink primary CTA. No pill buttons.
-- **Hero**: left-aligned display headline, lead, dual CTAs, then five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath. The tab rail sits in a framed surface, and the active panel floats on a painted stage inside the content area.
+- **Hero**: left-aligned display headline, lead, dual CTAs, then five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath. The tab rail sits in a framed surface, and the panels float on a single painted stage that stays put (and drifts) while the tabs change.
 - **Logo grid**: bordered cells for Astro, Markdown, GitHub, Claude, Cursor, Codex, plus a one-line git vocabulary note.
 - **Ops carousel**: “Handle content work at scale” with prev/next controls and horizontal product slides (collections, preview, publish, agent, history), each floating on its own painting.
 - **Feature cards**: three equal frames — Drafts and checkpoints, Previews and review, Agent in plain English — each holding a mini preview over a painting.
 - **Agent band**: wide framed agent transcript mock over a painting, with a draft summary.
 - **Proof**: the one night band — Lee Robinson's quote and a note from the maker.
 - **FAQ**: hairline `<details>` accordion with FAQPage JSON-LD.
+- **Blog**: one text-only featured post (date · category, large headline, excerpt) above a "Recent posts" bar with rounded category filters and a client-side search. Posts sit in a hairline grid — three columns on wide screens, two on tablet, one on mobile — with the cover or proof-sheet artwork at the top of each padded cell.
 - **Closing CTA**: left-aligned headline and supporting copy on a 12-column split, one action, and three plain facts in a hairline-divided strip, each led by a small monochrome icon in a hairline tile.
 
 ## Do's and Don'ts

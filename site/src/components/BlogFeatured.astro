@@ -1,0 +1,32 @@
+---
+import { href } from "../lib/href";
+import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
+
+interface Props {
+  post: Post;
+  categories: BlogCategory[];
+  /** Lower-case haystack used by the blog search. */
+  search?: string;
+}
+const { post, categories, search } = Astro.props;
+const postCategories = categoriesOf(post, categories);
+---
+
+<article
+  class="group relative transition-colors duration-gentle ease-gentle hover:bg-sand"
+  data-blog-item
+  data-search={search}
+>
+  <div class="page flex flex-col gap-3 py-14 md:py-20">
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
+      {postCategories.map((category) => (
+        <a class="label relative z-10 transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
+      ))}
+    </div>
+    <h2 class="max-w-4xl text-3xl tracking-display text-ink md:text-4xl">
+      <a class="decoration-line-strong decoration-1 underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+    </h2>
+    <p class="max-w-measure text-lg text-muted">{post.data.description}</p>
+  </div>
+</article>
