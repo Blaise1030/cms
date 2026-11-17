@@ -96,7 +96,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
       <div class="page flex min-h-header items-center gap-x-4 py-2">
-        <a class="-m-1 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
+        <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <SiteNav client:load items={navItems} />
           {site.secondaryCta && (
@@ -120,8 +120,11 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
             <a
               class={buttonVariants({ size: "lg" })}
               href={href(site.cta.href)}
-              rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>{site.cta.label}</a
+              rel={external(site.cta.href) ? "noopener noreferrer" : undefined}
             >
+              <span class="sm:hidden">Get Orso</span>
+              <span class="hidden sm:inline">{site.cta.label}</span>
+            </a>
           )}
         </div>
       </div>

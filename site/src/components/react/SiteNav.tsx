@@ -33,7 +33,7 @@ export function SiteNav({ items }: { items: NavItem[] }) {
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="lg" className="gap-2 lg:hidden" aria-label="Open menu">
             <MenuIcon className="size-4" />
-            Menu
+            <span className="hidden sm:inline">Menu</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-48 border border-line shadow-none ring-0">
