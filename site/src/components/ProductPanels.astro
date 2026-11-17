@@ -1,6 +1,6 @@
 ---
-import AppWindow from "../AppWindow.astro";
-import StatusChip from "../StatusChip.astro";
+import AppWindow from "./AppWindow.astro";
+import StatusChip from "./StatusChip.astro";
 
 const tabs = [
   {
@@ -52,22 +52,7 @@ const history = [
 ];
 ---
 
-<section class="page py-section" id="platform" aria-labelledby="platform-heading">
-  <div class="grid gap-8 md:grid-cols-12 md:gap-10">
-    <div class="md:col-span-7">
-      <h2 class="text-3xl tracking-display text-ink md:text-4xl" id="platform-heading">
-        Everything between the idea and the live page.
-      </h2>
-    </div>
-    <div class="md:col-span-5 md:pt-1">
-      <p class="max-w-measure text-muted">
-        Orso is a desk on top of your repo: collections, drafts, previews, an agent and history. The same files your
-        developer already uses, without the branch names.
-      </p>
-    </div>
-  </div>
-
-  <div class="mt-12 md:mt-16" data-platform>
+<div data-platform>
     <div class="grid grid-cols-2 border-y border-line md:grid-cols-5" role="tablist" aria-label="What Orso does">
       {tabs.map((tab, index) => (
         <button
@@ -369,41 +354,40 @@ const history = [
         </AppWindow>
       </div>
     </div>
-  </div>
+</div>
 
-  <script>
-    const initPlatformTabs = () => {
-      document.querySelectorAll<HTMLElement>("[data-platform]").forEach((root) => {
-        if (root.dataset.ready) return;
-        root.dataset.ready = "true";
-        const tabs = Array.from(root.querySelectorAll<HTMLElement>('[role="tab"]'));
-        const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
+<script>
+  const initPlatformTabs = () => {
+    document.querySelectorAll<HTMLElement>("[data-platform]").forEach((root) => {
+      if (root.dataset.ready) return;
+      root.dataset.ready = "true";
+      const tabs = Array.from(root.querySelectorAll<HTMLElement>('[role="tab"]'));
+      const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
 
-        const select = (index: number, focus = false) => {
-          tabs.forEach((tab, i) => {
-            const active = i === index;
-            tab.setAttribute("aria-selected", active ? "true" : "false");
-            tab.tabIndex = active ? 0 : -1;
-            panels[i].hidden = !active;
-          });
-          if (focus) tabs[index].focus();
-        };
-
-        tabs.forEach((tab, index) => tab.addEventListener("click", () => select(index)));
-
-        root.addEventListener("keydown", (event) => {
-          const current = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
-          let next = current;
-          if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
-          else if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
-          else if (event.key === "Home") next = 0;
-          else if (event.key === "End") next = tabs.length - 1;
-          else return;
-          event.preventDefault();
-          select(next, true);
+      const select = (index: number, focus = false) => {
+        tabs.forEach((tab, i) => {
+          const active = i === index;
+          tab.setAttribute("aria-selected", active ? "true" : "false");
+          tab.tabIndex = active ? 0 : -1;
+          panels[i].hidden = !active;
         });
+        if (focus) tabs[index].focus();
+      };
+
+      tabs.forEach((tab, index) => tab.addEventListener("click", () => select(index)));
+
+      root.addEventListener("keydown", (event) => {
+        const current = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
+        let next = current;
+        if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        select(next, true);
       });
-    };
-    document.addEventListener("astro:page-load", initPlatformTabs);
-  </script>
-</section>
+    });
+  };
+  document.addEventListener("astro:page-load", initPlatformTabs);
+</script>

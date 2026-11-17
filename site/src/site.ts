@@ -11,12 +11,14 @@ export const site = {
   /** Default social card, served from `public/`. */
   ogImage: "/og-default.png",
   nav: [
-    { label: "Platform", href: "#platform" },
+    { label: "Product", href: "#product" },
     { label: "How it works", href: "#how-it-works" },
     { label: "FAQ", href: "#faq" },
     { label: "Blog", href: "/blog/" },
     { label: "Help", href: "/help/" },
   ],
+  /** Header secondary action; set to `null` to hide it. */
+  secondaryCta: { label: "See what it does", href: "#scale" },
   /** Header call to action; set to `null` to hide it. */
   cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
   footer: {

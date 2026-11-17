@@ -7,21 +7,19 @@ const facts = [
 ---
 
 <section class="page py-section" id="cta">
-  <div class="grid gap-10 border-y border-line py-14 md:grid-cols-12 md:items-end md:py-20">
-    <div class="md:col-span-8">
-      <h2 class="text-4xl tracking-display text-ink md:text-5xl">Let your team run the site. The repo stays yours.</h2>
-    </div>
-    <div class="flex flex-col items-start gap-4 md:col-span-4 md:items-end">
-      <p class="max-w-sm text-muted md:text-right">
-        Your developer connects the repo once, and everyone else is editing in minutes.
-      </p>
-      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso on GitHub</a>
-    </div>
+  <div class="mx-auto max-w-2xl border-y border-line py-16 text-center md:py-20">
+    <h2 class="text-3xl tracking-display text-ink md:text-5xl">
+      Ready to let your team run the site?
+    </h2>
+    <p class="mx-auto mt-5 max-w-measure text-muted">
+      Your developer connects the repo once. Everyone else is editing in minutes — drafts, previews and Publish.
+    </p>
+    <a class="button mt-8" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso on GitHub</a>
   </div>
 
-  <ul class="grid gap-6 pt-8 md:grid-cols-3">
+  <ul class="grid gap-6 pt-10 md:grid-cols-3">
     {facts.map((fact) => (
-      <li class="border-l border-line pl-4">
+      <li class="border-l border-line pl-4 text-left">
         <p class="text-sm font-medium text-ink">{fact.title}</p>
         <p class="mt-1 text-sm text-muted">{fact.detail}</p>
       </li>

@@ -142,17 +142,19 @@ The scale steps by about 1.22 from a 16px body (`--text-*`): `xs` 0.75rem throug
 
 ## Layout
 
-The `page` utility centres content at up to 80rem with token gutters. Landing sections are full-bleed bands separated by 1px rules; their interiors use the 12-column grid. The hero is an 8/4 split: headline on the left, lead and actions aligned to its baseline on the right. The product panel below runs the full page width.
+The home page follows Medusa's section map with Orso copy and tokens. The `page` utility centres content at up to 80rem with token gutters. Landing sections are full-bleed bands; interiors use the 12-column grid where needed.
 
-The platform section borrows Medusa's tab rail: five equal columns of title and one-line description, hairline dividers, a 2px ink underline on the active tab, and one large product panel underneath. On narrow screens the rail scrolls horizontally. Sections are separated by `--spacing-section` (7rem); the proof band uses `--spacing-section-wide` (10rem).
+Order: hero (left-aligned headline, lead, dual CTAs, five product tabs switching one panel) → bordered logo grid → horizontal ops carousel → three feature cards → agent product band → night proof → FAQ → centred closing CTA. Sections use `--spacing-section` (7rem); the proof band may use `--spacing-section-wide` (10rem).
+
+The hero tab rail is five equal columns of title and one-line description, hairline dividers, a 2px ink underline on the active tab, and one large product panel underneath. On narrow screens the rail wraps to two columns.
 
 ## Elevation & Depth
 
-Flat. Depth comes from tone (surface, sand, night) and 1px hairlines. The single shadow, `--shadow-soft`, lifts the hero's product panel off the page; the tab panels sit in a flat framed boundary.
+Flat. Depth comes from tone (surface, sand, night) and 1px hairlines. The single shadow, `--shadow-soft`, lifts product panels; tab panels and carousel cards sit in a flat framed boundary.
 
 ## Shapes
 
-Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels and the tab frame use `--radius-md`; large bands are square. `full` is reserved for status pills, tags and avatars.
+Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels, carousel cards and the tab frame use `--radius-md`; large bands and the three feature cards are square-edged frames. `full` is reserved for status pills, tags, avatars and carousel arrows.
 
 ## Motion
 

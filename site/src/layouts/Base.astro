@@ -97,12 +97,21 @@ const external = (link: string) => /^https?:\/\//.test(link);
             >
           ))}
         </nav>
-        {site.cta && (
-          <a
-            class="ml-auto shrink-0 rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-quick ease-gentle hover:opacity-85 md:ml-0"
-            href={href(site.cta.href)}>{site.cta.label}</a
-          >
-        )}
+        <div class="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
+          {site.secondaryCta && (
+            <a
+              class="hidden rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-ink transition-colors duration-quick ease-gentle hover:bg-sand sm:inline"
+              href={href(site.secondaryCta.href)}>{site.secondaryCta.label}</a
+            >
+          )}
+          {site.cta && (
+            <a
+              class="rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-quick ease-gentle hover:opacity-85"
+              href={href(site.cta.href)}
+              rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>{site.cta.label}</a
+            >
+          )}
+        </div>
       </div>
     </header>
 
