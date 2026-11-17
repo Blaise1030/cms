@@ -1,6 +1,6 @@
 /** Site-wide name, description, navigation and footer, rendered by `layouts/Base.astro`. */
 export const site = {
-  name: "Orso",
+  name: "Project Orso",
   /** Short promise, used after the name in the home page title. */
   tagline: "Developer tools for content teams",
   /** Default meta description, social card text and llms.txt summary (keep it under 160 characters). */
@@ -18,9 +18,9 @@ export const site = {
     { label: "Help", href: "/help/" },
   ],
   /** Header call to action; set to `null` to hide it. */
-  cta: { label: "Get Orso", href: "https://github.com/Blaise1030/cms" },
+  cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
   footer: {
-    text: "© 2026 Orso. Free and open source under the MIT licence.",
+    text: "© 2026 Project Orso. Free and open source under the MIT licence.",
     links: [
       { label: "Privacy", href: "/privacy/" },
       { label: "Terms", href: "/terms/" },
