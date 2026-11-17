@@ -1,0 +1,47 @@
+---
+import { href } from "../../lib/href";
+
+// Questions render as an accordion and as FAQPage structured data, from this one list.
+const faqs = [
+  {
+    question: "Do I need a credit card to start?",
+    answer: "No. The Starter plan is free for teams of up to five people. You add a card only when you move to Team.",
+  },
+  {
+    question: "Can people outside my team see a plan?",
+    answer: "Only if you share it. A share link gives read-only access to one project, and you can turn it off at any time.",
+  },
+  {
+    question: "Can I bring in work from a spreadsheet?",
+    answer: "Yes. Paste rows from any spreadsheet into a project and Acme turns each row into a task, keeping your columns as fields.",
+  },
+  {
+    question: "What happens to my plans if I cancel?",
+    answer: "Your projects stay readable, and you can export each one to CSV or Markdown from its settings.",
+  },
+];
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faqs.map((faq) => ({ "@type": "Question", name: faq.question, acceptedAnswer: { "@type": "Answer", text: faq.answer } })),
+};
+---
+
+<section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="faq" data-reveal>
+  <div class="md:col-span-4">
+    <h2 class="text-3xl font-light tracking-display text-ink">Questions before you start</h2>
+    <p class="mt-5 text-muted">Something else on your mind? The <a class="link text-ink" href={href("/help/")}>help centre</a> has step-by-step guides.</p>
+  </div>
+  <div class="border-t border-line md:col-span-7 md:col-start-6">
+    {faqs.map((faq) => (
+      <details class="group border-b border-line">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-6 py-6 text-lg font-medium text-ink">
+          {faq.question}
+          <svg class="size-4 shrink-0 text-muted transition-transform duration-gentle ease-gentle group-open:rotate-45" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+        </summary>
+        <p class="max-w-prose pb-6 text-muted">{faq.answer}</p>
+      </details>
+    ))}
+  </div>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, "\\u003c")} />
+</section>

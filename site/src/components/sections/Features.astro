@@ -1,0 +1,35 @@
+---
+const features = [
+  {
+    title: "Milestones with dates",
+    description: "Group tasks under a milestone with a due date. The plan shows what is due this week and what can wait.",
+  },
+  {
+    title: "Decisions beside the work",
+    description: "Note why you chose an approach on the task itself. Months later the reason is one click away, not buried in chat.",
+  },
+  {
+    title: "A plan you can share",
+    description: "Send clients a read-only link to the live plan. They follow progress without an account or a status meeting.",
+  },
+  {
+    title: "A Friday summary",
+    description: "Each Friday, Acme emails everyone what they finished and what comes next. Nobody has to write the update.",
+  },
+];
+---
+
+<section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="features" data-reveal>
+  <div class="md:col-span-4">
+    <h2 class="text-3xl font-light tracking-display text-ink md:sticky md:top-28">One plan the whole team can read</h2>
+    <p class="mt-5 max-w-sm text-muted">Projects, dates and decisions sit together, so the plan answers questions before anyone has to ask them.</p>
+  </div>
+  <ul class="md:col-span-7 md:col-start-6">
+    {features.map((feature) => (
+      <li class="grid gap-2 border-t border-line py-8 last:border-b sm:grid-cols-5 sm:gap-8">
+        <h3 class="text-lg font-medium text-ink sm:col-span-2">{feature.title}</h3>
+        <p class="text-muted sm:col-span-3">{feature.description}</p>
+      </li>
+    ))}
+  </ul>
+</section>

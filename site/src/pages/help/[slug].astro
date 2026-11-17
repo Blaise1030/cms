@@ -1,0 +1,118 @@
+---
+import { render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import { href } from "../../lib/href";
+import { loadHelp } from "../../lib/help";
+import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
+
+export async function getStaticPaths() {
+  const { docs, sectionOf, topics } = await loadHelp();
+  return docs.map((entry, index) => {
+    const section = sectionOf(entry);
+    return {
+      params: { slug: entry.id },
+      props: {
+        entry,
+        section: { id: section.id, title: section.title },
+        subsection: section.subsections.find((sub) => sub.id === entry.data.subcategory)?.title,
+        topic: topics.find((topic) => topic.id === entry.data.category),
+        previous: docs[index - 1],
+        next: docs[index + 1],
+      },
+    };
+  });
+}
+const { entry, section, subsection, topic, previous, next } = Astro.props;
+const { Content, headings } = await render(entry);
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+const path = `/help/${entry.id}/`;
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: entry.data.title,
+    description: entry.data.description,
+    url: absoluteUrl(path),
+    mainEntityOfPage: absoluteUrl(path),
+    articleSection: section.title,
+    publisher: organization(),
+  },
+  breadcrumbs([
+    { name: "Home", path: "/" },
+    { name: "Help", path: "/help/" },
+    { name: section.title, path: `/help/section/${section.id}/` },
+    { name: entry.data.title, path },
+  ]),
+];
+const navLink = "group block border-t border-line pt-6";
+---
+<Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
+  <article class="page pt-14 md:pt-20">
+    <nav class="text-sm text-muted" aria-label="Breadcrumb">
+      <ol class="flex flex-wrap gap-x-2 gap-y-1">
+        <li><a class="link" href={href("/help/")}>Help</a></li>
+        <li aria-hidden="true">/</li>
+        <li><a class="link" href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
+        {subsection && <li aria-hidden="true">/</li>}
+        {subsection && <li>{subsection}</li>}
+      </ol>
+    </nav>
+    <div class="mt-10 grid gap-12 lg:grid-cols-12 lg:gap-10">
+      <div class="min-w-0 lg:col-span-8">
+        <h1 class="rise text-4xl font-light tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
+        <p class="rise-2 mt-6 max-w-prose text-xl text-muted">{entry.data.description}</p>
+        {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
+        <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
+        {(previous || next) && (
+          <nav class="mt-16 grid max-w-prose gap-8 sm:grid-cols-2" aria-label="More articles">
+            <div>{previous && <a class={navLink} href={href(`/help/${previous.id}/`)}><span class="label block">Previous</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{previous.data.title}</span></a>}</div>
+            <div class="sm:text-right">{next && <a class={navLink} href={href(`/help/${next.id}/`)}><span class="label block">Next</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{next.data.title}</span></a>}</div>
+          </nav>
+        )}
+      </div>
+      {toc.length > 1 && (
+        <aside class="hidden lg:col-span-3 lg:col-start-10 lg:block">
+          <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
+            <p class="label">On this page</p>
+            <ul class="mt-4 border-l border-line text-sm">
+              {toc.map((heading) => (
+                <li>
+                  <a
+                    class:list={[
+                      "-ml-px block border-l border-transparent py-1.5 text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:border-accent aria-[current=true]:text-ink",
+                      heading.depth === 3 ? "pl-8" : "pl-4",
+                    ]}
+                    href={`#${heading.slug}`}>{heading.text}</a
+                  >
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+      )}
+    </div>
+  </article>
+</Base>
+
+<script>
+  // Marks the "On this page" link for the heading being read. Runs after every navigation.
+  const track = () => {
+    const toc = document.querySelector<HTMLElement>("[data-toc]");
+    if (!toc || !("IntersectionObserver" in window)) return;
+    const links = new Map([...toc.querySelectorAll<HTMLAnchorElement>("a[href^='#']")].map((link) => [decodeURIComponent(link.hash.slice(1)), link]));
+    const headings = [...links.keys()].map((id) => document.getElementById(id)).filter((el): el is HTMLElement => el !== null);
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) entry.isIntersecting ? visible.add(entry.target.id) : visible.delete(entry.target.id);
+        const current = headings.find((heading) => visible.has(heading.id));
+        if (!current) return;
+        for (const [id, link] of links) link.setAttribute("aria-current", String(id === current.id));
+      },
+      { rootMargin: "-15% 0px -65% 0px" },
+    );
+    for (const heading of headings) observer.observe(heading);
+    document.addEventListener("astro:before-swap", () => observer.disconnect(), { once: true });
+  };
+  document.addEventListener("astro:page-load", track);
+</script>

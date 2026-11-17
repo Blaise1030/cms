@@ -1,0 +1,212 @@
+# Build the static Astro site and deploy it to Cloudflare Workers (static assets).
+#
+#   push to main          -> production deploy (`wrangler deploy`). Recorded as a GitHub
+#                            deployment of the push SHA (`environment: production`) whose status
+#                            carries the live URL (`environment_url`). The CMS orso reads that
+#                            deployment to show "Open live site" on main.
+#   pull request (opened, -> preview of the PR head commit: `wrangler versions upload
+#   updated, reopened)       --preview-alias=<alias>`, the alias made from the head branch by
+#                            .github/scripts/preview-alias.sh, so each branch keeps one stable URL
+#                            (https://<alias>-<worker>.<subdomain>.workers.dev). Recorded as a
+#                            GitHub deployment of the PR head SHA whose status carries the preview
+#                            URL (`environment_url`), plus one sticky PR comment with the link.
+#                            The CMS orso reads that deployment to show "Preview" next to the
+#                            PR status in its browser bar.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   secrets:   CLOUDFLARE_API_TOKEN   (token with "Workers Scripts: Edit")
+#              CLOUDFLARE_ACCOUNT_ID
+#   variables: CLOUDFLARE_WORKER_NAME (optional; defaults to `name` in wrangler.toml)
+# No other repo settings: the job requests the token permissions it needs (contents: read,
+# deployments: write, pull-requests: write). PRs from forks get no secrets and are skipped.
+name: Deploy Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    env:
+      WORKER_NAME: ${{ vars.CLOUDFLARE_WORKER_NAME || 'astro-marketing' }}
+    steps:
+      # On a PR, build the head commit (not the merge commit): that is the SHA the deployment
+      # is recorded for.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Preview alias from the PR head branch (the pushed branch otherwise). Branch names are
+      # untrusted, so only the sanitised alias is used below (never the raw ref).
+      - name: Preview alias
+        id: alias
+        env:
+          RAW_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: echo "name=$(bash .github/scripts/preview-alias.sh "$RAW_BRANCH" "$WORKER_NAME")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Fails on content-schema errors and missing section ids. PUBLIC_SITE_URL (a repo
+      # variable) sets the absolute URL used in canonical links, the sitemap and social cards.
+      - run: npm run build
+        env:
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+
+      - name: Start GitHub deployment (preview)
+        id: preview_deployment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_ALIAS: ${{ steps.alias.outputs.name }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.pull_request.head.sha,
+              environment: `preview/${process.env.PREVIEW_ALIAS}`,
+              transient_environment: true,
+              production_environment: false,
+              auto_merge: false,
+              required_contexts: [],
+              description: "Cloudflare Workers preview",
+            });
+            core.setOutput("id", data.id);
+
+      - name: Start GitHub deployment (production)
+        id: production_deployment
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: "production",
+              transient_environment: false,
+              production_environment: true,
+              auto_merge: false,
+              required_contexts: [],
+              description: "Cloudflare Workers production",
+            });
+            core.setOutput("id", data.id);
+
+      # `--preview-alias` needs wrangler 4.21+; the action would otherwise install 3.x.
+      - name: Deploy ./dist to Cloudflare Workers (production)
+        id: production
+        if: github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.149.0"
+          command: deploy --name="${{ env.WORKER_NAME }}"
+
+      - name: Upload ./dist as a Cloudflare Workers preview
+        id: preview
+        if: github.event_name == 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.149.0"
+          command: versions upload --name="${{ env.WORKER_NAME }}" --preview-alias="${{ steps.alias.outputs.name }}"
+
+      - name: Publish production URL (deployment status)
+        if: always() && steps.production_deployment.outputs.id
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.production_deployment.outputs.id }}
+          DEPLOY_OUTCOME: ${{ steps.production.outcome }}
+          WRANGLER_OUTPUT: ${{ steps.production.outputs.command-output }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+        with:
+          script: |
+            // Prefer an explicit repo variable; else the URL wrangler printed; else give up
+            // (orso can still derive production from a preview URL + wrangler.toml name).
+            const out = process.env.WRANGLER_OUTPUT || "";
+            const fromWrangler = (out.match(/https:\/\/[^\s]+workers\.dev\/?/i) || [])[0];
+            const url = (process.env.PUBLIC_SITE_URL || fromWrangler || "").replace(/\/$/, "");
+            const ok = process.env.DEPLOY_OUTCOME === "success" && /^https:\/\//i.test(url);
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: ok ? "success" : "failure",
+              ...(ok ? { environment_url: url } : {}),
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              auto_inactive: true,
+            });
+
+      - name: Publish preview URL (deployment status + sticky PR comment)
+        if: always() && steps.preview_deployment.outputs.id
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.preview_deployment.outputs.id }}
+          DEPLOY_OUTCOME: ${{ steps.preview.outcome }}
+          WRANGLER_OUTPUT: ${{ steps.preview.outputs.command-output }}
+        with:
+          script: |
+            // The branch alias URL (stable per branch) when wrangler prints one, else this
+            // version's own preview URL.
+            const out = process.env.WRANGLER_OUTPUT || "";
+            const url = (out.match(/Version Preview Alias URL:\s*(https:\/\/\S+)/) ||
+              out.match(/Version Preview URL:\s*(https:\/\/\S+)/) || [])[1];
+            const ok = process.env.DEPLOY_OUTCOME === "success" && !!url;
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: ok ? "success" : "failure",
+              ...(ok ? { environment_url: url } : {}),
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              auto_inactive: true,
+            });
+
+            const marker = "<!-- cms-preview-deploy -->";
+            const sha = context.payload.pull_request.head.sha.slice(0, 7);
+            const body = ok
+              ? `${marker}\n**Preview:** ${url}\n\nDeployed from ${sha}.`
+              : `${marker}\n**Preview deploy failed** for ${sha}. See the workflow run for details.`;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }

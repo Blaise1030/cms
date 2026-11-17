@@ -1,0 +1,19 @@
+---
+// A list of help articles: title and one-line description, divided by hairlines.
+import { href } from "../lib/href";
+import type { Doc } from "../lib/help";
+
+interface Props {
+  docs: Doc[];
+}
+const { docs } = Astro.props;
+---
+
+<ul class="border-b border-line">
+  {docs.map((doc) => (
+    <li class="group relative border-t border-line py-5">
+      <a class="font-medium text-ink decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/${doc.id}/`)}>{doc.data.title}</a>
+      <p class="mt-1 text-muted">{doc.data.description}</p>
+    </li>
+  ))}
+</ul>

@@ -1,0 +1,22 @@
+---
+import Cta from "../components/sections/Cta.astro";
+import Faq from "../components/sections/Faq.astro";
+import Features from "../components/sections/Features.astro";
+import Hero from "../components/sections/Hero.astro";
+import Logos from "../components/sections/Logos.astro";
+import Pricing from "../components/sections/Pricing.astro";
+import Testimonials from "../components/sections/Testimonials.astro";
+import Base from "../layouts/Base.astro";
+import { organization, website } from "../lib/seo";
+import { site } from "../site";
+---
+
+<Base description={site.description} jsonLd={[website(), organization()]}>
+  <Hero />
+  <Logos />
+  <Features />
+  <Testimonials />
+  <Pricing />
+  <Faq />
+  <Cta />
+</Base>

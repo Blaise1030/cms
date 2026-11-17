@@ -1,0 +1,27 @@
+---
+import Base from "../../../layouts/Base.astro";
+import DocList from "../../../components/DocList.astro";
+import PageHeader from "../../../components/PageHeader.astro";
+import { loadHelp } from "../../../lib/help";
+import { breadcrumbs } from "../../../lib/seo";
+
+export async function getStaticPaths() {
+  const { topics } = await loadHelp();
+  return topics.map((topic) => ({ params: { slug: topic.id }, props: { topic } }));
+}
+const { topic } = Astro.props;
+const description = topic.description ?? `Help articles about ${topic.title.toLowerCase()}.`;
+---
+<Base
+  title={`Help topic: ${topic.title}`}
+  description={description}
+  jsonLd={[
+    { "@context": "https://schema.org", "@type": "WebPage", name: topic.title, description },
+    breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: "Topics", path: "/help/categories/" }, { name: topic.title, path: `/help/categories/${topic.id}/` }]),
+  ]}
+>
+  <PageHeader title={topic.title} description={topic.description} back={{ label: "All topics", href: "/help/categories/" }} />
+  <div class="page mt-12">
+    {topic.docs.length === 0 ? <p class="text-muted">No articles on this topic yet.</p> : <div class="max-w-3xl" data-reveal><DocList docs={topic.docs} /></div>}
+  </div>
+</Base>
