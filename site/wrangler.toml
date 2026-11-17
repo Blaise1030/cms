@@ -2,7 +2,7 @@
 # assets, no Worker script. Rename `name` to your Worker; it must match CLOUDFLARE_WORKER_NAME in
 # CI (defaults to this value). Production: https://<name>.<subdomain>.workers.dev; each branch
 # gets a preview at https://<branch alias>-<name>.<subdomain>.workers.dev.
-name = "astro-marketing"
+name = "orso-site"
 compatibility_date = "2026-09-01"
 workers_dev = true
 preview_urls = true
