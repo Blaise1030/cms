@@ -159,7 +159,7 @@ export function OpsCarousel() {
                     </div>
                   </div>
                 </CardContent>
-                <CardHeader className="mt-auto min-h-28 border-t border-line">
+                <CardHeader className="mt-auto gap-1 border-t border-line py-4">
                   <CardTitle className="text-base text-ink">{slide.title}</CardTitle>
                   <CardDescription className="text-muted">{slide.caption}</CardDescription>
                 </CardHeader>
