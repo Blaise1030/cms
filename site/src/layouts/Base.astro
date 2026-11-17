@@ -2,6 +2,7 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import Wordmark from "../components/Wordmark.astro";
+import { SiteNav } from "../components/react/SiteNav";
 import { buttonVariants } from "../components/ui/button";
 import { href } from "../lib/href";
 import { cn } from "../lib/utils";
@@ -46,9 +47,12 @@ const base = import.meta.env.BASE_URL;
 // The nav item for the section being viewed (Blog or Help) gets aria-current.
 const here = Astro.url.pathname.slice(base.replace(/\/$/, "").length);
 const isCurrent = (link: string) => link.startsWith("/") && link !== "/" && here.startsWith(link);
-const product = site.nav.filter((link) => link.href.startsWith("#"));
-const resources = site.nav.filter((link) => !link.href.startsWith("#"));
 const external = (link: string) => /^https?:\/\//.test(link);
+const navItems = site.nav.map((link) => ({
+  label: link.label,
+  href: href(link.href),
+  current: isCurrent(link.href),
+}));
 ---
 
 <html lang="en">
@@ -88,18 +92,10 @@ const external = (link: string) => /^https?:\/\//.test(link);
       href="#main">Skip to content</a
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
-      <div class="page flex min-h-header flex-wrap items-center gap-x-8 gap-y-1 py-2 md:flex-nowrap">
+      <div class="page flex min-h-header items-center gap-x-4 py-2">
         <a class="-m-1 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
-        <nav class="order-last -mx-1 flex w-full gap-5 overflow-x-auto md:order-none md:ml-auto md:w-auto" aria-label="Main">
-          {site.nav.map((link) => (
-            <a
-              class="shrink-0 py-1 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
-              href={href(link.href)}
-              aria-current={isCurrent(link.href) ? "page" : undefined}>{link.label}</a
-            >
-          ))}
-        </nav>
-        <div class="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
+        <div class="ml-auto flex shrink-0 items-center gap-2">
+          <SiteNav client:load items={navItems} />
           {site.secondaryCta && (
             <a
               class={cn(buttonVariants({ variant: "outline", size: "lg" }), "hidden sm:inline-flex gap-2")}
