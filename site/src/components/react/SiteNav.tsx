@@ -16,7 +16,7 @@ export type NavItem = {
 export function SiteNav({ items }: { items: NavItem[] }) {
   return (
     <>
-      <nav className="hidden items-center gap-5 lg:flex" aria-label="Main">
+      <nav className="hidden items-center gap-5 pe-4 lg:flex" aria-label="Main">
         {items.map((link) => (
           <a
             key={link.href}
