@@ -91,8 +91,8 @@ spacing:
   base: 0.25rem
   gutter: 1.25rem
   gutter-wide: 2.5rem
-  section: 7rem
-  section-wide: 10rem
+  section: 4.5rem
+  section-wide: 7rem
   header: 4rem
   rise: 0.75rem
 ---
@@ -144,7 +144,7 @@ The scale steps by about 1.22 from a 16px body (`--text-*`): `xs` 0.75rem throug
 
 The home page follows Medusa's section map with Orso copy and tokens. The `page` utility spans the full viewport with token gutters, so sections keep their side padding. Sections that look best at the edge omit `page` and keep their copy in a nested `page` wrapper; the hero's product rail and app window break out that way. Interiors cap themselves where the copy needs a measure (`max-w-prose`, `max-w-measure`, `max-w-3xl`). `--container-page` (80rem) stays available for sections that want a narrower centred column. Landing sections are full-bleed bands; interiors use the 12-column grid where needed.
 
-Order: hero (left-aligned headline, lead, dual CTAs, five product tabs switching one panel) → bordered logo grid → horizontal ops carousel → three feature cards → agent product band → night proof → FAQ → centred closing CTA. Sections use `--spacing-section` (7rem); the proof band may use `--spacing-section-wide` (10rem).
+Order: hero (left-aligned headline, lead, dual CTAs, five product tabs switching one panel) → bordered logo grid → horizontal ops carousel → three feature cards → agent product band → night proof → FAQ → centred closing CTA. Sections use `--spacing-section` (4.5rem); the proof band may use `--spacing-section-wide` (7rem).
 
 The hero tab rail is five equal columns of title and one-line description, hairline dividers, a 2px ink underline on the active tab, and one large product panel underneath. On narrow screens the rail wraps to two columns.
 
