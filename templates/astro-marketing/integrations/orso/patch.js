@@ -186,9 +186,20 @@ function patchYaml(source, fields, unset, schema) {
   validateCandidate(schema, next);
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const edits = [], changed = changes(previous, next);
+  // A flow list (`[a, b]`) that changes length and has edited items is rewritten whole: its
+  // splice edit spans the brackets, so it would overlap the edits to the items inside it.
+  const isUnder = (path, prefix) => prefix.length < path.length && prefix.every((key, index) => path[index] === key);
+  const flowRewrites = changed
+    .filter(({ path, splice }) => splice && isSeq(document.getIn(path, true)) && document.getIn(path, true).flow)
+    .map(({ path }) => path)
+    .filter((prefix) => changed.some(({ path }) => isUnder(path, prefix)));
   for (const { path, value, splice } of changed) {
+    if (flowRewrites.some((prefix) => isUnder(path, prefix))) continue;
     const node = document.getIn(path, true);
-    if (splice) edits.push(spliceYaml(source, document, path, splice, eol));
+    if (splice && flowRewrites.includes(path)) {
+      if (!node.range || source[node.range[0]] !== "[" || source[node.range[1] - 1] !== "]") throw new PatchError("Cannot safely patch this YAML list");
+      edits.push({ start: node.range[0], end: node.range[1], text: yamlFlow(value) });
+    } else if (splice) edits.push(spliceYaml(source, document, path, splice, eol));
     else if (node && node.range && value !== undefined) {
       let text;
       if (typeof value === "string" && /[\r\n]/.test(value)) text = JSON.stringify(value);

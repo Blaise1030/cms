@@ -119,6 +119,11 @@ test("patchSource gains and loses YAML block and flow list items in their own st
   const flow = "---\ntitle: Post\ndescription: D\npubDate: \"2026-10-11\"\ntags: [news]\n---\nBody";
   assert.equal(blog({ source: flow, fields: { tags: ["news", "launch"] } }), flow.replace("[news]", "[news, launch]"));
   assert.equal(blog({ source: flow, fields: { tags: [] } }), flow.replace("[news]", "[]"));
+
+  // Changing an item and the length at once rewrites the flow list instead of overlapping edits.
+  const two = flow.replace("[news]", "[news, launch]");
+  assert.match(blog({ source: two, fields: { tags: ["update"] } }), /^tags: \[ ?update ?\]$/m);
+  assert.match(blog({ source: two, fields: { tags: ["a", "b", "c"] } }), /^tags: \[ ?a, b, c ?\]$/m);
 });
 
 test("patchSource refuses YAML lists whose comments cannot be preserved with a Code hint", () => {
