@@ -147,8 +147,8 @@ export function OpsCarousel() {
   return (
     <Carousel opts={{ align: "start", loop: false }} className="w-full">
       <div className="page mb-6 flex items-center justify-end gap-2">
-        <CarouselPrevious className="static translate-y-0" />
-        <CarouselNext className="static translate-y-0" />
+        <CarouselPrevious size="icon-lg" className="static translate-y-0" />
+        <CarouselNext size="icon-lg" className="static translate-y-0" />
       </div>
       <div className="relative">
         <CarouselContent className="-ml-5 items-stretch">
