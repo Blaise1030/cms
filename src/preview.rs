@@ -39,7 +39,12 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const VITE_COOKIE: &str = "wb_vite";
 
 /// Paths Astro/Vite serve from the site root even when `base` is `/preview/{id}/`.
+/// Every root `/@…` path is a Vite virtual module (`/@vite/client`, `/@id/…`, and plugin ones
+/// such as `/@react-refresh`, which React islands import before they hydrate).
 pub fn is_vite_dev_path(path: &str) -> bool {
+    if path.starts_with("/@") {
+        return true;
+    }
     const PREFIXES: [&str; 5] = ["/@vite", "/@id/", "/@fs/", "/node_modules/", "/src/"];
     PREFIXES.iter().any(|p| {
         path == p.trim_end_matches('/')
@@ -120,6 +125,16 @@ pub async fn handle_vite_root(State(state): State<AppState>, req: Request) -> Re
         Ok(res) => res,
         Err(e) => e.into_response(),
     }
+}
+
+/// Router fallback: Vite virtual modules the explicit routes don't name (`/@react-refresh`,
+/// other plugins' `/@…` ids) go to the dev server; everything else is the app.
+pub async fn fallback(state: State<AppState>, req: Request) -> Response {
+    if req.uri().path().starts_with("/@") {
+        return handle_vite_root(state, req).await;
+    }
+    let (parts, _) = req.into_parts();
+    crate::static_files::serve(parts.method, parts.uri, parts.headers).await
 }
 
 /// `/preview/{id}[/...]` → `id`.
@@ -396,6 +411,7 @@ mod tests {
         assert!(is_vite_dev_path("/@fs/Users/x/project/foo.ts"));
         assert!(is_vite_dev_path("/node_modules/vite/dist/client/env.mjs"));
         assert!(is_vite_dev_path("/src/layouts/Base.astro"));
+        assert!(is_vite_dev_path("/@react-refresh"));
         assert!(!is_vite_dev_path("/preview/site/"));
         assert!(!is_vite_dev_path("/assets/index.js"));
         assert!(!is_vite_dev_path("/api/health"));
