@@ -18,7 +18,7 @@ export const site = {
     { label: "Help", href: "/help/" },
   ],
   /** Header secondary action; set to `null` to hide it. */
-  secondaryCta: { label: "See what it does", href: "#scale" },
+  secondaryCta: { label: "GitHub", href: "https://github.com/Blaise1030/cms" },
   /** Header call to action; set to `null` to hide it. */
   cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
   footer: {

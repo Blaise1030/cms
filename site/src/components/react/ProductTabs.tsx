@@ -59,7 +59,7 @@ function PaintedCard({ children }: { children: ReactNode }) {
   return (
     <div className="relative aspect-video overflow-hidden">
       <img
-        src={paintingUrl("patinir")}
+        src={paintingUrl("danube")}
         alt=""
         aria-hidden="true"
         loading="eager"

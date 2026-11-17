@@ -1,37 +1,37 @@
 /**
- * Public-domain Renaissance paintings used as painted backdrops behind the product previews.
+ * Figure-free Renaissance landscapes used as painted backdrops behind the product previews.
  * Files live in `public/paintings/`; sources and licences are listed in `public/paintings/CREDITS.md`.
  */
 export const paintings = {
-  patinir: {
-    file: "patinir.webp",
-    title: "Landscape with the Flight into Egypt",
-    artist: "Joachim Patinir",
-    date: "c. 1516–17",
-  },
-  bruegel: {
-    file: "bruegel.webp",
-    title: "The Harvesters",
-    artist: "Pieter Bruegel the Elder",
-    date: "1565",
-  },
-  giorgione: {
-    file: "giorgione.webp",
-    title: "The Tempest",
-    artist: "Giorgione",
-    date: "c. 1506–08",
-  },
-  altdorfer: {
-    file: "altdorfer.webp",
-    title: "Danube Landscape",
+  danube: {
+    file: "altdorfer-danube.webp",
+    title: "Danube Landscape with Wörth Castle",
     artist: "Albrecht Altdorfer",
-    date: "c. 1520–25",
+    date: "c. 1528–30",
   },
-  leonardo: {
-    file: "leonardo.webp",
-    title: "The Virgin of the Rocks",
-    artist: "Leonardo da Vinci",
-    date: "c. 1491–1508",
+  bridge: {
+    file: "altdorfer-bridge.webp",
+    title: "Landscape with a Footbridge",
+    artist: "Albrecht Altdorfer",
+    date: "1516",
+  },
+  toledo: {
+    file: "elgreco-toledo.webp",
+    title: "View of Toledo",
+    artist: "El Greco",
+    date: "c. 1598–99",
+  },
+  alps: {
+    file: "verhaecht-alps.webp",
+    title: "Alpine Landscape",
+    artist: "Tobias Verhaecht",
+    date: "c. 1600",
+  },
+  rocks: {
+    file: "valckenborch-rocks.webp",
+    title: "Mountainous Landscape",
+    artist: "Lucas van Valckenborch",
+    date: "1582",
   },
 } as const;
 
