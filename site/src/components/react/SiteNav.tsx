@@ -39,11 +39,7 @@ export function SiteNav({ items }: { items: NavItem[] }) {
         <DropdownMenuContent align="end" className="min-w-48 border border-line shadow-none ring-0">
           {items.map((link) => (
             <DropdownMenuItem key={link.href} asChild>
-              <a
-                href={link.href}
-                aria-current={link.current ? "page" : undefined}
-                className="cursor-pointer text-ink"
-              >
+              <a href={link.href} aria-current={link.current ? "page" : undefined} className="cursor-pointer">
                 {link.label}
               </a>
             </DropdownMenuItem>
