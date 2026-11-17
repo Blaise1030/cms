@@ -2,7 +2,7 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import Wordmark from "../components/Wordmark.astro";
-import { SiteNav } from "../components/react/SiteNav";
+import { SiteNavLinks, SiteNavMenu } from "../components/react/SiteNav";
 import { buttonVariants } from "../components/ui/button";
 import { href } from "../lib/href";
 import { cn } from "../lib/utils";
@@ -98,6 +98,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
       <div class="page flex min-h-header items-center gap-x-4 py-1">
         <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-1">
+          <SiteNavLinks client:load items={navItems} />
           {site.secondaryCta && (
             <a
               class={cn(buttonVariants({ variant: "ghost", size: "lg" }), "hidden sm:inline-flex gap-2")}
@@ -125,7 +126,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
               <span class="hidden sm:inline">{site.cta.label}</span>
             </a>
           )}
-          <SiteNav client:load items={navItems} />
+          <SiteNavMenu client:load items={navItems} />
         </div>
       </div>
     </header>
