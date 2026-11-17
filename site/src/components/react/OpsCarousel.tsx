@@ -146,7 +146,7 @@ export function OpsCarousel() {
 
   return (
     <Carousel opts={{ align: "start", loop: false }} className="w-full">
-      <div className="page mb-6 flex items-center justify-end gap-2">
+      <div className="page mb-6 flex items-center justify-start gap-2">
         <CarouselPrevious size="icon-lg" className="static translate-y-0" />
         <CarouselNext size="icon-lg" className="static translate-y-0" />
       </div>
@@ -157,7 +157,7 @@ export function OpsCarousel() {
               key={slide.kind}
               className={cn(
                 "basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3",
-                index === 0 && "pl-gutter md:pl-gutter-wide",
+                index === 0 && "pl-[calc(var(--spacing-gutter)+1.25rem)] md:pl-[calc(var(--spacing-gutter-wide)+1.25rem)]",
                 index === last && "pr-gutter md:pr-gutter-wide",
               )}
             >
