@@ -8,7 +8,7 @@ import { site } from "../site";
 import "../styles/global.css";
 
 interface Props {
-  /** Page title; " | Acme" is appended. Omit on the home page to get "Acme | tagline". */
+  /** Page title; " | Orso" is appended. Omit on the home page to get "Orso | tagline". */
   title?: string;
   /** Meta description; defaults to `site.description`. */
   description?: string;
@@ -76,7 +76,7 @@ const external = (link: string) => /^https?:\/\//.test(link);
     <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
     <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
     <link rel="sitemap" href={`${base}sitemap.xml`} />
-    <Font cssVariable="--font-albert-sans" preload={[{ style: "normal" }]} />
+    <Font cssVariable="--font-geist" preload={[{ style: "normal" }]} />
     {jsonLd.map((data) => <script type="application/ld+json" is:inline set:html={JSON.stringify(data).replace(/</g, "\\u003c")} />)}
     <ClientRouter fallback="swap" />
   </head>

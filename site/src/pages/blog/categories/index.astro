@@ -8,7 +8,7 @@ const { categories } = await loadBlog();
 ---
 <Base
   title="Blog categories"
-  description="Browse Acme blog posts by topic: product news, practical guides and company stories."
+  description="Browse Orso blog posts by topic: product news, practical guides and company stories."
   jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: "Blog categories" }, breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }, { name: "Categories", path: "/blog/categories/" }])]}
 >
   <PageHeader title="Blog categories" back={{ label: "Back to Blog", href: "/blog/" }} />

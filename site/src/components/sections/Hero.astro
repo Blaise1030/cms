@@ -1,33 +1,35 @@
 ---
 import { href } from "../../lib/href";
 
-// The illustration's sample plan. Edit freely; it is decoration with a text label.
-const tasks = [
-  { title: "Write the release notes", done: true },
-  { title: "Invite twenty beta testers", done: true },
-  { title: "Record a two-minute walkthrough", done: false },
+// Decorative draft card: shows the Orso change model (edit → preview → publish).
+const changes = [
+  { title: "Update the pricing FAQ", done: true },
+  { title: "Swap the hero screenshot", done: true },
+  { title: "Publish when ready", done: false },
 ];
 ---
 
 <section class="page grid items-center gap-16 pt-14 pb-section md:grid-cols-12 md:gap-10 md:pt-24" id="hero">
   <div class="md:col-span-6">
-    <p class="rise label">Project planning for small teams</p>
-    <h1 class="rise mt-6 text-4xl font-light tracking-display text-ink md:text-5xl">Plan your team's work on one page</h1>
+    <p class="rise text-2xl font-medium tracking-tight text-ink md:text-3xl">Orso</p>
+    <h1 class="rise mt-6 text-4xl font-light tracking-display text-ink md:text-5xl">
+      Let your content team edit the site with an agent.
+    </h1>
     <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
-      Acme keeps projects, milestones and the reasons behind each decision in one shared plan, so everyone can see what
-      ships this week and what can wait.
+      Your developer set up the repo. Now marketing, writers and founders can change the site themselves: in a form, or
+      by asking an agent. Every change is a draft you preview before it goes live.
     </p>
     <div class="rise-3 mt-10 flex flex-wrap items-center gap-x-8 gap-y-4">
-      <a class="button" href={href("#pricing")}>Start a free project</a>
-      <a class="link font-medium text-ink" href={href("#features")}>See how it works</a>
+      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso</a>
+      <a class="link font-medium text-ink" href={href("#how-it-works")}>See how it works</a>
     </div>
-    <p class="rise-3 mt-6 text-sm text-muted">Free for teams of up to five. No card required.</p>
+    <p class="rise-3 mt-6 text-sm text-muted">Free and open source. Content stays in your repo.</p>
   </div>
 
   <div
     class="relative sm:pb-10 md:col-span-6 md:col-start-7 md:pb-0"
     role="img"
-    aria-label="An example Acme plan: the Public beta milestone is due Friday, with two of three tasks done."
+    aria-label="An example Orso draft: two edits done, publish waiting."
   >
     <div class="aspect-4/3 overflow-hidden rounded-xl bg-mist">
       <svg class="size-full" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -38,26 +40,28 @@ const tasks = [
           <path class="fill-accent" d="M252 216c42-30 96-38 148-24v24Z" />
         </g>
         <rect class="fill-ridge/40" x="0" y="216" width="400" height="84" />
-        <path class="stroke-glow" d="M262 234h64M276 248h36M286 260h16" stroke-width="2" stroke-linecap="round" />
-        <path class="rise-3 fill-sand" d="M0 300v-36c62-14 124-8 172 8 26 9 44 18 58 28Z" />
       </svg>
     </div>
-    <div class="rise-3 relative mx-4 -mt-24 rounded-lg bg-surface-raised p-5 shadow-soft sm:absolute sm:bottom-0 sm:-left-6 sm:mx-0 sm:mt-0 sm:w-80 md:-bottom-10">
-      <div class="flex items-baseline justify-between gap-4">
-        <p class="label">Milestone 2 of 4</p>
-        <p class="text-xs text-muted">Due Friday</p>
-      </div>
-      <p class="mt-2 text-lg font-medium text-ink">Public beta</p>
-      <div class="mt-3 h-1 overflow-hidden rounded-full bg-line"><div class="h-full w-2/3 rounded-full bg-accent"></div></div>
-      <ul class="mt-4 space-y-2.5 text-sm">
-        {tasks.map((task) => (
-          <li class="flex items-center gap-3">
-            {task.done ? (
-              <svg class="size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true"><circle class="fill-accent" cx="8" cy="8" r="8" /><path class="stroke-on-accent" d="m5 8.2 2 2 4-4.4" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-            ) : (
-              <svg class="size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true"><circle class="stroke-line-strong" cx="8" cy="8" r="7.25" fill="none" stroke-width="1.5" /></svg>
-            )}
-            <span class:list={[task.done ? "text-muted line-through decoration-line-strong" : "text-ink"]}>{task.title}</span>
+    <div
+      class="rise-3 absolute inset-x-4 -bottom-2 rounded-lg border border-line bg-surface-raised p-5 shadow-soft sm:inset-x-auto sm:right-6 sm:bottom-4 sm:w-72"
+    >
+      <p class="label">Draft · homepage</p>
+      <p class="mt-2 text-sm font-medium text-ink">Preview ready</p>
+      <ul class="mt-4 space-y-2.5">
+        {changes.map((change) => (
+          <li class="flex items-start gap-2.5 text-sm">
+            <span
+              class:list={[
+                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                change.done ? "border-accent bg-accent text-on-accent" : "border-line-strong",
+              ]}
+              aria-hidden="true"
+            >
+              {change.done && (
+                <svg class="size-2.5" viewBox="0 0 12 12"><path d="M2.5 6.5 5 9l4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              )}
+            </span>
+            <span class:list={[change.done ? "text-muted line-through" : "text-ink"]}>{change.title}</span>
           </li>
         ))}
       </ul>

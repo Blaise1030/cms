@@ -18,18 +18,18 @@ const siteUrl = process.env.PUBLIC_SITE_URL || site.url;
 export default defineConfig({
   site: siteUrl,
   base,
-  // Albert Sans ships with the site (no third-party font request). Astro writes the
+  // Geist ships with the site (no third-party font request). Astro writes the
   // @font-face rules, a preload and a metric-matched fallback so the swap causes no layout shift.
   fonts: [
     {
       provider: fontProviders.local(),
-      name: "Albert Sans",
-      cssVariable: "--font-albert-sans",
+      name: "Geist",
+      cssVariable: "--font-geist",
       fallbacks: ["ui-sans-serif", "system-ui", "sans-serif"],
       options: {
         variants: [
-          { src: ["@fontsource-variable/albert-sans/files/albert-sans-latin-wght-normal.woff2"], weight: "100 900", style: "normal", display: "swap" },
-          { src: ["@fontsource-variable/albert-sans/files/albert-sans-latin-wght-italic.woff2"], weight: "100 900", style: "italic", display: "swap" },
+          { src: ["@fontsource-variable/geist/files/geist-latin-wght-normal.woff2"], weight: "100 900", style: "normal", display: "swap" },
+          { src: ["@fontsource-variable/geist/files/geist-latin-wght-italic.woff2"], weight: "100 900", style: "italic", display: "swap" },
         ],
       },
     },

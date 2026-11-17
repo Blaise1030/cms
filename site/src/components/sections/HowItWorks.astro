@@ -1,0 +1,42 @@
+---
+const steps = [
+  {
+    number: "01",
+    title: "Write in the Markdown editor",
+    description:
+      "Open a post or help doc and type. The body is plain Markdown, and the title, date, cover image and tags are fields on the right. No frontmatter to get wrong.",
+  },
+  {
+    number: "02",
+    title: "Or point at the page in the visual builder",
+    description:
+      "Browse the live preview, click the part you want changed and tell the agent what to do. It edits the repo, the preview reloads, and you check it on desktop and mobile.",
+  },
+  {
+    number: "03",
+    title: "Publish to main",
+    description:
+      "Happy with the draft? Press Publish. Orso merges the change into main, your host rebuilds, and the live site updates. Every earlier version stays in History.",
+  },
+];
+---
+
+<section class="page py-section" id="how-it-works" data-reveal>
+  <div class="max-w-2xl">
+    <h2 class="text-3xl font-light tracking-display text-ink md:text-4xl">
+      Whoever makes the change, it goes live the same way.
+    </h2>
+    <p class="mt-5 text-muted">
+      Write it yourself or ask the agent. Either way you get a draft to check, and one button puts it on the live site.
+    </p>
+  </div>
+  <ol class="mt-14 grid gap-10 md:grid-cols-3 md:gap-8">
+    {steps.map((step) => (
+      <li class="border-t border-line pt-8">
+        <p class="label">{step.number}</p>
+        <h3 class="mt-4 text-xl font-medium tracking-tight text-ink">{step.title}</h3>
+        <p class="mt-3 text-muted">{step.description}</p>
+      </li>
+    ))}
+  </ol>
+</section>

@@ -4,33 +4,63 @@ import { href } from "../../lib/href";
 // Questions render as an accordion and as FAQPage structured data, from this one list.
 const faqs = [
   {
-    question: "Do I need a credit card to start?",
-    answer: "No. The Starter plan is free for teams of up to five people. You add a card only when you move to Team.",
+    question: "Who is Project Orso for?",
+    answer:
+      "Teams where developers own the repo but marketers, writers and founders own the words. It gives the second group the tools the first already uses — drafts, previews, reviews and a coding agent — without asking them to learn any of it.",
   },
   {
-    question: "Can people outside my team see a plan?",
-    answer: "Only if you share it. A share link gives read-only access to one project, and you can turn it off at any time.",
+    question: "Does my team need to know Git or code?",
+    answer:
+      "No. Copy, posts and help articles have forms, and anything bigger can go to the agent in plain English. They see drafts, previews and a Publish button, never branches or commits.",
   },
   {
-    question: "Can I bring in work from a spreadsheet?",
-    answer: "Yes. Paste rows from any spreadsheet into a project and Acme turns each row into a task, keeping your columns as fields.",
+    question: "Does everyone need a GitHub account?",
+    answer:
+      "Yes, and that's the only GitHub they'll touch. Access is your GitHub team, so there's no second login to manage and no separate list of who can publish.",
   },
   {
-    question: "What happens to my plans if I cancel?",
-    answer: "Your projects stay readable, and you can export each one to CSV or Markdown from its settings.",
+    question: "Do I have to migrate my content?",
+    answer:
+      "No. Orso reads the Markdown already in your repo. Open the repo and your posts and docs show up as collections.",
+  },
+  {
+    question: "Can someone break the live site?",
+    answer:
+      "Not by accident. Every change lands in a draft with its own preview, nothing goes live until someone hits Publish, and every save is a checkpoint you can roll back in one click.",
+  },
+  {
+    question: "Which AI agent do I need?",
+    answer: "Claude, Cursor or Codex. If your team already pays for one of them, that's everything Orso needs.",
+  },
+  {
+    question: "How is this free?",
+    answer:
+      "Project Orso is an open-source project, not a product with plans. Read it, fork it, run it locally — there's no paid tier and nothing behind a paywall.",
+  },
+  {
+    question: "What happens if we stop using Orso?",
+    answer:
+      "Nothing changes. Your content was always Markdown in your own repo, every change is already in its history, and the site is plain static files.",
   },
 ];
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "FAQPage",
-  mainEntity: faqs.map((faq) => ({ "@type": "Question", name: faq.question, acceptedAnswer: { "@type": "Answer", text: faq.answer } })),
+  mainEntity: faqs.map((faq) => ({
+    "@type": "Question",
+    name: faq.question,
+    acceptedAnswer: { "@type": "Answer", text: faq.answer },
+  })),
 };
 ---
 
 <section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="faq" data-reveal>
   <div class="md:col-span-4">
-    <h2 class="text-3xl font-light tracking-display text-ink">Questions before you start</h2>
-    <p class="mt-5 text-muted">Something else on your mind? The <a class="link text-ink" href={href("/help/")}>help centre</a> has step-by-step guides.</p>
+    <h2 class="text-3xl font-light tracking-display text-ink">Questions, answered.</h2>
+    <p class="mt-5 text-muted">
+      Anything else, write to the team. A person replies, not a ticket bot. The
+      <a class="link text-ink" href={href("/help/")}>help centre</a> has step-by-step guides.
+    </p>
   </div>
   <div class="border-t border-line md:col-span-7 md:col-start-6">
     {faqs.map((faq) => (

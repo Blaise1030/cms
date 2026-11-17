@@ -10,26 +10,26 @@
  * custom-property lines in this file.
  */
 @theme static {
-  /* Colour: light mode (birch, sand, soft charcoal, fjord blue). Dark values are below. */
+  /* Colour: light mode (cool paper, soft charcoal, blue primary). Dark values are below. */
   --color-*: initial;
-  --color-surface: #f6f4ef;
-  --color-surface-raised: #fcfbf8;
-  --color-sand: #ece7dd;
-  --color-mist: #dde5ea;
-  --color-ridge: #b4c0c6;
-  --color-glow: #fdfaf2;
-  --color-ink: #2a2e33;
-  --color-muted: #5b6269;
-  --color-line: #ddd7cb;
-  --color-line-strong: #b5ae9f;
-  --color-accent: #3b5a72;
-  --color-accent-hover: #2e4a60;
-  --color-on-accent: #f6f4ef;
+  --color-surface: #f7f8fa;
+  --color-surface-raised: #ffffff;
+  --color-sand: #eef1f6;
+  --color-mist: #dbe7f6;
+  --color-ridge: #9eb4cc;
+  --color-glow: #f5f8fc;
+  --color-ink: #0f172a;
+  --color-muted: #475569;
+  --color-line: #e2e8f0;
+  --color-line-strong: #94a3b8;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-on-accent: #ffffff;
 
-  /* Type: one family (Albert Sans, loaded by Astro's font API as --font-albert-sans). */
+  /* Type: one family (Geist, loaded by Astro's font API as --font-geist). */
   --font-*: initial;
-  --font-sans: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-weight-light: 300;
   --font-weight-normal: 400;
@@ -102,19 +102,19 @@
 /* Dark mode: the same tokens with warm-slate values, following the visitor's system setting. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: #25272a;
-    --color-surface-raised: #2c2f32;
-    --color-sand: #2f3235;
-    --color-mist: #2f3b45;
-    --color-ridge: #4a5862;
-    --color-glow: #d8d3c6;
-    --color-ink: #eae6de;
-    --color-muted: #a9adb0;
-    --color-line: #3c3f43;
-    --color-line-strong: #5a5f64;
-    --color-accent: #a3bdd1;
-    --color-accent-hover: #bfd2e0;
-    --color-on-accent: #1d2023;
+    --color-surface: #0b1220;
+    --color-surface-raised: #111827;
+    --color-sand: #152033;
+    --color-mist: #1e3a5f;
+    --color-ridge: #3b82a8;
+    --color-glow: #cbd5e1;
+    --color-ink: #e2e8f0;
+    --color-muted: #94a3b8;
+    --color-line: #1e293b;
+    --color-line-strong: #475569;
+    --color-accent: #60a5fa;
+    --color-accent-hover: #93c5fd;
+    --color-on-accent: #0b1220;
   }
 }
 
@@ -186,7 +186,7 @@
   }
 }
 
-/* Buttons: one solid (fjord) and one quiet outline. Pill-shaped, medium weight. */
+/* Buttons: one solid (blue primary) and one quiet outline. Pill-shaped, medium weight. */
 @utility button {
   display: inline-flex;
   align-items: center;

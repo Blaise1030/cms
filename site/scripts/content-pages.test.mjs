@@ -79,7 +79,7 @@ test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
   assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/blog\/a-new\/<\/loc>/);
   assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/help\/z-first\/<\/loc>/);
   assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/privacy\/<\/loc>/);
-  assert.match(file("llms.txt"), /^# Acme\n\n> /);
+  assert.match(file("llms.txt"), /^# Orso\n\n> /);
   assert.match(file("llms.txt"), /- \[Newest article\]\(https:\/\/example\.com\/preview\/example\/blog\/a-new\/\): New article/);
   assert.match(html(dir, "blog/a-new"), /<link rel="canonical" href="https:\/\/example\.com\/preview\/example\/blog\/a-new\/"/);
   assert.match(html(dir, "blog/a-new"), /"@type":"BlogPosting"/);

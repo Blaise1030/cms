@@ -1,0 +1,66 @@
+---
+const cmsLimits = [
+  "Only the fields the CMS was set up to show",
+  "A new page means a ticket, then a sprint",
+  "Ideas wait on a developer's calendar",
+  "The campaign ships after the moment has passed",
+];
+
+const prompts = [
+  {
+    who: "marketing",
+    ask: "Build a landing page for group bookings with our usual hero and FAQ.",
+    result: "+ src/pages/group-bookings.astro",
+  },
+  {
+    who: "founder",
+    ask: "Add a comparison page against Calendly with a feature table.",
+    result: "+ src/pages/vs-calendly.astro",
+  },
+  {
+    who: "support",
+    ask: "Turn this week's top customer questions into help articles.",
+    result: "+ 4 files in content/helpDocs/en/",
+  },
+  {
+    who: "writer",
+    ask: "Link every post that mentions previews to the new guide.",
+    result: "~ 7 files in content/blog/en/",
+  },
+];
+---
+
+<section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="agent" data-reveal>
+  <div class="md:col-span-5">
+    <h2 class="text-3xl font-light tracking-display text-ink md:text-4xl">Ask for whole new pages, not just edits.</h2>
+    <p class="mt-5 max-w-measure text-muted">
+      A CMS lets people fill in the fields someone built for them. With an agent on the repo, your team can ask for
+      things that used to take a sprint, and each one lands as a draft to review before it ships.
+    </p>
+  </div>
+
+  <div class="grid gap-10 md:col-span-7 md:grid-cols-2 md:gap-8">
+    <div>
+      <p class="label">with a cms</p>
+      <ul class="mt-6 space-y-3 border-t border-line pt-6">
+        {cmsLimits.map((item) => (
+          <li class="text-muted">{item}</li>
+        ))}
+      </ul>
+    </div>
+    <div>
+      <p class="label">with orso and an agent</p>
+      <ul class="mt-6 space-y-6 border-t border-line pt-6">
+        {prompts.map((prompt) => (
+          <li>
+            <p class="text-sm">
+              <span class="font-medium text-accent">{prompt.who}</span>
+              <span class="text-ink"> “{prompt.ask}”</span>
+            </p>
+            <p class="mt-2 font-mono text-xs text-muted">draft ready · {prompt.result}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+</section>
