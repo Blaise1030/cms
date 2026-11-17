@@ -98,7 +98,6 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
       <div class="page flex min-h-header items-center gap-x-4 py-2">
         <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-1">
-          <SiteNav client:load items={navItems} />
           {site.secondaryCta && (
             <a
               class={cn(buttonVariants({ variant: "outline", size: "lg" }), "hidden sm:inline-flex gap-2")}
@@ -126,6 +125,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
               <span class="hidden sm:inline">{site.cta.label}</span>
             </a>
           )}
+          <SiteNav client:load items={navItems} />
         </div>
       </div>
     </header>
