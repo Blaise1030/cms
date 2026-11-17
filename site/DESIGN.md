@@ -142,7 +142,7 @@ The scale steps by about 1.22 from a 16px body (`--text-*`): `xs` 0.75rem throug
 
 ## Layout
 
-The home page follows Medusa's section map with Orso copy and tokens. The `page` utility spans the full viewport with token gutters, so sections reach the edges on wide screens; interiors cap themselves where the copy needs a measure (`max-w-prose`, `max-w-measure`, `max-w-3xl`). `--container-page` (80rem) stays available for sections that want a narrower centred column. Landing sections are full-bleed bands; interiors use the 12-column grid where needed.
+The home page follows Medusa's section map with Orso copy and tokens. The `page` utility is full-bleed with no side inset, so sections and the app window reach the viewport edges; components that need breathing room add their own padding, and interiors cap themselves where the copy needs a measure (`max-w-prose`, `max-w-measure`, `max-w-3xl`). `--container-page` (80rem) stays available for sections that want a narrower centred column. Landing sections are full-bleed bands; interiors use the 12-column grid where needed.
 
 Order: hero (left-aligned headline, lead, dual CTAs, five product tabs switching one panel) → bordered logo grid → horizontal ops carousel → three feature cards → agent product band → night proof → FAQ → centred closing CTA. Sections use `--spacing-section` (7rem); the proof band may use `--spacing-section-wide` (10rem).
 

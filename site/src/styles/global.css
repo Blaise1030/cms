@@ -190,15 +190,11 @@
   color: var(--color-muted);
 }
 
-/* The page column: full width with token gutters. Sections that need a narrower column cap
-   themselves (max-w-prose, max-w-measure, max-w-3xl) or use --container-page. */
+/* The page column: full-bleed with no side inset. Components that need breathing room add
+   their own padding; reading columns still cap themselves (max-w-prose, max-w-measure). */
 @utility page {
   margin-inline: auto;
   width: 100%;
-  padding-inline: var(--spacing-gutter);
-  @media (width >= 48rem) {
-    padding-inline: var(--spacing-gutter-wide);
-  }
 }
 
 /* A quiet text link: hairline underline that darkens on hover. */
