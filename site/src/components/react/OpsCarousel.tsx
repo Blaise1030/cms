@@ -116,14 +116,6 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
   );
 }
 
-function slideBadge(kind: (typeof slides)[number]["kind"]) {
-  if (kind === "content") return <StatusBadge tone="neutral" label="12 posts" />;
-  if (kind === "preview") return <StatusBadge tone="review" label="Preview" />;
-  if (kind === "publish") return <StatusBadge tone="review" label="Ready" />;
-  if (kind === "agent") return <StatusBadge tone="draft" label="Draft ready" />;
-  return <StatusBadge tone="live" label="Live" />;
-}
-
 export function OpsCarousel() {
   return (
     <Carousel opts={{ align: "start", loop: false }} className="w-full">
@@ -136,14 +128,6 @@ export function OpsCarousel() {
           {slides.map((slide) => (
             <CarouselItem key={slide.kind} className="basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3">
               <Card className="flex h-full flex-col rounded-md border border-line shadow-soft">
-                <CardHeader className="flex flex-row items-center gap-2 border-b border-line py-3">
-                  <span className="font-mono text-xs text-muted">orso</span>
-                  <span className="text-line-strong" aria-hidden="true">
-                    /
-                  </span>
-                  <span className="text-xs text-muted">{slide.kind}</span>
-                  <span className="ml-auto">{slideBadge(slide.kind)}</span>
-                </CardHeader>
                 <CardContent className="relative aspect-3/2 overflow-hidden p-0" aria-hidden="true">
                   <img
                     src={paintingUrl(slide.painting)}
