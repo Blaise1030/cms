@@ -93,7 +93,7 @@ spacing:
   gutter-wide: 2.5rem
   section: 4.5rem
   section-wide: 7rem
-  header: 4rem
+  header: 3.25rem
   rise: 0.75rem
 ---
 
