@@ -211,6 +211,20 @@
   }
 }
 
+/* Brand marks: pair `.logo-on-light` + `.logo-on-dark` so the correct press-kit SVG shows
+   with the same prefers-color-scheme switch as the design tokens. */
+.logo-on-dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .logo-on-light {
+    display: none;
+  }
+  .logo-on-dark {
+    display: block;
+  }
+}
+
 /* A quiet text link: hairline underline that darkens on hover. */
 @utility link {
   text-decoration-line: underline;

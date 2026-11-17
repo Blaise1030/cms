@@ -18,18 +18,27 @@ const logos = [
   <ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
     {logos.map((logo) => (
       <li class="flex min-h-20 items-center justify-center border-r border-b border-line px-4 last:border-r-0 md:border-b-0">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset={href(`/logos/${logo.file}-on-dark.svg`)} />
+        <span class="inline-flex h-7 max-w-[7.5rem] items-center justify-center">
           <img
             src={href(`/logos/${logo.file}.svg`)}
             alt={logo.name}
             width="120"
             height="32"
-            class="h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            class="logo-on-light h-7 w-auto max-w-[7.5rem] object-contain object-center"
             loading="lazy"
             decoding="async"
           />
-        </picture>
+          <img
+            src={href(`/logos/${logo.file}-on-dark.svg`)}
+            alt=""
+            width="120"
+            height="32"
+            class="logo-on-dark h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            loading="lazy"
+            decoding="async"
+            aria-hidden="true"
+          />
+        </span>
       </li>
     ))}
   </ul>
