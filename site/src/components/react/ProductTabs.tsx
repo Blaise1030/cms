@@ -149,7 +149,7 @@ export function ProductTabs() {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="relative h-auto w-56 shrink-0 flex-col items-start gap-1 rounded-none border-r border-line px-4 py-4 pb-5 text-left after:hidden last:border-r-0 data-active:shadow-none md:w-auto md:min-w-0 md:flex-1 md:px-6 md:py-5 md:pb-6"
+              className="relative h-auto w-64 min-w-64 shrink-0 grow-0 flex-none flex-col items-start justify-start gap-1 rounded-none border-r border-line px-4 py-4 pb-5 text-left after:hidden last:border-r-0 data-active:shadow-none md:w-auto md:min-w-0 md:flex-1 md:grow md:px-6 md:py-5 md:pb-6"
             >
               <span className="text-base font-medium text-ink">{tab.title}</span>
               <span className="text-sm leading-snug font-normal whitespace-normal text-muted">{tab.description}</span>
