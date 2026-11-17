@@ -7,7 +7,6 @@ import {
   CarouselItem,
   CarouselNext,
   CarouselPrevious,
-  useCarousel,
 } from "@/components/ui/carousel";
 import { cn } from "cn";
 import { StatusBadge } from "./StatusBadge";
@@ -118,29 +117,6 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
   );
 }
 
-function EdgeFades() {
-  const { canScrollPrev, canScrollNext } = useCarousel();
-
-  return (
-    <>
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-linear-to-r from-surface to-transparent transition-opacity duration-gentle md:w-24",
-          canScrollPrev ? "opacity-100" : "opacity-0",
-        )}
-        aria-hidden="true"
-      />
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-linear-to-l from-surface to-transparent transition-opacity duration-gentle md:w-24",
-          canScrollNext ? "opacity-100" : "opacity-0",
-        )}
-        aria-hidden="true"
-      />
-    </>
-  );
-}
-
 export function OpsCarousel() {
   const last = slides.length - 1;
 
@@ -151,13 +127,13 @@ export function OpsCarousel() {
         <CarouselNext size="icon-lg" className="static translate-y-0" />
       </div>
       <div className="relative">
-        <CarouselContent className="-ml-5 items-stretch">
+        <CarouselContent className="-ml-3 items-stretch">
           {slides.map((slide, index) => (
             <CarouselItem
               key={slide.kind}
               className={cn(
-                "basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3",
-                index === 0 && "pl-[calc(var(--spacing-gutter)+1.25rem)] md:pl-[calc(var(--spacing-gutter-wide)+1.25rem)]",
+                "basis-4/5 py-1 pl-3 md:basis-1/2 lg:basis-1/3",
+                index === 0 && "pl-[calc(var(--spacing-gutter)+0.75rem)] md:pl-[calc(var(--spacing-gutter-wide)+0.75rem)]",
                 index === last && "pr-gutter md:pr-gutter-wide",
               )}
             >
@@ -185,7 +161,6 @@ export function OpsCarousel() {
             </CarouselItem>
           ))}
         </CarouselContent>
-        <EdgeFades />
       </div>
     </Carousel>
   );
