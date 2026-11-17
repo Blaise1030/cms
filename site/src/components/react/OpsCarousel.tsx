@@ -127,8 +127,8 @@ export function OpsCarousel() {
         <CarouselContent className="-ml-5 items-stretch">
           {slides.map((slide) => (
             <CarouselItem key={slide.kind} className="basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3">
-              <Card className="flex h-full flex-col rounded-md border border-line shadow-soft">
-                <CardContent className="relative aspect-3/2 overflow-hidden p-0" aria-hidden="true">
+              <Card className="flex h-full flex-col gap-0 rounded-md border border-line py-0 shadow-soft">
+                <CardContent className="relative min-h-0 flex-1 overflow-hidden p-0 aspect-3/2" aria-hidden="true">
                   <img
                     src={paintingUrl(slide.painting)}
                     alt=""
@@ -143,7 +143,7 @@ export function OpsCarousel() {
                     </div>
                   </div>
                 </CardContent>
-                <CardHeader className="mt-auto gap-1 border-t border-line py-4">
+                <CardHeader className="shrink-0 gap-1 border-t border-line py-4">
                   <CardTitle className="text-base text-ink">{slide.title}</CardTitle>
                   <CardDescription className="text-muted">{slide.caption}</CardDescription>
                 </CardHeader>
