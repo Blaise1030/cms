@@ -17,7 +17,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 - `src/site.ts` — site name, tagline, `description` (the default meta description), `url` (placeholder live address; `PUBLIC_SITE_URL` overrides it at build), default `ogImage`, header `nav` and `cta`, footer text/links and socials.
 - `src/pages/index.astro` — the landing page: renders the section components in order.
-- `src/components/sections/*.astro` — one component per landing-page section (`Hero`, `Logos`, `Ops`, `Features`, `AgentBand`, `Proof`, `Faq`, `Cta`). Each holds its own copy; its root `<section id>` is the anchor used by nav links (`#product`, `#scale`, `#how-it-works`, …). `Hero` imports `src/components/ProductPanels.astro` for the five product tabs and panels; mock frames come from `AppWindow.astro`, status pills from `StatusChip.astro`.
+- `src/components/sections/*.astro` — one component per landing-page section (`Hero`, `Logos`, `Ops`, `Features`, `AgentBand`, `Proof`, `Faq`, `Cta`). Interactive UI uses shadcn React islands in `src/components/react/` over CLI primitives in `src/components/ui/`. Mock frames use `AppWindow.astro` (shadcn Breadcrumb); status pills use `StatusChip` → `StatusBadge`.
 - `src/pages/blog/` — `/blog/` (all posts), `/blog/{id}/` (post), `/blog/categories/` and `/blog/categories/{id}/`.
 - `src/pages/help/` — `/help/` (search, sections, every article), `/help/{id}/` (article with "On this page" and previous/next), `/help/section/{id}/`, `/help/categories/` and `/help/categories/{id}/`.
 - `src/lib/blog.ts`, `src/lib/help.ts` — load the collections and work out ordering, categories, sections and related posts; pages call `loadBlog()` / `loadHelp()` instead of `getCollection` directly.

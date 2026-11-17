@@ -1,6 +1,8 @@
 ---
 import AppWindow from "../AppWindow.astro";
 import StatusChip from "../StatusChip.astro";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { href } from "../../lib/href";
 ---
 
@@ -18,15 +20,15 @@ import { href } from "../../lib/href";
   </div>
 
   <div class="mt-10 overflow-hidden rounded-md border border-line bg-sand p-3 md:p-5">
-    <AppWindow crumbs={["site", "agent"]} class="h-auto shadow-soft md:h-[28rem]">
+    <AppWindow crumbs={["site", "agent"]} class="h-auto md:h-[28rem]">
       <div slot="actions" class="flex items-center gap-2"><StatusChip tone="draft" label="Draft ready" /></div>
       <div class="grid h-full md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
         <div class="flex min-w-0 flex-col p-4 md:p-6">
           <div class="flex items-center gap-2 border-b border-line pb-3">
             <span class="text-xs font-medium text-ink">Agent</span>
-            <span class="chip">Claude</span>
-            <span class="chip">Cursor</span>
-            <span class="chip">Codex</span>
+            <Badge variant="outline">Claude</Badge>
+            <Badge variant="outline">Cursor</Badge>
+            <Badge variant="outline">Codex</Badge>
           </div>
           <div class="min-h-0 flex-1 space-y-4 overflow-hidden py-4">
             <div class="ml-auto max-w-md rounded-md bg-sand px-3 py-2.5 text-sm text-ink">
@@ -44,14 +46,14 @@ import { href } from "../../lib/href";
                 <p class="text-muted">~ src/site.ts</p>
               </div>
               <div class="mt-3 flex items-center gap-2">
-                <span class="rounded-md bg-ink px-2.5 py-1 text-xs font-medium text-surface">Open preview</span>
-                <span class="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink">View changes</span>
+                <Button size="sm">Open preview</Button>
+                <Button size="sm" variant="outline">View changes</Button>
               </div>
             </div>
           </div>
           <div class="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
             <span class="text-sm text-muted">Ask for a change…</span>
-            <span class="ml-auto rounded bg-ink px-2 py-1 text-[0.625rem] font-medium text-surface">Send</span>
+            <Button size="xs" className="ml-auto">Send</Button>
           </div>
         </div>
         <aside class="hidden border-l border-line p-4 md:block">

@@ -1,4 +1,7 @@
 ---
+import { Button } from "../ui/button";
+import { Separator } from "../ui/separator";
+
 const facts = [
   { title: "Free and open source", detail: "MIT licence, no paid tier." },
   { title: "Content stays in your repo", detail: "Plain Markdown you already own." },
@@ -7,17 +10,19 @@ const facts = [
 ---
 
 <section class="page py-section" id="cta">
-  <div class="mx-auto max-w-2xl border-y border-line py-16 text-center md:py-20">
-    <h2 class="text-3xl tracking-display text-ink md:text-5xl">
-      Ready to let your team run the site?
-    </h2>
+  <div class="mx-auto max-w-2xl py-16 text-center md:py-20">
+    <Separator class="mb-16" />
+    <h2 class="text-3xl tracking-display text-ink md:text-5xl">Ready to let your team run the site?</h2>
     <p class="mx-auto mt-5 max-w-measure text-muted">
       Your developer connects the repo once. Everyone else is editing in minutes — drafts, previews and Publish.
     </p>
-    <a class="button mt-8" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso on GitHub</a>
+    <Button asChild size="lg" className="mt-8">
+      <a href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso on GitHub</a>
+    </Button>
+    <Separator class="mt-16" />
   </div>
 
-  <ul class="grid gap-6 pt-10 md:grid-cols-3">
+  <ul class="grid gap-6 md:grid-cols-3">
     {facts.map((fact) => (
       <li class="border-l border-line pl-4 text-left">
         <p class="text-sm font-medium text-ink">{fact.title}</p>

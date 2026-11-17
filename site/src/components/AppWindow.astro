@@ -1,6 +1,12 @@
 ---
-// The application frame used by the hero demo and the platform tabs: a thin window bar, a
-// breadcrumb and an optional status or actions, then the screen itself.
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./ui/breadcrumb";
+
 interface Props {
   crumbs: string[];
   class?: string;
@@ -10,18 +16,30 @@ const { crumbs, class: className } = Astro.props;
 
 <div
   class:list={[
-    "flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-surface-raised",
+    "flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-surface-raised shadow-raised",
     className,
   ]}
 >
   <div class="flex min-h-11 shrink-0 items-center gap-2 border-b border-line px-4">
-    <span class="font-mono text-xs tracking-tight text-muted">orso</span>
-    {crumbs.map((crumb) => (
-      <>
-        <span class="text-line-strong" aria-hidden="true">/</span>
-        <span class="truncate text-xs text-muted">{crumb}</span>
-      </>
-    ))}
+    <Breadcrumb>
+      <BreadcrumbList className="text-xs">
+        <BreadcrumbItem>
+          <span class="font-mono tracking-tight text-muted">orso</span>
+        </BreadcrumbItem>
+        {crumbs.map((crumb, index) => (
+          <>
+            <BreadcrumbSeparator className="text-line-strong" />
+            <BreadcrumbItem>
+              {index === crumbs.length - 1 ? (
+                <BreadcrumbPage className="truncate text-xs text-muted">{crumb}</BreadcrumbPage>
+              ) : (
+                <span class="truncate text-xs text-muted">{crumb}</span>
+              )}
+            </BreadcrumbItem>
+          </>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
     <div class="ml-auto flex items-center gap-3"><slot name="actions" /></div>
   </div>
   <div class="min-h-0 flex-1 overflow-hidden"><slot /></div>

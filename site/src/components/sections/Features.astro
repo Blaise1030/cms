@@ -1,4 +1,6 @@
 ---
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+
 const cards = [
   {
     title: "Drafts and checkpoints",
@@ -34,18 +36,24 @@ const cards = [
 
   <ul class="mt-12 grid gap-5 md:grid-cols-3">
     {cards.map((card) => (
-      <li class="flex flex-col border border-line bg-surface-raised p-6">
-        <div class="mb-8 aspect-4/3 rounded border border-line bg-sand p-4" aria-hidden="true">
-          <div class="h-full rounded border border-dashed border-line-strong bg-surface-raised p-3">
-            <div class="h-2 w-16 rounded-full bg-ink"></div>
-            <div class="mt-3 h-2 w-28 rounded-full bg-line"></div>
-            <div class="mt-2 h-2 w-20 rounded-full bg-line"></div>
-            <div class="mt-6 h-16 rounded bg-sand"></div>
-          </div>
-        </div>
-        <h3 class="text-xl font-medium tracking-tight text-ink">{card.title}</h3>
-        <p class="mt-3 flex-1 text-sm leading-6 text-muted">{card.description}</p>
-        <p class="mt-5 border-t border-line pt-4 font-mono text-xs text-muted">{card.detail}</p>
+      <li>
+        <Card class="h-full rounded-md ring-line">
+          <CardContent class="pt-(--card-spacing)">
+            <div class="aspect-4/3 rounded-md border border-line bg-sand p-4" aria-hidden="true">
+              <div class="h-full rounded-md border border-dashed border-line-strong bg-surface-raised p-3">
+                <div class="h-2 w-16 rounded-full bg-ink"></div>
+                <div class="mt-3 h-2 w-28 rounded-full bg-line"></div>
+                <div class="mt-2 h-2 w-20 rounded-full bg-line"></div>
+                <div class="mt-6 h-16 rounded bg-sand"></div>
+              </div>
+            </div>
+          </CardContent>
+          <CardHeader>
+            <CardTitle class="text-xl text-ink">{card.title}</CardTitle>
+            <CardDescription class="text-sm leading-6 text-muted">{card.description}</CardDescription>
+          </CardHeader>
+          <CardFooter class="font-mono text-xs text-muted">{card.detail}</CardFooter>
+        </Card>
       </li>
     ))}
   </ul>

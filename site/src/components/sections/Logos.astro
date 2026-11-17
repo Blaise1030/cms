@@ -1,16 +1,20 @@
 ---
+import { Separator } from "../ui/separator";
+
 const logos = ["Astro", "Markdown", "GitHub", "Claude", "Cursor", "Codex"];
 ---
 
 <section class="page py-section" id="logos" aria-label="Works with your stack">
   <p class="mb-6 text-sm text-muted">Works with the stack and agents you already have</p>
-  <ul class="grid grid-cols-2 border-l border-t border-line sm:grid-cols-3 md:grid-cols-6">
+  <Separator />
+  <ul class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
     {logos.map((name) => (
-      <li class="flex min-h-20 items-center justify-center border-r border-b border-line px-4 text-center text-sm font-medium tracking-tight text-ink">
+      <li class="flex min-h-20 items-center justify-center border-r border-b border-line px-4 text-center text-sm font-medium tracking-tight text-ink last:border-r-0 md:border-b-0">
         {name}
       </li>
     ))}
   </ul>
+  <Separator />
   <p class="mt-5 text-sm text-muted">
     Same files. Same history. Same deploy — drafts, checkpoints and Publish on the repo you already have.
   </p>

@@ -119,7 +119,7 @@ Light mode is the default; dark mode follows the visitor's system setting by giv
 | `--color-muted` | `text-muted` | `#52525b` | `#a1a1aa` | Supporting text, labels, metadata |
 | `--color-line` | `border-line` | `#e4e4e7` | `#27272a` | Hairline dividers and panel edges |
 | `--color-line-strong` | `border-line-strong` | `#a1a1aa` | `#52525b` | Outline buttons, link underlines |
-| `--color-accent` | `bg-accent`, `text-accent` | `#2563eb` | `#60a5fa` | Focus ring, links in prose, one pencil mark |
+| `--color-accent` | `bg-accent`, `text-accent`, `bg-primary` | `#2663eb` | `#60a5fa` | App blue primary (shadcn `--primary`), focus ring, links |
 | `--color-accent-hover` | `hover:bg-accent-hover` | `#1d4ed8` | `#93c5fd` | Accent hover |
 | `--color-on-accent` | `text-on-accent` | `#ffffff` | `#0c0c0d` | Text on accent |
 | `--color-night` | `bg-night` | `#18181b` | `#1b1b1e` | The proof band and code-style surfaces |
@@ -150,7 +150,7 @@ The hero tab rail is five equal columns of title and one-line description, hairl
 
 ## Elevation & Depth
 
-Flat. Depth comes from tone (surface, sand, night) and 1px hairlines. The single shadow, `--shadow-soft`, lifts product panels; tab panels and carousel cards sit in a flat framed boundary.
+Depth comes from tone (surface, sand, night), 1px hairlines, and raised shadows. `--shadow-soft` is a light lift; `--shadow-raised` is the stronger product-panel lift used on hero tabs and carousel cards (app-like raised chrome).
 
 ## Shapes
 
