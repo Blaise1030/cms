@@ -134,7 +134,7 @@ export function OpsCarousel() {
       <CarouselContent className="-ml-5">
         {slides.map((slide) => (
           <CarouselItem key={slide.kind} className="basis-[min(100%,22rem)] pl-5 md:basis-[28rem]">
-            <Card className="rounded-md shadow-raised ring-line">
+            <Card className="rounded-md ring-line">
               <CardHeader className="flex flex-row items-center gap-2 border-b border-line py-3">
                 <span className="font-mono text-xs text-muted">orso</span>
                 <span className="text-line-strong" aria-hidden="true">

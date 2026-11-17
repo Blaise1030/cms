@@ -150,7 +150,7 @@ The hero tab rail is five equal columns of title and one-line description, hairl
 
 ## Elevation & Depth
 
-Depth comes from tone (surface, sand, night), 1px hairlines, and raised shadows. `--shadow-soft` is a light lift; `--shadow-raised` is the stronger product-panel lift used on hero tabs and carousel cards (app-like raised chrome).
+Depth comes from tone (surface, sand, night), 1px hairlines, and a black-tinted raised shadow. `--shadow-soft` is a light lift; `--shadow-raised` is the stronger lift used on the hero product frame and the agent window. Carousel cards stay flat with a hairline ring, and shadows never tint with the text colour so dark mode shows a shadow rather than a glow.
 
 ## Art
 

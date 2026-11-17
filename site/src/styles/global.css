@@ -99,8 +99,8 @@
   --radius-xl: 1rem;
   --radius-full: 9999px;
   --shadow-*: initial;
-  --shadow-soft: 0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent), 0 32px 64px -40px color-mix(in oklab, var(--color-ink) 30%, transparent);
-  --shadow-raised: 0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent), 0 24px 48px -24px color-mix(in oklab, var(--color-ink) 40%, transparent), 0 48px 80px -40px color-mix(in oklab, var(--color-ink) 28%, transparent);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.05), 0 18px 40px -20px rgb(0 0 0 / 0.18);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.06), 0 24px 48px -24px rgb(0 0 0 / 0.35), 0 48px 80px -40px rgb(0 0 0 / 0.25);
 
   /* Motion. Everything is switched off under prefers-reduced-motion (see below). */
   --ease-gentle: cubic-bezier(0.22, 0.61, 0.36, 1);
