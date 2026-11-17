@@ -7,9 +7,11 @@ import Logos from "../components/sections/Logos.astro";
 import Pricing from "../components/sections/Pricing.astro";
 import Testimonials from "../components/sections/Testimonials.astro";
 import Base from "../layouts/Base.astro";
+import { organization, website } from "../lib/seo";
+import { site } from "../site";
 ---
 
-<Base title="Acme — Ship your product story faster" description="Acme helps small teams launch a beautiful marketing site in minutes.">
+<Base description={site.description} jsonLd={[website(), organization()]}>
   <Hero />
   <Logos />
   <Features />

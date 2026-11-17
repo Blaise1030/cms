@@ -1,2 +1,348 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+/*
+ * Design tokens. DESIGN.md documents every value here; change both together.
+ * Components use the generated utilities (bg-surface, text-muted, border-line, font-display,
+ * duration-gentle, ease-gentle, py-section, max-w-page …) or var(--…). Tailwind's default
+ * palette, radii, shadows and type scale are cleared so only these tokens exist.
+ * Keep each token on one line: scripts/design-tokens.test.mjs allows colour literals only on
+ * custom-property lines in this file.
+ */
+@theme static {
+  /* Colour: light mode (birch, sand, soft charcoal, fjord blue). Dark values are below. */
+  --color-*: initial;
+  --color-surface: #f6f4ef;
+  --color-surface-raised: #fcfbf8;
+  --color-sand: #ece7dd;
+  --color-mist: #dde5ea;
+  --color-ridge: #b4c0c6;
+  --color-glow: #fdfaf2;
+  --color-ink: #2a2e33;
+  --color-muted: #5b6269;
+  --color-line: #ddd7cb;
+  --color-line-strong: #b5ae9f;
+  --color-accent: #3b5a72;
+  --color-accent-hover: #2e4a60;
+  --color-on-accent: #f6f4ef;
+
+  /* Type: one family (Albert Sans, loaded by Astro's font API as --font-albert-sans). */
+  --font-*: initial;
+  --font-sans: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* Type scale: a 1.25 ratio from a 17px body. */
+  --text-*: initial;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.6;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.7;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.6;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.875rem;
+  --text-2xl--line-height: 1.25;
+  --text-3xl: 2.375rem;
+  --text-3xl--line-height: 1.15;
+  --text-4xl: 3rem;
+  --text-4xl--line-height: 1.08;
+  --text-5xl: 3.75rem;
+  --text-5xl--line-height: 1.04;
+  --tracking-display: -0.025em;
+  --tracking-tight: -0.012em;
+  --tracking-label: 0.14em;
+  --leading-body: 1.7;
+  --leading-snug: 1.35;
+
+  /* Space and layout. --spacing is Tailwind's 0.25rem step (p-4 = 1rem). */
+  --spacing: 0.25rem;
+  --spacing-gutter: 1.25rem;
+  --spacing-gutter-wide: 2.5rem;
+  --spacing-section: 6rem;
+  --spacing-section-wide: 9rem;
+  --spacing-header: 4.5rem;
+  --spacing-rise: 0.75rem;
+  --container-page: 72rem;
+  --container-prose: 42rem;
+  --container-measure: 36rem;
+
+  /* Shape and depth. Flat by default; the one shadow lifts the hero's plan card. */
+  --radius-*: initial;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.75rem;
+  --radius-full: 9999px;
+  --shadow-*: initial;
+  --shadow-soft: 0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent), 0 18px 40px -20px color-mix(in oklab, var(--color-ink) 28%, transparent);
+
+  /* Motion. Everything is switched off under prefers-reduced-motion (see below). */
+  --ease-gentle: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-duration-quick: 180ms;
+  --transition-duration-gentle: 360ms;
+  --transition-duration-slow: 800ms;
+  --motion-stagger: 120ms;
+  --animate-rise: rise var(--transition-duration-slow) var(--ease-settle) both;
+
+  @keyframes rise {
+    from { opacity: 0; translate: 0 var(--spacing-rise); }
+    to { opacity: 1; translate: 0 0; }
+  }
+}
+
+/* Dark mode: the same tokens with warm-slate values, following the visitor's system setting. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #25272a;
+    --color-surface-raised: #2c2f32;
+    --color-sand: #2f3235;
+    --color-mist: #2f3b45;
+    --color-ridge: #4a5862;
+    --color-glow: #d8d3c6;
+    --color-ink: #eae6de;
+    --color-muted: #a9adb0;
+    --color-line: #3c3f43;
+    --color-line-strong: #5a5f64;
+    --color-accent: #a3bdd1;
+    --color-accent-hover: #bfd2e0;
+    --color-on-accent: #1d2023;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    scroll-padding-top: calc(var(--spacing-header) + var(--spacing-gutter));
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-body);
+    font-feature-settings: "ss01", "kern";
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  ::selection {
+    background-color: var(--color-mist);
+    color: var(--color-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
+  }
+}
+
+/* Small, tracked uppercase label used for dates, categories and column headings. */
+@utility label {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+/* The page column: centred, capped at --container-page, with token gutters. */
+@utility page {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-page);
+  padding-inline: var(--spacing-gutter);
+  @media (width >= 48rem) {
+    padding-inline: var(--spacing-gutter-wide);
+  }
+}
+
+/* A quiet text link: hairline underline that darkens on hover. */
+@utility link {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.25em;
+  text-decoration-color: var(--color-line-strong);
+  transition: text-decoration-color var(--transition-duration-quick) var(--ease-gentle), color var(--transition-duration-quick) var(--ease-gentle);
+  &:hover {
+    text-decoration-color: currentColor;
+  }
+}
+
+/* Buttons: one solid (fjord) and one quiet outline. Pill-shaped, medium weight. */
+@utility button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-accent);
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-snug);
+  transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle), color var(--transition-duration-gentle) var(--ease-gentle);
+  &:hover {
+    background-color: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+}
+@utility button-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-line-strong);
+  color: var(--color-ink);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--leading-snug);
+  transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle);
+  &:hover {
+    background-color: var(--color-sand);
+    border-color: var(--color-muted);
+  }
+}
+
+/* Rendered Markdown follows the tokens in both modes (no prose-invert needed). Unlayered on
+   purpose so it wins over the typography plugin's defaults. */
+.prose {
+  --tw-prose-body: var(--color-ink);
+  --tw-prose-headings: var(--color-ink);
+  --tw-prose-lead: var(--color-muted);
+  --tw-prose-links: var(--color-accent);
+  --tw-prose-bold: var(--color-ink);
+  --tw-prose-counters: var(--color-muted);
+  --tw-prose-bullets: var(--color-line-strong);
+  --tw-prose-hr: var(--color-line);
+  --tw-prose-quotes: var(--color-ink);
+  --tw-prose-quote-borders: var(--color-accent);
+  --tw-prose-captions: var(--color-muted);
+  --tw-prose-kbd: var(--color-ink);
+  --tw-prose-kbd-shadows: color-mix(in oklab, var(--color-ink) 12%, transparent);
+  --tw-prose-code: var(--color-ink);
+  --tw-prose-pre-code: var(--color-ink);
+  --tw-prose-pre-bg: var(--color-sand);
+  --tw-prose-th-borders: var(--color-line-strong);
+  --tw-prose-td-borders: var(--color-line);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+}
+.prose :where(h2, h3, h4):not(:where(.not-prose *)) {
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--tracking-tight);
+  scroll-margin-top: calc(var(--spacing-header) + var(--spacing-gutter));
+}
+.prose :where(a):not(:where(.not-prose *)) {
+  font-weight: var(--font-weight-medium);
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 1px;
+}
+.prose :where(pre):not(:where(.not-prose *)) {
+  border-radius: var(--radius-md);
+}
+.prose :where(blockquote):not(:where(.not-prose *)) {
+  font-style: normal;
+  font-weight: var(--font-weight-light);
+}
+
+/*
+ * Motion. Two moments only: the hero rises in once on load, and later sections fade in as
+ * they reach the viewport (Base.astro adds .reveal-pending just to sections below the fold,
+ * so without JavaScript nothing is ever hidden). Page-to-page navigation cross-fades via
+ * Astro's <ClientRouter />.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+  .reveal-pending {
+    opacity: 0;
+    translate: 0 var(--spacing-rise);
+  }
+  .reveal-in {
+    transition:
+      opacity var(--transition-duration-slow) var(--ease-settle),
+      translate var(--transition-duration-slow) var(--ease-settle);
+  }
+  /* FAQ answers open smoothly where the browser supports animating to height: auto. */
+  :root {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    height: 0;
+    overflow: clip;
+    transition:
+      height var(--transition-duration-gentle) var(--ease-gentle),
+      content-visibility var(--transition-duration-gentle) allow-discrete;
+  }
+  details[open]::details-content {
+    height: auto;
+  }
+  .rise {
+    animation: var(--animate-rise);
+  }
+  .rise-2 {
+    animation: var(--animate-rise);
+    animation-delay: var(--motion-stagger);
+  }
+  .rise-3 {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--motion-stagger) * 2);
+  }
+  ::view-transition-old(root) {
+    animation: var(--transition-duration-quick) var(--ease-gentle) both vt-fade-out;
+  }
+  ::view-transition-new(root) {
+    animation: var(--transition-duration-gentle) var(--ease-settle) both vt-fade-in;
+  }
+}
+
+@keyframes vt-fade-out {
+  to { opacity: 0; }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; translate: 0 calc(var(--spacing-rise) / 2); }
+}
+
+@media print {
+  .reveal-pending {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

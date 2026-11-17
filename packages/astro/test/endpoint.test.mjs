@@ -283,7 +283,7 @@ test("endpoint validate returns parsed and defaulted fields with no errors", asy
   assert.equal(status, 200);
   assert.deepEqual(body, {
     valid: true,
-    fields: { title: "Hello", description: "World", pubDate: "2026-10-11", tags: [], relatedPosts: [] },
+    fields: { title: "Hello", description: "World", pubDate: "2026-10-11", categories: [], tags: [], relatedPosts: [] },
     errors: [],
   });
   assert.match(headers.get("content-type"), /^application\/json/);

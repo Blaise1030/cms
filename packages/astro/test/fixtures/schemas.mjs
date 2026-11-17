@@ -19,6 +19,7 @@ export function createCollectionSchemas({ z, image = () => z.string() }) {
     }, "Use a valid calendar date").meta({ editor: { type: "date", knownRefinement: true } }),
     coverImage: image().meta({ editor: { type: "image" } }).optional(),
     coverAlt: z.string().optional(),
+    categories: z.array(z.string().meta({ editor: { type: "reference", collection: "blogCategories" } })).default([]),
     tags: z.array(z.string()).default([]),
     relatedPosts: z.array(z.string().meta({ editor: { type: "reference", collection: "blog" } })).default([]),
   }).superRefine((post, ctx) => {
@@ -27,7 +28,12 @@ export function createCollectionSchemas({ z, image = () => z.string() }) {
     }
   }).meta({ editor: { knownRefinement: true } });
   const helpDocs = z.object({
-    title: z.string(), description: z.string(), section: z.string(), order: z.number(),
+    title: z.string(),
+    description: z.string(),
+    section: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
+    category: z.string().meta({ editor: { type: "reference", collection: "helpDocsCategories" } }).optional(),
+    subcategory: z.string().meta({ editor: { type: "reference", collection: "helpSubcategories" } }).optional(),
+    order: z.number(),
   });
   return { blog, helpDocs };
 }

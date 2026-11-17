@@ -1,18 +1,33 @@
 ---
-const testimonials = [
-  { quote: "We went from idea to live site in an afternoon.", author: "Jordan Lee", role: "Founder, Northwind" },
-  { quote: "Editing copy has never been this painless.", author: "Sam Rivera", role: "Marketing Lead, Globex" },
+// Placeholder quotes: replace with real customer words you have permission to publish.
+const [lead, ...rest] = [
+  {
+    quote: "We used to keep the plan in a spreadsheet, a board and somebody's head. Now it lives in one place, and Monday planning is over by half past nine.",
+    author: "Jordan Lee",
+    role: "Founder, Northwind",
+  },
+  {
+    quote: "Clients stopped asking for status updates once we sent them the shared plan.",
+    author: "Sam Rivera",
+    role: "Operations lead, Globex",
+  },
 ];
 ---
 
-<section class="mx-auto max-w-5xl px-8 py-16" id="testimonials">
-  <h2 class="mb-6 text-3xl font-bold tracking-tight">What customers say</h2>
-  <div class="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-6">
-    {testimonials.map((t) => (
-      <figure class="rounded-xl border border-neutral-400/30 p-5">
-        <blockquote class="italic">{t.quote}</blockquote>
-        <figcaption class="mt-3 text-sm text-neutral-600 dark:text-neutral-400">{t.author}, {t.role}</figcaption>
+<section class="bg-sand py-section" id="testimonials" data-reveal>
+  <div class="page">
+    <h2 class="label">From teams using Acme</h2>
+    <div class="mt-10 grid gap-12 md:grid-cols-12 md:gap-10">
+      <figure class="md:col-span-8">
+        <blockquote class="text-2xl font-light tracking-tight text-ink md:text-3xl">“{lead.quote}”</blockquote>
+        <figcaption class="mt-8 text-sm"><span class="font-medium text-ink">{lead.author}</span><span class="block text-muted">{lead.role}</span></figcaption>
       </figure>
-    ))}
+      {rest.map((t) => (
+        <figure class="border-line md:col-span-4 md:border-l md:pl-10">
+          <blockquote class="text-lg text-ink">“{t.quote}”</blockquote>
+          <figcaption class="mt-6 text-sm"><span class="font-medium text-ink">{t.author}</span><span class="block text-muted">{t.role}</span></figcaption>
+        </figure>
+      ))}
+    </div>
   </div>
 </section>

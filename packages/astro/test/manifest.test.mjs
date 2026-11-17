@@ -254,6 +254,12 @@ test.describe("loadContent", () => {
     assert.deepEqual(fields.properties.pubDate, { type: "date", required: true });
     assert.deepEqual(fields.properties.coverImage, { type: "image", required: false });
     assert.deepEqual(fields.properties.coverAlt, { type: "string", required: false });
+    assert.deepEqual(fields.properties.categories, {
+      type: "array",
+      required: false,
+      default: [],
+      items: { type: "reference", collection: "blogCategories", required: true },
+    });
     assert.deepEqual(fields.properties.tags, {
       type: "array",
       required: false,
@@ -270,7 +276,9 @@ test.describe("loadContent", () => {
     assert.deepEqual(manifest.collections[1].fields.properties, {
       title: { type: "string", required: true },
       description: { type: "string", required: true },
-      section: { type: "string", required: true },
+      section: { type: "reference", collection: "helpCategories", required: true },
+      category: { type: "reference", collection: "helpDocsCategories", required: false },
+      subcategory: { type: "reference", collection: "helpSubcategories", required: false },
       order: { type: "number", required: true },
     });
   });

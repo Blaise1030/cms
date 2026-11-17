@@ -1,0 +1,34 @@
+---
+import Base from "../../../layouts/Base.astro";
+import DocList from "../../../components/DocList.astro";
+import PageHeader from "../../../components/PageHeader.astro";
+import { loadHelp } from "../../../lib/help";
+import { breadcrumbs } from "../../../lib/seo";
+
+export async function getStaticPaths() {
+  const { sections } = await loadHelp();
+  return sections.map((section) => ({ params: { section: section.id }, props: { section } }));
+}
+const { section } = Astro.props;
+const description = section.description ?? `Help articles about ${section.title.toLowerCase()}.`;
+const groups = [{ id: "", title: "", docs: section.loose }, ...section.subsections].filter((group) => group.docs.length > 0);
+---
+<Base
+  title={`Help: ${section.title}`}
+  description={description}
+  jsonLd={[
+    { "@context": "https://schema.org", "@type": "WebPage", name: section.title, description },
+    breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: section.title, path: `/help/section/${section.id}/` }]),
+  ]}
+>
+  <PageHeader title={section.title} description={section.description} back={{ label: "Back to Help", href: "/help/" }} />
+  <div class="page">
+    {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
+    {groups.map((group) => (
+      <section class="mt-16 grid gap-6 md:grid-cols-12 md:gap-10" data-reveal>
+        <div class="md:col-span-4">{group.title && <h2 class="text-2xl font-light tracking-display text-ink">{group.title}</h2>}</div>
+        <div class="md:col-span-8"><DocList docs={group.docs} /></div>
+      </section>
+    ))}
+  </div>
+</Base>

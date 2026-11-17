@@ -32,6 +32,9 @@ const blog = contentCollection({
           .meta({ editor: { type: "date", knownRefinement: true } }),
         coverImage: image().meta({ editor: { type: "image" } }).optional(),
         coverAlt: z.string().optional(),
+        categories: z
+          .array(z.string().meta({ editor: { type: "reference", collection: "blogCategories" } }))
+          .default([]),
         tags: z.array(z.string()).default([]),
         relatedPosts: z
           .array(z.string().meta({ editor: { type: "reference", collection: "blog" } }))
@@ -46,6 +49,23 @@ const blog = contentCollection({
   },
 });
 
+/** Blog categories: `blog.categories` lists their entry ids. Routed at `/blog/categories/{id}/`. */
+const blogCategories = contentCollection({
+  loader: orsoGlob({ base: "./src/content/blogCategories/en", pattern: "*.md" }),
+  schema: () => {
+    const z = getZod();
+    return z.object({
+      title: z.string(),
+      description: z.string().optional(),
+    });
+  },
+});
+
+/**
+ * Help articles. `section` names the help section the article belongs to (a `helpCategories`
+ * entry id; free text such as "Getting started" still validates, for sites made before sections
+ * were a collection). `category` and `subcategory` are optional.
+ */
 const helpDocs = contentCollection({
   loader: orsoGlob({ base: "./src/content/helpDocs/en", pattern: "*.md" }),
   schema: () => {
@@ -53,13 +73,67 @@ const helpDocs = contentCollection({
     return z.object({
       title: z.string(),
       description: z.string(),
-      section: z.string(),
+      section: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
+      category: z
+        .string()
+        .meta({ editor: { type: "reference", collection: "helpDocsCategories" } })
+        .optional(),
+      subcategory: z
+        .string()
+        .meta({ editor: { type: "reference", collection: "helpSubcategories" } })
+        .optional(),
       order: z.number(),
     });
   },
 });
 
+/** Help sections, the top-level groups on the Help home. Routed at `/help/section/{id}/`. */
+const helpCategories = contentCollection({
+  loader: orsoGlob({ base: "./src/content/helpCategories/en", pattern: "*.md" }),
+  schema: () => {
+    const z = getZod();
+    return z.object({
+      title: z.string(),
+      description: z.string().optional(),
+      order: z.number().default(0),
+    });
+  },
+});
+
+/** Groups of articles inside one help section; listed on that section's page. */
+const helpSubcategories = contentCollection({
+  loader: orsoGlob({ base: "./src/content/helpSubcategories/en", pattern: "*.md" }),
+  schema: () => {
+    const z = getZod();
+    return z.object({
+      title: z.string(),
+      category: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
+      order: z.number().default(0),
+    });
+  },
+});
+
+/** Cross-cutting help topics (`helpDocs.category`). Routed at `/help/categories/{id}/`. */
+const helpDocsCategories = contentCollection({
+  loader: orsoGlob({ base: "./src/content/helpDocsCategories/en", pattern: "*.md" }),
+  schema: () => {
+    const z = getZod();
+    return z.object({
+      title: z.string(),
+      description: z.string().optional(),
+      order: z.number().default(0),
+    });
+  },
+});
+
 /** Marketing-site collection preset for `orso({ collections: marketingCollections })`. */
-export const marketingCollections = attachMarketingPreviewPaths({ blog, helpDocs });
+export const marketingCollections = attachMarketingPreviewPaths({
+  blog,
+  blogCategories,
+  helpDocs,
+  helpCategories,
+  helpSubcategories,
+  helpDocsCategories,
+});
 
 export { attachMarketingPreviewPaths, marketingPreviewPaths } from "./marketing-preview-paths.js";
