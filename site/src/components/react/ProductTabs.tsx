@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { paintingUrl } from "@/lib/paintings";
 import { StatusBadge } from "./StatusBadge";
@@ -69,7 +68,9 @@ function PaintedCard({ children }: { children: ReactNode }) {
       />
       <div className="absolute inset-0 bg-night/25" aria-hidden="true" />
       <div className="relative flex size-full flex-col p-4 md:p-6">
-        <Card className="min-h-0 flex-1 overflow-hidden rounded-md p-0 ring-line">{children}</Card>
+        <Card className="min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0 shadow-none ring-0">
+          {children}
+        </Card>
       </div>
     </div>
   );
@@ -128,7 +129,7 @@ export function ProductTabs() {
     <Tabs
       value={value}
       onValueChange={onValueChange}
-      className="gap-0 overflow-hidden rounded-none bg-surface shadow-raised ring-1 ring-line"
+      className="gap-0 overflow-hidden rounded-none border border-line bg-surface shadow-none"
       onPointerEnter={() => setPaused(true)}
       onPointerLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
@@ -267,7 +268,7 @@ export function ProductTabs() {
               </div>
               <h3 className="mt-3 text-xl font-medium tracking-tight text-ink">Publish 3 changes</h3>
               <p className="mt-1 text-sm text-muted">This saves a checkpoint, merges the draft and lets your host rebuild.</p>
-              <Separator className="my-4" />
+              <div className="my-4 border-t border-line" />
               <ul className="space-y-2.5">
                 {checks.map((check) => (
                   <li key={check} className="flex items-center gap-2.5 text-sm text-ink">
