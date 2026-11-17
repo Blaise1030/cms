@@ -190,11 +190,11 @@
   color: var(--color-muted);
 }
 
-/* The page column: centred, capped at --container-page, with token gutters. */
+/* The page column: full width with token gutters. Sections that need a narrower column cap
+   themselves (max-w-prose, max-w-measure, max-w-3xl) or use --container-page. */
 @utility page {
   margin-inline: auto;
   width: 100%;
-  max-width: var(--container-page);
   padding-inline: var(--spacing-gutter);
   @media (width >= 48rem) {
     padding-inline: var(--spacing-gutter-wide);
