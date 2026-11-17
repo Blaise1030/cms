@@ -7,7 +7,9 @@ import {
   CarouselItem,
   CarouselNext,
   CarouselPrevious,
+  useCarousel,
 } from "@/components/ui/carousel";
+import { cn } from "cn";
 import { StatusBadge } from "./StatusBadge";
 
 const slides = [
@@ -116,19 +118,51 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
   );
 }
 
+function EdgeFades() {
+  const { canScrollPrev, canScrollNext } = useCarousel();
+
+  return (
+    <>
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-linear-to-r from-surface to-transparent transition-opacity duration-gentle md:w-24",
+          canScrollPrev ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden="true"
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-linear-to-l from-surface to-transparent transition-opacity duration-gentle md:w-24",
+          canScrollNext ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden="true"
+      />
+    </>
+  );
+}
+
 export function OpsCarousel() {
+  const last = slides.length - 1;
+
   return (
     <Carousel opts={{ align: "start", loop: false }} className="w-full">
-      <div className="mb-6 flex items-center justify-end gap-2">
+      <div className="page mb-6 flex items-center justify-end gap-2">
         <CarouselPrevious className="static translate-y-0" />
         <CarouselNext className="static translate-y-0" />
       </div>
       <div className="relative">
         <CarouselContent className="-ml-5 items-stretch">
-          {slides.map((slide) => (
-            <CarouselItem key={slide.kind} className="basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3">
+          {slides.map((slide, index) => (
+            <CarouselItem
+              key={slide.kind}
+              className={cn(
+                "basis-4/5 py-1 pl-5 md:basis-1/2 lg:basis-1/3",
+                index === 0 && "pl-gutter md:pl-gutter-wide",
+                index === last && "pr-gutter md:pr-gutter-wide",
+              )}
+            >
               <Card className="flex h-full flex-col gap-0 rounded-md border border-line py-0 shadow-soft">
-                <CardContent className="relative min-h-0 flex-1 overflow-hidden p-0 aspect-3/2" aria-hidden="true">
+                <CardContent className="relative aspect-3/2 min-h-0 flex-1 overflow-hidden p-0" aria-hidden="true">
                   <img
                     src={paintingUrl(slide.painting)}
                     alt=""
@@ -151,10 +185,7 @@ export function OpsCarousel() {
             </CarouselItem>
           ))}
         </CarouselContent>
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-linear-to-l from-surface to-transparent md:w-24"
-          aria-hidden="true"
-        />
+        <EdgeFades />
       </div>
     </Carousel>
   );
