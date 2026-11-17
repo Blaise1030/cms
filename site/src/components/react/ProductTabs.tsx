@@ -58,7 +58,7 @@ function WindowChrome({ crumbs, action }: { crumbs: string[]; action: ReactNode 
 
 function PaintedCard({ children }: { children: ReactNode }) {
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative aspect-video overflow-hidden">
       <img
         src={paintingUrl("patinir")}
         alt=""
@@ -68,8 +68,8 @@ function PaintedCard({ children }: { children: ReactNode }) {
         className="absolute inset-0 size-full object-cover"
       />
       <div className="absolute inset-0 bg-night/25" aria-hidden="true" />
-      <div className="relative p-4 md:p-6">
-        <Card className="overflow-hidden rounded-md p-0 ring-line">{children}</Card>
+      <div className="relative flex size-full flex-col p-4 md:p-6">
+        <Card className="min-h-0 flex-1 overflow-hidden rounded-md p-0 ring-line">{children}</Card>
       </div>
     </div>
   );
