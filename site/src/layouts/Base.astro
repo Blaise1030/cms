@@ -100,7 +100,7 @@ const resources = site.nav.filter((link) => !link.href.startsWith("#"));
         <div class="ml-auto flex shrink-0 items-center gap-1">
           {site.secondaryCta && (
             <a
-              class={cn(buttonVariants({ variant: "outline", size: "lg" }), "hidden sm:inline-flex gap-2")}
+              class={cn(buttonVariants({ variant: "ghost", size: "lg" }), "hidden sm:inline-flex gap-2")}
               href={href(site.secondaryCta.href)}
               rel={external(site.secondaryCta.href) ? "noopener noreferrer" : undefined}
             >
