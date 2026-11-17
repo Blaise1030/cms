@@ -152,6 +152,11 @@ The hero tab rail is five equal columns of title and one-line description, hairl
 
 Depth comes from tone (surface, sand, night), 1px hairlines, and raised shadows. `--shadow-soft` is a light lift; `--shadow-raised` is the stronger product-panel lift used on hero tabs and carousel cards (app-like raised chrome).
 
+## Art
+
+Public-domain Renaissance paintings sit behind the product previews, so the app windows read as objects in front of a picture. The hero uses Patinir's *Landscape with the Flight into Egypt*; the three feature cards use Bruegel, Giorgione and Altdorfer; the ops carousel cycles all five; the agent band uses Leonardo's *The Virgin of the Rocks*. Each image is cropped to fill its frame, covered by a flat `bg-night` scrim (20–30%) so the interface keeps contrast, and never used for meaning. Files, sources and licences are in `public/paintings/CREDITS.md`; the ids live in `src/lib/paintings.ts` and render through `Painting.astro`.
+
+
 ## Shapes
 
 Buttons use `--radius-md` (0.5rem) and are compact, never pills. Product panels, carousel cards and the tab frame use `--radius-md`; large bands and the three feature cards are square-edged frames. `full` is reserved for status pills, tags, avatars and carousel arrows.
@@ -173,11 +178,11 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 ## Components
 
 - **Header**: wordmark plus name, plain muted nav, outline secondary CTA and ink primary CTA. No pill buttons.
-- **Hero**: left-aligned display headline, lead, dual CTAs, then five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath.
+- **Hero**: left-aligned display headline, lead, dual CTAs, then a painted band holding five product tabs (Content, Preview, Publish, Agent, History) that switch one large product panel underneath.
 - **Logo grid**: bordered cells for Astro, Markdown, GitHub, Claude, Cursor, Codex, plus a one-line git vocabulary note.
-- **Ops carousel**: “Handle content work at scale” with prev/next controls and horizontal product slides (collections, preview, publish, agent, history).
-- **Feature cards**: three equal frames — Drafts and checkpoints, Previews and review, Agent in plain English.
-- **Agent band**: wide framed agent transcript mock with draft summary.
+- **Ops carousel**: “Handle content work at scale” with prev/next controls and horizontal product slides (collections, preview, publish, agent, history), each floating on its own painting.
+- **Feature cards**: three equal frames — Drafts and checkpoints, Previews and review, Agent in plain English — each holding a mini preview over a painting.
+- **Agent band**: wide framed agent transcript mock over a painting, with a draft summary.
 - **Proof**: the one night band — Lee Robinson's quote and a note from the maker.
 - **FAQ**: hairline `<details>` accordion with FAQPage JSON-LD.
 - **Closing CTA**: centred headline, one action, and three plain facts on a hairline rule.

@@ -1,35 +1,44 @@
 ---
 import { buttonVariants } from "../ui/button";
 import { ProductTabs } from "../react/ProductTabs";
+import Painting from "../Painting.astro";
 import { href } from "../../lib/href";
 
 const headline = "Let your content team edit the site with an agent.";
 const words = headline.split(" ");
 ---
 
-<section class="page pt-14 md:pt-20" id="product">
-  <div class="max-w-3xl">
-    <h1 class="text-display font-medium tracking-display text-ink">
-      {words.map((word, index) => (
-        <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
-      ))}
-    </h1>
-    <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
-      Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
-      by asking an agent. Every change is a draft you preview before it goes live.
-    </p>
-    <div class="rise-3 mt-8 flex flex-wrap items-center gap-3">
-      <a
-        class={buttonVariants({ size: "lg" })}
-        href="https://github.com/Blaise1030/cms"
-        rel="noopener noreferrer">Get Orso</a
-      >
-      <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#scale")}>See what it does</a>
+<section class="pt-14 md:pt-20" id="product">
+  <div class="page">
+    <div class="max-w-3xl">
+      <h1 class="text-display font-medium tracking-display text-ink">
+        {words.map((word, index) => (
+          <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
+        ))}
+      </h1>
+      <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
+        Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
+        by asking an agent. Every change is a draft you preview before it goes live.
+      </p>
+      <div class="rise-3 mt-8 flex flex-wrap items-center gap-3">
+        <a
+          class={buttonVariants({ size: "lg" })}
+          href="https://github.com/Blaise1030/cms"
+          rel="noopener noreferrer">Get Orso</a
+        >
+        <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#scale")}>See what it does</a>
+      </div>
+      <p class="rise-3 mt-4 text-sm text-muted">Free and open source. Content stays in your repo.</p>
     </div>
-    <p class="rise-3 mt-4 text-sm text-muted">Free and open source. Content stays in your repo.</p>
   </div>
 
-  <div class="rise-3 mt-12 md:mt-16">
-    <ProductTabs client:load />
+  <div class="rise-3 relative mt-12 overflow-hidden border-y border-line md:mt-16">
+    <Painting id="patinir" eager />
+    <div class="absolute inset-0 bg-night/30" aria-hidden="true"></div>
+    <div class="relative px-gutter py-8 md:px-gutter-wide md:py-14">
+      <div class="overflow-hidden rounded-lg bg-surface shadow-raised ring-1 ring-line">
+        <ProductTabs client:load />
+      </div>
+    </div>
   </div>
 </section>

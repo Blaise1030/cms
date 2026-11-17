@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { paintingUrl, type PaintingId } from "@/lib/paintings";
 import {
   Carousel,
   CarouselContent,
@@ -14,26 +15,31 @@ const slides = [
     title: "Collections you can browse",
     caption: "Every Markdown collection in the repo, as a list with status.",
     kind: "content" as const,
+    painting: "altdorfer" as PaintingId,
   },
   {
     title: "Desktop and mobile preview",
     caption: "Share a draft link, leave comments, approve before Publish.",
     kind: "preview" as const,
+    painting: "giorgione" as PaintingId,
   },
   {
     title: "Publish with a checklist",
     caption: "Build, links and review run first. One button puts it live.",
     kind: "publish" as const,
+    painting: "bruegel" as PaintingId,
   },
   {
     title: "Ask in plain English",
     caption: "Whole pages, a pass on the FAQ, or a new section — as a draft.",
     kind: "agent" as const,
+    painting: "leonardo" as PaintingId,
   },
   {
     title: "Checkpoints you can restore",
     caption: "Every save is history. Restoring makes a new draft, never a rewrite.",
     kind: "history" as const,
+    painting: "patinir" as PaintingId,
   },
 ];
 
@@ -137,8 +143,18 @@ export function OpsCarousel() {
                 <span className="text-xs text-muted">{slide.kind}</span>
                 <span className="ml-auto">{slideBadge(slide.kind)}</span>
               </CardHeader>
-              <CardContent className="bg-sand p-5" aria-hidden="true">
-                <SlideBody kind={slide.kind} />
+              <CardContent className="relative overflow-hidden p-0" aria-hidden="true">
+                <img
+                  src={paintingUrl(slide.painting)}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 size-full object-cover"
+                />
+                <div className="absolute inset-0 bg-night/20" />
+                <div className="relative p-6">
+                  <SlideBody kind={slide.kind} />
+                </div>
               </CardContent>
               <CardHeader className="border-t border-line">
                 <CardTitle className="text-base text-ink">{slide.title}</CardTitle>

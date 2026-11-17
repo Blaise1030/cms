@@ -55,10 +55,10 @@ function WindowChrome({ crumbs, action }: { crumbs: string[]; action: ReactNode 
 
 export function ProductTabs() {
   return (
-    <Tabs defaultValue="content" className="gap-5">
+    <Tabs defaultValue="content" className="gap-0">
       <TabsList
         variant="line"
-        className="grid h-auto w-full grid-cols-2 rounded-none border-y border-line bg-transparent p-0 md:grid-cols-5"
+        className="grid h-auto w-full grid-cols-2 rounded-none border-b border-line bg-transparent p-0 md:grid-cols-5"
       >
         {tabs.map((tab) => (
           <TabsTrigger
@@ -73,7 +73,7 @@ export function ProductTabs() {
       </TabsList>
 
       <TabsContent value="content" className="mt-0">
-        <Card className="overflow-hidden rounded-md p-0 shadow-raised ring-line">
+        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
           <WindowChrome crumbs={["site", "content", "blog"]} action={<StatusBadge tone="neutral" label="All content" />} />
           <div className="grid md:grid-cols-[12.5rem_minmax(0,1fr)]" aria-hidden="true">
             <aside className="hidden border-r border-line p-3 md:block">
@@ -130,7 +130,7 @@ export function ProductTabs() {
       </TabsContent>
 
       <TabsContent value="preview" className="mt-0">
-        <Card className="overflow-hidden rounded-md p-0 shadow-raised ring-line">
+        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
           <WindowChrome
             crumbs={["site", "preview", "home"]}
             action={<StatusBadge tone="review" label="Preview" />}
@@ -168,7 +168,7 @@ export function ProductTabs() {
       </TabsContent>
 
       <TabsContent value="publish" className="mt-0">
-        <Card className="overflow-hidden rounded-md p-0 shadow-raised ring-line">
+        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
           <WindowChrome crumbs={["site", "publish"]} action={<StatusBadge tone="review" label="Ready to publish" />} />
           <div className="grid place-items-center p-6" aria-hidden="true">
             <div className="w-full max-w-lg rounded-md border border-line bg-surface-raised p-6">
@@ -198,7 +198,7 @@ export function ProductTabs() {
       </TabsContent>
 
       <TabsContent value="agent" className="mt-0">
-        <Card className="overflow-hidden rounded-md p-0 shadow-raised ring-line">
+        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
           <WindowChrome crumbs={["site", "agent"]} action={<StatusBadge tone="draft" label="Draft ready" />} />
           <div className="grid md:grid-cols-[minmax(0,1fr)_16rem]" aria-hidden="true">
             <div className="flex min-w-0 flex-col p-4 md:p-6">
@@ -239,7 +239,7 @@ export function ProductTabs() {
       </TabsContent>
 
       <TabsContent value="history" className="mt-0">
-        <Card className="overflow-hidden rounded-md p-0 shadow-raised ring-line">
+        <Card className="overflow-hidden rounded-none p-0 shadow-none ring-0">
           <WindowChrome crumbs={["site", "history"]} action={<StatusBadge tone="live" label="Live" />} />
           <div className="p-5 md:p-7" aria-hidden="true">
             <div className="flex items-end justify-between gap-4">

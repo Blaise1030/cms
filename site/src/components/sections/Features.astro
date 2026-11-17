@@ -1,5 +1,6 @@
 ---
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import Painting from "../Painting.astro";
 
 const cards = [
   {
@@ -7,18 +8,21 @@ const cards = [
     description:
       "Every edit lands in a draft with a checkpoint you can restore. Nothing reaches the live site until someone presses Publish.",
     detail: "Branch → draft · Commit → checkpoint",
+    painting: "bruegel" as const,
   },
   {
     title: "Previews and review",
     description:
       "Share a preview link, leave comments on the page, and approve the change before it goes live — on desktop and mobile.",
     detail: "Preview deploy → shareable link",
+    painting: "giorgione" as const,
   },
   {
     title: "Agent in plain English",
     description:
       "Ask for a page, a pass on the FAQ, or a whole new section. The agent edits the repo; you still own Publish.",
     detail: "Claude, Cursor or Codex",
+    painting: "altdorfer" as const,
   },
 ];
 ---
@@ -39,12 +43,16 @@ const cards = [
       <li>
         <Card class="h-full rounded-md ring-line">
           <CardContent class="pt-(--card-spacing)">
-            <div class="aspect-4/3 rounded-md border border-line bg-sand p-4" aria-hidden="true">
-              <div class="h-full rounded-md border border-dashed border-line-strong bg-surface-raised p-3">
-                <div class="h-2 w-16 rounded-full bg-ink"></div>
-                <div class="mt-3 h-2 w-28 rounded-full bg-line"></div>
-                <div class="mt-2 h-2 w-20 rounded-full bg-line"></div>
-                <div class="mt-6 h-16 rounded bg-sand"></div>
+            <div class="relative aspect-4/3 overflow-hidden rounded-md border border-line" aria-hidden="true">
+              <Painting id={card.painting} />
+              <div class="absolute inset-0 bg-night/20"></div>
+              <div class="relative flex size-full items-center justify-center p-4 md:p-5">
+                <div class="w-full rounded-md border border-line bg-surface-raised p-3 shadow-raised">
+                  <div class="h-2 w-16 rounded-full bg-ink"></div>
+                  <div class="mt-3 h-2 w-28 rounded-full bg-line"></div>
+                  <div class="mt-2 h-2 w-20 rounded-full bg-line"></div>
+                  <div class="mt-6 h-16 rounded bg-sand"></div>
+                </div>
               </div>
             </div>
           </CardContent>

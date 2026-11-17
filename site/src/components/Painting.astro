@@ -1,0 +1,21 @@
+---
+// Decorative painted backdrop: fills its positioned parent, behind a product preview.
+import { paintingUrl, type PaintingId } from "../lib/paintings";
+
+interface Props {
+  id: PaintingId;
+  class?: string;
+  /** Load immediately; used for the hero band above the fold. */
+  eager?: boolean;
+}
+const { id, class: className, eager = false } = Astro.props;
+---
+
+<img
+  src={paintingUrl(id)}
+  alt=""
+  aria-hidden="true"
+  decoding="async"
+  loading={eager ? "eager" : "lazy"}
+  class:list={["absolute inset-0 size-full object-cover", className]}
+/>

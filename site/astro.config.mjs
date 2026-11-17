@@ -41,8 +41,15 @@ export default defineConfig({
     plugins: [tailwindcss()],
     // Orso's conflict preview and the template tests run the site with node_modules symlinked
     // in. Keeping symlinked paths lets Astro compile components that ship their own <style>
-    // (such as <ClientRouter />) from there.
-    resolve: { preserveSymlinks: true },
+    // (such as <ClientRouter />) from there. Dedupe + optimizeDeps keep React islands from
+    // loading the raw CJS react-dom/client (which has no named createRoot export in the browser).
+    resolve: {
+      preserveSymlinks: true,
+      dedupe: ["react", "react-dom"],
+    },
+    optimizeDeps: {
+      include: ["react", "react-dom", "react-dom/client"],
+    },
     server: {
       // Astro keeps Vite's own base at "/", so without this the HMR socket would connect to
       // the proxy root instead of the /preview/{id}/ prefix. clientPort points it at this
