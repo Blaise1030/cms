@@ -17,31 +17,31 @@ const slides = [
     title: "Collections you can browse",
     caption: "Every Markdown collection in the repo, as a list with status.",
     kind: "content" as const,
-    painting: "altdorfer" as PaintingId,
+    painting: "danube" as PaintingId,
   },
   {
     title: "Desktop and mobile preview",
     caption: "Share a draft link, leave comments, approve before Publish.",
     kind: "preview" as const,
-    painting: "giorgione" as PaintingId,
+    painting: "bridge" as PaintingId,
   },
   {
     title: "Publish with a checklist",
     caption: "Build, links and review run first. One button puts it live.",
     kind: "publish" as const,
-    painting: "bruegel" as PaintingId,
+    painting: "toledo" as PaintingId,
   },
   {
     title: "Ask in plain English",
     caption: "Whole pages, a pass on the FAQ, or a new section — as a draft.",
     kind: "agent" as const,
-    painting: "leonardo" as PaintingId,
+    painting: "alps" as PaintingId,
   },
   {
     title: "Checkpoints you can restore",
     caption: "Every save is history. Restoring makes a new draft, never a rewrite.",
     kind: "history" as const,
-    painting: "patinir" as PaintingId,
+    painting: "rocks" as PaintingId,
   },
 ];
 
