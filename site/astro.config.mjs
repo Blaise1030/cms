@@ -5,6 +5,8 @@ import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
 import { site } from "./src/site.ts";
 
+import react from "@astrojs/react";
+
 // The orso dev server proxies the site under /preview/{id}/.
 const base = process.env.PUBLIC_BASE ?? "/";
 // The browser's HMR socket: the dev server's own port when the preview is framed directly
@@ -34,7 +36,7 @@ export default defineConfig({
       },
     },
   ],
-  integrations: [mdx(), orso({ collections: marketingCollections })],
+  integrations: [mdx(), orso({ collections: marketingCollections }), react()],
   vite: {
     plugins: [tailwindcss()],
     // Orso's conflict preview and the template tests run the site with node_modules symlinked

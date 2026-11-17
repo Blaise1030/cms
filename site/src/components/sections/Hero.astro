@@ -6,22 +6,24 @@ const headline = "Let your content team edit the site with an agent.";
 const words = headline.split(" ");
 ---
 
-<section class="page pt-14 md:pt-20" id="product">
-  <div class="max-w-3xl">
-    <h1 class="text-display font-medium tracking-display text-ink">
-      {words.map((word, index) => (
-        <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
-      ))}
-    </h1>
-    <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
-      Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
-      by asking an agent. Every change is a draft you preview before it goes live.
-    </p>
-    <div class="rise-3 mt-8 flex flex-wrap items-center gap-3">
-      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso</a>
-      <a class="button-quiet" href={href("#scale")}>See what it does</a>
+<section class="pt-14 md:pt-20" id="product">
+  <div class="page">
+    <div class="max-w-3xl">
+      <h1 class="text-display font-medium tracking-display text-ink">
+        {words.map((word, index) => (
+          <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
+        ))}
+      </h1>
+      <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
+        Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
+        by asking an agent. Every change is a draft you preview before it goes live.
+      </p>
+      <div class="rise-3 mt-8 flex flex-wrap items-center gap-3">
+        <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso</a>
+        <a class="button-quiet" href={href("#scale")}>See what it does</a>
+      </div>
+      <p class="rise-3 mt-4 text-sm text-muted">Free and open source. Content stays in your repo.</p>
     </div>
-    <p class="rise-3 mt-4 text-sm text-muted">Free and open source. Content stays in your repo.</p>
   </div>
 
   <div class="rise-3 mt-12 md:mt-16">
