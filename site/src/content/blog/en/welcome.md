@@ -1,6 +1,6 @@
 ---
 title: Welcome to the blog
-description: News, ideas, and updates from the Acme team.
+description: News, ideas, and updates from the Orso team.
 pubDate: "2026-10-11"
 categories: [company]
 tags: [news]
