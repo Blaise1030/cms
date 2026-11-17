@@ -1,70 +1,138 @@
 ---
+import AppWindow from "../AppWindow.astro";
+import StatusChip from "../StatusChip.astro";
 import { href } from "../../lib/href";
 
-// Decorative draft card: shows the Orso change model (edit → preview → publish).
-const changes = [
-  { title: "Update the pricing FAQ", done: true },
-  { title: "Swap the hero screenshot", done: true },
-  { title: "Publish when ready", done: false },
+const headline = "Let your content team edit the site with an agent.";
+const words = headline.split(" ");
+
+const rail = [
+  { label: "Content", active: true },
+  { label: "Pages", active: false },
+  { label: "Media", active: false },
+  { label: "History", active: false },
+];
+
+const posts = [
+  { title: "Welcome to Orso", tone: "draft" as const },
+  { title: "Release notes people read", tone: "live" as const },
+  { title: "How we run design reviews", tone: "live" as const },
+  { title: "Plan a launch in a week", tone: "review" as const },
 ];
 ---
 
-<section class="page grid items-center gap-16 pt-14 pb-section md:grid-cols-12 md:gap-10 md:pt-24" id="hero">
-  <div class="md:col-span-6">
-    <p class="rise text-2xl font-medium tracking-tight text-ink md:text-3xl">Project Orso</p>
-    <h1 class="rise mt-6 text-4xl font-light tracking-display text-ink md:text-5xl">
-      Let your content team edit the site with an agent.
-    </h1>
-    <p class="rise-2 mt-6 max-w-measure text-lg text-muted">
-      Your developer set up the repo. Now marketing, writers and founders can change the site themselves: in a form, or
-      by asking an agent. Every change is a draft you preview before it goes live.
-    </p>
-    <div class="rise-3 mt-10 flex flex-wrap items-center gap-x-8 gap-y-4">
-      <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Project Orso</a>
-      <a class="link font-medium text-ink" href={href("#how-it-works")}>See how it works</a>
+<section class="page pt-14 md:pt-20" id="hero">
+  <div class="grid gap-10 md:grid-cols-12 md:gap-10">
+    <div class="md:col-span-8">
+      <h1 class="max-w-4xl text-display font-medium tracking-display text-ink">
+        {words.map((word, index) => (
+          <span class="word" style={`--word-delay: ${index * 45}ms`}>{word}{index < words.length - 1 ? " " : ""}</span>
+        ))}
+      </h1>
     </div>
-    <p class="rise-3 mt-6 text-sm text-muted">Free and open source. Content stays in your repo.</p>
+    <div class="flex flex-col justify-end gap-6 md:col-span-4">
+      <p class="rise-2 max-w-measure text-lg text-muted">
+        Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form
+        or by asking an agent. Every change is a draft you preview before it goes live.
+      </p>
+      <div class="rise-3 flex flex-wrap items-center gap-3">
+        <a class="button" href="https://github.com/Blaise1030/cms" rel="noopener noreferrer">Get Orso</a>
+        <a class="button-quiet" href={href("#platform")}>See what it does</a>
+      </div>
+      <p class="rise-3 text-sm text-muted">Free and open source. Content stays in your repo.</p>
+    </div>
   </div>
 
-  <div
-    class="relative sm:pb-10 md:col-span-6 md:col-start-7 md:pb-0"
-    role="img"
-    aria-label="An example Orso draft: two edits done, publish waiting."
-  >
-    <div class="aspect-4/3 overflow-hidden rounded-xl bg-mist">
-      <svg class="size-full" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        <circle class="rise fill-glow" cx="292" cy="104" r="34" />
-        <path class="rise fill-ridge" d="M0 196 38 168 70 182 116 136 158 174 204 116 248 166 288 148 330 176 372 154 400 168V216H0Z" />
-        <g class="rise-2">
-          <path class="fill-accent" d="M0 216c38-26 82-32 122-18 30 10 52 16 82 18Z" />
-          <path class="fill-accent" d="M252 216c42-30 96-38 148-24v24Z" />
-        </g>
-        <rect class="fill-ridge/40" x="0" y="216" width="400" height="84" />
-      </svg>
-    </div>
-    <div
-      class="rise-3 absolute inset-x-4 -bottom-2 rounded-lg border border-line bg-surface-raised p-5 shadow-soft sm:inset-x-auto sm:right-6 sm:bottom-4 sm:w-72"
-    >
-      <p class="label">Draft · homepage</p>
-      <p class="mt-2 text-sm font-medium text-ink">Preview ready</p>
-      <ul class="mt-4 space-y-2.5">
-        {changes.map((change) => (
-          <li class="flex items-start gap-2.5 text-sm">
-            <span
-              class:list={[
-                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-                change.done ? "border-accent bg-accent text-on-accent" : "border-line-strong",
-              ]}
-              aria-hidden="true"
-            >
-              {change.done && (
-                <svg class="size-2.5" viewBox="0 0 12 12"><path d="M2.5 6.5 5 9l4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              )}
-            </span>
-            <span class:list={[change.done ? "text-muted line-through" : "text-ink"]}>{change.title}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+  <div class="rise-3 mt-12 md:mt-16" role="img" aria-label="The Orso editor open on a blog post, with its fields on the right and a draft ready to publish.">
+    <AppWindow crumbs={["site", "blog", "welcome"]} class="h-[30rem] shadow-soft md:h-[34rem]">
+      <div slot="actions">
+        <span class="hidden text-xs text-muted sm:block">Saved a moment ago</span>
+        <StatusChip tone="draft" label="Draft" />
+        <span class="flex size-6 items-center justify-center rounded-full border border-line bg-sand text-[0.625rem] font-medium text-muted" aria-hidden="true">BT</span>
+      </div>
+
+      <div class="grid h-full grid-cols-1 md:grid-cols-[12.5rem_minmax(0,1fr)_14.5rem]" aria-hidden="true">
+        <aside class="hidden border-r border-line p-3 md:block">
+          <p class="px-2 text-xs text-muted">cms / site</p>
+          <ul class="mt-3 space-y-0.5">
+            {rail.map((item) => (
+              <li class:list={["rounded px-2 py-1.5 text-sm", item.active ? "bg-sand font-medium text-ink" : "text-muted"]}>{item.label}</li>
+            ))}
+          </ul>
+          <p class="mt-6 px-2 text-xs text-muted">Blog posts</p>
+          <ul class="mt-2 space-y-0.5">
+            {posts.map((post, index) => (
+              <li class:list={["flex items-center gap-2 rounded px-2 py-1.5 text-xs", index === 0 ? "bg-sand text-ink" : "text-muted"]}>
+                <span class:list={["size-1.5 shrink-0 rounded-full", post.tone === "live" ? "bg-status-live" : post.tone === "review" ? "bg-status-review" : "bg-status-draft"]}></span>
+                <span class="truncate">{post.title}</span>
+              </li>
+            ))}
+          </ul>
+          <p class="mt-4 px-2 text-xs text-muted">+ New post</p>
+        </aside>
+
+        <div class="min-w-0 overflow-hidden p-5 md:p-7">
+          <div class="flex items-center gap-2 text-xs text-muted">
+            <span>Blog</span>
+            <span class="text-line-strong">/</span>
+            <span class="text-ink">Welcome to Orso</span>
+            <span class="ml-auto hidden rounded border border-line px-2 py-0.5 sm:inline">Markdown</span>
+          </div>
+          <h2 class="mt-5 text-2xl font-medium tracking-tight text-ink">Welcome to Orso</h2>
+          <p class="mt-2 text-xs text-muted">Draft saving to the repo · 2 min read</p>
+          <div class="mt-5 space-y-3 text-sm leading-6 text-muted">
+            <p class="text-ink">Orso is a writing desk on top of your codebase. The words live in Markdown, and the people who own them can finally reach them.</p>
+            <p>Open a post and the title, date, cover and tags are real fields. The body stays plain Markdown. Nothing here needs a branch name or a deploy.</p>
+            <blockquote class="border-l-2 border-ink pl-3 text-ink">Every change is a draft. A person still presses Publish.</blockquote>
+            <p class="hidden md:block">That is the whole model: the agent edits the repo, Orso shows the result, and publishing stays a human decision.</p>
+          </div>
+          <div class="mt-6 flex items-center gap-2 border-t border-line pt-4 text-xs text-muted">
+            <span class="rounded bg-sand px-2 py-1">H1</span>
+            <span class="rounded px-2 py-1">H2</span>
+            <span class="rounded px-2 py-1">B</span>
+            <span class="rounded px-2 py-1">Link</span>
+            <span class="ml-auto font-mono">content/blog/en/welcome.md</span>
+          </div>
+        </div>
+
+        <aside class="hidden border-l border-line p-4 md:block">
+          <p class="text-xs font-medium text-ink">Fields</p>
+          <div class="mt-4 space-y-3">
+            <div>
+              <p class="text-xs text-muted">Title</p>
+              <div class="mt-1 rounded border border-line bg-surface px-2 py-1.5 text-xs text-ink">Welcome to Orso</div>
+            </div>
+            <div>
+              <p class="text-xs text-muted">Slug</p>
+              <div class="mt-1 rounded border border-line bg-surface px-2 py-1.5 font-mono text-xs text-muted">welcome</div>
+            </div>
+            <div>
+              <p class="text-xs text-muted">Published</p>
+              <div class="mt-1 rounded border border-line bg-surface px-2 py-1.5 text-xs text-muted">12 Nov 2026</div>
+            </div>
+            <div>
+              <p class="text-xs text-muted">Tags</p>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <span class="rounded-full bg-sand px-2 py-0.5 text-xs text-muted">product</span>
+                <span class="rounded-full bg-sand px-2 py-0.5 text-xs text-muted">start here</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-muted">Cover</p>
+              <div class="mt-1 flex aspect-4/3 items-center justify-center rounded border border-dashed border-line-strong bg-sand text-xs text-muted">cover.jpg</div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div slot="footer">
+        <StatusChip tone="draft" label="Draft" />
+        <span class="text-xs text-muted">3 checkpoints</span>
+        <div class="ml-auto flex items-center gap-2">
+          <span class="hidden rounded-md border border-line px-2.5 py-1 text-xs font-medium text-ink sm:inline">Preview</span>
+          <span class="rounded-md bg-ink px-2.5 py-1 text-xs font-medium text-surface">Publish</span>
+        </div>
+      </div>
+    </AppWindow>
   </div>
 </section>

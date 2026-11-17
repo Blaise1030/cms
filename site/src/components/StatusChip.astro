@@ -1,0 +1,27 @@
+---
+// A small status pill for the product mocks and drafts. Colour is semantic: amber is waiting,
+// blue is in review, green is live.
+interface Props {
+  tone: "draft" | "review" | "live" | "neutral";
+  label: string;
+  class?: string;
+}
+const { tone, label, class: className } = Astro.props;
+const tones = {
+  draft: "bg-status-draft/10 text-status-draft",
+  review: "bg-status-review/10 text-status-review",
+  live: "bg-status-live/10 text-status-live",
+  neutral: "bg-sand text-muted",
+};
+---
+
+<span
+  class:list={[
+    "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium leading-5",
+    tones[tone],
+    className,
+  ]}
+>
+  <span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
+  {label}
+</span>

@@ -10,21 +10,29 @@
  * custom-property lines in this file.
  */
 @theme static {
-  /* Colour: light mode (cool paper, soft charcoal, blue primary). Dark values are below. */
+  /* Colour: proof paper, ink, hairlines. Status colours carry meaning, not decoration. */
   --color-*: initial;
-  --color-surface: #f7f8fa;
+  --color-surface: #fafaf9;
   --color-surface-raised: #ffffff;
-  --color-sand: #eef1f6;
-  --color-mist: #dbe7f6;
-  --color-ridge: #9eb4cc;
-  --color-glow: #f5f8fc;
-  --color-ink: #0f172a;
-  --color-muted: #475569;
-  --color-line: #e2e8f0;
-  --color-line-strong: #94a3b8;
+  --color-sand: #f4f4f5;
+  --color-mist: #eaeae7;
+  --color-ridge: #c4c4c0;
+  --color-glow: #fafaf9;
+  --color-ink: #18181b;
+  --color-muted: #52525b;
+  --color-line: #e4e4e7;
+  --color-line-strong: #a1a1aa;
   --color-accent: #2563eb;
   --color-accent-hover: #1d4ed8;
   --color-on-accent: #ffffff;
+  --color-night: #18181b;
+  --color-night-raised: #242427;
+  --color-night-line: #3f3f46;
+  --color-on-night: #fafafa;
+  --color-on-night-muted: #a1a1aa;
+  --color-status-draft: #b45309;
+  --color-status-review: #2563eb;
+  --color-status-live: #15803d;
 
   /* Type: one family (Geist, loaded by Astro's font API as --font-geist). */
   --font-*: initial;
@@ -36,85 +44,101 @@
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
 
-  /* Type scale: a 1.25 ratio from a 17px body. */
+  /* Type scale: a 1.22 ratio from a 16px body, plus a responsive hero step. */
   --text-*: initial;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.5;
   --text-sm: 0.875rem;
-  --text-sm--line-height: 1.6;
-  --text-base: 1.0625rem;
-  --text-base--line-height: 1.7;
-  --text-lg: 1.25rem;
-  --text-lg--line-height: 1.6;
-  --text-xl: 1.5rem;
-  --text-xl--line-height: 1.4;
-  --text-2xl: 1.875rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1rem;
+  --text-base--line-height: 1.65;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.55;
+  --text-xl: 1.4375rem;
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.75rem;
   --text-2xl--line-height: 1.25;
-  --text-3xl: 2.375rem;
+  --text-3xl: 2.25rem;
   --text-3xl--line-height: 1.15;
   --text-4xl: 3rem;
   --text-4xl--line-height: 1.08;
   --text-5xl: 3.75rem;
   --text-5xl--line-height: 1.04;
-  --tracking-display: -0.025em;
-  --tracking-tight: -0.012em;
-  --tracking-label: 0.14em;
-  --leading-body: 1.7;
+  --text-display: clamp(2.75rem, 6vw, 4.75rem);
+  --text-display--line-height: 1.02;
+  --tracking-display: -0.035em;
+  --tracking-tight: -0.015em;
+  --tracking-label: 0.02em;
+  --leading-body: 1.65;
   --leading-snug: 1.35;
 
   /* Space and layout. --spacing is Tailwind's 0.25rem step (p-4 = 1rem). */
   --spacing: 0.25rem;
   --spacing-gutter: 1.25rem;
   --spacing-gutter-wide: 2.5rem;
-  --spacing-section: 6rem;
-  --spacing-section-wide: 9rem;
-  --spacing-header: 4.5rem;
+  --spacing-section: 7rem;
+  --spacing-section-wide: 10rem;
+  --spacing-header: 4rem;
   --spacing-rise: 0.75rem;
-  --container-page: 72rem;
+  --container-page: 80rem;
   --container-prose: 42rem;
-  --container-measure: 36rem;
+  --container-measure: 38rem;
 
-  /* Shape and depth. Flat by default; the one shadow lifts the hero's plan card. */
+  /* Shape and depth. Flat; one shadow lifts the product panel. */
   --radius-*: initial;
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.75rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --radius-full: 9999px;
   --shadow-*: initial;
-  --shadow-soft: 0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent), 0 18px 40px -20px color-mix(in oklab, var(--color-ink) 28%, transparent);
+  --shadow-soft: 0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent), 0 32px 64px -40px color-mix(in oklab, var(--color-ink) 30%, transparent);
 
   /* Motion. Everything is switched off under prefers-reduced-motion (see below). */
   --ease-gentle: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-duration-quick: 180ms;
-  --transition-duration-gentle: 360ms;
-  --transition-duration-slow: 800ms;
-  --motion-stagger: 120ms;
+  --transition-duration-quick: 160ms;
+  --transition-duration-gentle: 320ms;
+  --transition-duration-slow: 700ms;
+  --motion-stagger: 45ms;
   --animate-rise: rise var(--transition-duration-slow) var(--ease-settle) both;
+  --animate-word: word-rise 900ms var(--ease-settle) both;
 
   @keyframes rise {
     from { opacity: 0; translate: 0 var(--spacing-rise); }
     to { opacity: 1; translate: 0 0; }
   }
+
+  @keyframes word-rise {
+    from { opacity: 0; translate: 0 0.5em; filter: blur(6px); }
+    to { opacity: 1; translate: 0 0; filter: blur(0); }
+  }
 }
 
-/* Dark mode: the same tokens with warm-slate values, following the visitor's system setting. */
+/* Dark mode: the same tokens with neutral values, following the visitor's system setting. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: #0b1220;
-    --color-surface-raised: #111827;
-    --color-sand: #152033;
-    --color-mist: #1e3a5f;
-    --color-ridge: #3b82a8;
-    --color-glow: #cbd5e1;
-    --color-ink: #e2e8f0;
-    --color-muted: #94a3b8;
-    --color-line: #1e293b;
-    --color-line-strong: #475569;
+    --color-surface: #0c0c0d;
+    --color-surface-raised: #141416;
+    --color-sand: #18181a;
+    --color-mist: #222225;
+    --color-ridge: #3f3f46;
+    --color-glow: #e4e4e7;
+    --color-ink: #f4f4f5;
+    --color-muted: #a1a1aa;
+    --color-line: #27272a;
+    --color-line-strong: #52525b;
     --color-accent: #60a5fa;
     --color-accent-hover: #93c5fd;
-    --color-on-accent: #0b1220;
+    --color-on-accent: #0c0c0d;
+    --color-night: #1b1b1e;
+    --color-night-raised: #232326;
+    --color-night-line: #3f3f46;
+    --color-on-night: #fafafa;
+    --color-on-night-muted: #a1a1aa;
+    --color-status-draft: #fbbf24;
+    --color-status-review: #60a5fa;
+    --color-status-live: #4ade80;
   }
 }
 
@@ -134,6 +158,8 @@
   }
   h1, h2, h3, h4 {
     font-family: var(--font-display);
+    font-weight: var(--font-weight-medium);
+    letter-spacing: var(--tracking-display);
     text-wrap: balance;
   }
   p {
@@ -153,13 +179,12 @@
   }
 }
 
-/* Small, tracked uppercase label used for dates, categories and column headings. */
+/* Small supporting label: dates, categories, field names and column headings. */
 @utility label {
   font-size: var(--text-xs);
   line-height: var(--text-xs--line-height);
   font-weight: var(--font-weight-medium);
   letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
   color: var(--color-muted);
 }
 
@@ -186,23 +211,24 @@
   }
 }
 
-/* Buttons: one solid (blue primary) and one quiet outline. Pill-shaped, medium weight. */
+/* Buttons: ink primary and a hairline secondary. Compact, small radius, not pills. */
 @utility button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: calc(var(--spacing) * 2);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-accent);
-  background-color: var(--color-accent);
-  color: var(--color-on-accent);
-  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-ink);
+  background-color: var(--color-ink);
+  color: var(--color-surface);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 4);
+  font-size: var(--text-sm);
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-snug);
   transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle), color var(--transition-duration-gentle) var(--ease-gentle);
   &:hover {
-    background-color: var(--color-accent-hover);
-    border-color: var(--color-accent-hover);
+    background-color: color-mix(in oklab, var(--color-ink) 86%, var(--color-surface));
+    border-color: color-mix(in oklab, var(--color-ink) 86%, var(--color-surface));
   }
 }
 @utility button-quiet {
@@ -210,10 +236,11 @@
   align-items: center;
   justify-content: center;
   gap: calc(var(--spacing) * 2);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-line-strong);
   color: var(--color-ink);
-  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 4);
+  font-size: var(--text-sm);
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-snug);
   transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle);
@@ -221,6 +248,21 @@
     background-color: var(--color-sand);
     border-color: var(--color-muted);
   }
+}
+
+/* Small neutral pill for counts, tags and metadata inside the product mocks. */
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-line);
+  background-color: var(--color-surface);
+  color: var(--color-muted);
+  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
 }
 
 /* Rendered Markdown follows the tokens in both modes (no prose-invert needed). Unlayered on
@@ -235,7 +277,7 @@
   --tw-prose-bullets: var(--color-line-strong);
   --tw-prose-hr: var(--color-line);
   --tw-prose-quotes: var(--color-ink);
-  --tw-prose-quote-borders: var(--color-accent);
+  --tw-prose-quote-borders: var(--color-ink);
   --tw-prose-captions: var(--color-muted);
   --tw-prose-kbd: var(--color-ink);
   --tw-prose-kbd-shadows: color-mix(in oklab, var(--color-ink) 12%, transparent);
@@ -262,27 +304,33 @@
 }
 .prose :where(blockquote):not(:where(.not-prose *)) {
   font-style: normal;
-  font-weight: var(--font-weight-light);
+  font-weight: var(--font-weight-normal);
 }
 
 /*
- * Motion. Two moments only: the hero rises in once on load, and later sections fade in as
- * they reach the viewport (Base.astro adds .reveal-pending just to sections below the fold,
- * so without JavaScript nothing is ever hidden). Page-to-page navigation cross-fades via
- * Astro's <ClientRouter />.
+ * Motion. One orchestrated load in the hero, quiet hover transitions, and page cross-fades.
+ * There are no scroll-triggered reveals; interaction motion is welcome.
  */
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
   }
-  .reveal-pending {
-    opacity: 0;
-    translate: 0 var(--spacing-rise);
+  /* Hero words arrive once, in one sequence. */
+  .word {
+    display: inline-block;
+    animation: var(--animate-word);
+    animation-delay: var(--word-delay, 0ms);
   }
-  .reveal-in {
-    transition:
-      opacity var(--transition-duration-slow) var(--ease-settle),
-      translate var(--transition-duration-slow) var(--ease-settle);
+  .rise {
+    animation: var(--animate-rise);
+  }
+  .rise-2 {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--motion-stagger) * 3);
+  }
+  .rise-3 {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--motion-stagger) * 6);
   }
   /* FAQ answers open smoothly where the browser supports animating to height: auto. */
   :root {
@@ -298,22 +346,11 @@
   details[open]::details-content {
     height: auto;
   }
-  .rise {
-    animation: var(--animate-rise);
-  }
-  .rise-2 {
-    animation: var(--animate-rise);
-    animation-delay: var(--motion-stagger);
-  }
-  .rise-3 {
-    animation: var(--animate-rise);
-    animation-delay: calc(var(--motion-stagger) * 2);
-  }
   ::view-transition-old(root) {
     animation: var(--transition-duration-quick) var(--ease-gentle) both vt-fade-out;
   }
   ::view-transition-new(root) {
-    animation: var(--transition-duration-gentle) var(--ease-settle) both vt-fade-in;
+    animation: var(--transition-duration-slow) var(--ease-settle) both vt-fade-in;
   }
 }
 
@@ -322,13 +359,6 @@
 }
 @keyframes vt-fade-in {
   from { opacity: 0; translate: 0 calc(var(--spacing-rise) / 2); }
-}
-
-@media print {
-  .reveal-pending {
-    opacity: 1;
-    translate: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
