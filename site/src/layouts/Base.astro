@@ -2,8 +2,9 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import Wordmark from "../components/Wordmark.astro";
-import { Button } from "../components/ui/button";
+import { buttonVariants } from "../components/ui/button";
 import { href } from "../lib/href";
+import { cn } from "../lib/utils";
 import { absoluteUrl, themeColors } from "../lib/seo";
 import { site } from "../site";
 import "../styles/global.css";
@@ -100,16 +101,17 @@ const external = (link: string) => /^https?:\/\//.test(link);
         </nav>
         <div class="ml-auto flex shrink-0 items-center gap-2 md:ml-0">
           {site.secondaryCta && (
-            <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
-              <a href={href(site.secondaryCta.href)}>{site.secondaryCta.label}</a>
-            </Button>
+            <a
+              class={cn(buttonVariants({ variant: "outline", size: "sm" }), "hidden sm:inline-flex")}
+              href={href(site.secondaryCta.href)}>{site.secondaryCta.label}</a
+            >
           )}
           {site.cta && (
-            <Button asChild size="sm">
-              <a href={href(site.cta.href)} rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>
-                {site.cta.label}
-              </a>
-            </Button>
+            <a
+              class={buttonVariants({ size: "sm" })}
+              href={href(site.cta.href)}
+              rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>{site.cta.label}</a
+            >
           )}
         </div>
       </div>
