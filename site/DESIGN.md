@@ -185,7 +185,7 @@ There is one orchestrated page-load moment: the hero headline arrives word by wo
 - **Agent band**: wide framed agent transcript mock over a painting, with a draft summary.
 - **Proof**: the one night band — Lee Robinson's quote and a note from the maker.
 - **FAQ**: hairline `<details>` accordion with FAQPage JSON-LD.
-- **Closing CTA**: centred headline, one action, and three plain facts on a hairline rule.
+- **Closing CTA**: left-aligned headline and supporting copy on a 12-column split, one action, and three plain facts in a hairline-divided strip.
 
 ## Do's and Don'ts
 
