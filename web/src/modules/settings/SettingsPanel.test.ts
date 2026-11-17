@@ -30,7 +30,7 @@ import { useProjectsStore } from "@/modules/projects/store";
 
 const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock" };
 const doc = (over: Partial<SettingsDoc> = {}): SettingsDoc => ({
-  exists: true, settings: { root: "apps/web" }, defaults, hash: "h1", branch: "content/a", errors: {}, ...over,
+  exists: true, settings: { root: "apps/web" }, defaults, hash: "h1", branch: "content/a", errors: {}, siteRoot: "apps/web", ...over,
 });
 const project: Project = { id: "site", name: "Site", port: 4321, devserver: "ready", autoApprove: false, repo: null };
 

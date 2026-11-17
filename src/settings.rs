@@ -269,6 +269,9 @@ pub struct SettingsDoc {
     pub hash: Option<String>,
     pub branch: String,
     pub errors: FieldErrors,
+    /// The site folder the daemon actually uses: the validated, normalized `root`, or `.`
+    /// when the file is missing or invalid (the same fallback as [`site_prefix`]).
+    pub site_root: String,
 }
 
 #[derive(Deserialize)]
@@ -291,12 +294,20 @@ pub async fn read(state: &AppState, project: &str) -> Result<SettingsDoc, ApiErr
             hash: None,
             branch,
             errors: FieldErrors::new(),
+            site_root: ProjectSettings::defaults().root,
         });
     }
     let source = read_current(&path)?;
+    let mut site_root = ProjectSettings::defaults().root;
     let (settings, errors) = match serde_json::from_str::<Value>(&source) {
         Ok(Value::Object(map)) => {
-            let errors = validate(&root, &map).err().unwrap_or_default();
+            let errors = match validate(&root, &map) {
+                Ok(valid) => {
+                    site_root = valid.root;
+                    FieldErrors::new()
+                }
+                Err(errors) => errors,
+            };
             (map, errors)
         }
         Ok(_) => {
@@ -317,6 +328,7 @@ pub async fn read(state: &AppState, project: &str) -> Result<SettingsDoc, ApiErr
         hash: Some(catalog::hash(&source)),
         branch,
         errors,
+        site_root,
     })
 }
 

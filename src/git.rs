@@ -363,9 +363,17 @@ impl Drop for ScopedIndexFiles {
     }
 }
 
+/// Pathspec args limiting a command to `scope` (a project-relative folder such as `site`);
+/// empty or `.` means the whole tree. `literal` magic keeps glob characters inert.
+fn scope_pathspec(scope: &str) -> Option<String> {
+    let scope = scope.trim_end_matches('/');
+    (!scope.is_empty() && scope != ".").then(|| format!(":(literal){scope}"))
+}
+
 /// Commits on the current branch, newest first. Includes the scaffold's initial commit so
-/// a project can be restored to its pristine state.
-pub async fn log(dir: &Path) -> Result<Vec<Checkpoint>, ApiError> {
+/// a project can be restored to its pristine state. A non-empty `scope` (a project-relative
+/// folder, see [`crate::settings::ProjectSettings::root`]) lists only commits touching it.
+pub async fn log(dir: &Path, scope: &str) -> Result<Vec<Checkpoint>, ApiError> {
     // No commits yet (or unborn HEAD): empty log rather than an error.
     if run(dir, &["rev-parse", "--verify", "--quiet", "HEAD"])
         .await
@@ -373,7 +381,12 @@ pub async fn log(dir: &Path) -> Result<Vec<Checkpoint>, ApiError> {
     {
         return Ok(Vec::new());
     }
-    let out = run(dir, &["log", "--format=%H%x1f%ct%x1f%an%x1f%s"]).await?;
+    let pathspec = scope_pathspec(scope);
+    let mut args = vec!["log", "--format=%H%x1f%ct%x1f%an%x1f%s"];
+    if let Some(spec) = pathspec.as_deref() {
+        args.extend(["--", spec]);
+    }
+    let out = run(dir, &args).await?;
     Ok(out
         .lines()
         .filter_map(|line| {
@@ -396,6 +409,14 @@ pub async fn log(dir: &Path) -> Result<Vec<Checkpoint>, ApiError> {
         .collect())
 }
 
+/// Full SHA of `HEAD`, or `None` before the first commit.
+pub async fn head(dir: &Path) -> Option<String> {
+    run(dir, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .ok()
+        .map(|out| out.trim().to_string())
+}
+
 /// Validate a client-supplied revision and resolve it to a full commit SHA that is part of
 /// the current branch's history. Only hex is accepted, so it can never be read as an option
 /// or a ref expression.
@@ -416,22 +437,24 @@ async fn resolve(dir: &Path, sha: &str) -> Result<String, ApiError> {
     Ok(full)
 }
 
-/// Unified diff introduced by the given commit (for the root commit: everything added).
-pub async fn diff(dir: &Path, sha: &str) -> Result<String, ApiError> {
+/// Unified diff introduced by the given commit (for the root commit: everything added),
+/// limited to `scope` when it is a folder (see [`log`]).
+pub async fn diff(dir: &Path, sha: &str, scope: &str) -> Result<String, ApiError> {
     let full = resolve(dir, sha).await?;
-    run(
-        dir,
-        &[
-            "show",
-            "--format=",
-            "--patch",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            &full,
-        ],
-    )
-    .await
+    let pathspec = scope_pathspec(scope);
+    let mut args = vec![
+        "show",
+        "--format=",
+        "--patch",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        &full,
+    ];
+    if let Some(spec) = pathspec.as_deref() {
+        args.extend(["--", spec]);
+    }
+    run(dir, &args).await
 }
 
 /// One commit in a file's history. `path` is the file's name at that commit (it differs from

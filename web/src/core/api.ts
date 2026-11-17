@@ -31,7 +31,7 @@ import {
   type PublishedPr,
   type DeployStatus,
   type PrStatus,
-  type Checkpoint,
+  type CheckpointLog,
   type ErrorCode,
   type DeviceStart,
   type DevicePoll,
@@ -408,9 +408,7 @@ export function createApi(
     deployStatus: (project: string, sha: string): Promise<DeployStatus> =>
       json<DeployStatus>("GET", `/api/projects/${enc(project)}/deploy`, { query: { sha } }),
 
-    listCheckpoints: async (project: string): Promise<Checkpoint[]> =>
-      (await json<{ checkpoints: Checkpoint[] }>("GET", "/api/checkpoints", { query: { project } }))
-        .checkpoints,
+    listCheckpoints: (project: string) => json<CheckpointLog>("GET", "/api/checkpoints", { query: { project } }),
     checkpointDiff: async (project: string, sha: string): Promise<string> =>
       (await send("GET", `/api/checkpoints/${enc(sha)}/diff`, { query: { project } })).text(),
     restoreCheckpoint: (project: string, sha: string) =>
