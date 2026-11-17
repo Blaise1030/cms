@@ -1,5 +1,5 @@
 ---
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import Painting from "../Painting.astro";
 
 const cards = [
@@ -7,21 +7,18 @@ const cards = [
     title: "Drafts and checkpoints",
     description:
       "Every edit lands in a draft with a checkpoint you can restore. Nothing reaches the live site until someone presses Publish.",
-    detail: "Branch → draft · Commit → checkpoint",
     painting: "bruegel" as const,
   },
   {
     title: "Previews and review",
     description:
       "Share a preview link, leave comments on the page, and approve the change before it goes live — on desktop and mobile.",
-    detail: "Preview deploy → shareable link",
     painting: "giorgione" as const,
   },
   {
     title: "Agent in plain English",
     description:
       "Ask for a page, a pass on the FAQ, or a whole new section. The agent edits the repo; you still own Publish.",
-    detail: "Claude, Cursor or Codex",
     painting: "altdorfer" as const,
   },
 ];
@@ -60,7 +57,6 @@ const cards = [
             <CardTitle class="text-xl text-ink">{card.title}</CardTitle>
             <CardDescription class="text-sm leading-6 text-muted">{card.description}</CardDescription>
           </CardHeader>
-          <CardFooter class="font-mono text-xs text-muted">{card.detail}</CardFooter>
         </Card>
       </li>
     ))}
