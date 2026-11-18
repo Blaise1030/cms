@@ -2,6 +2,15 @@
 import { buttonVariants } from "../ui/button";
 import { ProductTabs } from "../react/ProductTabs";
 import { href } from "../../lib/href";
+import { appShot } from "../../lib/appShots";
+
+const shots = {
+  content: await appShot("hero-content"),
+  preview: await appShot("hero-preview"),
+  publish: await appShot("hero-publish"),
+  agent: await appShot("hero-agent"),
+  history: await appShot("hero-history"),
+};
 
 const headline = "Let your content team edit the site with an agent.";
 const words = headline.split(" ");
@@ -32,6 +41,6 @@ const words = headline.split(" ");
   </div>
 
   <div class="rise-3 mt-12 md:mt-16">
-    <ProductTabs client:load />
+    <ProductTabs client:load shots={shots} />
   </div>
 </section>

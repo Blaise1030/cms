@@ -210,14 +210,17 @@
 
 /* Brand marks: pair `.logo-on-light` + `.logo-on-dark` so the correct press-kit SVG shows
    with the same prefers-color-scheme switch as the design tokens. */
-.logo-on-dark {
+.logo-on-dark,
+.scheme-dark {
   display: none;
 }
 @media (prefers-color-scheme: dark) {
-  .logo-on-light {
+  .logo-on-light,
+  .scheme-light {
     display: none;
   }
-  .logo-on-dark {
+  .logo-on-dark,
+  .scheme-dark {
     display: block;
   }
 }

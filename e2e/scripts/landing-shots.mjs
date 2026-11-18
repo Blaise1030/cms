@@ -8,9 +8,9 @@
  * project (default `cms`). Shots are read-only: they open views, menus and dialogs, and close them
  * without saving, publishing or running an agent.
  *
- * Output: site/src/assets/app/<id>-<light|dark>.png (and .webm for video shots), consumed by
- * site/src/components/AppShot.astro, which serves the pair through <picture> +
- * prefers-color-scheme so it follows the site's own theme switch.
+ * Output: site/src/assets/app/<id>-<light|dark>.png (and public/app/<id>-<scheme>.webm for video
+ * shots). site/src/lib/appShots.ts resolves a pair by id; site/src/components/react/AppShot.tsx
+ * serves it through <picture> + prefers-color-scheme so it follows the site's own theme.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -121,9 +121,9 @@ const SHOTS = [
     prepare: async (page) => {
       await page.goto(origin + p("preview"));
       await previewReady(page);
-      // The share / publish menu, opened but never confirmed.
-      const share = page.getByTestId("share-preview");
-      if (await share.isVisible()) await share.click();
+      // The changes menu, opened but never confirmed. (share-preview would push the branch.)
+      const menu = page.getByTestId("changes-menu");
+      if (await menu.isVisible()) await menu.click();
       await settle(page);
     },
   },
@@ -134,7 +134,7 @@ const SHOTS = [
     viewport: VIEWPORT.wide,
     prepare: async (page) => {
       await page.goto(origin + p("history"));
-      await page.getByTestId("history-list").waitFor({ timeout: 60_000 });
+      await page.getByTestId("checkpoint-item").first().waitFor({ timeout: 60_000 });
       await settle(page);
     },
   },
@@ -178,8 +178,8 @@ const SHOTS = [
     viewport: VIEWPORT.card,
     prepare: async (page) => {
       await page.goto(origin + p("history"));
-      await page.getByTestId("history-list").waitFor({ timeout: 60_000 });
-      const version = page.getByTestId("history-version").nth(1);
+      await page.getByTestId("checkpoint-item").first().waitFor({ timeout: 60_000 });
+      const version = page.getByTestId("checkpoint-item").nth(1);
       if (await version.isVisible().catch(() => false)) await version.click();
       await settle(page, 1200);
     },
@@ -192,7 +192,7 @@ const SHOTS = [
     viewport: VIEWPORT.square,
     prepare: async (page) => {
       await page.goto(origin + p("history"));
-      await page.getByTestId("history-list").waitFor({ timeout: 60_000 });
+      await page.getByTestId("checkpoint-item").first().waitFor({ timeout: 60_000 });
       await settle(page);
     },
   },
