@@ -13,17 +13,16 @@ const logos = [
 
 <section class="mx-auto max-w-7xl border-x border-line py-section" id="logos" aria-label="Works with your stack">
   <p class="page mb-6 text-small text-muted">Works with the stack and agents you already have</p>
-  <div class="border-t border-line"></div>
-  <ul class="grid grid-cols-2 border-b border-line sm:grid-cols-3 md:grid-cols-6">
+  <ul class="grid grid-cols-2 gap-px border-y border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
     {logos.map((logo) => (
-      <li class="flex min-h-20 items-center justify-center border-r border-b border-line px-4 last:border-r-0 md:border-b-0">
-        <span class="inline-flex h-7 max-w-[7.5rem] items-center justify-center">
+      <li class="flex min-h-20 items-center justify-center bg-surface px-4 py-5">
+        <span class="inline-flex h-7 w-full max-w-[7.5rem] items-center justify-center">
           <img
             src={href(`/logos/${logo.file}.svg`)}
             alt={logo.name}
             width="120"
             height="32"
-            class="logo-on-light h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            class="logo-on-light h-auto max-h-7 w-auto max-w-full object-contain object-center"
             loading="lazy"
             decoding="async"
           />
@@ -32,7 +31,7 @@ const logos = [
             alt=""
             width="120"
             height="32"
-            class="logo-on-dark h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            class="logo-on-dark h-auto max-h-7 w-auto max-w-full object-contain object-center"
             loading="lazy"
             decoding="async"
             aria-hidden="true"
