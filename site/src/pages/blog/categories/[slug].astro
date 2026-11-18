@@ -3,7 +3,7 @@ import Base from "../../../layouts/Base.astro";
 import BlogCard from "../../../components/BlogCard.astro";
 import BlogFilters from "../../../components/BlogFilters.astro";
 import PageHeader from "../../../components/PageHeader.astro";
-import { loadBlog } from "../../../lib/blog";
+import { loadBlog, searchText } from "../../../lib/blog";
 import { breadcrumbs } from "../../../lib/seo";
 
 export async function getStaticPaths() {
@@ -22,10 +22,15 @@ const description = category.description ?? `Blog posts about ${category.title.t
   ]}
 >
   <PageHeader title={category.title} description={category.description} back={{ label: "All categories", href: "/blog/categories/" }} />
-  <div class="page mt-12">
-    <BlogFilters categories={categories} active={category.id} />
-    {category.posts.length === 0 ? <p class="mt-12 text-muted">No posts in this category yet.</p> : (
-      <div class="mt-12 grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3" data-reveal>{category.posts.map((post) => <BlogCard post={post} categories={categories} />)}</div>
-    )}
+  <div class="mt-12 border-y border-line">
+    <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
+      <h2 class="text-heading tracking-tight text-ink">Posts</h2>
+      <BlogFilters categories={categories} active={category.id} />
+    </div>
   </div>
+  {category.posts.length === 0 ? <p class="page py-16 text-muted">No posts in this category yet.</p> : (
+    <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">
+      {category.posts.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
+    </div>
+  )}
 </Base>

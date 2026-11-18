@@ -1,18 +1,42 @@
 ---
-import { href } from "../../lib/href";
+import { buttonVariants } from "../ui/button";
+import Icon from "../Icon.astro";
+
+const facts = [
+  { title: "Free and open source", detail: "MIT licence, no paid tier.", icon: "scale" as const },
+  { title: "Content stays in your repo", detail: "Plain Markdown you already own.", icon: "file-text" as const },
+  { title: "Static files, any host", detail: "No runtime and no lock-in.", icon: "globe" as const },
+];
 ---
 
-<section class="page" id="cta" data-reveal>
-  <div class="relative overflow-hidden rounded-xl bg-mist px-6 pt-16 pb-32 text-center md:pt-24 md:pb-40">
-    <h2 class="mx-auto max-w-2xl text-3xl font-light tracking-display text-ink md:text-4xl">Plan next week in one sitting</h2>
-    <p class="mx-auto mt-5 max-w-measure text-muted">Create a project, add your first milestone and invite the team. The plan is ready before your coffee goes cold.</p>
-    <div class="mt-10 flex flex-col items-center gap-4">
-      <a class="button" href={href("#pricing")}>Start a free project</a>
-      <p class="text-sm text-muted">Free for teams of up to five. No card required.</p>
+<section class="page" id="cta">
+  <div class="py-16 md:py-20">
+    <div class="grid gap-10 md:grid-cols-12 md:items-end md:gap-10">
+      <div class="md:col-span-7">
+        <h2 class="max-w-xl text-title tracking-display text-ink">Ready to let your team run the site?</h2>
+      </div>
+      <div class="md:col-span-5 md:border-l md:border-line md:pl-10">
+        <p class="max-w-measure text-muted">
+          Your developer connects the repo once. Everyone else is editing in minutes — drafts, previews and Publish.
+        </p>
+        <a
+          class={`${buttonVariants({ size: "lg" })} mt-8`}
+          href="https://github.com/Blaise1030/cms"
+          rel="noopener noreferrer">Get Orso on GitHub</a
+        >
+      </div>
     </div>
-    <svg class="absolute inset-x-0 bottom-0 h-20 w-full md:h-28" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
-      <path class="fill-ridge" d="M0 70 120 40l90 30 150-56 120 48 140-38 160 52 130-34 140 30 150-30v138H0Z" />
-      <path class="fill-accent" d="M0 120V92c160-26 320-30 470-8 120 18 230 20 330 6 140-20 280-22 400-2v32Z" />
-    </svg>
+
+    <ul class="mt-16 grid divide-y divide-line border-t border-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      {facts.map((fact) => (
+        <li class="py-6 sm:px-6 sm:first:pl-0 sm:last:pr-0">
+          <span class="flex size-9 items-center justify-center rounded-md border border-line bg-surface-raised text-ink">
+            <Icon name={fact.icon} class="size-5" />
+          </span>
+          <p class="mt-4 text-small font-medium text-ink">{fact.title}</p>
+          <p class="mt-1 text-small text-muted">{fact.detail}</p>
+        </li>
+      ))}
+    </ul>
   </div>
 </section>

@@ -1,4 +1,10 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/*
+ ---break---
+ */
+@custom-variant dark (&:is(.dark *));
 @plugin "@tailwindcss/typography";
 
 /*
@@ -10,111 +16,135 @@
  * custom-property lines in this file.
  */
 @theme static {
-  /* Colour: light mode (birch, sand, soft charcoal, fjord blue). Dark values are below. */
+  /* Colour: proof paper, ink, hairlines. Status colours carry meaning, not decoration. */
   --color-*: initial;
-  --color-surface: #f6f4ef;
-  --color-surface-raised: #fcfbf8;
-  --color-sand: #ece7dd;
-  --color-mist: #dde5ea;
-  --color-ridge: #b4c0c6;
-  --color-glow: #fdfaf2;
-  --color-ink: #2a2e33;
-  --color-muted: #5b6269;
-  --color-line: #ddd7cb;
-  --color-line-strong: #b5ae9f;
-  --color-accent: #3b5a72;
-  --color-accent-hover: #2e4a60;
-  --color-on-accent: #f6f4ef;
+  --color-surface: #fafaf9;
+  --color-surface-raised: #ffffff;
+  --color-sand: #f4f4f5;
+  --color-mist: #eaeae7;
+  --color-ridge: #c4c4c0;
+  --color-glow: #fafaf9;
+  --color-ink: #18181b;
+  --color-muted: #52525b;
+  --color-line: #e4e4e7;
+  --color-line-strong: #a1a1aa;
+  --color-accent: #2663eb;
+  --color-accent-hover: #1d4ed8;
+  --color-on-accent: #ffffff;
+  --color-night: #18181b;
+  --color-night-raised: #242427;
+  --color-night-line: #3f3f46;
+  --color-night-ghost: #2f2f36;
+  --color-on-night: #fafafa;
+  --color-on-night-muted: #a1a1aa;
+  --color-status-draft: #b45309;
+  --color-status-review: #2563eb;
+  --color-status-live: #15803d;
+  --color-status-danger: #b91c1c;
 
-  /* Type: one family (Albert Sans, loaded by Astro's font API as --font-albert-sans). */
+  /* Type: one family (Geist, loaded by Astro's font API as --font-geist). */
   --font-*: initial;
-  --font-sans: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-albert-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-weight-light: 300;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
 
-  /* Type scale: a 1.25 ratio from a 17px body. */
+  /* Type scale: six roles. Use text-label … text-display everywhere; no numeric steps. */
   --text-*: initial;
-  --text-xs: 0.75rem;
-  --text-xs--line-height: 1.5;
-  --text-sm: 0.875rem;
-  --text-sm--line-height: 1.6;
-  --text-base: 1.0625rem;
-  --text-base--line-height: 1.7;
-  --text-lg: 1.25rem;
-  --text-lg--line-height: 1.6;
-  --text-xl: 1.5rem;
-  --text-xl--line-height: 1.4;
-  --text-2xl: 1.875rem;
-  --text-2xl--line-height: 1.25;
-  --text-3xl: 2.375rem;
-  --text-3xl--line-height: 1.15;
-  --text-4xl: 3rem;
-  --text-4xl--line-height: 1.08;
-  --text-5xl: 3.75rem;
-  --text-5xl--line-height: 1.04;
-  --tracking-display: -0.025em;
-  --tracking-tight: -0.012em;
-  --tracking-label: 0.14em;
-  --leading-body: 1.7;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.5;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.55;
+  --text-body: 1rem;
+  --text-body--line-height: 1.65;
+  --text-heading: 1.5rem;
+  --text-heading--line-height: 1.25;
+  --text-title: clamp(2.25rem, 4vw, 3rem);
+  --text-title--line-height: 1.08;
+  --text-display: clamp(2.75rem, 6vw, 4.75rem);
+  --text-display--line-height: 1.02;
+  --text-watermark: clamp(7rem, 36vw, 40rem);
+  --text-watermark--line-height: 0.78;
+  --tracking-display: -0.035em;
+  --tracking-tight: -0.015em;
+  --tracking-label: 0.02em;
+  --leading-body: 1.65;
   --leading-snug: 1.35;
 
   /* Space and layout. --spacing is Tailwind's 0.25rem step (p-4 = 1rem). */
   --spacing: 0.25rem;
   --spacing-gutter: 1.25rem;
   --spacing-gutter-wide: 2.5rem;
-  --spacing-section: 6rem;
-  --spacing-section-wide: 9rem;
-  --spacing-header: 4.5rem;
+  --spacing-section: 4.5rem;
+  --spacing-section-wide: 7rem;
+  --spacing-header: 3.25rem;
   --spacing-rise: 0.75rem;
-  --container-page: 72rem;
+  --container-page: 80rem;
   --container-prose: 42rem;
-  --container-measure: 36rem;
+  --container-measure: 38rem;
 
-  /* Shape and depth. Flat by default; the one shadow lifts the hero's plan card. */
+  /* Shape and depth. Flat; one shadow lifts the product panel. */
   --radius-*: initial;
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.75rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --radius-full: 9999px;
   --shadow-*: initial;
-  --shadow-soft: 0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent), 0 18px 40px -20px color-mix(in oklab, var(--color-ink) 28%, transparent);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.05), 0 18px 40px -20px rgb(0 0 0 / 0.18);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.06), 0 24px 48px -24px rgb(0 0 0 / 0.35), 0 48px 80px -40px rgb(0 0 0 / 0.25);
 
   /* Motion. Everything is switched off under prefers-reduced-motion (see below). */
   --ease-gentle: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-duration-quick: 180ms;
-  --transition-duration-gentle: 360ms;
-  --transition-duration-slow: 800ms;
-  --motion-stagger: 120ms;
+  --transition-duration-quick: 160ms;
+  --transition-duration-gentle: 320ms;
+  --transition-duration-slow: 700ms;
+  --motion-stagger: 45ms;
   --animate-rise: rise var(--transition-duration-slow) var(--ease-settle) both;
+  --animate-word: word-rise 900ms var(--ease-settle) both;
 
   @keyframes rise {
     from { opacity: 0; translate: 0 var(--spacing-rise); }
     to { opacity: 1; translate: 0 0; }
   }
+
+  @keyframes word-rise {
+    from { opacity: 0; translate: 0 0.5em; filter: blur(6px); }
+    to { opacity: 1; translate: 0 0; filter: blur(0); }
+  }
+
 }
 
-/* Dark mode: the same tokens with warm-slate values, following the visitor's system setting. */
+/* Dark mode: the same tokens with neutral values, following the visitor's system setting. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: #25272a;
-    --color-surface-raised: #2c2f32;
-    --color-sand: #2f3235;
-    --color-mist: #2f3b45;
-    --color-ridge: #4a5862;
-    --color-glow: #d8d3c6;
-    --color-ink: #eae6de;
-    --color-muted: #a9adb0;
-    --color-line: #3c3f43;
-    --color-line-strong: #5a5f64;
-    --color-accent: #a3bdd1;
-    --color-accent-hover: #bfd2e0;
-    --color-on-accent: #1d2023;
+    --color-surface: #0c0c0d;
+    --color-surface-raised: #141416;
+    --color-sand: #18181a;
+    --color-mist: #222225;
+    --color-ridge: #3f3f46;
+    --color-glow: #e4e4e7;
+    --color-ink: #f4f4f5;
+    --color-muted: #a1a1aa;
+    --color-line: #27272a;
+    --color-line-strong: #52525b;
+    --color-accent: #60a5fa;
+    --color-accent-hover: #93c5fd;
+    --color-on-accent: #0c0c0d;
+    --color-night: #1b1b1e;
+    --color-night-raised: #232326;
+    --color-night-line: #3f3f46;
+    --color-night-ghost: #2f2f36;
+    --color-on-night: #fafafa;
+    --color-on-night-muted: #a1a1aa;
+    --color-status-draft: #fbbf24;
+    --color-status-review: #60a5fa;
+    --color-status-live: #4ade80;
+    --color-status-danger: #f87171;
   }
 }
 
@@ -128,12 +158,14 @@
     background-color: var(--color-surface);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: var(--text-base);
+    font-size: var(--text-body);
     line-height: var(--leading-body);
     font-feature-settings: "ss01", "kern";
   }
   h1, h2, h3, h4 {
     font-family: var(--font-display);
+    font-weight: var(--font-weight-medium);
+    letter-spacing: var(--tracking-display);
     text-wrap: balance;
   }
   p {
@@ -151,26 +183,42 @@
     outline-offset: 3px;
     border-radius: var(--radius-sm);
   }
+  * {
+    @apply border-border outline-ring/50;
+  }
 }
 
-/* Small, tracked uppercase label used for dates, categories and column headings. */
+/* Small supporting label: dates, categories, field names and column headings. */
 @utility label {
-  font-size: var(--text-xs);
-  line-height: var(--text-xs--line-height);
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
   font-weight: var(--font-weight-medium);
   letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
   color: var(--color-muted);
 }
 
-/* The page column: centred, capped at --container-page, with token gutters. */
+/* The page column: full width with token gutters. Sections that should run edge to edge omit
+   `page` (or break out with -mx-gutter) and keep inner copy in a nested `page` wrapper. */
 @utility page {
   margin-inline: auto;
   width: 100%;
-  max-width: var(--container-page);
   padding-inline: var(--spacing-gutter);
   @media (width >= 48rem) {
     padding-inline: var(--spacing-gutter-wide);
+  }
+}
+
+/* Brand marks: pair `.logo-on-light` + `.logo-on-dark` so the correct press-kit SVG shows
+   with the same prefers-color-scheme switch as the design tokens. */
+.logo-on-dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .logo-on-light {
+    display: none;
+  }
+  .logo-on-dark {
+    display: block;
   }
 }
 
@@ -186,17 +234,18 @@
   }
 }
 
-/* Buttons: one solid (fjord) and one quiet outline. Pill-shaped, medium weight. */
+/* Legacy button utility — prefer shadcn <Button>. Primary matches app blue. */
 @utility button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: calc(var(--spacing) * 2);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-accent);
   background-color: var(--color-accent);
   color: var(--color-on-accent);
-  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 4);
+  font-size: var(--text-small);
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-snug);
   transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle), color var(--transition-duration-gentle) var(--ease-gentle);
@@ -210,10 +259,11 @@
   align-items: center;
   justify-content: center;
   gap: calc(var(--spacing) * 2);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-line-strong);
   color: var(--color-ink);
-  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 4);
+  font-size: var(--text-small);
   font-weight: var(--font-weight-medium);
   line-height: var(--leading-snug);
   transition: background-color var(--transition-duration-gentle) var(--ease-gentle), border-color var(--transition-duration-gentle) var(--ease-gentle);
@@ -221,6 +271,21 @@
     background-color: var(--color-sand);
     border-color: var(--color-muted);
   }
+}
+
+/* Small neutral pill for counts, tags and metadata inside the product mocks. */
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-line);
+  background-color: var(--color-surface);
+  color: var(--color-muted);
+  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2);
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
 }
 
 /* Rendered Markdown follows the tokens in both modes (no prose-invert needed). Unlayered on
@@ -235,7 +300,7 @@
   --tw-prose-bullets: var(--color-line-strong);
   --tw-prose-hr: var(--color-line);
   --tw-prose-quotes: var(--color-ink);
-  --tw-prose-quote-borders: var(--color-accent);
+  --tw-prose-quote-borders: var(--color-ink);
   --tw-prose-captions: var(--color-muted);
   --tw-prose-kbd: var(--color-ink);
   --tw-prose-kbd-shadows: color-mix(in oklab, var(--color-ink) 12%, transparent);
@@ -244,7 +309,7 @@
   --tw-prose-pre-bg: var(--color-sand);
   --tw-prose-th-borders: var(--color-line-strong);
   --tw-prose-td-borders: var(--color-line);
-  font-size: var(--text-base);
+  font-size: var(--text-body);
   line-height: var(--leading-body);
 }
 .prose :where(h2, h3, h4):not(:where(.not-prose *)) {
@@ -262,27 +327,33 @@
 }
 .prose :where(blockquote):not(:where(.not-prose *)) {
   font-style: normal;
-  font-weight: var(--font-weight-light);
+  font-weight: var(--font-weight-normal);
 }
 
 /*
- * Motion. Two moments only: the hero rises in once on load, and later sections fade in as
- * they reach the viewport (Base.astro adds .reveal-pending just to sections below the fold,
- * so without JavaScript nothing is ever hidden). Page-to-page navigation cross-fades via
- * Astro's <ClientRouter />.
+ * Motion. One orchestrated load in the hero, quiet hover transitions, and page cross-fades.
+ * There are no scroll-triggered reveals; interaction motion is welcome.
  */
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
   }
-  .reveal-pending {
-    opacity: 0;
-    translate: 0 var(--spacing-rise);
+  /* Hero words arrive once, in one sequence. */
+  .word {
+    display: inline-block;
+    animation: var(--animate-word);
+    animation-delay: var(--word-delay, 0ms);
   }
-  .reveal-in {
-    transition:
-      opacity var(--transition-duration-slow) var(--ease-settle),
-      translate var(--transition-duration-slow) var(--ease-settle);
+  .rise {
+    animation: var(--animate-rise);
+  }
+  .rise-2 {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--motion-stagger) * 3);
+  }
+  .rise-3 {
+    animation: var(--animate-rise);
+    animation-delay: calc(var(--motion-stagger) * 6);
   }
   /* FAQ answers open smoothly where the browser supports animating to height: auto. */
   :root {
@@ -298,22 +369,11 @@
   details[open]::details-content {
     height: auto;
   }
-  .rise {
-    animation: var(--animate-rise);
-  }
-  .rise-2 {
-    animation: var(--animate-rise);
-    animation-delay: var(--motion-stagger);
-  }
-  .rise-3 {
-    animation: var(--animate-rise);
-    animation-delay: calc(var(--motion-stagger) * 2);
-  }
   ::view-transition-old(root) {
     animation: var(--transition-duration-quick) var(--ease-gentle) both vt-fade-out;
   }
   ::view-transition-new(root) {
-    animation: var(--transition-duration-gentle) var(--ease-settle) both vt-fade-in;
+    animation: var(--transition-duration-slow) var(--ease-settle) both vt-fade-in;
   }
 }
 
@@ -322,13 +382,6 @@
 }
 @keyframes vt-fade-in {
   from { opacity: 0; translate: 0 calc(var(--spacing-rise) / 2); }
-}
-
-@media print {
-  .reveal-pending {
-    opacity: 1;
-    translate: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -344,5 +397,86 @@
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation: none !important;
+  }
+}
+/*
+ * shadcn semantic tokens bridged to Orso. Primary = app blue.
+ * Do not redefine --color-muted / --color-accent (Orso text + brand blue).
+ */
+@theme inline {
+  --font-heading: var(--font-sans);
+  --color-background: var(--color-surface);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-surface-raised);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-surface-raised);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: var(--color-on-accent);
+  --color-secondary: var(--color-sand);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted-foreground: var(--color-muted);
+  --color-accent-foreground: var(--color-ink);
+  --color-destructive: var(--color-status-danger);
+  --color-border: var(--color-line);
+  --color-input: var(--color-line);
+  --color-ring: var(--color-accent);
+  --color-chart-1: var(--color-accent);
+  --color-chart-2: var(--color-status-live);
+  --color-chart-3: var(--color-status-draft);
+  --color-chart-4: var(--color-line-strong);
+  --color-chart-5: var(--color-night);
+  --color-sidebar: var(--color-surface);
+  --color-sidebar-foreground: var(--color-ink);
+  --color-sidebar-primary: var(--color-accent);
+  --color-sidebar-primary-foreground: var(--color-on-accent);
+  --color-sidebar-accent: var(--color-sand);
+  --color-sidebar-accent-foreground: var(--color-ink);
+  --color-sidebar-border: var(--color-line);
+  --color-sidebar-ring: var(--color-accent);
+}
+
+:root {
+  --background: var(--color-surface);
+  --foreground: var(--color-ink);
+  --card: var(--color-surface-raised);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-surface-raised);
+  --popover-foreground: var(--color-ink);
+  --primary: oklch(0.546 0.215 263);
+  --primary-foreground: #ffffff;
+  --secondary: var(--color-sand);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-sand);
+  --muted-foreground: var(--color-muted);
+  --accent: var(--color-sand);
+  --accent-foreground: var(--color-ink);
+  --destructive: var(--color-status-danger);
+  --border: var(--color-line);
+  --input: var(--color-line);
+  --ring: oklch(0.546 0.215 263);
+  --chart-1: var(--color-accent);
+  --chart-2: var(--color-status-live);
+  --chart-3: var(--color-status-draft);
+  --chart-4: var(--color-line-strong);
+  --chart-5: var(--color-night);
+  --radius: 0.5rem;
+  --sidebar: var(--color-surface);
+  --sidebar-foreground: var(--color-ink);
+  --sidebar-primary: oklch(0.546 0.215 263);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--color-sand);
+  --sidebar-accent-foreground: var(--color-ink);
+  --sidebar-border: var(--color-line);
+  --sidebar-ring: oklch(0.546 0.215 263);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: oklch(0.62 0.19 260);
+    --primary-foreground: #0c0c0d;
+    --sidebar-primary: oklch(0.62 0.19 260);
+    --sidebar-primary-foreground: #0c0c0d;
+    --ring: oklch(0.62 0.19 260);
   }
 }

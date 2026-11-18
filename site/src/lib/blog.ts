@@ -36,6 +36,12 @@ export async function loadBlog() {
 export const categoriesOf = (post: Post, categories: BlogCategory[]) =>
   post.data.categories.flatMap((id) => categories.filter((category) => category.id === id));
 
+/** Lower-case text the blog search matches: title, description, tags and category titles. */
+export const searchText = (post: Post, categories: BlogCategory[]) =>
+  [post.data.title, post.data.description, ...post.data.tags, ...categoriesOf(post, categories).map((category) => category.title)]
+    .join(" ")
+    .toLowerCase();
+
 /** Up to `count` posts to read next: the post's `relatedPosts`, then posts sharing a category, then the newest. */
 export function morePosts(post: Post, posts: Post[], count = 3) {
   const others = posts.filter((other) => other.id !== post.id);

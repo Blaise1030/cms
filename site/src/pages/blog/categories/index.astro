@@ -8,7 +8,7 @@ const { categories } = await loadBlog();
 ---
 <Base
   title="Blog categories"
-  description="Browse Acme blog posts by topic: product news, practical guides and company stories."
+  description="Browse Orso blog posts by topic: product news, practical guides and company stories."
   jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: "Blog categories" }, breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }, { name: "Categories", path: "/blog/categories/" }])]}
 >
   <PageHeader title="Blog categories" back={{ label: "Back to Blog", href: "/blog/" }} />
@@ -16,7 +16,7 @@ const { categories } = await loadBlog();
     {categories.length === 0 ? <p class="text-muted">No blog categories yet.</p> : (
       <ul class="grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">{categories.map((category) => (
         <li class="group relative border-t border-line py-8">
-          <h2 class="text-xl font-medium tracking-tight text-ink">
+          <h2 class="text-heading font-medium tracking-tight text-ink">
             <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
           </h2>
           <p class="label mt-2">{category.posts.length} {category.posts.length === 1 ? "post" : "posts"}</p>

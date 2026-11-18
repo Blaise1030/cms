@@ -23,7 +23,7 @@ const { title, description, path, updated } = Astro.props;
 >
   <PageHeader title={title} description={description} />
   <div class="page mt-12">
-    <p class="max-w-prose rounded-md border-l-2 border-accent bg-mist px-5 py-4 text-sm text-ink" role="note">
+    <p class="max-w-prose rounded-md border-l-2 border-accent bg-mist px-5 py-4 text-small text-ink" role="note">
       Placeholder text. Replace this page with your own policy, reviewed by someone qualified, before you launch.
     </p>
     <p class="label mt-10">Last updated <time datetime={updated}>{new Date(`${updated}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</time></p>

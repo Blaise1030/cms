@@ -5,6 +5,8 @@ import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
 import { site } from "./src/site.ts";
 
+import react from "@astrojs/react";
+
 // The orso dev server proxies the site under /preview/{id}/.
 const base = process.env.PUBLIC_BASE ?? "/";
 // The browser's HMR socket: the dev server's own port when the preview is framed directly
@@ -18,29 +20,36 @@ const siteUrl = process.env.PUBLIC_SITE_URL || site.url;
 export default defineConfig({
   site: siteUrl,
   base,
-  // Albert Sans ships with the site (no third-party font request). Astro writes the
+  // Geist ships with the site (no third-party font request). Astro writes the
   // @font-face rules, a preload and a metric-matched fallback so the swap causes no layout shift.
   fonts: [
     {
       provider: fontProviders.local(),
-      name: "Albert Sans",
-      cssVariable: "--font-albert-sans",
+      name: "Geist",
+      cssVariable: "--font-geist",
       fallbacks: ["ui-sans-serif", "system-ui", "sans-serif"],
       options: {
         variants: [
-          { src: ["@fontsource-variable/albert-sans/files/albert-sans-latin-wght-normal.woff2"], weight: "100 900", style: "normal", display: "swap" },
-          { src: ["@fontsource-variable/albert-sans/files/albert-sans-latin-wght-italic.woff2"], weight: "100 900", style: "italic", display: "swap" },
+          { src: ["@fontsource-variable/geist/files/geist-latin-wght-normal.woff2"], weight: "100 900", style: "normal", display: "swap" },
+          { src: ["@fontsource-variable/geist/files/geist-latin-wght-italic.woff2"], weight: "100 900", style: "italic", display: "swap" },
         ],
       },
     },
   ],
-  integrations: [mdx(), orso({ collections: marketingCollections })],
+  integrations: [mdx(), orso({ collections: marketingCollections }), react()],
   vite: {
     plugins: [tailwindcss()],
     // Orso's conflict preview and the template tests run the site with node_modules symlinked
     // in. Keeping symlinked paths lets Astro compile components that ship their own <style>
-    // (such as <ClientRouter />) from there.
-    resolve: { preserveSymlinks: true },
+    // (such as <ClientRouter />) from there. Dedupe + optimizeDeps keep React islands from
+    // loading the raw CJS react-dom/client (which has no named createRoot export in the browser).
+    resolve: {
+      preserveSymlinks: true,
+      dedupe: ["react", "react-dom"],
+    },
+    optimizeDeps: {
+      include: ["react", "react-dom", "react-dom/client"],
+    },
     server: {
       // Astro keeps Vite's own base at "/", so without this the HMR socket would connect to
       // the proxy root instead of the /preview/{id}/ prefix. clientPort points it at this

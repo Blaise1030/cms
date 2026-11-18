@@ -1,13 +1,11 @@
 ---
-// The logo: a low sun over still water, plus the site name. The same mark is public/favicon.svg.
+// The logo: the Orso bear (Simple Black Bear by qubodup, CC0), plus the site name.
+// The same mark is public/favicon.svg.
+import BearMark from "./BearMark.astro";
 import { site } from "../site";
 ---
 
 <span class="inline-flex items-center gap-2.5 text-ink">
-  <svg class="size-6 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-    <circle class="fill-mist" cx="12" cy="12" r="11" />
-    <path class="fill-accent" d="M1 12a11 11 0 0 0 22 0Z" />
-    <path class="stroke-surface" d="M6 16h12M9 19h6" stroke-width="1.25" stroke-linecap="round" />
-  </svg>
-  <span class="text-lg font-medium tracking-tight">{site.name}</span>
+  <BearMark class="h-4 w-auto shrink-0" />
+  <span class="text-body font-medium tracking-tight whitespace-nowrap">{site.name}</span>
 </span>

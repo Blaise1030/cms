@@ -1,13 +1,47 @@
 ---
-// Placeholder customer names: replace with real logos or names you have permission to show.
-const logos = ["Northwind", "Globex", "Initech", "Umbrella", "Hooli"];
+import { href } from "../../lib/href";
+
+const logos = [
+  { name: "Astro", file: "astro" },
+  { name: "Markdown", file: "markdown" },
+  { name: "GitHub", file: "github" },
+  { name: "Claude", file: "claude" },
+  { name: "Cursor", file: "cursor" },
+  { name: "Codex", file: "codex" },
+];
 ---
 
-<section class="page" id="logos" data-reveal>
-  <div class="flex flex-col gap-4 border-y border-line py-8 md:flex-row md:items-center md:gap-14">
-    <h2 class="label shrink-0">Teams planning with Acme</h2>
-    <ul class="flex flex-wrap gap-x-10 gap-y-2 text-lg font-medium tracking-tight text-muted">
-      {logos.map((name) => <li>{name}</li>)}
-    </ul>
-  </div>
+<section class="py-section" id="logos" aria-label="Works with your stack">
+  <p class="page mb-6 text-small text-muted">Works with the stack and agents you already have</p>
+  <div class="border-t border-line"></div>
+  <ul class="grid grid-cols-2 border-b border-line sm:grid-cols-3 md:grid-cols-6">
+    {logos.map((logo) => (
+      <li class="flex min-h-20 items-center justify-center border-r border-b border-line px-4 last:border-r-0 md:border-b-0">
+        <span class="inline-flex h-7 max-w-[7.5rem] items-center justify-center">
+          <img
+            src={href(`/logos/${logo.file}.svg`)}
+            alt={logo.name}
+            width="120"
+            height="32"
+            class="logo-on-light h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            src={href(`/logos/${logo.file}-on-dark.svg`)}
+            alt=""
+            width="120"
+            height="32"
+            class="logo-on-dark h-7 w-auto max-w-[7.5rem] object-contain object-center"
+            loading="lazy"
+            decoding="async"
+            aria-hidden="true"
+          />
+        </span>
+      </li>
+    ))}
+  </ul>
+  <p class="page mt-5 text-small text-muted">
+    Same files. Same history. Same deploy — drafts, checkpoints and Publish on the repo you already have.
+  </p>
 </section>

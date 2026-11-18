@@ -32,14 +32,14 @@ const json = JSON.stringify(index).replace(/</g, "\\u003c");
     <svg class="pointer-events-none absolute top-1/2 left-0 size-5 -translate-y-1/2 text-muted" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="m13 13 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
     <input
       id="help-search-input"
-      class="w-full border-b border-muted bg-transparent py-3 pr-2 pl-8 text-lg text-ink transition-colors duration-gentle ease-gentle placeholder:text-muted focus:border-accent focus:outline-none"
+      class="w-full border-b border-muted bg-transparent py-3 pr-2 pl-8 text-body text-ink transition-colors duration-gentle ease-gentle placeholder:text-muted focus:border-accent focus:outline-none"
       type="search"
       placeholder="Search help, for example “invite”"
       autocomplete="off"
       aria-describedby="help-search-status"
     />
   </div>
-  <p id="help-search-status" class="mt-4 text-sm text-muted" aria-live="polite"></p>
+  <p id="help-search-status" class="mt-4 text-small text-muted" aria-live="polite"></p>
   <ul class="divide-y divide-line" data-help-search-results></ul>
   <script type="application/json" data-help-search-index set:html={json}></script>
 </div>
@@ -83,7 +83,7 @@ const json = JSON.stringify(index).replace(/</g, "\\u003c");
           link.href = entry.href;
           link.textContent = entry.title;
           const meta = document.createElement("p");
-          meta.className = "mt-1 text-sm text-muted";
+          meta.className = "mt-1 text-small text-muted";
           meta.textContent = entry.description;
           item.append(section, link, meta);
           list.append(item);

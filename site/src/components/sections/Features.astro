@@ -1,34 +1,63 @@
 ---
-const features = [
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import Painting from "../Painting.astro";
+
+const cards = [
   {
-    title: "Milestones with dates",
-    description: "Group tasks under a milestone with a due date. The plan shows what is due this week and what can wait.",
+    title: "Drafts and checkpoints",
+    description:
+      "Every edit lands in a draft with a checkpoint you can restore. Nothing reaches the live site until someone presses Publish.",
+    painting: "bridge" as const,
   },
   {
-    title: "Decisions beside the work",
-    description: "Note why you chose an approach on the task itself. Months later the reason is one click away, not buried in chat.",
+    title: "Previews and review",
+    description:
+      "Share a preview link, leave comments on the page, and approve the change before it goes live — on desktop and mobile.",
+    painting: "toledo" as const,
   },
   {
-    title: "A plan you can share",
-    description: "Send clients a read-only link to the live plan. They follow progress without an account or a status meeting.",
-  },
-  {
-    title: "A Friday summary",
-    description: "Each Friday, Acme emails everyone what they finished and what comes next. Nobody has to write the update.",
+    title: "Agent in plain English",
+    description:
+      "Ask for a page, a pass on the FAQ, or a whole new section. The agent edits the repo; you still own Publish.",
+    painting: "rocks" as const,
   },
 ];
 ---
 
-<section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="features" data-reveal>
-  <div class="md:col-span-4">
-    <h2 class="text-3xl font-light tracking-display text-ink md:sticky md:top-28">One plan the whole team can read</h2>
-    <p class="mt-5 max-w-sm text-muted">Projects, dates and decisions sit together, so the plan answers questions before anyone has to ask them.</p>
+<section class="page py-section" id="how-it-works">
+  <div class="w-full md:max-w-3/4">
+    <p class="text-small font-medium text-muted">Built for content teams</p>
+    <h2 class="mt-3 text-title tracking-display text-ink">
+      Get the most out of your repo with tools the team can actually use
+    </h2>
+    <p class="mt-4 max-w-measure text-muted">
+      The same files your developer owns, with drafts, previews and an agent on top — no second CMS to sync.
+    </p>
   </div>
-  <ul class="md:col-span-7 md:col-start-6">
-    {features.map((feature) => (
-      <li class="grid gap-2 border-t border-line py-8 last:border-b sm:grid-cols-5 sm:gap-8">
-        <h3 class="text-lg font-medium text-ink sm:col-span-2">{feature.title}</h3>
-        <p class="text-muted sm:col-span-3">{feature.description}</p>
+
+  <ul class="mt-12 grid gap-3 md:grid-cols-3">
+    {cards.map((card) => (
+      <li>
+        <Card className="h-full gap-3 rounded-lg border border-line py-2 ring-0">
+          <CardContent className="px-2 pt-0">
+            <div class="relative aspect-4/3 overflow-hidden rounded-md border border-line" aria-hidden="true">
+              <Painting id={card.painting} />
+              <div class="absolute inset-0 bg-night/20"></div>
+              <div class="relative flex size-full items-center justify-center p-3 md:p-4">
+                <div class="w-full rounded-md border border-line bg-surface-raised p-3">
+                  <div class="h-2 w-16 rounded-full bg-ink"></div>
+                  <div class="mt-3 h-2 w-28 rounded-full bg-line"></div>
+                  <div class="mt-2 h-2 w-20 rounded-full bg-line"></div>
+                  <div class="mt-6 h-16 rounded bg-sand"></div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+          <CardHeader className="px-2">
+            <CardTitle className="text-heading text-ink">{card.title}</CardTitle>
+            <CardDescription className="text-small leading-6 text-muted">{card.description}</CardDescription>
+          </CardHeader>
+        </Card>
       </li>
     ))}
   </ul>
