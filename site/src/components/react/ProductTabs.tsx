@@ -145,7 +145,7 @@ export function ProductTabs() {
     >
       <TabsList
         variant="line"
-        className="relative z-10 flex h-auto! w-full items-stretch gap-0 overflow-x-auto rounded-none border-b border-line bg-transparent p-0 lg:overflow-visible"
+        className="relative z-10 flex h-auto! w-full items-stretch justify-start gap-0 overflow-x-auto rounded-none border-b border-line bg-transparent p-0 lg:overflow-visible"
       >
         {tabs.map((tab, index) => {
           const fill = index < activeIndex ? 1 : index === activeIndex ? (reducedMotion ? 1 : progress) : 0;
