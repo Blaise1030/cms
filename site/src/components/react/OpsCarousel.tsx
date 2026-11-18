@@ -126,19 +126,21 @@ export function OpsCarousel() {
         <CarouselPrevious size="icon-lg" className="static translate-y-0" />
         <CarouselNext size="icon-lg" className="static translate-y-0" />
       </div>
-      <div className="relative">
-        <CarouselContent className="-ml-3 items-stretch">
+      <div className="relative border-t border-line">
+        <CarouselContent className="ml-0 items-stretch">
           {slides.map((slide, index) => (
             <CarouselItem
               key={slide.kind}
               className={cn(
-                "basis-4/5 py-1 pl-3 md:basis-1/2 lg:basis-1/3",
-                index === 0 && "pl-[calc(var(--spacing-gutter)+0.75rem)] md:pl-[calc(var(--spacing-gutter-wide)+0.75rem)]",
-                index === last && "pr-gutter md:pr-gutter-wide",
+                "basis-4/5 border-r border-line pl-0 md:basis-1/2 lg:basis-1/3",
+                index === last && "border-r-0",
               )}
             >
-              <Card className="flex h-full flex-col gap-0 rounded-md border border-line py-0 shadow-none ring-0">
-                <CardContent className="relative aspect-3/2 min-h-0 flex-1 overflow-hidden p-0" aria-hidden="true">
+              <Card className="flex h-full flex-col gap-0 rounded-none bg-transparent p-2 shadow-none ring-0">
+                <CardContent
+                  className="relative aspect-3/2 min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0"
+                  aria-hidden="true"
+                >
                   <img
                     src={paintingUrl(slide.painting)}
                     alt=""
@@ -153,7 +155,7 @@ export function OpsCarousel() {
                     </div>
                   </div>
                 </CardContent>
-                <CardHeader className="shrink-0 gap-1 border-t border-line py-4">
+                <CardHeader className="shrink-0 gap-1 px-4 pt-5 pb-4">
                   <CardTitle className="text-body text-ink">{slide.title}</CardTitle>
                   <CardDescription className="text-muted">{slide.caption}</CardDescription>
                 </CardHeader>
