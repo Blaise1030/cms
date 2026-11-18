@@ -10,6 +10,9 @@ const { sections, topics, docs } = await loadHelp();
 const shown = sections.filter((section) => section.docs.length > 0);
 const shownTopics = topics.filter((topic) => topic.docs.length > 0);
 const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
+// Same pill as the blog category filters (BlogFilters.astro).
+const topicPill =
+  "shrink-0 rounded-full border border-transparent px-3 py-1 text-small whitespace-nowrap text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink";
 ---
 <Base
   title="Help"
@@ -35,9 +38,9 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
               </li>
             ))}</ul>
             {shownTopics.length > 0 && (
-              <nav class="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t border-line pt-6 text-small" aria-label="Help topics">
-                <span class="label">Topics</span>
-                {shownTopics.map((topic) => <a class="link text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
+              <nav class="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-6" aria-label="Help topics">
+                <span class="label mr-2">Topics</span>
+                {shownTopics.map((topic) => <a class={topicPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
               </nav>
             )}
           </section>
