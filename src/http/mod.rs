@@ -14,6 +14,7 @@ pub mod github;
 pub mod health;
 pub mod history;
 pub mod projects;
+pub mod reviews;
 pub mod settings;
 pub mod setup;
 
@@ -89,6 +90,9 @@ pub fn router(state: AppState) -> Router {
             post(projects::dismiss_protection_hint),
         )
         .route("/api/projects/{id}/deploy", get(changes::deploy))
+        .route("/api/projects/{id}/reviews", get(reviews::list))
+        .route("/api/projects/{id}/reviews/{n}", get(reviews::detail))
+        .route("/api/projects/{id}/reviews/{n}/diff", get(reviews::diff))
         .route(
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
