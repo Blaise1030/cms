@@ -353,6 +353,10 @@
   html {
     scroll-behavior: smooth;
   }
+  /* Lenis drives wheel scrolling; native smooth scrolling would fight it. */
+  html.lenis {
+    scroll-behavior: auto;
+  }
   /* Hero words arrive once, in one sequence. */
   .word {
     display: inline-block;
