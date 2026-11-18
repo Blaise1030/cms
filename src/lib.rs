@@ -19,6 +19,7 @@ pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod providers;
+pub mod review;
 pub mod runtime;
 pub mod settings;
 pub mod setup_prefs;

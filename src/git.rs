@@ -69,6 +69,41 @@ pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
     map.entry(dir.to_path_buf()).or_default().clone()
 }
 
+/// [`run`] with extra environment variables (e.g. credentials for a fetch).
+pub(crate) async fn run_env(
+    dir: &Path,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<String, ApiError> {
+    let mut command = Command::new("git");
+    command
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.quotepath=off",
+        ])
+        .args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null());
+    let out = command
+        .output()
+        .await
+        .map_err(|e| ApiError::git(format!("failed to run git: {e}")))?;
+    if !out.status.success() {
+        return Err(ApiError::git(format!(
+            "git {} failed ({}): {}",
+            args.first().copied().unwrap_or(""),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// Run git in `dir`, returning stdout. Commit identity comes from the repo's local config.
 /// Hooks are disabled: the tree is agent-authored and we never want it to execute code on our
 /// behalf.
@@ -450,6 +485,29 @@ pub async fn diff(dir: &Path, sha: &str, scope: &str) -> Result<String, ApiError
         "--no-ext-diff",
         "--no-textconv",
         &full,
+    ];
+    if let Some(spec) = pathspec.as_deref() {
+        args.extend(["--", spec]);
+    }
+    run(dir, &args).await
+}
+
+/// Unified diff from `base` to `head` (both revisions), limited to `scope` like [`diff`].
+/// Binary files show as `Binary files ... differ`.
+pub async fn range_diff(
+    dir: &Path,
+    base: &str,
+    head: &str,
+    scope: &str,
+) -> Result<String, ApiError> {
+    let pathspec = scope_pathspec(scope);
+    let mut args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        base,
+        head,
     ];
     if let Some(spec) = pathspec.as_deref() {
         args.extend(["--", spec]);
