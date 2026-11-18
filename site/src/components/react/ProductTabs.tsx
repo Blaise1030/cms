@@ -9,13 +9,13 @@ export const productTabs = [
     value: "content",
     title: "Content",
     description: "Every collection in the repo, as a list you can use.",
-    alt: "Orso's blog collection: a list of posts with their status and last edit.",
+    alt: "Orso's editor open on a blog post: the markdown body beside its title, slug, date and tags.",
   },
   {
     value: "preview",
     title: "Preview",
     description: "See the draft on desktop and mobile before anyone else.",
-    alt: "Orso previewing a draft of the site, with the agent panel open beside it.",
+    alt: "Orso previewing the same blog post rendered on the draft site, with the agent panel open beside it.",
   },
   {
     value: "publish",

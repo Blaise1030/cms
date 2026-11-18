@@ -70,6 +70,30 @@ async function openFirstEntry(page) {
   await settle(page);
 }
 
+/** The post the Content and Preview tabs both show, so the pair reads as edit → see it rendered. */
+const POST = { title: "How we run design reviews", path: "/blog/how-we-run-design-reviews/" };
+
+async function openPost(page) {
+  await openBlog(page);
+  await page.getByTestId("content-entry").filter({ hasText: POST.title }).first().click();
+  await page.getByTestId("content-fields").waitFor({ timeout: 60_000 });
+  await settle(page);
+}
+
+async function previewPost(page) {
+  await page.goto(origin + p("preview"));
+  await previewReady(page);
+  const address = page.getByTestId("preview-address");
+  await address.fill(POST.path);
+  await address.press("Enter");
+  await page
+    .frameLocator('[data-testid="preview-frame"]')
+    .getByRole("heading", { name: POST.title })
+    .first()
+    .waitFor({ timeout: 60_000 });
+  await settle(page, 1200);
+}
+
 async function openAgent(page) {
   await page.goto(origin + p("preview"));
   await previewReady(page);
@@ -93,21 +117,19 @@ async function openAgent(page) {
  */
 const SHOTS = [
   // Hero: ProductTabs (16:9 stage)
-  { id: "hero-content", section: "hero", viewport: VIEWPORT.wide, prepare: openBlog },
+  // Content: the post's markdown in the editor. Preview: the same post rendered on the draft site.
+  { id: "hero-content", section: "hero", viewport: VIEWPORT.wide, prepare: openPost },
   {
     id: "hero-preview",
     section: "hero",
     viewport: VIEWPORT.wide,
-    prepare: async (page) => {
-      await page.goto(origin + p("preview"));
-      await previewReady(page);
-    },
+    prepare: previewPost,
     video: true,
     play: async (page) => {
-      // Scroll the previewed site so the clip shows a live page, not a still.
+      // Scroll the previewed post so the clip shows a live page, not a still.
       const frame = page.frameLocator('[data-testid="preview-frame"]');
-      for (let i = 0; i < 6; i++) {
-        await frame.locator("html").evaluate((el) => el.scrollBy({ top: 320, behavior: "smooth" }));
+      for (let i = 0; i < 4; i++) {
+        await frame.locator("html").evaluate((el) => el.scrollBy({ top: 240, behavior: "smooth" }));
         await page.waitForTimeout(700);
       }
       await frame.locator("html").evaluate((el) => el.scrollTo({ top: 0, behavior: "smooth" }));
