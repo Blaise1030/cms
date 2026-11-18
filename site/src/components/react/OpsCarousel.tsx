@@ -85,7 +85,7 @@ export function OpsCarousel({ shots }: { shots: Record<SlideKind, AppShotData> }
                     className="absolute inset-0 size-full object-cover"
                   />
                   <div className="absolute inset-0 bg-night/20" aria-hidden="true" />
-                  <div className="relative flex size-full items-center justify-center p-4 md:p-5">
+                  <div className="relative flex size-full items-center justify-center p-2 md:p-3">
                     <AppShot
                       shot={shots[slide.kind]}
                       alt={alts[slide.kind]}
