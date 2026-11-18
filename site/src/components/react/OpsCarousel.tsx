@@ -70,7 +70,7 @@ export function OpsCarousel({ shots }: { shots: Record<SlideKind, AppShotData> }
             <CarouselItem
               key={slide.kind}
               className={cn(
-                "basis-4/5 border-r border-line pl-0 md:basis-1/2 lg:basis-1/3",
+                "basis-4/5 border-r border-line pl-0 md:basis-1/2 lg:basis-2/5",
                 index === last && "border-r-0",
               )}
             >
@@ -89,7 +89,7 @@ export function OpsCarousel({ shots }: { shots: Record<SlideKind, AppShotData> }
                     <AppShot
                       shot={shots[slide.kind]}
                       alt={alts[slide.kind]}
-                      sizes="(min-width: 64rem) 26rem, (min-width: 48rem) 50vw, 80vw"
+                      sizes="(min-width: 64rem) 32rem, (min-width: 48rem) 50vw, 80vw"
                       className="h-full max-h-full w-auto max-w-full"
                     />
                   </div>

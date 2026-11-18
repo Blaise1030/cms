@@ -121,6 +121,47 @@ async function openAgent(page) {
 }
 
 /**
+ * Preview + agent side by side: the hero headline picked into a fresh chat (a mention chip and a
+ * typed, unsent prompt), then hovered again so the preview shows the picker's highlight on it.
+ */
+async function pickForAgent(page) {
+  await page.goto(origin + p("preview"));
+  await previewReady(page);
+  const panel = page.getByTestId("chat-panel");
+  if (!(await panel.isVisible())) await page.getByTestId("chat-toggle").click();
+  await panel.waitFor();
+  const fresh = page.getByTestId("chat-new");
+  if (await fresh.isVisible().catch(() => false)) await fresh.click();
+  await settle(page, 600);
+
+  const headline = page.frameLocator('[data-testid="preview-frame"]').locator("h1").first();
+  // The headline wraps each word in a span; aim at a point where the h1 itself is the target
+  // (a gap between words) so the whole headline is picked and highlighted, not one word.
+  const position = await headline.evaluate((h1) => {
+    const r = h1.getBoundingClientRect();
+    for (let y = r.top + 4; y < r.bottom; y += 4) {
+      for (let x = r.left + 4; x < r.right; x += 4) {
+        if (h1.ownerDocument.elementFromPoint(x, y) === h1) return { x: x - r.left, y: y - r.top };
+      }
+    }
+    return undefined;
+  });
+  const picker = page.getByTestId("element-picker");
+  await picker.click();
+  await headline.hover({ position });
+  await page.waitForTimeout(300);
+  await headline.click({ position });
+  await settle(page, 1200);
+
+  await page.getByTestId("chat-input").click();
+  await page.keyboard.type("Make this headline shorter and punchier");
+
+  await picker.click();
+  await headline.hover({ position });
+  await settle(page, 800);
+}
+
+/**
  * id: file stem. section: where it is used on the landing page. video: also record a short clip
  * of `play` (after `prepare`).
  */
@@ -210,7 +251,7 @@ const SHOTS = [
       await settle(page);
     },
   },
-  { id: "ops-agent", section: "ops", viewport: VIEWPORT.card, prepare: openAgent },
+  { id: "ops-agent", section: "ops", viewport: VIEWPORT.card, prepare: pickForAgent },
   {
     id: "ops-history",
     section: "ops",
