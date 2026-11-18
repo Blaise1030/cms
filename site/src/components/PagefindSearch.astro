@@ -1,0 +1,30 @@
+---
+// Pagefind Component UI over one section's index (built by integrations/pagefind.js after
+// `astro build`). The index only exists in a build, so under `astro dev` the box stays empty.
+// `searchbox` shows results in a dropdown; `inline` lists them under the field.
+interface Props {
+  /** Index name from astro.config.mjs, e.g. "blog" → `<base>pagefind-blog/`. */
+  bundle: string;
+  placeholder: string;
+  variant?: "searchbox" | "inline";
+  class?: string;
+}
+const { bundle, placeholder, variant = "searchbox", class: className } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+const bundlePath = `${base}pagefind-${bundle}/`;
+---
+
+<link rel="stylesheet" href={`${bundlePath}pagefind-component-ui.css`} />
+<div class:list={["pf-theme", className]}>
+  <pagefind-config instance={bundle} bundle-path={bundlePath} base-url={base}></pagefind-config>
+  {variant === "searchbox" ? (
+    <pagefind-searchbox instance={bundle} placeholder={placeholder} max-results="6" hide-shortcut></pagefind-searchbox>
+  ) : (
+    <>
+      <pagefind-input instance={bundle} placeholder={placeholder}></pagefind-input>
+      <pagefind-summary instance={bundle}></pagefind-summary>
+      <pagefind-results instance={bundle} max-results="8" hide-sub-results></pagefind-results>
+    </>
+  )}
+</div>
+<script is:inline src={`${bundlePath}pagefind-component-ui.js`}></script>

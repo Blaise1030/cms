@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, fontProviders } from "astro/config";
 import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
+import { pagefindIndex } from "./integrations/pagefind.js";
 import { site } from "./src/site.ts";
 
 import react from "@astrojs/react";
@@ -36,7 +37,18 @@ export default defineConfig({
       },
     },
   ],
-  integrations: [mdx(), orso({ collections: marketingCollections }), react()],
+  integrations: [
+    mdx(),
+    orso({ collections: marketingCollections }),
+    react(),
+    // Search indexes for the blog and help search boxes (build only; see integrations/pagefind.js).
+    pagefindIndex({
+      sections: [
+        { name: "blog", glob: "blog/**/*.html" },
+        { name: "help", glob: "help/**/*.html" },
+      ],
+    }),
+  ],
   vite: {
     plugins: [tailwindcss()],
     // Orso's conflict preview and the template tests run the site with node_modules symlinked

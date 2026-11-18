@@ -1,7 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import DocList from "../../components/DocList.astro";
-import HelpSearch from "../../components/HelpSearch.astro";
+import PagefindSearch from "../../components/PagefindSearch.astro";
 import PageHeader from "../../components/PageHeader.astro";
 import { href } from "../../lib/href";
 import { loadHelp } from "../../lib/help";
@@ -17,7 +17,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
   jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: "Help" }, breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }])]}
 >
   <PageHeader title="Help" description="Guides and answers for every step, from your first sign-in to your next invoice.">
-    {docs.length > 0 && <HelpSearch docs={shown.flatMap((section) => section.docs.map((doc) => ({ doc, section: section.title })))} />}
+    {docs.length > 0 && <PagefindSearch bundle="help" variant="inline" placeholder="Search help, for example “invite”" class="rise-3 mt-10 max-w-2xl" />}
   </PageHeader>
   <div class="page">
     {docs.length === 0 ? <p class="mt-12 text-muted">No help docs yet. Check back soon for guides and answers.</p> : (

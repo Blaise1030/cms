@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -43,7 +43,9 @@ test("built sample categories, sections and topics link their articles", () => {
   const help = html(root, "help");
   assert.match(help, /href="\/help\/section\/projects\/"/);
   assert.match(help, /href="\/help\/categories\/setup\/"/);
-  assert.match(help, /data-help-search-index/);
+  assert.match(help, /<pagefind-config instance="help" bundle-path="\/pagefind-help\/"/);
+  assert.match(html(root, "blog"), /<pagefind-config instance="blog" bundle-path="\/pagefind-blog\/"/);
+  for (const bundle of ["blog", "help"]) assert.ok(existsSync(join(root, "dist", `pagefind-${bundle}`, "pagefind.js")), `pagefind-${bundle} index`);
   const projects = html(root, "help/section/projects");
   assert.match(projects, /<h2[^>]*>Planning/);
   assert.ok(projects.indexOf("Create a project") < projects.indexOf("Share a project"));
