@@ -25,7 +25,7 @@ const postCategories = categoriesOf(post, categories);
       ))}
     </div>
     <h2 class="max-w-4xl text-title tracking-display text-ink">
-      <a class="decoration-line-strong decoration-1 underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+      <a class="after:absolute after:inset-0" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
     </h2>
     <p class="max-w-measure text-body text-muted">{post.data.description}</p>
   </div>
