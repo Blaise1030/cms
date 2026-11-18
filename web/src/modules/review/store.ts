@@ -96,9 +96,9 @@ export const useReviewStore = defineStore("review", () => {
   /**
    * Greenlight or send back the open change. The row and the open change take the new state
    * without a reload. `head_moved` reloads detail and diff and says why; other failures show
-   * their message. Resolves true when the decision went through.
+   * their message. Resolves true when the decision went through, or "head_moved" when the change moved.
    */
-  async function decide(decision: "greenlight" | "send_back", comment?: string): Promise<boolean> {
+  async function decide(decision: "greenlight" | "send_back", comment?: string): Promise<boolean | "head_moved"> {
     const detail = current.value;
     const id = projectId.value;
     if (!detail || !id || deciding.value) return false;
@@ -117,6 +117,7 @@ export const useReviewStore = defineStore("review", () => {
       if (err.status === 409 && err.reason === "head_moved") {
         await open(id, detail.number);
         decideError.value = "This change was updated since you opened it";
+        return "head_moved";
       } else {
         if (err.status === 404) gone.value = true;
         decideError.value = errorMessage(e);

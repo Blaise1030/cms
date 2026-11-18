@@ -1439,6 +1439,14 @@ impl GithubAuth {
         let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
             ApiError::enoent("Couldn't publish. Share the draft first, then try again.")
         })?;
+        // A reviewer's send-back holds the change even when GitHub would merge it (no branch
+        // protection). Drafts have no reviews that count; publish readies them first.
+        if !pull.draft {
+            let state = self.pull_and_state(repo, head_branch).await?;
+            if matches!(state, Some((_, PrState::ChangesRequested, _))) {
+                return Err(ApiError::conflict("A reviewer sent this change back."));
+            }
+        }
         let (status, body) = self
             .api_raw(
                 reqwest::Method::PUT,
@@ -4678,17 +4686,64 @@ esac"#,
     ) -> axum::Router {
         use axum::extract::Json as AxJson;
         use axum::routing::put;
-        one_open_pull(false).route(
-            "/repos/acme/site/pulls/4/merge",
-            put(move |AxJson(body): AxJson<serde_json::Value>| {
-                let seen = seen.clone();
-                let response = response.clone();
-                async move {
-                    seen.lock().unwrap().push(body);
-                    (status, axum::Json(response))
-                }
-            }),
-        )
+        one_open_pull(false)
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                axum::routing::get(|| async { axum::Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/merge",
+                put(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let seen = seen.clone();
+                    let response = response.clone();
+                    async move {
+                        seen.lock().unwrap().push(body);
+                        (status, axum::Json(response))
+                    }
+                }),
+            )
+    }
+
+    #[tokio::test]
+    async fn merge_pr_refuses_a_sent_back_change_without_merging() {
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let merges = seen.clone();
+        let routes = one_open_pull(false)
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!([
+                        { "user": { "login": "alan" }, "state": "CHANGES_REQUESTED",
+                          "commit_id": "abc", "body": "Fix the headline" }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/merge",
+                axum::routing::put(move |axum::Json(b): axum::Json<serde_json::Value>| {
+                    let merges = merges.clone();
+                    async move {
+                        merges.lock().unwrap().push(b);
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(serde_json::json!({ "merged": true, "sha": "def" })),
+                        )
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-sent-back");
+        let err = auth
+            .merge_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+
+        assert_eq!(err.http_status(), 409);
+        assert_eq!(err.message, "A reviewer sent this change back.");
+        assert!(seen.lock().unwrap().is_empty(), "no merge request was sent");
     }
 
     #[tokio::test]

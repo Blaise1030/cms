@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, h as el } from "vue";
 import { TooltipProvider } from "reka-ui";
@@ -56,7 +56,7 @@ async function mountChange(api: Record<string, unknown>) {
     setup: () => () =>
       el(TooltipProvider, null, { default: () => el(ReviewChange, { projectId: "site", number: 7 }) }),
   });
-  const w = mount(Host, { global: { plugins: [router] } });
+  const w = mount(Host, { global: { plugins: [router] }, attachTo: document.body });
   // The store loads the diff parser lazily.
   await vi.waitFor(() => expect(w.text()).not.toContain("Loading change"));
   await flushPromises();
@@ -178,6 +178,53 @@ describe("ReviewChange", () => {
       expect(reviewDiff).toHaveBeenCalledTimes(2);
       expect(w.text()).toContain("This change was updated since you opened it");
       expect(store.items[0]?.myState).toBe("new");
+    });
+
+    describe("send back dialog", () => {
+      const dialog = () => new DOMWrapper(document.body);
+      async function openDialog(api: Record<string, unknown>) {
+        const m = await mountChange({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF), ...api });
+        await m.w.get("[data-testid='review-send-back']").trigger("click");
+        await flushPromises();
+        await dialog().get("[data-testid='send-back-comment']").setValue("  Fix the hero  ");
+        return m;
+      }
+      async function submit() {
+        await dialog().get("form").trigger("submit");
+        await flushPromises();
+      }
+      afterEach(() => {
+        document.body.innerHTML = "";
+      });
+
+      it("sends the trimmed comment and closes on success", async () => {
+        const decideReview = vi.fn(async () => undefined);
+        await openDialog({ decideReview });
+        await submit();
+        expect(decideReview).toHaveBeenCalledWith("site", 7, { decision: "send_back", comment: "Fix the hero", headSha: "abc" });
+        expect(dialog().find("[data-testid='send-back-comment']").exists()).toBe(false);
+      });
+
+      it("closes on head_moved and shows the message on the page", async () => {
+        const decideReview = vi.fn(async () => {
+          throw new ApiError("UNKNOWN", "This change was updated since you opened it", 409, { reason: "head_moved" });
+        });
+        const { w } = await openDialog({ decideReview });
+        await submit();
+        await vi.waitFor(() => expect(dialog().find("[data-testid='send-back-comment']").exists()).toBe(false));
+        expect(w.get("[data-testid='review-decide-error']").text()).toContain("This change was updated since you opened it");
+      });
+
+      it("keeps the dialog open and shows another failure inside it", async () => {
+        const decideReview = vi.fn(async () => {
+          throw new ApiError("UNKNOWN", "This is your change", 403);
+        });
+        const { w } = await openDialog({ decideReview });
+        await submit();
+        expect(dialog().get("[data-testid='send-back-error']").text()).toContain("This is your change");
+        expect((dialog().get("[data-testid='send-back-comment']").element as HTMLTextAreaElement).value).toBe("  Fix the hero  ");
+        expect(w.find("[data-testid='review-decide-error']").exists()).toBe(false);
+      });
     });
   });
 });
