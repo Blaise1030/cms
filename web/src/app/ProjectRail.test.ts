@@ -1,14 +1,29 @@
 // @vitest-environment happy-dom
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import { createFakeDaemon } from "@/test/fakeDaemon";
+import { useReviewStore } from "@/modules/review/store";
+
+const hoisted = vi.hoisted(() => ({ daemon: null as unknown }));
+vi.mock("@/core/daemon", () => ({ useDaemon: () => hoisted.daemon }));
+
 import ProjectRail from "./ProjectRail.vue";
 
 const Page = defineComponent({ props: { id: String }, setup: (props) => () => h(ProjectRail, { projectId: props.id! }) });
 const empty = { render: () => null };
 
-async function setup(start: string) {
+async function setup(start: string, waiting = 0) {
+  hoisted.daemon = createFakeDaemon({
+    reviews: vi.fn(async () =>
+      Array.from({ length: waiting }, (_, i) => ({ number: i + 1, myState: "new" })).concat([
+        { number: 99, myState: "greenlit" },
+      ]),
+    ),
+  });
+  setActivePinia(createPinia());
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -19,6 +34,7 @@ async function setup(start: string) {
         { path: "content/:rest(.*)?", name: "project-content", component: empty },
         { path: "code/:rest(.*)?", name: "project-code", component: empty },
         { path: "history", name: "project-history", component: empty },
+        { path: "review/:number?", name: "project-review", component: empty },
       ] },
     ],
   });
@@ -55,7 +71,7 @@ it("links to app settings from the rail footer, apart from the project tabs", as
   const link = w.get('[data-testid="project-rail-app-settings"]');
   expect(link.attributes("href")).toBe("/settings");
   expect(link.attributes("aria-label")).toBe("App settings");
-  expect(w.findAll('[data-testid^="workspace-tab-"]')).toHaveLength(6);
+  expect(w.findAll('[data-testid^="workspace-tab-"]')).toHaveLength(7);
   await link.trigger("click");
   await flushPromises();
   expect(router.currentRoute.value.path).toBe("/settings");
@@ -76,4 +92,18 @@ it("keeps its buttons below the macOS traffic lights and drags the window from a
   } finally {
     delete document.documentElement.dataset.desktop;
   }
+});
+
+it("shows the Review tab with a badge of changes waiting for you", async () => {
+  const { w } = await setup("/p/site/preview", 2);
+  expect(w.get('[data-testid="workspace-tab-review"]').attributes("href")).toBe("/p/site/review");
+  expect(w.get('[data-testid="workspace-tab-review"]').attributes("aria-label")).toBe("Review");
+  expect(useReviewStore().waitingCount).toBe(2);
+  expect(w.get('[data-testid="review-badge"]').text()).toBe("2");
+});
+
+it("hides the Review badge when nothing is waiting", async () => {
+  const { w } = await setup("/p/site/preview", 0);
+  expect(w.find('[data-testid="workspace-tab-review"]').exists()).toBe(true);
+  expect(w.find('[data-testid="review-badge"]').exists()).toBe(false);
 });

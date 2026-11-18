@@ -42,6 +42,8 @@ import {
   type Project,
   type ProviderSignInState,
   type ProviderVerifyResult,
+  type ReviewDetail,
+  type ReviewItem,
   type RuntimeStatus,
   type SetupSnapshot,
   type SetupStatus,
@@ -411,6 +413,14 @@ export function createApi(
     listCheckpoints: (project: string) => json<CheckpointLog>("GET", "/api/checkpoints", { query: { project } }),
     checkpointDiff: async (project: string, sha: string): Promise<string> =>
       (await send("GET", `/api/checkpoints/${enc(sha)}/diff`, { query: { project } })).text(),
+    /** Labelled changes waiting on the signed-in reviewer. */
+    reviews: async (project: string): Promise<ReviewItem[]> =>
+      (await json<{ reviews: ReviewItem[] }>("GET", `/api/projects/${enc(project)}/reviews`)).reviews,
+    review: (project: string, number: number) =>
+      json<ReviewDetail>("GET", `/api/projects/${enc(project)}/reviews/${number}`),
+    /** Unified diff of a teammate's change, fetched without a checkout. */
+    reviewDiff: async (project: string, number: number): Promise<string> =>
+      (await send("GET", `/api/projects/${enc(project)}/reviews/${number}/diff`)).text(),
     restoreCheckpoint: (project: string, sha: string) =>
       json<{ restored: string }>("POST", `/api/checkpoints/${enc(sha)}/restore`, {
         body: { project },

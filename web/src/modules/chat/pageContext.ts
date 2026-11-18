@@ -21,6 +21,7 @@ const TAB_LABEL: Record<ProjectTab, string> = {
   design: "Design",
   code: "Code",
   history: "History",
+  review: "Review",
   settings: "Settings",
 };
 

@@ -96,6 +96,32 @@ export type PrState = "draft" | "open" | "approved" | "merged" | "closed";
 /** Check runs on the PR head: any failing → failing, else any pending → pending. */
 export type ChecksState = "none" | "pending" | "passing" | "failing";
 
+/** Where the signed-in reviewer stands on a change waiting for them. */
+export type MyReviewState = "new" | "sent_back" | "greenlit";
+
+/** One change in the Review inbox (`GET /api/projects/{id}/reviews`). */
+export interface ReviewItem {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  /** ISO timestamp. */
+  updatedAt: string;
+  headSha: string;
+  checks: ChecksState;
+  myState: MyReviewState;
+}
+
+/** `GET /api/projects/{id}/reviews/{n}`. */
+export interface ReviewDetail extends ReviewItem {
+  description: string | null;
+  open: boolean;
+  draft: boolean;
+  /** The reviewer may greenlight or send back; false carries a `reason`. */
+  canDecide: boolean;
+  reason: string | null;
+}
+
 /** `pr` of `GET /api/changes/{branch}/status`. */
 export interface PrStatus {
   number: number;

@@ -5,11 +5,12 @@ import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
 import ContentPanel from "@/modules/content/ContentPanel.vue";
 import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
+import ReviewPanel from "@/modules/review/ReviewPanel.vue";
 import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
+export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "review" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
 export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
@@ -65,6 +66,15 @@ export const routes: RouteRecordRaw[] = [
         props: (r) => ({ projectId: r.params.id as string, sha: (r.params.sha as string) || undefined }),
       },
       {
+        path: "review/:number?",
+        name: "project-review",
+        component: ReviewPanel,
+        props: (r) => ({
+          projectId: r.params.id as string,
+          number: r.params.number ? Number(r.params.number) : undefined,
+        }),
+      },
+      {
         path: "settings",
         name: "project-settings",
         component: SettingsPanel,
@@ -103,11 +113,17 @@ export function historyPath(id: string, sha?: string | null) {
   return sha ? `${base}/${encodeURIComponent(sha)}` : base;
 }
 
+export function reviewPath(id: string, number?: number | null) {
+  const base = projectPath(id, "review");
+  return number ? `${base}/${number}` : base;
+}
+
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
   if (name === "project-content") return "content";
   if (name === "project-design") return "design";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
+  if (name === "project-review") return "review";
   if (name === "project-settings") return "settings";
   return "preview";
 }
