@@ -51,51 +51,53 @@ const navLink = "group block border-t border-line pt-6";
 const crumbLink = cn(buttonVariants({ variant: "link" }), "h-auto px-0");
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
-  <article class="page pt-14 md:pt-20" data-pagefind-body>
-    <nav class="text-small text-muted" aria-label="Breadcrumb">
-      <ol class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <li><a class={crumbLink} href={href("/help/")}>Help</a></li>
-        <li aria-hidden="true">/</li>
-        <li><a class={crumbLink} href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
-        {subsection && <li aria-hidden="true">/</li>}
-        {subsection && <li>{subsection}</li>}
-      </ol>
-    </nav>
-    <div class="mt-10 grid gap-12 lg:grid-cols-12 lg:gap-10">
-      <div class="min-w-0 lg:col-span-8">
-        <h1 class="rise text-title tracking-display text-ink">{entry.data.title}</h1>
-        <p class="rise-2 mt-6 max-w-prose text-body text-muted">{entry.data.description}</p>
-        {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
-        <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
-        {(previous || next) && (
-          <nav class="mt-16 grid max-w-prose gap-8 sm:grid-cols-2" aria-label="More articles" data-pagefind-ignore>
-            <div>{previous && <a class={navLink} href={href(`/help/${previous.id}/`)}><span class="label block">Previous</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{previous.data.title}</span></a>}</div>
-            <div class="sm:text-right">{next && <a class={navLink} href={href(`/help/${next.id}/`)}><span class="label block">Next</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{next.data.title}</span></a>}</div>
-          </nav>
+  <div class="mx-auto w-full max-w-7xl border-x border-line pb-section">
+    <article class="page pt-14 md:pt-20" data-pagefind-body>
+      <nav class="text-small text-muted" aria-label="Breadcrumb">
+        <ol class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <li><a class={crumbLink} href={href("/help/")}>Help</a></li>
+          <li aria-hidden="true">/</li>
+          <li><a class={crumbLink} href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
+          {subsection && <li aria-hidden="true">/</li>}
+          {subsection && <li>{subsection}</li>}
+        </ol>
+      </nav>
+      <div class="mt-10 grid gap-12 lg:grid-cols-12 lg:gap-10">
+        <div class="min-w-0 lg:col-span-8">
+          <h1 class="rise text-title tracking-display text-ink">{entry.data.title}</h1>
+          <p class="rise-2 mt-6 max-w-prose text-body text-muted">{entry.data.description}</p>
+          {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
+          <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
+          {(previous || next) && (
+            <nav class="mt-16 grid max-w-prose gap-8 sm:grid-cols-2" aria-label="More articles" data-pagefind-ignore>
+              <div>{previous && <a class={navLink} href={href(`/help/${previous.id}/`)}><span class="label block">Previous</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{previous.data.title}</span></a>}</div>
+              <div class="sm:text-right">{next && <a class={navLink} href={href(`/help/${next.id}/`)}><span class="label block">Next</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{next.data.title}</span></a>}</div>
+            </nav>
+          )}
+        </div>
+        {toc.length > 1 && (
+          <aside class="hidden lg:col-span-3 lg:col-start-10 lg:block">
+            <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
+              <p class="label">On this page</p>
+              <ul class="mt-4 border-l border-line text-small">
+                {toc.map((heading) => (
+                  <li>
+                    <a
+                      class:list={[
+                        "-ml-px block border-l border-transparent py-1.5 text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:border-accent aria-[current=true]:text-ink",
+                        heading.depth === 3 ? "pl-8" : "pl-4",
+                      ]}
+                      href={`#${heading.slug}`}>{heading.text}</a
+                    >
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </aside>
         )}
       </div>
-      {toc.length > 1 && (
-        <aside class="hidden lg:col-span-3 lg:col-start-10 lg:block">
-          <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
-            <p class="label">On this page</p>
-            <ul class="mt-4 border-l border-line text-small">
-              {toc.map((heading) => (
-                <li>
-                  <a
-                    class:list={[
-                      "-ml-px block border-l border-transparent py-1.5 text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:border-accent aria-[current=true]:text-ink",
-                      heading.depth === 3 ? "pl-8" : "pl-4",
-                    ]}
-                    href={`#${heading.slug}`}>{heading.text}</a
-                  >
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </aside>
-      )}
-    </div>
-  </article>
+    </article>
+  </div>
 </Base>
 
 <script>
