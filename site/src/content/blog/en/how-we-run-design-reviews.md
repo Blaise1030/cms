@@ -5,7 +5,6 @@ pubDate: "2026-11-10"
 categories: [company]
 tags: [design, process]
 ---
-
 ## Feedback comes first, in writing
 
 The designer shares the work a day ahead. Reviewers leave written comments before the meeting, so the call is for decisions, not first impressions.
@@ -17,3 +16,10 @@ Every review ends with a single outcome: ship it, change it, or try another dire
 ## Keep it short
 
 Thirty minutes is enough. Long reviews tend to drift into redesigning the whole product.
+
+
+
+| First item                       | Second Item                      | 3rd items                        |
+| -------------------------------- | -------------------------------- | -------------------------------- |
+| Please this is good, this is bad | Please this is good, this is bad | Please this is good, this is bad |
+|                                  |                                  |                                  |
