@@ -11,7 +11,7 @@ const { topics } = await loadHelp();
   description="Browse Orso help articles by topic, such as setup, collaboration and troubleshooting."
   jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: "Help topics" }, breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: "Topics", path: "/help/categories/" }])]}
 >
-  <div class="mx-auto w-full max-w-7xl border-x border-line pb-section">
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
     <PageHeader title="Help topics" back={{ label: "Back to Help", href: "/help/" }} />
     <div class="page mt-12">
       {topics.length === 0 ? <p class="text-muted">No help topics yet.</p> : (

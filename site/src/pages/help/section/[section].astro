@@ -21,7 +21,7 @@ const groups = [{ id: "", title: "", docs: section.loose }, ...section.subsectio
     breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: section.title, path: `/help/section/${section.id}/` }]),
   ]}
 >
-  <div class="mx-auto w-full max-w-7xl border-x border-line pb-section">
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
     <PageHeader title={section.title} description={section.description} back={{ label: "Back to Help", href: "/help/" }} />
     <div class="page">
       {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
