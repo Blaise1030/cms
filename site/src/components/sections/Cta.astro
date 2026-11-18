@@ -7,6 +7,8 @@ const facts = [
   { title: "Content stays in your repo", detail: "Plain Markdown you already own.", icon: "file-text" as const },
   { title: "Static files, any host", detail: "No runtime and no lock-in.", icon: "globe" as const },
 ];
+
+const installCommand = "brew install blaise1030/tap/orso && orso serve --open";
 ---
 
 <section class="mx-auto w-full max-w-7xl border border-line" id="cta">
@@ -17,8 +19,20 @@ const facts = [
       </div>
       <div class="border-t border-line px-6 py-8 md:col-span-5 md:border-t-0 md:border-l md:px-10 md:py-10">
         <p class="max-w-measure text-muted">
-          Your developer connects the repo once. Everyone else is editing in minutes — drafts, previews and Publish.
+          You install Orso and connect the repo once. After that, your team edits with drafts, previews and Publish.
         </p>
+        <div class="mt-6 flex items-center gap-2 rounded-md border border-line bg-surface-raised py-1 pr-1 pl-3">
+          <code class="min-w-0 flex-1 overflow-x-auto text-small whitespace-nowrap text-ink" data-install-command
+            >{installCommand}</code
+          >
+          <button
+            class={buttonVariants({ variant: "outline", size: "sm" })}
+            type="button"
+            data-copy-install
+            aria-label="Copy install command">Copy</button
+          >
+        </div>
+        <p class="mt-2 text-small text-muted">macOS via Homebrew. Linux installer script on GitHub.</p>
         <a
           class={`${buttonVariants({ size: "lg" })} mt-8`}
           href="https://github.com/Blaise1030/cms"
@@ -40,3 +54,18 @@ const facts = [
     </ul>
   </div>
 </section>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>("[data-copy-install]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const command = button.parentElement?.querySelector("[data-install-command]")?.textContent ?? "";
+      try {
+        await navigator.clipboard.writeText(command.trim());
+        button.textContent = "Copied";
+        setTimeout(() => (button.textContent = "Copy"), 1500);
+      } catch {
+        button.textContent = "Copy failed";
+      }
+    });
+  });
+</script>
