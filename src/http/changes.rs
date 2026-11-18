@@ -263,9 +263,10 @@ pub async fn share(
             let title = pr_title(&change.title);
             let description = changes::description(&project.dir, &branch).await;
             let body = pr_body(&change.title, description.as_deref());
+            let labels = crate::settings::pr_labels(&project.dir);
             state
                 .github
-                .create_draft_pr(&repo, &branch, &title, &body)
+                .create_draft_pr(&repo, &branch, &title, &body, &labels)
                 .await?
         }
     };
@@ -874,9 +875,10 @@ pub async fn publish(
             let title = pr_title(&change.title);
             let description = changes::description(&project.dir, &branch).await;
             let body = pr_body(&change.title, description.as_deref());
+            let labels = crate::settings::pr_labels(&project.dir);
             state
                 .github
-                .create_draft_pr(&repo, &branch, &title, &body)
+                .create_draft_pr(&repo, &branch, &title, &body, &labels)
                 .await
                 .map_err(|e| publish_step_error(e, false))?
         }

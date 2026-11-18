@@ -1145,13 +1145,14 @@ impl GithubAuth {
         Ok(pulls.into_iter().next().map(PullRequest::from))
     }
 
-    /// Create a draft pull request from `head_branch` into `main`.
+    /// Create a draft pull request from `head_branch` into `main`, tagged with `labels`.
     pub async fn create_draft_pr(
         &self,
         repo: &str,
         head_branch: &str,
         title: &str,
         body: &str,
+        labels: &[String],
     ) -> Result<PullRequest, ApiError> {
         let pull: ApiPull = self
             .api_json(
@@ -1166,6 +1167,17 @@ impl GithubAuth {
                 })),
             )
             .await?;
+        // Tag it so reviewers can filter orso's PRs (e.g. `label:orso`). GitHub creates a label
+        // on first use. Best effort: a refused or failed label must not fail sharing the change.
+        if !labels.is_empty() {
+            let _ = self
+                .api_raw(
+                    reqwest::Method::POST,
+                    &format!("/repos/{repo}/issues/{}/labels", pull.number),
+                    Some(&serde_json::json!({ "labels": labels })),
+                )
+                .await;
+        }
         Ok(PullRequest::from(pull))
     }
 
@@ -2453,24 +2465,37 @@ mod tests {
 
         let seen: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let seen2 = seen.clone();
-        let routes = Router::new().route(
-            "/repos/acme/site/pulls",
-            post(move |AxJson(body): AxJson<serde_json::Value>| {
-                let seen2 = seen2.clone();
-                async move {
-                    *seen2.lock().unwrap() = Some(body);
-                    (
-                        axum::http::StatusCode::CREATED,
-                        Json(serde_json::json!({
-                            "number": 1,
-                            "html_url": "https://github.com/acme/site/pull/1",
-                            "title": "Launch week",
-                            "draft": true
-                        })),
-                    )
-                }
-            }),
-        );
+        let labels: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let labels2 = labels.clone();
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/issues/1/labels",
+                post(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let labels2 = labels2.clone();
+                    async move {
+                        *labels2.lock().unwrap() = Some(body);
+                        Json(serde_json::json!([{ "name": "orso" }]))
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                post(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let seen2 = seen2.clone();
+                    async move {
+                        *seen2.lock().unwrap() = Some(body);
+                        (
+                            axum::http::StatusCode::CREATED,
+                            Json(serde_json::json!({
+                                "number": 1,
+                                "html_url": "https://github.com/acme/site/pull/1",
+                                "title": "Launch week",
+                                "draft": true
+                            })),
+                        )
+                    }
+                }),
+            );
         let (base, stop) = mock_api(routes).await;
         let dir = tmp_dir("createdraft");
         write_session(&dir, "tok");
@@ -2487,7 +2512,13 @@ mod tests {
         let title = pr_title("Launch week");
         let body = pr_body("Launch week", None);
         let pr = auth
-            .create_draft_pr("acme/site", "content/launch-week", &title, &body)
+            .create_draft_pr(
+                "acme/site",
+                "content/launch-week",
+                &title,
+                &body,
+                &["orso".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(pr.number, 1);
@@ -2497,6 +2528,52 @@ mod tests {
         assert_eq!(sent["body"], "Preview of change: Launch week");
         assert_eq!(sent["head"], "content/launch-week");
         assert_eq!(sent["base"], "main");
+        let labelled = labels.lock().unwrap().clone().expect("PR labelled");
+        assert_eq!(labelled["labels"], serde_json::json!(["orso"]));
+        stop();
+    }
+
+    #[tokio::test]
+    async fn create_draft_pr_survives_a_refused_label() {
+        use axum::routing::post;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/issues/2/labels",
+                post(|| async { axum::http::StatusCode::FORBIDDEN }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                post(|| async {
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(serde_json::json!({
+                            "number": 2,
+                            "html_url": "https://github.com/acme/site/pull/2",
+                            "title": "X",
+                            "draft": true
+                        })),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let dir = tmp_dir("createdraft-label-refused");
+        write_session(&dir, "tok");
+        let auth = GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        );
+        let pr = auth
+            .create_draft_pr("acme/site", "content/x", "X", "b", &["orso".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(pr.number, 2);
         stop();
     }
 
@@ -2536,7 +2613,13 @@ esac"#,
             .unwrap()
             .is_none());
         let pr = auth
-            .create_draft_pr("acme/site", "content/x", "X", "Preview of change: X")
+            .create_draft_pr(
+                "acme/site",
+                "content/x",
+                "X",
+                "Preview of change: X",
+                &["orso".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(pr.number, 7);
@@ -2545,11 +2628,26 @@ esac"#,
         assert!(calls
             .contains("api --method GET /repos/acme/site/pulls?head=acme:content%2Fx&state=open"));
         assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
+        assert!(calls.contains("api --method POST /repos/acme/site/issues/7/labels --input -"));
+        // `gh.stdin` holds the last call's body: the label request after the PR create.
         let sent: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("gh.stdin")).unwrap()).unwrap();
-        assert_eq!(sent["head"], "content/x");
-        assert_eq!(sent["base"], "main");
-        assert_eq!(sent["draft"], true);
+        assert_eq!(sent["labels"], serde_json::json!(["orso"]));
+    }
+
+    #[tokio::test]
+    async fn no_labels_means_no_label_request() {
+        let dir = tmp_dir("ghnolabels");
+        let auth = gh_with_api(
+            &dir,
+            r#"printf '%s' '{"number":7,"html_url":"https://github.com/acme/site/pull/7","title":"X","draft":true}'"#,
+        );
+        auth.create_draft_pr("acme/site", "content/x", "X", "b", &[])
+            .await
+            .unwrap();
+        let calls = std::fs::read_to_string(dir.join("gh.calls")).unwrap();
+        assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
+        assert!(!calls.contains("/labels"));
     }
 
     #[tokio::test]
@@ -2560,7 +2658,7 @@ esac"#,
             r#"printf '{"message":"Validation Failed"}'; echo 'gh: Validation Failed (HTTP 422)' >&2; exit 1"#,
         );
         let err = auth
-            .create_draft_pr("acme/site", "content/x", "X", "b")
+            .create_draft_pr("acme/site", "content/x", "X", "b", &["orso".to_string()])
             .await
             .unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::Conflict);

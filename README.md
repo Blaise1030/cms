@@ -82,6 +82,7 @@ once it meets these requirements:
 | `DESIGN.md` at the root | Design tab |
 | A deploy that records GitHub Deployments with an `environment_url` | Preview and Open live site links |
 | `orso.json` when you use pnpm/yarn or the site isn't at the repo root | Install and dev commands |
+| `orso.json` `prLabels` (optional, default `["orso"]`, `[]` for none) | Labels on the PRs orso opens, so reviewers can filter them |
 
 Let your coding agent do it. Install the skills, then ask it to "set up this site for orso":
 
