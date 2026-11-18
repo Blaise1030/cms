@@ -54,7 +54,7 @@ function PaintedStage({ children }: { children: ReactNode }) {
         className="absolute inset-0 size-full object-cover"
       />
       <div className="absolute inset-0 bg-night/25" aria-hidden="true" />
-      <div className="relative flex size-full flex-col p-4 md:p-6">{children}</div>
+      <div className="relative flex size-full flex-col p-1.5 sm:p-4 md:p-6">{children}</div>
     </div>
   );
 }
