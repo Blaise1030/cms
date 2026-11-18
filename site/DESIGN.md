@@ -47,34 +47,28 @@ typography:
     fontWeight: 500
     lineHeight: 1.02
     letterSpacing: -0.035em
-  h1:
+  title:
     fontFamily: "Geist"
-    fontSize: 3rem
+    fontSize: clamp(2.25rem, 4vw, 3rem)
     fontWeight: 500
     lineHeight: 1.08
     letterSpacing: -0.035em
-  h2:
+  heading:
     fontFamily: "Geist"
-    fontSize: 2.25rem
+    fontSize: 1.5rem
     fontWeight: 500
-    lineHeight: 1.15
-    letterSpacing: -0.035em
-  h3:
-    fontFamily: "Geist"
-    fontSize: 1.4375rem
-    fontWeight: 500
-    lineHeight: 1.35
+    lineHeight: 1.25
     letterSpacing: -0.015em
-  body-lg:
-    fontFamily: "Geist"
-    fontSize: 1.1875rem
-    fontWeight: 400
-    lineHeight: 1.55
-  body-md:
+  body:
     fontFamily: "Geist"
     fontSize: 1rem
     fontWeight: 400
     lineHeight: 1.65
+  small:
+    fontFamily: "Geist"
+    fontSize: 0.875rem
+    fontWeight: 400
+    lineHeight: 1.55
   label:
     fontFamily: "Geist"
     fontSize: 0.75rem

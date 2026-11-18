@@ -348,7 +348,7 @@ export function ProductTabs() {
                     <span className={`mt-1.5 size-2 rounded-full ${item.live ? "bg-status-live" : "bg-line-strong"}`} />
                     <div className="min-w-0">
                       <p className="text-small font-medium text-ink">{item.title}</p>
-                      <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">{item.detail}</p>
+                      <p className="mt-0.5 font-mono text-label text-muted">{item.detail}</p>
                     </div>
                     <span className="text-label text-muted">{item.live ? "Live" : "Restore"}</span>
                   </li>
