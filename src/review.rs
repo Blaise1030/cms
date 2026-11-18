@@ -34,10 +34,14 @@ pub async fn fetch_head(
         env,
     )
     .await
-    .map_err(|_| ApiError::enoent(GONE))?;
-    let sha = git::run_env(dir, &["rev-parse", "--verify", &ours], env)
-        .await
-        .map_err(|_| ApiError::enoent(GONE))?;
+    .map_err(|e| {
+        if e.message.contains("couldn't find remote ref") {
+            ApiError::enoent(GONE)
+        } else {
+            e
+        }
+    })?;
+    let sha = git::run_env(dir, &["rev-parse", "--verify", &ours], env).await?;
     Ok(sha.trim().to_string())
 }
 
@@ -56,6 +60,8 @@ pub async fn diff(dir: &Path, head_sha: &str) -> Result<String, ApiError> {
 
 /// Drop review refs for changes that are no longer open. Errors are ignored.
 pub async fn prune_refs(dir: &Path, open: &[u64]) {
+    let lock = git::lock_for(dir);
+    let _guard = lock.lock().await;
     let Ok(out) = git::run_env(
         dir,
         &["for-each-ref", "--format=%(refname)", "refs/orso/review/"],
@@ -116,6 +122,8 @@ mod tests {
         );
         std::fs::write(work.join("orso.json"), r#"{"root":"site"}"#).unwrap();
         std::fs::write(work.join("site/a.md"), "one\n").unwrap();
+        // orso.json's `root` is only honoured when it holds an Astro config.
+        std::fs::write(work.join("site/astro.config.mjs"), "export default {};\n").unwrap();
         git(&work, &["add", "."]);
         git(&work, &["commit", "-m", "base"]);
         git(&work, &["push", "origin", "main"]);
@@ -123,6 +131,7 @@ mod tests {
         git(&work, &["checkout", "-b", "pr"]);
         std::fs::write(work.join("site/a.md"), "one\ntwo\n").unwrap();
         std::fs::write(work.join("site/logo.png"), [0u8, 1, 2, 3, 0, 255]).unwrap();
+        std::fs::write(work.join("outside.txt"), "pr outside\n").unwrap();
         git(&work, &["add", "."]);
         git(&work, &["commit", "-m", "pr"]);
         let sha = git(&work, &["rev-parse", "HEAD"]);
@@ -131,6 +140,7 @@ mod tests {
         git(&work, &["checkout", "main"]);
         git(&work, &["branch", "-D", "pr"]);
         std::fs::write(work.join("unrelated.txt"), "later\n").unwrap();
+        std::fs::write(work.join("site/b.md"), "later site\n").unwrap();
         git(&work, &["add", "."]);
         git(&work, &["commit", "-m", "unrelated"]);
         git(&work, &["push", "origin", "main"]);
@@ -169,6 +179,8 @@ mod tests {
         assert!(out.contains("Binary files"), "{out}");
         assert!(out.contains("site/logo.png"), "{out}");
         assert!(!out.contains("unrelated.txt"), "{out}");
+        assert!(!out.contains("site/b.md"), "{out}");
+        assert!(!out.contains("outside.txt"), "{out}");
     }
 
     #[tokio::test]
@@ -176,6 +188,18 @@ mod tests {
         let (_tmp, work, _sha) = fixture();
         let err = fetch_head(&work, 99, &[]).await.unwrap_err();
         assert_eq!(err.message, "This change is no longer waiting");
+    }
+
+    #[tokio::test]
+    async fn fetch_without_reachable_origin_is_not_reported_as_gone() {
+        let (_tmp, work, _sha) = fixture();
+        git(
+            &work,
+            &["remote", "set-url", "origin", "/nonexistent/origin.git"],
+        );
+        let err = fetch_head(&work, 7, &[]).await.unwrap_err();
+        assert_ne!(err.message, "This change is no longer waiting");
+        assert!(err.message.contains("fetch"), "{}", err.message);
     }
 
     #[tokio::test]
