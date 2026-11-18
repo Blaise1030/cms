@@ -63,13 +63,10 @@ export function SiteNavMenu({ items }: { items: NavItem[] }) {
             </ul>
           </nav>
           <Dialog.Close asChild>
-            <button
-              type="button"
-              className="sticky bottom-6 mx-auto mb-6 inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-small font-medium text-surface shadow-lg transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:outline-none"
-            >
-              <XIcon className="size-4" aria-hidden="true" />
+            <Button size="lg" className="sticky bottom-6 mx-auto mb-6">
+              <XIcon data-icon="inline-start" aria-hidden="true" />
               Close
-            </button>
+            </Button>
           </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
