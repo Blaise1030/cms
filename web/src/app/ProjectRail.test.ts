@@ -107,3 +107,12 @@ it("hides the Review badge when nothing is waiting", async () => {
   expect(w.find('[data-testid="workspace-tab-review"]').exists()).toBe(true);
   expect(w.find('[data-testid="review-badge"]').exists()).toBe(false);
 });
+
+it("reloads the review inbox when the project changes", async () => {
+  const { w, router } = await setup("/p/one/preview", 1);
+  const reviews = (hoisted.daemon as { api: { reviews: ReturnType<typeof vi.fn> } }).api.reviews;
+  expect(reviews).toHaveBeenLastCalledWith("one");
+  await router.push("/p/two/preview"); await flushPromises();
+  expect(reviews).toHaveBeenLastCalledWith("two");
+  w.unmount();
+});

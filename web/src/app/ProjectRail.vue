@@ -15,7 +15,7 @@ const props = defineProps<{ projectId: string }>();
 const route = useRoute();
 const review = useReviewStore();
 // The Review badge counts changes waiting on you, so the rail keeps the inbox fresh.
-useReviewRefresh(() => void review.load(props.projectId));
+useReviewRefresh(() => void review.load(props.projectId), () => props.projectId);
 const active = computed(() => projectTabFromRoute(route.name));
 
 /** `icon` is an Iconify Lucide name. */

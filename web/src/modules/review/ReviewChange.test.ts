@@ -112,4 +112,15 @@ describe("ReviewChange", () => {
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/p/site/review");
   });
+
+  it("shows an error message when opening fails for another reason", async () => {
+    const { w } = await mountChange({
+      review: vi.fn(async () => {
+        throw new ApiError("UNKNOWN", "GitHub is unreachable", 502);
+      }),
+      reviewDiff: vi.fn(async () => DIFF),
+    });
+    expect(w.get("[role='alert']").text()).toContain("GitHub is unreachable");
+    expect(w.text()).not.toContain("no longer waiting");
+  });
 });

@@ -115,8 +115,8 @@ function reveal(path: string) {
         <UButton color="neutral" variant="outline" label="Back to inbox" data-testid="review-gone-back" @click="back()" />
       </template>
     </UEmpty>
-    <div v-else-if="store.error" class="p-3">
-      <UAlert color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.error" role="alert" />
+    <div v-else-if="store.openError" class="p-3">
+      <UAlert color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.openError" role="alert" />
     </div>
     <template v-else-if="change">
       <p

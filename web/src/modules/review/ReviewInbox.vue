@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { watch } from "vue";
 import { useRouter } from "vue-router";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UBadge from "@nuxt/ui/components/Badge.vue";
@@ -17,11 +16,7 @@ const store = useReviewStore();
 const router = useRouter();
 
 // The rail polls too; this refreshes on focus and while the inbox is on screen.
-useReviewRefresh(() => void store.load(props.projectId));
-watch(
-  () => props.projectId,
-  (id) => void store.load(id),
-);
+useReviewRefresh(() => void store.load(props.projectId), () => props.projectId);
 
 const STATE: Record<MyReviewState, { label: string; color: "primary" | "warning" | "success" }> = {
   new: { label: "New", color: "primary" },
@@ -46,11 +41,11 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
         Loading changes…
       </p>
       <UAlert
-        v-else-if="store.error && store.items.length === 0"
+        v-else-if="store.inboxError && store.items.length === 0"
         color="error"
         variant="subtle"
         icon="i-hugeicons-alert-circle"
-        :description="store.error"
+        :description="store.inboxError"
         role="alert"
       />
       <UEmpty

@@ -1,9 +1,10 @@
-import { onBeforeUnmount, onMounted } from "vue";
+import { onBeforeUnmount, onMounted, watch } from "vue";
 
 const REFRESH_MS = 60_000;
 
-/** Run `refresh` now, when the window regains focus, and every minute while the page is visible. */
-export function useReviewRefresh(refresh: () => void) {
+/** Run `refresh` now, whenever `source` changes, when the window regains focus, and every minute while the page is visible. */
+export function useReviewRefresh(refresh: () => void, source?: () => unknown) {
+  if (source) watch(source, () => refresh());
   const visible = () => document.visibilityState !== "hidden";
   const tick = () => {
     if (visible()) refresh();
