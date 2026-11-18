@@ -244,6 +244,9 @@ struct ApiMerge {
 pub enum PrState {
     Draft,
     Open,
+    /// A reviewer's latest decisive review asks for changes.
+    #[serde(rename = "changes_requested")]
+    ChangesRequested,
     Approved,
     Merged,
     Closed,
@@ -287,9 +290,27 @@ pub struct PrStatus {
     pub mergeable_state: Option<String>,
     /// The local branch tip is the PR head: nothing new to push.
     pub up_to_date: bool,
+    /// Why a reviewer sent the change back; set while the state is `changes_requested`.
+    pub sent_back: Option<SentBack>,
     /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
     #[serde(skip)]
     pub head_sha: String,
+}
+
+/// A reviewer's request for changes: who, and what they wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentBack {
+    pub reviewer: String,
+    pub comment: String,
+}
+
+/// What a reviewer decides about a change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Greenlight,
+    SendBack,
 }
 
 /// A pull request's [`PrState`] and head commit.
@@ -331,9 +352,8 @@ struct ApiReview {
     state: String,
     #[serde(default)]
     commit_id: String,
-    /// The review comment; read by the send-back flow (later slices).
+    /// The review comment.
     #[serde(default)]
-    #[allow(dead_code)]
     body: Option<String>,
 }
 
@@ -442,26 +462,56 @@ fn pr_state(pull: &PullFacts, reviews: &[ApiReview]) -> PrState {
     if pull.draft {
         return PrState::Draft;
     }
-    // Reviews arrive oldest first; keep each reviewer's latest decisive one.
-    let mut latest: Vec<(&str, &str)> = Vec::new();
-    for r in reviews {
-        let state = r.state.as_str();
-        if !matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") {
-            continue;
-        }
-        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
-        match latest.iter_mut().find(|(u, _)| *u == who) {
-            Some(entry) => entry.1 = state,
-            None => latest.push((who, state)),
-        }
-    }
-    let approved = latest.iter().any(|(_, s)| *s == "APPROVED")
-        && !latest.iter().any(|(_, s)| *s == "CHANGES_REQUESTED");
-    if approved {
+    let latest = latest_decisions(reviews);
+    if latest.iter().any(|r| r.state == "CHANGES_REQUESTED") {
+        PrState::ChangesRequested
+    } else if latest.iter().any(|r| r.state == "APPROVED") {
         PrState::Approved
     } else {
         PrState::Open
     }
+}
+
+/// Each reviewer's latest decisive review (approve, request changes, dismissed).
+fn latest_decisions(reviews: &[ApiReview]) -> Vec<&ApiReview> {
+    // Reviews arrive oldest first; a later one replaces the reviewer's earlier one.
+    let mut latest: Vec<&ApiReview> = Vec::new();
+    for r in reviews {
+        if !matches!(
+            r.state.as_str(),
+            "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED"
+        ) {
+            continue;
+        }
+        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
+        match latest
+            .iter_mut()
+            .find(|e| e.user.as_ref().map_or("", |u| u.login.as_str()) == who)
+        {
+            Some(entry) => *entry = r,
+            None => latest.push(r),
+        }
+    }
+    latest
+}
+
+/// The newest outstanding change request, with its comment.
+fn sent_back(reviews: &[ApiReview]) -> Option<SentBack> {
+    let outstanding: Vec<&ApiReview> = latest_decisions(reviews)
+        .into_iter()
+        .filter(|r| r.state == "CHANGES_REQUESTED")
+        .collect();
+    // `reviews` is oldest first: the outstanding request that appears last is the newest.
+    let newest = reviews
+        .iter()
+        .rfind(|r| outstanding.iter().any(|o| std::ptr::eq(*o, *r)))?;
+    Some(SentBack {
+        reviewer: newest
+            .user
+            .as_ref()
+            .map_or_else(String::new, |u| u.login.clone()),
+        comment: newest.body.clone().unwrap_or_default(),
+    })
 }
 
 /// Only `http://` / `https://` URLs may become links (a deployment's `environment_url` is
@@ -1281,6 +1331,7 @@ impl GithubAuth {
                 mergeable: None,
                 mergeable_state: None,
                 up_to_date: false,
+                sent_back: None,
                 // Unknown without the re-read; only used server-side (cleanup), never sent.
                 head_sha: String::new(),
             },
@@ -1419,7 +1470,7 @@ impl GithubAuth {
         repo: &str,
         head_branch: &str,
     ) -> Result<Option<PrStatus>, ApiError> {
-        let Some((pull, state)) = self.pull_and_state(repo, head_branch).await? else {
+        let Some((pull, state, sent_back)) = self.pull_and_state(repo, head_branch).await? else {
             return Ok(None);
         };
         let sha = pull.head.map(|h| h.sha).unwrap_or_default();
@@ -1447,6 +1498,7 @@ impl GithubAuth {
             mergeable: pull.mergeable,
             mergeable_state: pull.mergeable_state,
             up_to_date: false,
+            sent_back,
             head_sha: sha,
         }))
     }
@@ -1516,6 +1568,55 @@ impl GithubAuth {
             description,
             open,
             draft,
+        })
+    }
+
+    /// Greenlight (approve) or send back (request changes) `number` as the signed-in user.
+    /// The review is pinned to `head_sha`, the commit the reviewer looked at: when the head
+    /// has moved since, nothing is sent and the caller is told to reopen the change.
+    pub async fn submit_review(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+        decision: Decision,
+        comment: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let pull: ApiPull = self
+            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .await?;
+        if pull.head.as_ref().map(|h| h.sha.as_str()) != Some(head_sha) {
+            return Err(
+                ApiError::conflict("This change was updated since you opened it")
+                    .with_reason("head_moved"),
+            );
+        }
+        let event = match decision {
+            Decision::Greenlight => "APPROVE",
+            Decision::SendBack => "REQUEST_CHANGES",
+        };
+        let (status, _) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/pulls/{number}/reviews"),
+                Some(&serde_json::json!({
+                    "event": event,
+                    "body": comment.unwrap_or_default(),
+                    "commit_id": head_sha,
+                })),
+            )
+            .await?;
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(match status {
+            reqwest::StatusCode::FORBIDDEN => {
+                ApiError::sandbox("Ask an owner to add you to this site, then try again.")
+            }
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY => ApiError::conflict(
+                "GitHub didn't accept that review. Reopen the change and try again.",
+            ),
+            _ => ApiError::github("Couldn't send your review. Try again in a moment."),
         })
     }
 
@@ -1619,7 +1720,7 @@ impl GithubAuth {
         Ok(self
             .pull_and_state(repo, head_branch)
             .await?
-            .map(|(pull, state)| PrRef {
+            .map(|(pull, state, _)| PrRef {
                 state,
                 head_sha: pull.head.map(|h| h.sha).unwrap_or_default(),
             }))
@@ -1630,7 +1731,7 @@ impl GithubAuth {
         &self,
         repo: &str,
         head_branch: &str,
-    ) -> Result<Option<(ApiPull, PrState)>, ApiError> {
+    ) -> Result<Option<(ApiPull, PrState, Option<SentBack>)>, ApiError> {
         let owner = repo
             .split_once('/')
             .map(|(o, _)| o)
@@ -1662,7 +1763,12 @@ impl GithubAuth {
             .await?
         };
         let state = pr_state(&facts, &reviews);
-        Ok(Some((pull, state)))
+        let back = if state == PrState::ChangesRequested {
+            sent_back(&reviews)
+        } else {
+            None
+        };
+        Ok(Some((pull, state, back)))
     }
 
     /// `environment_url` of the newest deployment of `sha` whose latest status is a success.
@@ -2967,7 +3073,7 @@ esac"#,
             ),
             PrState::Approved
         );
-        // A later change request from the same reviewer withdraws it.
+        // A later change request from the same reviewer withdraws it and sends the change back.
         assert_eq!(
             pr_state(
                 &open,
@@ -2976,9 +3082,9 @@ esac"#,
                     review("grace", "CHANGES_REQUESTED")
                 ]
             ),
-            PrState::Open
+            PrState::ChangesRequested
         );
-        // Any outstanding change request blocks approval.
+        // Any outstanding change request beats approval.
         assert_eq!(
             pr_state(
                 &open,
@@ -2987,7 +3093,7 @@ esac"#,
                     review("alan", "CHANGES_REQUESTED")
                 ]
             ),
-            PrState::Open
+            PrState::ChangesRequested
         );
         // Re-approval after a change request.
         assert_eq!(
@@ -3010,6 +3116,178 @@ esac"#,
             pr_state(&pull(true, "open", false), &[review("grace", "APPROVED")]),
             PrState::Draft
         );
+    }
+
+    #[test]
+    fn pr_state_changes_requested_beats_approval() {
+        let open = pull(false, "open", false);
+        assert_eq!(
+            pr_state(&open, &[review("alan", "CHANGES_REQUESTED")]),
+            PrState::ChangesRequested
+        );
+        assert_eq!(
+            pr_state(
+                &open,
+                &[
+                    review("grace", "APPROVED"),
+                    review("alan", "CHANGES_REQUESTED")
+                ]
+            ),
+            PrState::ChangesRequested
+        );
+        assert_eq!(
+            serde_json::to_value(PrState::ChangesRequested).unwrap(),
+            "changes_requested"
+        );
+    }
+
+    #[test]
+    fn sent_back_is_the_newest_outstanding_request() {
+        let mut first = review("alan", "CHANGES_REQUESTED");
+        first.body = Some("fix the title".into());
+        let mut second = review("grace", "CHANGES_REQUESTED");
+        second.body = Some("and the image".into());
+        let mut resolved = review("alan", "CHANGES_REQUESTED");
+        resolved.body = Some("old".into());
+        let approve = review("alan", "APPROVED");
+        assert_eq!(
+            sent_back(&[first, second]),
+            Some(SentBack {
+                reviewer: "grace".into(),
+                comment: "and the image".into()
+            })
+        );
+        assert_eq!(sent_back(&[resolved, approve]), None);
+    }
+
+    /// `pulls/4` (head `h1`, or `head`) and `pulls/4/reviews` (GET: `reviews`; POST: recorded).
+    fn review_routes(
+        head: &'static str,
+        reviews: serde_json::Value,
+        posts: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) -> axum::Router {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        Router::new()
+            .route(
+                "/repos/acme/site/pulls/4",
+                get(move || async move {
+                    Json(
+                        serde_json::json!({ "number": 4, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": head } }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                get(move || async move {
+                    Json(
+                        serde_json::json!([{ "number": 4, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": head } }]),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(move || {
+                    let reviews = reviews.clone();
+                    async move { Json(reviews) }
+                })
+                .post(move |Json(b): Json<serde_json::Value>| {
+                    let posts = posts.clone();
+                    async move {
+                        posts.lock().unwrap().push(b);
+                        Json(serde_json::json!({ "id": 1 }))
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/{sha}/check-runs",
+                get(|| async { Json(serde_json::json!({ "check_runs": [] })) }),
+            )
+            .route(
+                "/repos/acme/site/commits/{sha}/status",
+                get(|| async { Json(serde_json::json!({})) }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+    }
+
+    #[tokio::test]
+    async fn submit_review_pins_commit_id() {
+        let posts = Default::default();
+        let (base, stop) = mock_api(review_routes(
+            "h1",
+            serde_json::json!([]),
+            std::sync::Arc::clone(&posts),
+        ))
+        .await;
+        let auth = status_auth(base, "submit-review");
+        auth.submit_review("acme/site", 4, "h1", Decision::SendBack, Some("fix it"))
+            .await
+            .unwrap();
+        auth.submit_review("acme/site", 4, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap();
+        let sent = posts.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![
+                serde_json::json!({ "event": "REQUEST_CHANGES", "body": "fix it", "commit_id": "h1" }),
+                serde_json::json!({ "event": "APPROVE", "body": "", "commit_id": "h1" }),
+            ]
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn submit_review_refuses_moved_head() {
+        let posts = Default::default();
+        let (base, stop) = mock_api(review_routes(
+            "h2",
+            serde_json::json!([]),
+            std::sync::Arc::clone(&posts),
+        ))
+        .await;
+        let auth = status_auth(base, "submit-moved");
+        let err = auth
+            .submit_review("acme/site", 4, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.message, "This change was updated since you opened it");
+        assert_eq!(err.reason, Some("head_moved"));
+        assert_eq!(err.http_status(), 409);
+        assert!(posts.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_carries_send_back_comment() {
+        let reviews = serde_json::json!([
+            { "user": { "login": "alan" }, "state": "CHANGES_REQUESTED",
+              "commit_id": "h1", "body": "Please fix the headline" }
+        ]);
+        let (base, stop) = mock_api(review_routes("h1", reviews, Default::default())).await;
+        let auth = status_auth(base, "sent-back-status");
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(st.state, PrState::ChangesRequested);
+        assert_eq!(
+            st.sent_back,
+            Some(SentBack {
+                reviewer: "alan".into(),
+                comment: "Please fix the headline".into()
+            })
+        );
+        let json = serde_json::to_value(&st).unwrap();
+        assert_eq!(json["sentBack"]["reviewer"], "alan");
+        assert_eq!(json["state"], "changes_requested");
+        stop();
     }
 
     fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
@@ -4385,6 +4663,7 @@ esac"#,
                 mergeable: None,
                 mergeable_state: None,
                 up_to_date: false,
+                sent_back: None,
                 head_sha: String::new(),
             }
         );

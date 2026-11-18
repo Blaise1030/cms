@@ -1,11 +1,15 @@
 //! `GET /api/projects/{id}/reviews`, `GET /api/projects/{id}/reviews/{n}`,
-//! `GET /api/projects/{id}/reviews/{n}/diff`: the review inbox over HTTP.
+//! `GET /api/projects/{id}/reviews/{n}/diff`, `POST /api/projects/{id}/reviews/{n}/decision`:
+//! the review inbox over HTTP.
 
 use axum::extract::{Path, State};
-use axum::http::header;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::Deserialize;
 use serde_json::{json, Value};
+
+use crate::github::Decision;
 
 use crate::error::ApiError;
 use crate::projects::Project;
@@ -43,6 +47,22 @@ pub async fn list(
     Ok(Json(json!({ "reviews": reviews })))
 }
 
+/// Why `me` may not greenlight or send back a change by `author` (the string the UI shows).
+async fn refusal(
+    state: &AppState,
+    repo: &str,
+    author: &str,
+    me: &str,
+) -> Result<Option<&'static str>, ApiError> {
+    if author.eq_ignore_ascii_case(me) {
+        Ok(Some(OWN_CHANGE))
+    } else if !state.github.can_push(repo).await? {
+        Ok(Some(NEEDS_EDIT_ACCESS))
+    } else {
+        Ok(None)
+    }
+}
+
 /// `GET /api/projects/{id}/reviews/{n}` → the change plus `{ canDecide, reason }`.
 pub async fn detail(
     State(state): State<AppState>,
@@ -54,18 +74,56 @@ pub async fn detail(
     if !detail.open || detail.draft {
         return Err(ApiError::enoent(GONE));
     }
-    let reason = if detail.item.author.eq_ignore_ascii_case(&me) {
-        Some(OWN_CHANGE)
-    } else if !state.github.can_push(&repo).await? {
-        Some(NEEDS_EDIT_ACCESS)
-    } else {
-        None
-    };
+    let reason = refusal(&state, &repo, &detail.item.author, &me).await?;
     let mut body = serde_json::to_value(&detail)
         .map_err(|e| ApiError::io(format!("could not encode the change: {e}")))?;
     body["canDecide"] = json!(reason.is_none());
     body["reason"] = json!(reason);
     Ok(Json(body))
+}
+
+/// Body of `POST /api/projects/{id}/reviews/{n}/decision`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionBody {
+    decision: Decision,
+    #[serde(default)]
+    comment: Option<String>,
+    /// The head commit the reviewer was looking at.
+    head_sha: String,
+}
+
+/// `POST /api/projects/{id}/reviews/{n}/decision` → `204`: greenlight (approve) or send back
+/// (request changes) a change, pinned to the commit the reviewer viewed.
+pub async fn decide(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+    Json(body): Json<DecisionBody>,
+) -> Result<StatusCode, ApiError> {
+    let comment = body
+        .comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    if body.decision == Decision::SendBack && comment.is_none() {
+        return Err(ApiError::badreq(
+            "Say what needs changing before sending it back",
+        ));
+    }
+    let (_, repo) = project_repo(&state, &id).await?;
+    let me = state.github.signed_in_login().await?;
+    let detail = state.github.review_detail(&repo, number, &me).await?;
+    if !detail.open || detail.draft {
+        return Err(ApiError::enoent(GONE));
+    }
+    if let Some(reason) = refusal(&state, &repo, &detail.item.author, &me).await? {
+        return Err(ApiError::sandbox(reason));
+    }
+    state
+        .github
+        .submit_review(&repo, number, &body.head_sha, body.decision, comment)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /api/projects/{id}/reviews/{n}/diff` → the change's unified diff (`text/plain`).
@@ -159,7 +217,8 @@ mod tests {
             )
             .route(
                 "/repos/acme/site/pulls/{n}/reviews",
-                get(|| async { axum::Json(json!([])) }),
+                get(|| async { axum::Json(json!([])) })
+                    .post(|| async { axum::Json(json!({ "id": 1 })) }),
             )
             .route(
                 "/repos/acme/site/commits/{sha}/check-runs",
@@ -219,6 +278,14 @@ mod tests {
             None => state.projects.create("Site").await.unwrap().id,
         };
         (state, id)
+    }
+
+    fn decision(d: Decision, comment: Option<&str>, head: &str) -> Json<DecisionBody> {
+        Json(DecisionBody {
+            decision: d,
+            comment: comment.map(String::from),
+            head_sha: head.into(),
+        })
     }
 
     async fn body_json(r: Result<Json<Value>, ApiError>) -> Value {
@@ -311,5 +378,98 @@ mod tests {
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("a.md"), "{text}");
         assert!(text.contains("+two"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn send_back_needs_a_comment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        for c in [None, Some(""), Some("  \n ")] {
+            let err = decide(
+                State(state.clone()),
+                Path((id.clone(), 7)),
+                decision(Decision::SendBack, c, "h7"),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.code.status(), 400, "{c:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn deciding_on_your_own_change_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let err = decide(
+            State(state),
+            Path((id, 8)),
+            decision(Decision::Greenlight, None, "h8"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 403);
+        assert_eq!(err.message, "This is your change");
+    }
+
+    #[tokio::test]
+    async fn deciding_without_push_access_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), false, Some("acme/site")).await;
+        let err = decide(
+            State(state),
+            Path((id, 7)),
+            decision(Decision::Greenlight, None, "h7"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 403);
+        assert_eq!(
+            err.message,
+            "You need edit access to this site's repository to greenlight"
+        );
+    }
+
+    #[tokio::test]
+    async fn deciding_on_a_closed_change_is_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let err = decide(
+            State(state),
+            Path((id, 9)),
+            decision(Decision::Greenlight, None, "h9"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 404);
+        assert_eq!(err.message, "This change is no longer waiting");
+    }
+
+    #[tokio::test]
+    async fn a_moved_head_is_a_conflict_with_a_reason() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let err = decide(
+            State(state),
+            Path((id, 7)),
+            decision(Decision::Greenlight, None, "old"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 409);
+        assert_eq!(err.reason, Some("head_moved"));
+    }
+
+    #[tokio::test]
+    async fn a_decision_is_posted_and_answers_no_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let status = decide(
+            State(state),
+            Path((id, 7)),
+            decision(Decision::SendBack, Some(" fix it "), "h7"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
     }
 }
