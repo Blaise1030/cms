@@ -3,6 +3,7 @@
 // the right, and the legal row underneath. Group and link data live in `src/site.ts`.
 import BearMark from "./BearMark.astro";
 import Icon from "./Icon.astro";
+import { buttonVariants } from "./ui/button";
 import { href } from "../lib/href";
 import { site } from "../site";
 
@@ -36,7 +37,7 @@ const legal = [...site.footer.links, site.footer.license];
         )}
 
         <a
-          class="mt-8 inline-flex h-10 items-center gap-2 rounded-md border border-line-strong bg-surface-raised px-4 text-sm font-medium text-ink transition-colors duration-quick ease-gentle hover:border-ink"
+          class={`${buttonVariants({ variant: "outline", size: "lg" })} mt-8`}
           href={site.cta.href}
           rel="noopener noreferrer"
         >
