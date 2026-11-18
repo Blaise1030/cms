@@ -23,12 +23,12 @@ const topicPill =
     <PageHeader title="Help" description="Guides and answers for every step, from your first sign-in to your next invoice.">
       {docs.length > 0 && <PagefindSearch bundle="help" variant="inline" placeholder="Search help, for example “invite”" class="rise-3 mt-10 max-w-2xl" />}
     </PageHeader>
-    <div class="page">
-      {docs.length === 0 ? <p class="mt-12 text-muted">No help docs yet. Check back soon for guides and answers.</p> : (
+    <div>
+      {docs.length === 0 ? <p class="page mt-12 text-muted">No help docs yet. Check back soon for guides and answers.</p> : (
         <>
           <section class="mt-20" aria-labelledby="browse">
-            <h2 class="label" id="browse">Browse by section</h2>
-            <ul class="mt-6 grid border-t border-l border-line sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
+            <h2 class="page label" id="browse">Browse by section</h2>
+            <ul class="-mx-px mt-6 grid border-t border-l border-line sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
               <li class="group relative border-r border-b border-line p-6 transition-colors duration-gentle ease-gentle hover:bg-sand lg:p-8">
                 <h3 class="text-heading font-medium tracking-tight text-ink">
                   <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/section/${section.id}/`)}>{section.title}</a>
@@ -38,14 +38,14 @@ const topicPill =
               </li>
             ))}</ul>
             {shownTopics.length > 0 && (
-              <nav class="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-6" aria-label="Help topics">
+              <nav class="page mt-6 flex flex-wrap items-center gap-2" aria-label="Help topics">
                 <span class="label mr-2">Topics</span>
                 {shownTopics.map((topic) => <a class={topicPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
               </nav>
             )}
           </section>
           {shown.map((section) => (
-            <section class="mt-24 grid gap-6 md:grid-cols-12 md:gap-10">
+            <section class="page mt-24 grid gap-6 md:grid-cols-12 md:gap-10">
               <div class="md:col-span-4">
                 <h2 class="text-heading tracking-display text-ink">{section.title}</h2>
                 <p class="label mt-2">{count(section.docs.length)}</p>
