@@ -206,6 +206,20 @@ struct ApiPull {
     mergeable_state: Option<String>,
     #[serde(default)]
     head: Option<ApiPullHead>,
+    #[serde(default)]
+    labels: Vec<ApiLabel>,
+    /// Null when the author's account was deleted.
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiLabel {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -315,6 +329,66 @@ struct ApiReview {
     #[serde(default)]
     user: Option<ApiLogin>,
     state: String,
+    #[serde(default)]
+    commit_id: String,
+    /// The review comment; read by the send-back flow (later slices).
+    #[serde(default)]
+    #[allow(dead_code)]
+    body: Option<String>,
+}
+
+/// The signed-in reviewer's standing on a pull request's current head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MyReviewState {
+    New,
+    SentBack,
+    Greenlit,
+}
+
+/// One change in the review inbox.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewItem {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub url: String,
+    pub updated_at: String,
+    pub head_sha: String,
+    pub checks: ChecksState,
+    pub my_state: MyReviewState,
+}
+
+/// A single change opened for review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDetail {
+    #[serde(flatten)]
+    pub item: ReviewItem,
+    pub description: Option<String>,
+    pub open: bool,
+    pub draft: bool,
+}
+
+/// `me`'s latest decisive review (approved / changes requested / dismissed) on `head_sha`:
+/// approved -> greenlit, changes requested -> sent back, anything else -> new.
+fn my_review_state(reviews: &[ApiReview], me: &str, head_sha: &str) -> MyReviewState {
+    let latest = reviews.iter().rfind(|r| {
+        r.user
+            .as_ref()
+            .is_some_and(|u| u.login.eq_ignore_ascii_case(me))
+            && r.commit_id == head_sha
+            && matches!(
+                r.state.as_str(),
+                "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED"
+            )
+    });
+    match latest.map(|r| r.state.as_str()) {
+        Some("APPROVED") => MyReviewState::Greenlit,
+        Some("CHANGES_REQUESTED") => MyReviewState::SentBack,
+        _ => MyReviewState::New,
+    }
 }
 
 #[derive(Deserialize)]
@@ -1377,6 +1451,106 @@ impl GithubAuth {
         }))
     }
 
+    /// Login of the signed-in user.
+    pub async fn signed_in_login(&self) -> Result<String, ApiError> {
+        self.status()
+            .await
+            .user
+            .map(|u| u.login)
+            .ok_or_else(not_signed_in)
+    }
+
+    /// Whether the signed-in user can push to `repo`.
+    pub async fn can_push(&self, repo: &str) -> Result<bool, ApiError> {
+        let r: ApiRepo = self.get_json(&format!("/repos/{repo}")).await?;
+        Ok(r.permissions.is_some_and(|p| p.push))
+    }
+
+    /// Open, non-draft pull requests carrying any of `labels` (case-insensitive) that `me`
+    /// did not author, each with `me`'s review standing and the head's checks.
+    pub async fn review_inbox(
+        &self,
+        repo: &str,
+        labels: &[String],
+        me: &str,
+    ) -> Result<Vec<ReviewItem>, ApiError> {
+        let pulls = self
+            .get_all_query::<Vec<ApiPull>, ApiPull>(
+                &format!("/repos/{repo}/pulls"),
+                "state=open&",
+                |p| p,
+            )
+            .await?;
+        let kept: Vec<ApiPull> = pulls
+            .into_iter()
+            .filter(|p| {
+                !p.draft
+                    && p.labels
+                        .iter()
+                        .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(&l.name)))
+                    && !p
+                        .user
+                        .as_ref()
+                        .is_some_and(|u| u.login.eq_ignore_ascii_case(me))
+            })
+            .collect();
+        futures_util::future::try_join_all(kept.into_iter().map(|p| self.review_item(repo, p, me)))
+            .await
+    }
+
+    /// One pull request opened for review.
+    pub async fn review_detail(
+        &self,
+        repo: &str,
+        number: u64,
+        me: &str,
+    ) -> Result<ReviewDetail, ApiError> {
+        let pull: ApiPull = self
+            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .await?;
+        let open = pull.state.as_deref() == Some("open") && pull.merged_at.is_none();
+        let (draft, description) = (pull.draft, pull.body.clone());
+        let item = self.review_item(repo, pull, me).await?;
+        Ok(ReviewDetail {
+            item,
+            description,
+            open,
+            draft,
+        })
+    }
+
+    async fn review_item(
+        &self,
+        repo: &str,
+        pull: ApiPull,
+        me: &str,
+    ) -> Result<ReviewItem, ApiError> {
+        let sha = pull.head.map(|h| h.sha).unwrap_or_default();
+        let reviews_path = format!("/repos/{repo}/pulls/{}/reviews", pull.number);
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        let reviews = self.get_all::<Vec<ApiReview>, ApiReview>(&reviews_path, |p| p);
+        let checks = async {
+            if sha.is_empty() {
+                return ChecksState::None;
+            }
+            self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+                .await
+                .map_or(ChecksState::None, |r| aggregate_checks(&r))
+        };
+        let (reviews, checks) = tokio::join!(reviews, checks);
+        let my_state = my_review_state(&reviews?, me, &sha);
+        Ok(ReviewItem {
+            number: pull.number,
+            title: pull.title,
+            author: pull.user.map_or_else(|| "ghost".to_string(), |u| u.login),
+            url: pull.html_url,
+            updated_at: pull.updated_at,
+            head_sha: sha,
+            checks,
+            my_state,
+        })
+    }
+
     /// The commit GitHub's `main` currently points at.
     pub async fn main_head(&self, repo: &str) -> Result<String, ApiError> {
         let branch: ApiBranch = self
@@ -1560,10 +1734,20 @@ impl GithubAuth {
         path: &str,
         items: impl Fn(P) -> Vec<T>,
     ) -> Result<Vec<T>, ApiError> {
+        self.get_all_query(path, "", items).await
+    }
+
+    /// [`Self::get_all`] with extra query parameters (`extra` is `k=v&` pairs, or empty).
+    async fn get_all_query<P: DeserializeOwned, T>(
+        &self,
+        path: &str,
+        extra: &str,
+        items: impl Fn(P) -> Vec<T>,
+    ) -> Result<Vec<T>, ApiError> {
         let mut all = Vec::new();
         for page in 1..=MAX_PAGES {
             let batch = items(
-                self.get_json::<P>(&format!("{path}?per_page={PAGE_SIZE}&page={page}"))
+                self.get_json::<P>(&format!("{path}?{extra}per_page={PAGE_SIZE}&page={page}"))
                     .await?,
             );
             let short = batch.len() < PAGE_SIZE;
@@ -2734,6 +2918,8 @@ esac"#,
                 login: login.into(),
             }),
             state: state.into(),
+            commit_id: String::new(),
+            body: None,
         }
     }
 
@@ -2931,6 +3117,180 @@ esac"#,
             },
             &dir,
         )
+    }
+
+    fn review_on(user: &str, state: &str, commit: &str) -> ApiReview {
+        ApiReview {
+            user: Some(ApiLogin {
+                login: user.to_string(),
+            }),
+            state: state.to_string(),
+            commit_id: commit.to_string(),
+            body: None,
+        }
+    }
+
+    #[test]
+    fn my_review_state_uses_latest_review_on_current_head() {
+        let rs = vec![
+            review_on("ada", "APPROVED", "aaa"),
+            review_on("ada", "CHANGES_REQUESTED", "bbb"),
+        ];
+        assert_eq!(my_review_state(&rs, "ada", "bbb"), MyReviewState::SentBack);
+        assert_eq!(my_review_state(&rs, "ada", "aaa"), MyReviewState::Greenlit);
+        assert_eq!(my_review_state(&rs, "ada", "ccc"), MyReviewState::New);
+        let others = vec![review_on("bob", "APPROVED", "bbb")];
+        assert_eq!(my_review_state(&others, "ada", "bbb"), MyReviewState::New);
+        assert_eq!(my_review_state(&rs, "Ada", "bbb"), MyReviewState::SentBack);
+        let commented = vec![
+            review_on("ada", "APPROVED", "bbb"),
+            review_on("ada", "COMMENTED", "bbb"),
+        ];
+        assert_eq!(
+            my_review_state(&commented, "ada", "bbb"),
+            MyReviewState::Greenlit
+        );
+        assert_eq!(
+            serde_json::to_value(MyReviewState::SentBack).unwrap(),
+            "sent_back"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_inbox_filters_label_draft_and_author() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "number": 1, "html_url": "u1", "title": "keep", "draft": false,
+                          "labels": [{ "name": "Orso" }], "user": { "login": "bob" },
+                          "updated_at": "2026-01-01T00:00:00Z",
+                          "head": { "sha": "h1" } },
+                        { "number": 2, "html_url": "u2", "title": "draft", "draft": true,
+                          "labels": [{ "name": "orso" }], "user": { "login": "bob" } },
+                        { "number": 3, "html_url": "u3", "title": "nolabel", "draft": false,
+                          "labels": [], "user": { "login": "bob" } },
+                        { "number": 4, "html_url": "u4", "title": "mine", "draft": false,
+                          "labels": [{ "name": "orso" }], "user": { "login": "ADA" } },
+                        { "number": 5, "html_url": "u5", "title": "ghost", "draft": false,
+                          "labels": [{ "name": "orso" }], "user": null }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/1/reviews",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "user": { "login": "ada" }, "state": "APPROVED", "commit_id": "h1" }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/5/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/h1/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "check_runs": [{ "status": "completed", "conclusion": "success" }]
+                    }))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewinbox");
+        let items = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].number, 1);
+        assert_eq!(items[0].author, "bob");
+        assert_eq!(items[0].head_sha, "h1");
+        assert_eq!(items[0].checks, ChecksState::Passing);
+        assert_eq!(items[0].my_state, MyReviewState::Greenlit);
+        assert_eq!(items[1].number, 5);
+        assert_eq!(items[1].author, "ghost");
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["headSha"], "h1");
+        assert_eq!(json["myState"], "greenlit");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn review_inbox_paginates() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("page").map(String::as_str) == Some("2") {
+                        return Json(serde_json::json!([
+                            { "number": 101, "html_url": "u", "title": "late", "draft": false,
+                              "labels": [{ "name": "orso" }], "user": { "login": "bob" } }
+                        ]));
+                    }
+                    let page: Vec<_> = (1..=100)
+                        .map(|n| {
+                            serde_json::json!({ "number": n, "html_url": "u", "title": "x",
+                                "draft": false, "labels": [], "user": { "login": "bob" } })
+                        })
+                        .collect();
+                    Json(serde_json::Value::Array(page))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/101/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewpages");
+        let items = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].number, 101);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn can_push_reads_permissions() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "full_name": "acme/site", "private": false,
+                        "default_branch": "main", "permissions": { "push": true } }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/ro",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "full_name": "acme/ro", "private": false,
+                        "default_branch": "main" }),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "canpush");
+        assert!(auth.can_push("acme/site").await.unwrap());
+        assert!(!auth.can_push("acme/ro").await.unwrap());
+        stop();
     }
 
     #[test]
