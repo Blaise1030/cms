@@ -93,7 +93,7 @@ const navItems = site.nav.map((link) => ({
       href="#main">Skip to content</a
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
-      <div class="page mx-auto flex min-h-header max-w-7xl items-center gap-x-4 border-x border-line py-1">
+      <div class="mx-auto flex min-h-header w-full max-w-7xl items-center gap-x-4 border-x border-line px-3 py-1 md:px-6">
         <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-1">
           <SiteNavLinks client:load items={navItems} />
