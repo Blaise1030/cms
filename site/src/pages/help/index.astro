@@ -4,15 +4,14 @@ import DocList from "../../components/DocList.astro";
 import PagefindSearch from "../../components/PagefindSearch.astro";
 import PageHeader from "../../components/PageHeader.astro";
 import { href } from "../../lib/href";
+import { filterPill } from "../../lib/pill";
 import { loadHelp } from "../../lib/help";
 import { breadcrumbs } from "../../lib/seo";
 const { sections, topics, docs } = await loadHelp();
 const shown = sections.filter((section) => section.docs.length > 0);
 const shownTopics = topics.filter((topic) => topic.docs.length > 0);
 const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
-// Same pill as the blog category filters (BlogFilters.astro).
-const topicPill =
-  "shrink-0 rounded-full border border-transparent px-3 py-1 text-small whitespace-nowrap text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink";
+
 ---
 <Base
   title="Help"
@@ -40,7 +39,7 @@ const topicPill =
             {shownTopics.length > 0 && (
               <nav class="page mt-6 flex flex-wrap items-center gap-2" aria-label="Help topics">
                 <span class="label mr-2">Topics</span>
-                {shownTopics.map((topic) => <a class={topicPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
+                {shownTopics.map((topic) => <a class={filterPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
               </nav>
             )}
           </section>
