@@ -135,29 +135,21 @@ async function pickForAgent(page) {
   await settle(page, 600);
 
   const headline = page.frameLocator('[data-testid="preview-frame"]').locator("h1").first();
-  // The headline wraps each word in a span; aim at a point where the h1 itself is the target
-  // (a gap between words) so the whole headline is picked and highlighted, not one word.
-  const position = await headline.evaluate((h1) => {
-    const r = h1.getBoundingClientRect();
-    for (let y = r.top + 4; y < r.bottom; y += 4) {
-      for (let x = r.left + 4; x < r.right; x += 4) {
-        if (h1.ownerDocument.elementFromPoint(x, y) === h1) return { x: x - r.left, y: y - r.top };
-      }
-    }
-    return undefined;
-  });
+  // The headline wraps each word in a span and the picker targets the event's element, so a real
+  // pointer lands on one word. Dispatch the events on the h1 itself to pick the whole headline.
+  const fire = (type) => headline.evaluate((h1, t) => h1.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true })), type);
   const picker = page.getByTestId("element-picker");
   await picker.click();
-  await headline.hover({ position });
+  await fire("mousemove");
   await page.waitForTimeout(300);
-  await headline.click({ position });
+  await fire("click");
   await settle(page, 1200);
 
   await page.getByTestId("chat-input").click();
   await page.keyboard.type("Make this headline shorter and punchier");
 
   await picker.click();
-  await headline.hover({ position });
+  await fire("mousemove");
   await settle(page, 800);
 }
 

@@ -75,7 +75,7 @@ export function OpsCarousel({ shots }: { shots: Record<SlideKind, AppShotData> }
               )}
             >
               <Card className="flex h-full flex-col gap-0 rounded-none bg-transparent p-2 shadow-none ring-0">
-                <CardContent className="relative aspect-3/2 min-h-0 flex-1 overflow-hidden rounded-md border border-line p-0">
+                <CardContent className="relative shrink-0 overflow-hidden rounded-md border border-line p-0">
                   <img
                     src={paintingUrl(slide.painting)}
                     alt=""
@@ -85,12 +85,12 @@ export function OpsCarousel({ shots }: { shots: Record<SlideKind, AppShotData> }
                     className="absolute inset-0 size-full object-cover"
                   />
                   <div className="absolute inset-0 bg-night/20" aria-hidden="true" />
-                  <div className="relative flex size-full items-center justify-center p-2 md:p-3">
+                  <div className="relative p-2 md:p-3">
                     <AppShot
                       shot={shots[slide.kind]}
                       alt={alts[slide.kind]}
                       sizes="(min-width: 64rem) 32rem, (min-width: 48rem) 50vw, 80vw"
-                      className="h-full max-h-full w-auto max-w-full"
+                      className="aspect-3/2 w-full"
                     />
                   </div>
                 </CardContent>
