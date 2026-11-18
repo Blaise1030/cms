@@ -5,6 +5,7 @@ export const PR_STATE_LABEL: Record<PrState, string> = {
   draft: "Draft",
   open: "Waiting for greenlight",
   approved: "Greenlit",
+  changes_requested: "Sent back",
   merged: "Published",
   closed: "Closed",
 };

@@ -123,4 +123,61 @@ describe("ReviewChange", () => {
     expect(w.get("[role='alert']").text()).toContain("GitHub is unreachable");
     expect(w.text()).not.toContain("no longer waiting");
   });
+
+  describe("decision", () => {
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF) });
+
+    it("offers Give greenlight and Send back", async () => {
+      const { w } = await mountChange(base());
+      const green = w.get("[data-testid='review-greenlight']");
+      const back = w.get("[data-testid='review-send-back']");
+      expect(green.text()).toBe("Give greenlight");
+      expect(back.text()).toBe("Send back");
+      expect(green.attributes("disabled")).toBeUndefined();
+      expect(back.attributes("disabled")).toBeUndefined();
+    });
+
+    it("disables both and shows the reason when the reviewer cannot decide", async () => {
+      const { w } = await mountChange({
+        ...base(),
+        review: vi.fn(async () => ({ ...DETAIL, canDecide: false, reason: "This is your change" })),
+      });
+      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeDefined();
+      expect(w.get("[data-testid='review-send-back']").attributes("disabled")).toBeDefined();
+      expect(w.get("[data-testid='review-reason']").text()).toBe("This is your change");
+    });
+
+    it("greenlights with the head the reviewer saw and updates the row without reloading", async () => {
+      const decideReview = vi.fn(async () => undefined);
+      const review = vi.fn(async () => ({ ...DETAIL }));
+      const { w } = await mountChange({ ...base(), review, decideReview });
+      const { useReviewStore } = await import("./store");
+      const store = useReviewStore();
+      store.items = [{ ...DETAIL }];
+      await w.get("[data-testid='review-greenlight']").trigger("click");
+      await flushPromises();
+      expect(decideReview).toHaveBeenCalledWith("site", 7, { decision: "greenlight", comment: undefined, headSha: "abc" });
+      expect(store.items[0]?.myState).toBe("greenlit");
+      expect(store.current?.myState).toBe("greenlit");
+      expect(review).toHaveBeenCalledTimes(1);
+    });
+
+    it("says the change was updated and reloads detail and diff on head_moved", async () => {
+      const decideReview = vi.fn(async () => {
+        throw new ApiError("UNKNOWN", "This change was updated since you opened it", 409, { reason: "head_moved" });
+      });
+      const review = vi.fn(async () => ({ ...DETAIL }));
+      const reviewDiff = vi.fn(async () => DIFF);
+      const { w } = await mountChange({ review, reviewDiff, decideReview });
+      const { useReviewStore } = await import("./store");
+      const store = useReviewStore();
+      store.items = [{ ...DETAIL }];
+      await w.get("[data-testid='review-greenlight']").trigger("click");
+      await flushPromises();
+      await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
+      expect(reviewDiff).toHaveBeenCalledTimes(2);
+      expect(w.text()).toContain("This change was updated since you opened it");
+      expect(store.items[0]?.myState).toBe("new");
+    });
+  });
 });

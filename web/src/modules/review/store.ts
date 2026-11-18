@@ -18,6 +18,9 @@ export const useReviewStore = defineStore("review", () => {
   const inboxError = ref<string | null>(null);
   const openError = ref<string | null>(null);
   const gone = ref(false);
+  /** A decision in flight, and why the last one did not go through. */
+  const deciding = ref(false);
+  const decideError = ref<string | null>(null);
   /** The project the held state belongs to. */
   const projectId = ref<string | null>(null);
   let openRequest = 0;
@@ -36,6 +39,8 @@ export const useReviewStore = defineStore("review", () => {
     inboxError.value = null;
     openError.value = null;
     gone.value = false;
+    deciding.value = false;
+    decideError.value = null;
     loading.value = false;
     opening.value = false;
   }
@@ -66,6 +71,7 @@ export const useReviewStore = defineStore("review", () => {
     diffText.value = null;
     diff.value = null;
     openError.value = null;
+    decideError.value = null;
     gone.value = false;
     try {
       // Lazy: the parser lives in `@pierre/diffs`, kept out of the app shell with the renderer.
@@ -87,5 +93,39 @@ export const useReviewStore = defineStore("review", () => {
     }
   }
 
-  return { items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
+  /**
+   * Greenlight or send back the open change. The row and the open change take the new state
+   * without a reload. `head_moved` reloads detail and diff and says why; other failures show
+   * their message. Resolves true when the decision went through.
+   */
+  async function decide(decision: "greenlight" | "send_back", comment?: string): Promise<boolean> {
+    const detail = current.value;
+    const id = projectId.value;
+    if (!detail || !id || deciding.value) return false;
+    deciding.value = true;
+    decideError.value = null;
+    try {
+      await daemon.api.decideReview(id, detail.number, { decision, comment, headSha: detail.headSha });
+      if (projectId.value !== id) return false;
+      const myState = decision === "greenlight" ? "greenlit" : "sent_back";
+      for (const item of items.value) if (item.number === detail.number) item.myState = myState;
+      if (current.value?.number === detail.number) current.value.myState = myState;
+      return true;
+    } catch (e) {
+      if (projectId.value !== id) return false;
+      const err = e as { status?: number; reason?: string };
+      if (err.status === 409 && err.reason === "head_moved") {
+        await open(id, detail.number);
+        decideError.value = "This change was updated since you opened it";
+      } else {
+        if (err.status === 404) gone.value = true;
+        decideError.value = errorMessage(e);
+      }
+      return false;
+    } finally {
+      deciding.value = false;
+    }
+  }
+
+  return { deciding, decideError, decide, items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
 });

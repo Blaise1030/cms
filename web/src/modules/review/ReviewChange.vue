@@ -12,6 +12,7 @@ import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
+import SendBackDialog from "./SendBackDialog.vue";
 import { useReviewStore } from "./store";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
@@ -25,6 +26,7 @@ const router = useRouter();
 
 const diffs = ref<HTMLElement | null>(null);
 const liveUrl = ref<string | null>(null);
+const sendingBack = ref(false);
 
 watch(
   () => [props.projectId, props.number] as const,
@@ -47,6 +49,13 @@ watch(
 
 const change = computed(() => store.current);
 const back = () => router.push(reviewPath(props.projectId));
+
+async function greenlight() {
+  await store.decide("greenlight");
+}
+async function sendBack(comment: string) {
+  if (await store.decide("send_back", comment)) sendingBack.value = false;
+}
 
 const SPLIT: SplitterItem[] = [
   { id: "review-files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
@@ -85,7 +94,28 @@ function reveal(path: string) {
         </div>
       </div>
       <div v-else class="flex-1" />
-      <!-- Task 6 puts Give greenlight / Send back here. -->
+      <div v-if="change" class="flex shrink-0 items-center gap-2">
+        <p v-if="!change.canDecide && change.reason" class="text-muted max-w-64 text-xs" data-testid="review-reason">
+          {{ change.reason }}
+        </p>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          label="Send back"
+          :disabled="!change.canDecide || store.deciding"
+          data-testid="review-send-back"
+          @click="sendingBack = true"
+        />
+        <UButton
+          size="sm"
+          label="Give greenlight"
+          :loading="store.deciding"
+          :disabled="!change.canDecide || store.deciding"
+          data-testid="review-greenlight"
+          @click="greenlight()"
+        />
+      </div>
       <UButton
         v-if="liveUrl"
         :href="liveUrl"
@@ -101,6 +131,17 @@ function reveal(path: string) {
       />
     </div>
 
+    <UAlert
+      v-if="store.decideError && !store.gone"
+      color="warning"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      :description="store.decideError"
+      role="alert"
+      class="mx-3 mb-2 w-auto shrink-0"
+      data-testid="review-decide-error"
+    />
+    <SendBackDialog v-model:open="sendingBack" :busy="store.deciding" @submit="sendBack" />
     <p v-if="store.opening" class="text-muted flex items-center gap-2 p-3 text-sm">
       <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
       Loading change…

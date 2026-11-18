@@ -421,6 +421,12 @@ export function createApi(
     /** Unified diff of a teammate's change, fetched without a checkout. */
     reviewDiff: async (project: string, number: number): Promise<string> =>
       (await send("GET", `/api/projects/${enc(project)}/reviews/${number}/diff`)).text(),
+    /** Greenlight or send back; 409 `head_moved` when the change was updated since `headSha`. */
+    decideReview: (
+      project: string,
+      number: number,
+      body: { decision: "greenlight" | "send_back"; comment?: string; headSha: string },
+    ) => send("POST", `/api/projects/${enc(project)}/reviews/${number}/decision`, { body }).then(() => undefined),
     restoreCheckpoint: (project: string, sha: string) =>
       json<{ restored: string }>("POST", `/api/checkpoints/${enc(sha)}/restore`, {
         body: { project },

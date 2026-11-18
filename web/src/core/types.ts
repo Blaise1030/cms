@@ -92,7 +92,7 @@ export interface Change {
   prState?: PrState;
 }
 
-export type PrState = "draft" | "open" | "approved" | "merged" | "closed";
+export type PrState = "draft" | "open" | "approved" | "changes_requested" | "merged" | "closed";
 /** Check runs on the PR head: any failing → failing, else any pending → pending. */
 export type ChecksState = "none" | "pending" | "passing" | "failing";
 
@@ -136,6 +136,8 @@ export interface PrStatus {
   mergeableState: string | null;
   /** The local branch tip is the PR head: there is nothing new to push. */
   upToDate: boolean;
+  /** Who sent the change back and what they said; null unless `state` is `changes_requested`. */
+  sentBack?: { reviewer: string; comment: string } | null;
 }
 
 /** Whether the deploy a publish set off has shipped. */
