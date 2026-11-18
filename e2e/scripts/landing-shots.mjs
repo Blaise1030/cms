@@ -80,6 +80,15 @@ async function openPost(page) {
   await settle(page);
 }
 
+/** Collapse the agent sidebar so the workspace (e.g. the markdown editor) gets the full width. */
+async function hideAgent(page) {
+  const toggle = page.getByTestId("chat-toggle");
+  if ((await toggle.isVisible().catch(() => false)) && (await toggle.getAttribute("aria-pressed")) === "true") {
+    await toggle.click();
+    await settle(page, 600);
+  }
+}
+
 async function previewPost(page) {
   await page.goto(origin + p("preview"));
   await previewReady(page);
@@ -162,7 +171,15 @@ const SHOTS = [
   },
 
   // Ops carousel (3:2 cards)
-  { id: "ops-content", section: "ops", viewport: VIEWPORT.card, prepare: openFirstEntry },
+  {
+    id: "ops-content",
+    section: "ops",
+    viewport: VIEWPORT.card,
+    prepare: async (page) => {
+      await openFirstEntry(page);
+      await hideAgent(page);
+    },
+  },
   {
     id: "ops-preview",
     section: "ops",
