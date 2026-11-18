@@ -28,8 +28,8 @@ const topicPill =
         <>
           <section class="mt-20" aria-labelledby="browse">
             <h2 class="label" id="browse">Browse by section</h2>
-            <ul class="mt-6 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
-              <li class="group relative border-t border-line py-8">
+            <ul class="mt-6 grid border-t border-l border-line sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
+              <li class="group relative border-r border-b border-line p-6 transition-colors duration-gentle ease-gentle hover:bg-sand lg:p-8">
                 <h3 class="text-heading font-medium tracking-tight text-ink">
                   <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/section/${section.id}/`)}>{section.title}</a>
                 </h3>
