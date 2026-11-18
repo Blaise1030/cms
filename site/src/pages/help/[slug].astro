@@ -1,6 +1,8 @@
 ---
 import { render } from "astro:content";
 import Base from "../../layouts/Base.astro";
+import { buttonVariants } from "../../components/ui/button";
+import { cn } from "../../lib/utils";
 import { href } from "../../lib/href";
 import { loadHelp } from "../../lib/help";
 import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
@@ -45,14 +47,16 @@ const jsonLd = [
   ]),
 ];
 const navLink = "group block border-t border-line pt-6";
+// Breadcrumb links: shadcn link button, sized to sit inline with the separators.
+const crumbLink = cn(buttonVariants({ variant: "link" }), "h-auto px-0");
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
   <article class="page pt-14 md:pt-20" data-pagefind-body>
     <nav class="text-small text-muted" aria-label="Breadcrumb">
-      <ol class="flex flex-wrap gap-x-2 gap-y-1">
-        <li><a class="link" href={href("/help/")}>Help</a></li>
+      <ol class="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <li><a class={crumbLink} href={href("/help/")}>Help</a></li>
         <li aria-hidden="true">/</li>
-        <li><a class="link" href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
+        <li><a class={crumbLink} href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
         {subsection && <li aria-hidden="true">/</li>}
         {subsection && <li>{subsection}</li>}
       </ol>
