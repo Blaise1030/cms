@@ -1,6 +1,7 @@
 ---
 // The title block at the top of inner pages: an optional back link, the page's single h1 and a
 // short introduction. Extra content (filters, search) goes in the default slot.
+import { buttonVariants } from "./ui/button";
 import { href } from "../lib/href";
 
 interface Props {
@@ -12,7 +13,7 @@ const { title, description, back } = Astro.props;
 ---
 
 <header class="page pt-14 md:pt-20">
-  {back && <a class="link text-small text-muted" href={href(back.href)}>{back.label}</a>}
+  {back && <a class={buttonVariants({ variant: "outline", size: "sm" })} href={href(back.href)}>{back.label}</a>}
   <h1 class:list={["rise text-title tracking-display text-ink", back && "mt-6"]}>{title}</h1>
   {description && <p class="rise-2 mt-5 max-w-measure text-body text-muted">{description}</p>}
   <slot />
