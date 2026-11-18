@@ -48,7 +48,7 @@ const navLink = "group block border-t border-line pt-6";
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
   <article class="page pt-14 md:pt-20">
-    <nav class="text-sm text-muted" aria-label="Breadcrumb">
+    <nav class="text-small text-muted" aria-label="Breadcrumb">
       <ol class="flex flex-wrap gap-x-2 gap-y-1">
         <li><a class="link" href={href("/help/")}>Help</a></li>
         <li aria-hidden="true">/</li>
@@ -59,8 +59,8 @@ const navLink = "group block border-t border-line pt-6";
     </nav>
     <div class="mt-10 grid gap-12 lg:grid-cols-12 lg:gap-10">
       <div class="min-w-0 lg:col-span-8">
-        <h1 class="rise text-4xl tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
-        <p class="rise-2 mt-6 max-w-prose text-xl text-muted">{entry.data.description}</p>
+        <h1 class="rise text-title tracking-display text-ink">{entry.data.title}</h1>
+        <p class="rise-2 mt-6 max-w-prose text-body text-muted">{entry.data.description}</p>
         {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
         <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
         {(previous || next) && (
@@ -74,7 +74,7 @@ const navLink = "group block border-t border-line pt-6";
         <aside class="hidden lg:col-span-3 lg:col-start-10 lg:block">
           <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
             <p class="label">On this page</p>
-            <ul class="mt-4 border-l border-line text-sm">
+            <ul class="mt-4 border-l border-line text-small">
               {toc.map((heading) => (
                 <li>
                   <a

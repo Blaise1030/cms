@@ -16,7 +16,7 @@ const { topics } = await loadHelp();
     {topics.length === 0 ? <p class="text-muted">No help topics yet.</p> : (
       <ul class="grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">{topics.map((topic) => (
         <li class="group relative border-t border-line py-8">
-          <h2 class="text-xl font-medium tracking-tight text-ink">
+          <h2 class="text-heading font-medium tracking-tight text-ink">
             <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>
           </h2>
           <p class="label mt-2">{topic.docs.length} {topic.docs.length === 1 ? "article" : "articles"}</p>

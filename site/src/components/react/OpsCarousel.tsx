@@ -50,7 +50,7 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
       <div className="space-y-2 rounded-md border border-line bg-surface-raised p-3">
         {["Welcome to Orso", "Release notes people read", "Plan a launch in a week"].map((title, i) => (
           <div key={title} className="flex items-center justify-between gap-3 border-b border-line py-2 last:border-0">
-            <span className="truncate text-sm text-ink">{title}</span>
+            <span className="truncate text-small text-ink">{title}</span>
             <StatusBadge tone={i === 0 ? "draft" : i === 2 ? "review" : "live"} label={i === 0 ? "Draft" : i === 2 ? "Review" : "Live"} />
           </div>
         ))}
@@ -74,8 +74,8 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
   if (kind === "publish") {
     return (
       <div className="rounded-md border border-line bg-surface-raised p-4">
-        <p className="text-sm font-medium text-ink">Publish 3 changes</p>
-        <ul className="mt-3 space-y-2 text-xs text-muted">
+        <p className="text-small font-medium text-ink">Publish 3 changes</p>
+        <ul className="mt-3 space-y-2 text-label text-muted">
           <li className="flex items-center gap-2">
             <span className="size-1.5 rounded-full bg-status-live" />
             Build passed
@@ -96,10 +96,10 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
   if (kind === "agent") {
     return (
       <div className="space-y-3">
-        <div className="ml-auto max-w-[85%] rounded-md bg-surface-raised px-3 py-2 text-xs text-ink">
+        <div className="ml-auto max-w-[85%] rounded-md bg-surface-raised px-3 py-2 text-label text-ink">
           Tighten the pricing FAQ and add a refund line.
         </div>
-        <div className="max-w-[85%] rounded-md border border-line bg-surface-raised px-3 py-2 text-xs text-muted">
+        <div className="max-w-[85%] rounded-md border border-line bg-surface-raised px-3 py-2 text-label text-muted">
           Draft ready. Open the preview when you want to check it.
         </div>
       </div>
@@ -110,7 +110,7 @@ function SlideBody({ kind }: { kind: (typeof slides)[number]["kind"] }) {
       {["Published to main", "Shortened the pricing FAQ", "New cover image"].map((title, i) => (
         <div key={title} className="flex items-center gap-3 border-b border-line py-2.5 last:border-0">
           <span className={`size-2 rounded-full ${i === 0 ? "bg-status-live" : "bg-line-strong"}`} />
-          <span className="text-sm text-ink">{title}</span>
+          <span className="text-small text-ink">{title}</span>
         </div>
       ))}
     </div>
@@ -154,7 +154,7 @@ export function OpsCarousel() {
                   </div>
                 </CardContent>
                 <CardHeader className="shrink-0 gap-1 border-t border-line py-4">
-                  <CardTitle className="text-base text-ink">{slide.title}</CardTitle>
+                  <CardTitle className="text-body text-ink">{slide.title}</CardTitle>
                   <CardDescription className="text-muted">{slide.caption}</CardDescription>
                 </CardHeader>
               </Card>

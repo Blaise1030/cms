@@ -10,7 +10,7 @@ interface Props {
 const { categories, active } = Astro.props;
 const shown = categories.filter((category) => category.posts.length > 0 || category.id === active);
 const item =
-  "shrink-0 rounded-full border border-transparent px-3 py-1 text-sm whitespace-nowrap text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink aria-[current=page]:border-line aria-[current=page]:bg-surface-raised aria-[current=page]:text-ink";
+  "shrink-0 rounded-full border border-transparent px-3 py-1 text-small whitespace-nowrap text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink aria-[current=page]:border-line aria-[current=page]:bg-surface-raised aria-[current=page]:text-ink";
 ---
 
 {shown.length > 0 && (

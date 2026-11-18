@@ -24,7 +24,7 @@ const description = category.description ?? `Blog posts about ${category.title.t
   <PageHeader title={category.title} description={category.description} back={{ label: "All categories", href: "/blog/categories/" }} />
   <div class="mt-12 border-y border-line">
     <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
-      <h2 class="text-2xl tracking-tight text-ink">Posts</h2>
+      <h2 class="text-heading tracking-tight text-ink">Posts</h2>
       <BlogFilters categories={categories} active={category.id} />
     </div>
   </div>

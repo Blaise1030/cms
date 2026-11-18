@@ -20,7 +20,7 @@ export function SiteNavLinks({ items }: { items: NavItem[] }) {
       {items.map((link) => (
         <a
           key={link.href}
-          className="shrink-0 py-1 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
+          className="shrink-0 py-1 text-small text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
           href={link.href}
           aria-current={link.current ? "page" : undefined}
         >

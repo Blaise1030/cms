@@ -22,7 +22,7 @@ const { crumbs, class: className } = Astro.props;
 >
   <div class="flex min-h-11 shrink-0 items-center gap-2 border-b border-line px-4">
     <Breadcrumb>
-      <BreadcrumbList className="text-xs">
+      <BreadcrumbList className="text-label">
         <BreadcrumbItem>
           <span class="font-mono tracking-tight text-muted">orso</span>
         </BreadcrumbItem>
@@ -31,9 +31,9 @@ const { crumbs, class: className } = Astro.props;
             <BreadcrumbSeparator className="text-line-strong" />
             <BreadcrumbItem>
               {index === crumbs.length - 1 ? (
-                <BreadcrumbPage className="truncate text-xs text-muted">{crumb}</BreadcrumbPage>
+                <BreadcrumbPage className="truncate text-label text-muted">{crumb}</BreadcrumbPage>
               ) : (
-                <span class="truncate text-xs text-muted">{crumb}</span>
+                <span class="truncate text-label text-muted">{crumb}</span>
               )}
             </BreadcrumbItem>
           </>

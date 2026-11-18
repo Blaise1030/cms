@@ -47,15 +47,15 @@ const navLink = "group block border-t border-line pt-6";
     <div class="mx-auto max-w-5xl">
       <div class="grid gap-12 lg:grid-cols-12 lg:gap-10">
         <div class="min-w-0 lg:col-span-8">
-          <a class="link text-sm text-muted" href={href("/blog/")}>Back to Blog</a>
+          <a class="link text-small text-muted" href={href("/blog/")}>Back to Blog</a>
           <div class="rise mt-10 flex flex-wrap items-center gap-x-4 gap-y-1">
             <time class="label" datetime={entry.data.pubDate}>{formatDate(entry.data.pubDate)}</time>
             {postCategories.map((category) => (
               <a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
             ))}
           </div>
-          <h1 class="rise mt-4 text-4xl tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
-          <p class="rise-2 mt-6 max-w-prose text-xl text-muted">{entry.data.description}</p>
+          <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
+          <p class="rise-2 mt-6 max-w-prose text-body text-muted">{entry.data.description}</p>
           <div class="rise-3 mt-10 overflow-hidden rounded-lg bg-sand">
             {entry.data.coverImage ? (
               <Image class="aspect-16/9 w-full object-cover" src={entry.data.coverImage} alt={entry.data.coverAlt!} widths={[800, 1200, 1600]} sizes="(min-width: 1024px) 46rem, 100vw" loading="eager" />
@@ -71,7 +71,7 @@ const navLink = "group block border-t border-line pt-6";
             ]}
           ><Content /></div>
           {entry.data.tags.length > 0 && (
-            <ul class="mt-10 flex max-w-prose flex-wrap gap-x-4 gap-y-1 text-sm text-muted" aria-label="Tags">
+            <ul class="mt-10 flex max-w-prose flex-wrap gap-x-4 gap-y-1 text-small text-muted" aria-label="Tags">
               {entry.data.tags.map((tag) => <li>#{tag}</li>)}
             </ul>
           )}
@@ -88,7 +88,7 @@ const navLink = "group block border-t border-line pt-6";
   </article>
   {more.length > 0 && (
     <section class="mt-section" aria-labelledby="keep-reading">
-      <div class="page"><h2 class="border-t border-line pt-12 text-3xl tracking-display text-ink" id="keep-reading">Keep reading</h2></div>
+      <div class="page"><h2 class="border-t border-line pt-12 text-title tracking-display text-ink" id="keep-reading">Keep reading</h2></div>
       <div class="mt-12 grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} class="border-b border-line sm:border-r" />)}</div>
     </section>
   )}

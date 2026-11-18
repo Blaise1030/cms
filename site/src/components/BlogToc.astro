@@ -18,7 +18,7 @@ const indent = (depth: number) => (depth === 3 ? "pl-8" : "pl-4");
   <aside class:list={["hidden lg:block", className]}>
     <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
       <p class="label">On this page</p>
-      <ul class="mt-4 border-l border-line text-sm">
+      <ul class="mt-4 border-l border-line text-small">
         {headings.map((heading) => (
           <li>
             <a
@@ -36,11 +36,11 @@ const indent = (depth: number) => (depth === 3 ? "pl-8" : "pl-4");
   </aside>
 ) : (
   <details class="group mt-10 border-y border-line lg:hidden" data-toc>
-    <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-medium text-ink">
+    <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-small font-medium text-ink">
       On this page
       <svg class="size-4 text-muted transition-transform duration-quick ease-gentle group-open:rotate-180" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 8 5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </summary>
-    <ul class="pb-2 text-sm">
+    <ul class="pb-2 text-small">
       {headings.map((heading) => (
         <li><a class:list={[link, indent(heading.depth)]} href={`#${heading.slug}`}>{heading.text}</a></li>
       ))}

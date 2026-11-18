@@ -26,7 +26,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
           <h2 class="label" id="browse">Browse by section</h2>
           <ul class="mt-6 grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
             <li class="group relative border-t border-line py-8">
-              <h3 class="text-xl font-medium tracking-tight text-ink">
+              <h3 class="text-heading font-medium tracking-tight text-ink">
                 <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/section/${section.id}/`)}>{section.title}</a>
               </h3>
               <p class="label mt-2">{count(section.docs.length)}</p>
@@ -34,7 +34,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
             </li>
           ))}</ul>
           {shownTopics.length > 0 && (
-            <nav class="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t border-line pt-6 text-sm" aria-label="Help topics">
+            <nav class="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t border-line pt-6 text-small" aria-label="Help topics">
               <span class="label">Topics</span>
               {shownTopics.map((topic) => <a class="link text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
             </nav>
@@ -43,7 +43,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
         {shown.map((section) => (
           <section class="mt-24 grid gap-6 md:grid-cols-12 md:gap-10">
             <div class="md:col-span-4">
-              <h2 class="text-2xl tracking-display text-ink">{section.title}</h2>
+              <h2 class="text-heading tracking-display text-ink">{section.title}</h2>
               <p class="label mt-2">{count(section.docs.length)}</p>
             </div>
             <div class="md:col-span-8"><DocList docs={section.docs} /></div>

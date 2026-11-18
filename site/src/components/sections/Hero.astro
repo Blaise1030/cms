@@ -10,12 +10,12 @@ const words = headline.split(" ");
 <section class="pt-14 md:pt-20" id="product">
   <div class="page">
     <div class="w-full md:max-w-3/4">
-      <h1 class="text-4xl font-medium tracking-display text-ink md:text-display">
+      <h1 class="text-display font-medium tracking-display text-ink">
         {words.map((word, index) => (
           <><span class="word" style={`--word-delay: ${index * 45}ms`}>{word}</span>{" "}</>
         ))}
       </h1>
-      <p class="rise-2 mt-5 max-w-measure text-base text-muted md:mt-6 md:text-lg">
+      <p class="rise-2 mt-5 max-w-measure text-body text-muted md:mt-6">
         Your developer set up the repo. Now marketing, writers and founders can change the site themselves, in a form or
         by asking an agent. Every change is a draft you preview before it goes live.
       </p>
@@ -27,7 +27,7 @@ const words = headline.split(" ");
         >
         <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#scale")}>See what it does</a>
       </div>
-      <p class="rise-3 mt-4 text-sm text-muted">Free and open source. Content stays in your repo.</p>
+      <p class="rise-3 mt-4 text-small text-muted">Free and open source. Content stays in your repo.</p>
     </div>
   </div>
 
