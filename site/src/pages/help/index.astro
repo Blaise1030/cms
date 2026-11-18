@@ -27,8 +27,8 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
         <>
           <section class="mt-20" aria-labelledby="browse">
             <h2 class="page label" id="browse">Browse by section</h2>
-            <ul class="-mx-px mt-6 grid border-t border-l border-line sm:grid-cols-2 lg:grid-cols-3">{shown.map((section) => (
-              <li class="group relative border-r border-b border-line p-6 transition-colors duration-gentle ease-gentle hover:bg-sand lg:p-8">
+            <ul class="-mx-px mt-6 flex snap-x snap-mandatory overflow-x-auto border-t border-l border-line sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{shown.map((section) => (
+              <li class="group relative w-4/5 shrink-0 snap-start border-r border-b border-line p-6 transition-colors sm:w-auto duration-gentle ease-gentle hover:bg-sand lg:p-8">
                 <h3 class="text-heading font-medium tracking-tight text-ink">
                   <a class="after:absolute after:inset-0" href={href(`/help/section/${section.id}/`)}>{section.title}</a>
                 </h3>
@@ -37,9 +37,11 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
               </li>
             ))}</ul>
             {shownTopics.length > 0 && (
-              <nav class="page mt-6 flex flex-wrap items-center gap-2" aria-label="Help topics">
-                <span class="label mr-2">Topics</span>
-                {shownTopics.map((topic) => <a class={filterPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
+              <nav class="mt-6" aria-label="Help topics">
+                <p class="page label">Topics</p>
+                <div class="mt-3 flex gap-2 overflow-x-auto px-gutter py-1 md:flex-wrap md:overflow-visible md:px-gutter-wide">
+                  {shownTopics.map((topic) => <a class={filterPill} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>)}
+                </div>
               </nav>
             )}
           </section>
