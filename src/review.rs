@@ -13,6 +13,16 @@ fn review_ref(number: u64) -> String {
     format!("refs/orso/review/{number}")
 }
 
+/// `env` with git's messages forced to untranslated English (`LC_ALL=C`), so a missing
+/// pull request is recognised by its message whatever the reviewer's locale.
+fn untranslated(env: &[(String, String)]) -> Vec<(String, String)> {
+    env.iter()
+        .filter(|(k, _)| k != "LC_ALL")
+        .cloned()
+        .chain([("LC_ALL".to_string(), "C".to_string())])
+        .collect()
+}
+
 /// Fetch change `number`'s head (and refresh `origin/main`), returning the head's full SHA.
 pub async fn fetch_head(
     dir: &Path,
@@ -23,6 +33,7 @@ pub async fn fetch_head(
     let _guard = lock.lock().await;
     let ours = review_ref(number);
     let head_spec = format!("+refs/pull/{number}/head:{ours}");
+    let fetch_env = untranslated(env);
     git::run_env(
         dir,
         &[
@@ -31,7 +42,7 @@ pub async fn fetch_head(
             &head_spec,
             "+refs/heads/main:refs/remotes/origin/main",
         ],
-        env,
+        &fetch_env,
     )
     .await
     .map_err(|e| {
@@ -188,6 +199,28 @@ mod tests {
         let (_tmp, work, _sha) = fixture();
         let err = fetch_head(&work, 99, &[]).await.unwrap_err();
         assert_eq!(err.message, "This change is no longer waiting");
+        // A translated locale (from the caller's env) is overridden for the fetch.
+        let french = [
+            ("LC_ALL".to_string(), "fr_FR.UTF-8".to_string()),
+            ("LANG".to_string(), "fr_FR.UTF-8".to_string()),
+        ];
+        let err = fetch_head(&work, 99, &french).await.unwrap_err();
+        assert_eq!(err.message, "This change is no longer waiting");
+    }
+
+    #[test]
+    fn fetch_env_forces_the_c_locale() {
+        let env = untranslated(&[
+            ("LC_ALL".into(), "de_DE.UTF-8".into()),
+            ("GIT_ASKPASS".into(), "x".into()),
+        ]);
+        assert_eq!(
+            env,
+            vec![
+                ("GIT_ASKPASS".to_string(), "x".to_string()),
+                ("LC_ALL".to_string(), "C".to_string()),
+            ]
+        );
     }
 
     #[tokio::test]
