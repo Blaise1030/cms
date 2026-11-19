@@ -43,7 +43,7 @@ test("built sample categories, sections and topics link their articles", () => {
   const help = html(root, "help");
   assert.match(help, /href="\/help\/section\/projects\/"/);
   assert.match(help, /href="\/help\/categories\/setup\/"/);
-  // The search combobox island points at its section's index.
+  // The search palette island points at its section's index.
   assert.match(help, /bundlePath&quot;:\[0,&quot;\/pagefind-help\/&quot;\]/);
   assert.match(html(root, "blog"), /bundlePath&quot;:\[0,&quot;\/pagefind-blog\/&quot;\]/);
   for (const bundle of ["blog", "help"]) assert.ok(existsSync(join(root, "dist", `pagefind-${bundle}`, "pagefind.js")), `pagefind-${bundle} index`);

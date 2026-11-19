@@ -1,14 +1,14 @@
 ---
 // Search over one section's Pagefind index (built by integrations/pagefind.js after
-// `astro build`), in Nuxt UI's combobox (UInputMenu): type to list matching pages, pick one to
-// open it; ⌘K / Ctrl+K focuses the field. The index only exists in a build, so under
-// `astro dev` the field says search is unavailable.
+// `astro build`): a search button (or ⌘K / Ctrl+K) opens Nuxt UI's command palette
+// (UCommandPalette in a UModal); type to list matching pages, pick one to open it. The index
+// only exists in a build, so under `astro dev` the palette says search is unavailable.
 import SiteSearch from "./vue/SiteSearch.vue";
 
 interface Props {
   /** Index name from astro.config.mjs, e.g. "blog" → `<base>pagefind-blog/`. */
   bundle: string;
-  /** Field placeholder and accessible name. */
+  /** Button label, palette placeholder and accessible name. */
   placeholder: string;
   class?: string;
 }
