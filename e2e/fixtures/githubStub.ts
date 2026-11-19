@@ -29,6 +29,16 @@ export type Review = {
   state: string;
   body?: string;
   commit_id?: string;
+  submitted_at?: string;
+};
+
+/** A comment on a pull request's conversation (`/issues/{n}/comments`). */
+export type IssueComment = {
+  id: number;
+  user: { login: string };
+  body: string;
+  created_at: string;
+  html_url: string;
 };
 
 /** A change opened by a teammate that waits in the review inbox. */
@@ -39,6 +49,8 @@ export type ReviewPrSeed = {
   headSha: string;
   body?: string;
   labels?: string[];
+  /** Comments already on its conversation. */
+  comments?: { author: string; body: string }[];
   draft?: boolean;
 };
 
@@ -81,6 +93,8 @@ export type GithubStub = {
   addReviewPr: (seed: ReviewPrSeed) => void;
   /** Bodies of every `POST …/pulls/{n}/reviews` the daemon sent. */
   reviewPosts: () => ReviewPost[];
+  /** Bodies of every `POST …/issues/{n}/comments` the daemon sent. */
+  commentPosts: () => { path: string; body: { body?: string } }[];
   /** Serve `html` at `GET /sites{path}`: a deployed site a deployment's URL can point at. */
   addSitePage: (path: string, html: string) => void;
   close: () => Promise<void>;
@@ -131,7 +145,7 @@ export function startGithubStub(
     merged_at: null,
     updated_at: "2026-11-01T00:00:00Z",
     user: { login: p.author },
-    labels: (p.labels ?? ["orso"]).map((name) => ({ name })),
+    labels: (p.labels ?? ["orso"]).map((name) => ({ name, color: "0e8a16" })),
     head: { ref: `review-${p.number}`, sha: p.headSha },
   });
   let nextPr = 1;
@@ -162,6 +176,16 @@ export function startGithubStub(
   };
 
   const sitePages = new Map<string, string>();
+  const commentsByPr = new Map<number, IssueComment[]>();
+  const commentPosts: { path: string; body: { body?: string } }[] = [];
+  let nextCommentId = 100;
+  const issueComment = (number: number, login: string, body: string): IssueComment => ({
+    id: nextCommentId++,
+    user: { login },
+    body,
+    created_at: new Date().toISOString(),
+    html_url: `https://github.com/acme/site/pull/${number}#issuecomment-${nextCommentId}`,
+  });
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const auth = req.headers.authorization;
@@ -422,9 +446,42 @@ export function startGithubStub(
         const number = Number(reviewsPost[1]);
         const state = body.event === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED";
         const list = reviewsByPr.get(number) ?? [];
-        list.push({ user: { login: STUB_USER.login }, state, body: body.body ?? "", commit_id: body.commit_id ?? "" });
+        list.push({
+          user: { login: STUB_USER.login },
+          state,
+          body: body.body ?? "",
+          commit_id: body.commit_id ?? "",
+          submitted_at: new Date().toISOString(),
+        });
         reviewsByPr.set(number, list);
         sendJson(res, 200, { id: list.length, state });
+      });
+      return;
+    }
+
+    const commentsPost = req.method === "POST" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/);
+    if (commentsPost) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        let body: { body?: string } = {};
+        try {
+          body = JSON.parse(raw) as { body?: string };
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        commentPosts.push({ path: url.pathname, body });
+        const number = Number(commentsPost[1]);
+        const comment = issueComment(number, STUB_USER.login, body.body ?? "");
+        commentsByPr.set(number, [...(commentsByPr.get(number) ?? []), comment]);
+        sendJson(res, 201, comment);
       });
       return;
     }
@@ -455,6 +512,27 @@ export function startGithubStub(
       if (reviewsGet) {
         const mine = reviewsByPr.get(Number(reviewsGet[1]));
         sendJson(res, 200, mine ?? (reviewPrs.some((p) => p.number === Number(reviewsGet[1])) ? [] : status.reviews));
+        return;
+      }
+      const commentsGet = rest.match(/^\/issues\/(\d+)\/comments$/);
+      if (commentsGet) {
+        sendJson(res, 200, commentsByPr.get(Number(commentsGet[1])) ?? []);
+        return;
+      }
+      const commitsGet = rest.match(/^\/pulls\/(\d+)\/commits$/);
+      const pushed = commitsGet && reviewPrs.find((p) => p.number === Number(commitsGet[1]));
+      if (commitsGet) {
+        sendJson(
+          res,
+          200,
+          pushed
+            ? [{
+                sha: pushed.headSha,
+                commit: { message: pushed.title, committer: { name: pushed.author, date: "2026-11-01T00:00:00Z" } },
+                author: { login: pushed.author },
+              }]
+            : [],
+        );
         return;
       }
       const pullGet = rest.match(/^\/pulls\/(\d+)$/);
@@ -513,7 +591,12 @@ export function startGithubStub(
         readyForReviewCalls: () => readyCalls.slice(),
         addReviewPr: (seed) => {
           reviewPrs.push(seed);
+          commentsByPr.set(
+            seed.number,
+            (seed.comments ?? []).map((c) => issueComment(seed.number, c.author, c.body)),
+          );
         },
+        commentPosts: () => commentPosts.slice(),
         reviewPosts: () => reviewPosts.slice(),
         addSitePage: (path, html) => {
           sitePages.set(path, html);

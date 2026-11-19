@@ -220,6 +220,34 @@ describe("githubStub", () => {
     }
   });
 
+  it("serves a review PR's comments and commits and records new comments", async () => {
+    const stub = await startGithubStub();
+    const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };
+    const get = async (p: string) => (await fetch(`${stub.baseUrl}${p}`, { headers: auth })).json();
+    try {
+      stub.addReviewPr({
+        number: 3, title: "Fix", author: "bob", headSha: "a".repeat(40),
+        comments: [{ author: "carol", body: "First look" }],
+      });
+      expect(await get("/repos/acme/site/issues/3/comments")).toMatchObject([
+        { user: { login: "carol" }, body: "First look" },
+      ]);
+      expect(await get("/repos/acme/site/pulls/3/commits")).toMatchObject([
+        { sha: "a".repeat(40), author: { login: "bob" } },
+      ]);
+      const res = await fetch(`${stub.baseUrl}/repos/acme/site/issues/3/comments`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ body: "Looks good" }),
+      });
+      expect(res.status).toBe(201);
+      expect(stub.commentPosts()).toEqual([{ path: "/repos/acme/site/issues/3/comments", body: { body: "Looks good" } }]);
+      expect(await get("/repos/acme/site/issues/3/comments")).toHaveLength(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("serves a deployed site's pages without auth", async () => {
     const stub = await startGithubStub();
     try {

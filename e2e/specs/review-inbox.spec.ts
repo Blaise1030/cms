@@ -21,7 +21,8 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
     title: "Fix the hero copy",
     author: "bob",
     headSha: sha,
-    body: "Tightens the hero copy.",
+    body: "Tightens the **hero** copy.",
+    comments: [{ author: "carol", body: "Can we keep the old subtitle?" }],
   });
   expect(git(bareRemote, ["rev-parse", `refs/pull/${PR}/head`])).toBe(sha);
 
@@ -35,8 +36,24 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   await expect(item).toHaveCount(1);
   await expect(item).toContainText("Fix the hero copy");
   await item.click();
+  // A change opens on its Conversation: description, the teammate's comment, a comment box.
   await expect(page).toHaveURL(new RegExp(`/p/${projectId}/review/${PR}$`));
   await expect(page.getByTestId("review-title")).toHaveText("Fix the hero copy");
+  await expect(page.getByTestId("review-description").locator("strong")).toHaveText("hero");
+  const comments = page.getByTestId("review-timeline-comment");
+  await expect(comments).toHaveCount(1);
+  await expect(comments.first()).toContainText("Can we keep the old subtitle?");
+  await page.getByTestId("review-comment-input").fill("Yes, keeping it.");
+  await page.getByTestId("review-comment-submit").click();
+  await expect(comments).toHaveCount(2);
+  await expect(comments.nth(1)).toContainText("Yes, keeping it.");
+  expect(github.commentPosts()).toEqual([
+    { path: `/repos/acme/site/issues/${PR}/comments`, body: { body: "Yes, keeping it." } },
+  ]);
+
+  // Review holds the preview and what changed.
+  await page.getByTestId("review-tab-files").click();
+  await expect(page).toHaveURL(new RegExp(`/p/${projectId}/review/${PR}/files$`));
   // The preview fills the view; What changed is the other tab.
   await expect(page.getByTestId("review-preview")).toBeVisible();
   await page.getByRole("tab", { name: "What changed" }).click();

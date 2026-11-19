@@ -33,6 +33,7 @@ export type orsoEnv = {
     setGraphqlStatus: (status: number | null) => void;
     addReviewPr: (seed: import("./githubStub").ReviewPrSeed) => void;
     reviewPosts: () => import("./githubStub").ReviewPost[];
+    commentPosts: () => { path: string; body: { body?: string } }[];
     /** Serve a deployed site's page from the stub, at `${baseUrl}/sites{path}`. */
     addSitePage: (path: string, html: string) => void;
   };
@@ -320,6 +321,7 @@ export async function startorso(): Promise<orsoEnv> {
       addReviewPr: (seed) => stub.addReviewPr(seed),
       reviewPosts: () => stub.reviewPosts(),
       addSitePage: (path, html) => stub.addSitePage(path, html),
+      commentPosts: () => stub.commentPosts(),
     },
     stop: async () => {
       const exitedWithin = (ms: number) =>
