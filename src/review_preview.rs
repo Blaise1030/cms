@@ -19,7 +19,9 @@ use crate::snapshot_build::{self, BuildError};
 
 /// Previews kept per project; the least recently viewed goes first.
 pub const MAX_PER_PROJECT: usize = 3;
-/// A preview older than this is dropped.
+/// A preview older than this is dropped. Age counts from when its build started
+/// (the `prepare` that created it), not from its last view, so even a preview
+/// looked at all day is rebuilt at most once a day.
 pub const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -276,6 +278,13 @@ impl ReviewPreviews {
         Ok(conflict_preview::page_response(&file, bytes))
     }
 
+    /// Drops every preview older than [`MAX_AGE`] in every project. Run
+    /// periodically, so an idle daemon does not keep expired builds on disk.
+    pub async fn expire_now(&self) {
+        let doomed = self.state.lock().unwrap().expire((self.clock)());
+        remove_dirs(doomed).await;
+    }
+
     /// Drops `project`'s previews of PRs that are no longer open.
     pub async fn prune(&self, project: &str, open: &[u64]) {
         let doomed = {
@@ -370,6 +379,10 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         calls: AtomicUsize,
+        /// Builds that ran to the end (and wrote their output).
+        done: AtomicUsize,
+        /// Output folder of every build, in start order.
+        outs: std::sync::Mutex<Vec<PathBuf>>,
         fail: AtomicBool,
         gate: Option<Arc<Semaphore>>,
     }
@@ -377,6 +390,7 @@ mod tests {
     fn fake(fake: Arc<Fake>) -> Builder {
         Arc::new(move |_repo, sha, base_url, out| {
             let fake = fake.clone();
+            fake.outs.lock().unwrap().push(out.clone());
             Box::pin(async move {
                 fake.calls.fetch_add(1, Ordering::SeqCst);
                 if let Some(gate) = &fake.gate {
@@ -389,6 +403,7 @@ mod tests {
                 tokio::fs::write(out.join("index.html"), format!("{sha} at {base_url}"))
                     .await
                     .unwrap();
+                fake.done.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             })
         })
@@ -594,6 +609,132 @@ mod tests {
             }
         }
         out
+    }
+
+    fn gated() -> (Arc<Semaphore>, Arc<Fake>) {
+        let gate = Arc::new(Semaphore::new(0));
+        let f = Arc::new(Fake {
+            gate: Some(gate.clone()),
+            ..Fake::default()
+        });
+        (gate, f)
+    }
+
+    /// Waits until `n` builds have written their output.
+    async fn finished(f: &Fake, n: usize) {
+        for _ in 0..400 {
+            if f.done.load(Ordering::SeqCst) >= n {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("only {} builds finished", f.done.load(Ordering::SeqCst));
+    }
+
+    /// Whether `dir` is (or soon becomes) absent.
+    async fn gone(dir: &Path) -> bool {
+        for _ in 0..400 {
+            if !dir.exists() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn expire_now_drops_old_builds_without_other_calls() {
+        let base = tempfile::tempdir().unwrap();
+        let f = Arc::new(Fake::default());
+        let m = manager(&base, &f);
+        ready(&m, 1, "0dd").await;
+        advance(MAX_AGE + Duration::from_secs(60));
+        m.expire_now().await;
+        assert!(built_dirs(&base).is_empty());
+    }
+
+    #[tokio::test]
+    async fn superseded_running_build_deletes_its_output() {
+        let base = tempfile::tempdir().unwrap();
+        let (gate, f) = gated();
+        let m = manager(&base, &f);
+        m.prepare("p", Path::new("/repo"), 7, "aaa").await;
+        m.prepare("p", Path::new("/repo"), 7, "bbb").await;
+        gate.add_permits(1);
+        finished(&f, 1).await;
+        let old = f.outs.lock().unwrap()[0].clone();
+        assert!(gone(&old).await, "superseded output kept");
+        assert_eq!(m.status("p", 7, "bbb").await, Some(ReviewPreview::Building));
+        gate.add_permits(1);
+        assert!(matches!(
+            settle(&m, 7, "bbb").await,
+            ReviewPreview::Ready { .. }
+        ));
+        assert_eq!(built_dirs(&base), ["bbb at /preview/p/reviews/7/bbb/"]);
+    }
+
+    #[tokio::test]
+    async fn evicted_running_build_deletes_its_output() {
+        let base = tempfile::tempdir().unwrap();
+        let (gate, f) = gated();
+        let m = manager(&base, &f);
+        for (n, sha) in [(1, "a1"), (2, "a2"), (3, "a3"), (4, "a4")] {
+            m.prepare("p", Path::new("/repo"), n, sha).await;
+        }
+        assert_eq!(m.status("p", 1, "a1").await, None);
+        gate.add_permits(4);
+        finished(&f, 4).await;
+        let evicted = f.outs.lock().unwrap()[0].clone();
+        assert!(gone(&evicted).await, "evicted output kept");
+        for (n, sha) in [(2, "a2"), (3, "a3"), (4, "a4")] {
+            assert!(matches!(
+                settle(&m, n, sha).await,
+                ReviewPreview::Ready { .. }
+            ));
+        }
+        assert_eq!(built_dirs(&base).len(), MAX_PER_PROJECT);
+    }
+
+    #[tokio::test]
+    async fn pruned_running_build_deletes_its_output() {
+        let base = tempfile::tempdir().unwrap();
+        let (gate, f) = gated();
+        let m = manager(&base, &f);
+        m.prepare("p", Path::new("/repo"), 1, "a1").await;
+        m.prune("p", &[]).await;
+        assert_eq!(m.status("p", 1, "a1").await, None);
+        gate.add_permits(1);
+        finished(&f, 1).await;
+        let pruned = f.outs.lock().unwrap()[0].clone();
+        assert!(gone(&pruned).await, "pruned output kept");
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_a_running_build() {
+        let base = tempfile::tempdir().unwrap();
+        let (gate, f) = gated();
+        let m = manager(&base, &f);
+        m.prepare("p", Path::new("/repo"), 1, "a1").await;
+        // Let the build start and park on the gate.
+        for _ in 0..400 {
+            if f.calls.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        tokio::time::timeout(Duration::from_secs(5), m.shutdown())
+            .await
+            .expect("shutdown waited on a running build instead of aborting it");
+        gate.add_permits(1);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            f.done.load(Ordering::SeqCst),
+            0,
+            "build ran on after shutdown"
+        );
+        assert!(!f.outs.lock().unwrap()[0].exists());
+        assert!(built_dirs(&base).is_empty());
     }
 
     #[test]

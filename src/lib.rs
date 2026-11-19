@@ -78,12 +78,14 @@ pub async fn serve_until(
     devservers.resume_all().await;
     let cleanup = tokio::spawn({
         let previews = previews.clone();
+        let review_previews = review_previews.clone();
         let state = state.clone();
         async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 previews.prune(&sessions.active_ids().await).await;
+                review_previews.expire_now().await;
                 changes::sync_chat::sweep(&state).await;
             }
         }
