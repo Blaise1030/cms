@@ -3534,7 +3534,10 @@ esac"#,
         assert_eq!(items[0].checks, ChecksState::Passing);
         assert_eq!(items[0].my_state, MyReviewState::Greenlit);
         assert_eq!(items[1].number, 4);
-        assert!(items[1].mine, "the signed-in user's own change is listed, marked mine");
+        assert!(
+            items[1].mine,
+            "the signed-in user's own change is listed, marked mine"
+        );
         assert_eq!(items[2].number, 5);
         assert_eq!(items[2].author, "ghost");
         assert!(!items[2].mine);
