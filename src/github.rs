@@ -590,8 +590,9 @@ pub struct Conversation {
     pub reviewers: Vec<Reviewer>,
 }
 
-/// Comments, reviews, pushes and the close/merge, oldest first, with consecutive commits
-/// grouped into one push. Pending reviews and empty comment-only reviews are left out.
+/// Comments, reviews, pushes and the close/merge, newest first, with consecutive commits
+/// grouped into one push dated by its latest commit. Pending reviews and empty comment-only
+/// reviews are left out.
 fn timeline(
     comments: Vec<ApiIssueComment>,
     reviews: &[ApiReview],
@@ -661,14 +662,21 @@ fn timeline(
     for item in raw {
         match (items.last_mut(), item) {
             (
-                Some(TimelineItem::Push { commits, .. }),
-                TimelineItem::Push { commits: more, .. },
+                Some(TimelineItem::Push { commits, at }),
+                TimelineItem::Push {
+                    commits: more,
+                    at: later,
+                },
             ) => {
+                // Dated by its latest commit, so the group sorts where it last moved.
                 commits.extend(more);
+                *at = later;
             }
             (_, item) => items.push(item),
         }
     }
+    // Newest first; a group's commits stay in the order they were made.
+    items.reverse();
     items
 }
 
@@ -3996,7 +4004,7 @@ esac"#,
     }
 
     #[test]
-    fn timeline_orders_everything_and_groups_consecutive_commits() {
+    fn timeline_is_newest_first_and_groups_consecutive_commits() {
         let comments = vec![ApiIssueComment {
             id: 9,
             user: Some(ApiLogin {
@@ -4040,11 +4048,13 @@ esac"#,
             .collect();
         assert_eq!(
             kinds,
-            ["push", "comment", "review", "review", "push", "review", "state"]
+            ["state", "review", "push", "review", "review", "comment", "push"]
         );
-        let TimelineItem::Push { commits, .. } = &items[0] else {
-            panic!("{:?}", items[0])
+        // A group is dated by its latest commit; its commits keep their own order.
+        let TimelineItem::Push { commits, at } = &items[6] else {
+            panic!("{:?}", items[6])
         };
+        assert_eq!(at, "2026-01-01T01:00:00Z");
         assert_eq!(
             commits,
             &vec![
@@ -4061,7 +4071,7 @@ esac"#,
             ]
         );
         assert_eq!(
-            items[2],
+            items[4],
             TimelineItem::Review {
                 author: "ada".into(),
                 at: "2026-01-03T00:00:00Z".into(),
@@ -4073,7 +4083,7 @@ esac"#,
             matches!(&items[3], TimelineItem::Review { verdict: ReviewVerdict::Commented, author, .. } if author == "cy")
         );
         assert!(matches!(
-            &items[5],
+            &items[1],
             TimelineItem::Review {
                 verdict: ReviewVerdict::Greenlit,
                 body: None,
@@ -4081,13 +4091,13 @@ esac"#,
             }
         ));
         assert_eq!(
-            items[6],
+            items[0],
             TimelineItem::State {
                 at: "2026-01-06T00:00:00Z".into(),
                 state: "merged".into()
             }
         );
-        let json = serde_json::to_value(&items[2]).unwrap();
+        let json = serde_json::to_value(&items[4]).unwrap();
         assert_eq!(json["verdict"], "sent_back");
     }
 
@@ -4203,11 +4213,12 @@ esac"#,
         let c = auth.conversation("acme/site", 3).await.unwrap();
         stop();
         let json = serde_json::to_value(&c).unwrap();
-        assert_eq!(json["items"][0]["kind"], "push");
-        assert_eq!(json["items"][0]["commits"][0]["sha"], "abcdef1");
-        assert_eq!(json["items"][0]["commits"][0]["author"], "b");
-        assert_eq!(json["items"][1]["kind"], "comment");
-        assert_eq!(json["items"][1]["body"], "hi");
+        // Newest first: the comment came after the push.
+        assert_eq!(json["items"][0]["kind"], "comment");
+        assert_eq!(json["items"][0]["body"], "hi");
+        assert_eq!(json["items"][1]["kind"], "push");
+        assert_eq!(json["items"][1]["commits"][0]["sha"], "abcdef1");
+        assert_eq!(json["items"][1]["commits"][0]["author"], "b");
         assert_eq!(
             json["checks"],
             serde_json::json!([{ "name": "build", "status": "completed",

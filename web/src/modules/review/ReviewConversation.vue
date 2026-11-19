@@ -54,16 +54,16 @@ const commitsLabel = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
 
 /** A push of more than this many commits shows only the first ones until opened. */
 const PUSH_PREVIEW = 3;
-/** Opened push groups, by timeline position (not remembered). */
-const openPushes = ref(new Set<number>());
-const pushOpen = (i: number) => openPushes.value.has(i);
-function setPushOpen(i: number, open: boolean) {
+/** Opened push groups, by their first commit, so a new comment on top does not shift them. */
+const openPushes = ref(new Set<string>());
+const pushOpen = (key: string) => openPushes.value.has(key);
+function setPushOpen(key: string, open: boolean) {
   const next = new Set(openPushes.value);
-  if (open) next.add(i);
-  else next.delete(i);
+  if (open) next.add(key);
+  else next.delete(key);
   openPushes.value = next;
 }
-const togglePush = (i: number) => setPushOpen(i, !pushOpen(i));
+const togglePush = (key: string) => setPushOpen(key, !pushOpen(key));
 /** orso's checkpoint commits read "checkpoint: …": shown as a badge plus the subject. */
 function commitSubject(message: string): { checkpoint: boolean; text: string } {
   const m = message.match(/^checkpoint:\s*/i);
@@ -90,6 +90,44 @@ async function submit() {
             <p v-else class="text-muted text-sm italic">No description provided.</p>
           </div>
         </article>
+
+        <form
+          v-if="change.open"
+          class="border-default bg-default flex flex-col gap-2 rounded-lg border p-3"
+          data-testid="review-comment-form"
+          @submit.prevent="submit"
+        >
+          <label for="review-comment" class="text-highlighted text-sm font-medium">Add a comment</label>
+          <UTextarea
+            id="review-comment"
+            v-model="draft"
+            :rows="4"
+            autoresize
+            placeholder="Add a comment"
+            class="w-full"
+            data-testid="review-comment-input"
+          />
+          <UAlert
+            v-if="talk.postError.value"
+            color="error"
+            variant="subtle"
+            icon="i-hugeicons-alert-circle"
+            :description="talk.postError.value"
+            role="alert"
+            data-testid="review-comment-error"
+          />
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-muted text-xs">Markdown is supported.</span>
+            <UButton
+              type="submit"
+              size="sm"
+              label="Comment"
+              :loading="talk.posting.value"
+              :disabled="!draft.trim() || talk.posting.value"
+              data-testid="review-comment-submit"
+            />
+          </div>
+        </form>
 
         <p v-if="talk.loading.value && !conversation" class="text-muted flex items-center gap-2 text-sm">
           <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
@@ -142,7 +180,7 @@ async function submit() {
                 class="flex items-center gap-2 text-sm"
                 :class="item.commits.length > PUSH_PREVIEW && 'cursor-pointer'"
                 data-testid="review-push-header"
-                @click="item.commits.length > PUSH_PREVIEW && togglePush(i)"
+                @click="item.commits.length > PUSH_PREVIEW && togglePush(item.commits[0]!.sha)"
               >
                 <UIcon name="i-hugeicons-git-commit" class="text-muted size-4 shrink-0" />
                 <span class="min-w-0 flex-1">
@@ -155,11 +193,11 @@ async function submit() {
                   color="neutral"
                   variant="ghost"
                   size="xs"
-                  :icon="pushOpen(i) ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
-                  :aria-label="pushOpen(i) ? 'Show fewer commits' : 'Show all commits'"
-                  :aria-expanded="pushOpen(i)"
+                  :icon="pushOpen(item.commits[0]!.sha) ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
+                  :aria-label="pushOpen(item.commits[0]!.sha) ? 'Show fewer commits' : 'Show all commits'"
+                  :aria-expanded="pushOpen(item.commits[0]!.sha)"
                   data-testid="review-push-toggle"
-                  @click.stop="togglePush(i)"
+                  @click.stop="togglePush(item.commits[0]!.sha)"
                 />
               </p>
               <ul class="m-0 mt-1 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
@@ -179,9 +217,9 @@ async function submit() {
               </ul>
               <UCollapsible
                 v-if="item.commits.length > PUSH_PREVIEW"
-                :open="pushOpen(i)"
+                :open="pushOpen(item.commits[0]!.sha)"
                 data-testid="review-push-rest"
-                @update:open="setPushOpen(i, $event)"
+                @update:open="setPushOpen(item.commits[0]!.sha, $event)"
               >
                 <template #content>
                   <ul class="m-0 mt-0.5 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
@@ -207,10 +245,10 @@ async function submit() {
                 variant="link"
                 size="xs"
                 class="ml-6"
-                :label="pushOpen(i) ? 'Show fewer' : `Show all ${item.commits.length} commits`"
-                :aria-expanded="pushOpen(i)"
+                :label="pushOpen(item.commits[0]!.sha) ? 'Show fewer' : `Show all ${item.commits.length} commits`"
+                :aria-expanded="pushOpen(item.commits[0]!.sha)"
                 data-testid="review-push-more"
-                @click="togglePush(i)"
+                @click="togglePush(item.commits[0]!.sha)"
               />
             </div>
 
@@ -227,43 +265,6 @@ async function submit() {
           </li>
         </ol>
 
-        <form
-          v-if="change.open"
-          class="border-default bg-default flex flex-col gap-2 rounded-lg border p-3"
-          data-testid="review-comment-form"
-          @submit.prevent="submit"
-        >
-          <label for="review-comment" class="text-highlighted text-sm font-medium">Add a comment</label>
-          <UTextarea
-            id="review-comment"
-            v-model="draft"
-            :rows="4"
-            autoresize
-            placeholder="Add a comment"
-            class="w-full"
-            data-testid="review-comment-input"
-          />
-          <UAlert
-            v-if="talk.postError.value"
-            color="error"
-            variant="subtle"
-            icon="i-hugeicons-alert-circle"
-            :description="talk.postError.value"
-            role="alert"
-            data-testid="review-comment-error"
-          />
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-muted text-xs">Markdown is supported.</span>
-            <UButton
-              type="submit"
-              size="sm"
-              label="Comment"
-              :loading="talk.posting.value"
-              :disabled="!draft.trim() || talk.posting.value"
-              data-testid="review-comment-submit"
-            />
-          </div>
-        </form>
       </div>
 
       <aside class="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-64" data-testid="review-sidebar">

@@ -54,7 +54,9 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   await page.getByTestId("review-comment-input").fill("Yes, keeping it.");
   await page.getByTestId("review-comment-submit").click();
   await expect(comments).toHaveCount(2);
-  await expect(comments.nth(1)).toContainText("Yes, keeping it.");
+  // Newest first: the posted comment tops the timeline.
+  await expect(comments.first()).toContainText("Yes, keeping it.");
+  await expect(comments.nth(1)).toContainText("Can we keep the old subtitle?");
   expect(github.commentPosts()).toEqual([
     { path: `/repos/acme/site/issues/${PR}/comments`, body: { body: "Yes, keeping it." } },
   ]);

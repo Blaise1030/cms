@@ -43,7 +43,7 @@ export function useReviewConversation(
     postError.value = null;
     try {
       const item = await daemon.api.commentOnReview(projectId(), number(), body);
-      if (conversation.value) conversation.value = { ...conversation.value, items: [...conversation.value.items, item] };
+      if (conversation.value) conversation.value = { ...conversation.value, items: [item, ...conversation.value.items] };
       return true;
     } catch (e) {
       postError.value = errorMessage(e);

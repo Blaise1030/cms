@@ -272,16 +272,17 @@ describe("ReviewChange", () => {
   describe("conversation", () => {
     const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
     const TALK = {
+      // Newest first, as the daemon sends it.
       items: [
-        { kind: "push", at: "2026-01-01T00:00:00Z", commits: [
+        { kind: "state", at: "2026-01-06T00:00:00Z", state: "merged" },
+        { kind: "review", author: "bo", at: "2026-01-05T00:00:00Z", verdict: "greenlit", body: null },
+        { kind: "review", author: "dee", at: "2026-01-04T00:00:00Z", verdict: "commented", body: "Nit" },
+        { kind: "review", author: "bo", at: "2026-01-03T00:00:00Z", verdict: "sent_back", body: "Fix the title" },
+        { kind: "comment", id: 1, author: "cy", at: "2026-01-02T00:00:00Z", body: "Looks **close**", url: "u" },
+        { kind: "push", at: "2026-01-01T01:00:00Z", commits: [
           { sha: "aaaaaaa", message: "First edit", author: "Ada" },
           { sha: "bbbbbbb", message: "Second edit", author: "Ada" },
         ] },
-        { kind: "comment", id: 1, author: "cy", at: "2026-01-02T00:00:00Z", body: "Looks **close**", url: "u" },
-        { kind: "review", author: "bo", at: "2026-01-03T00:00:00Z", verdict: "sent_back", body: "Fix the title" },
-        { kind: "review", author: "dee", at: "2026-01-04T00:00:00Z", verdict: "commented", body: "Nit" },
-        { kind: "review", author: "bo", at: "2026-01-05T00:00:00Z", verdict: "greenlit", body: null },
-        { kind: "state", at: "2026-01-06T00:00:00Z", state: "merged" },
       ],
       checks: [
         { name: "build", status: "completed", conclusion: "success", url: "https://gh/runs/1" },
@@ -293,10 +294,10 @@ describe("ReviewChange", () => {
       ],
     };
 
-    it("renders each kind of timeline entry, oldest first", async () => {
+    it("renders each kind of timeline entry, newest first", async () => {
       const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
       const kinds = w.findAll("[data-testid='review-timeline'] > li").map((li) => li.attributes("data-kind"));
-      expect(kinds).toEqual(["push", "comment", "review", "review", "review", "state"]);
+      expect(kinds).toEqual(["state", "review", "review", "review", "comment", "push"]);
       const push = w.get("[data-testid='review-timeline-push']");
       expect(push.text()).toContain("Ada");
       expect(push.text()).toContain("pushed 2 commits");
@@ -307,10 +308,10 @@ describe("ReviewChange", () => {
       await vi.waitFor(() => expect(comment.find("strong").exists()).toBe(true));
       expect(comment.get("strong").text()).toBe("close");
       const reviews = w.findAll("[data-testid='review-timeline-review']");
-      expect(reviews.map((r) => r.attributes("data-verdict"))).toEqual(["sent_back", "commented", "greenlit"]);
-      expect(reviews[0]!.text()).toContain("bo sent this back");
-      await vi.waitFor(() => expect(reviews[0]!.text()).toContain("Fix the title"));
-      expect(reviews[2]!.text()).toContain("bo greenlit these changes");
+      expect(reviews.map((r) => r.attributes("data-verdict"))).toEqual(["greenlit", "commented", "sent_back"]);
+      expect(reviews[2]!.text()).toContain("bo sent this back");
+      await vi.waitFor(() => expect(reviews[2]!.text()).toContain("Fix the title"));
+      expect(reviews[0]!.text()).toContain("bo greenlit these changes");
       expect(w.get("[data-testid='review-timeline-state']").text()).toContain("Merged");
     });
 
@@ -419,6 +420,29 @@ describe("ReviewChange", () => {
       expect(comments[0]!.text()).toContain("me");
       expect((input.element as HTMLTextAreaElement).value).toBe("");
       expect(w.get("[data-testid='review-tab-conversation']").text()).toContain("1");
+    });
+
+    it("puts the comment box between the description and the timeline, and a new comment on top", async () => {
+      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => ({
+        kind: "comment", id: 9, author: "me", at: new Date().toISOString(), body, url: "u9",
+      }));
+      const open = { ...DETAIL, open: true };
+      const { w } = await mountChange(
+        { ...base(), review: vi.fn(async () => open), reviewConversation: vi.fn(async () => TALK), commentOnReview },
+        "conversation",
+      );
+      const ids = ["review-description", "review-comment-form", "review-timeline"];
+      const els = ids.map((id) => w.get(`[data-testid='${id}']`).element);
+      const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(follows(els[0]!, els[1]!)).toBe(true);
+      expect(follows(els[1]!, els[2]!)).toBe(true);
+
+      await w.get("[data-testid='review-comment-input']").setValue("Newest word");
+      await w.get("[data-testid='review-comment-form']").trigger("submit");
+      await flushPromises();
+      const first = w.get("[data-testid='review-timeline'] > li");
+      expect(first.attributes("data-kind")).toBe("comment");
+      expect(first.text()).toContain("Newest word");
     });
 
     it("keeps the comment and says why when posting fails", async () => {
