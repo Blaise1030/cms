@@ -17,6 +17,8 @@ export interface FeedMessage {
   url?: string;
   /** Follows a message by the same author within 5 minutes: no avatar or name of its own. */
   grouped: boolean;
+  /** Still being sent, or it didn't get there (the client id is then in `key`). */
+  pending?: "sending" | "failed";
 }
 
 /** Something that happened: a greenlight or send-back (with its comment), a push, a merge or close. */
@@ -76,13 +78,15 @@ export function buildFeed(items: TimelineItem[], now = new Date()): FeedRow[] {
       !!prev && prev.author === message.author && valid && at.getTime() - new Date(prev.at).getTime() <= GROUP_MS;
     const row: FeedMessage = {
       type: "message",
-      key: message.kind === "comment" ? `comment-${message.id}` : `review-${i}`,
+      // A sent comment keeps its pending row's key, so it doesn't remount when it arrives.
+      key: message.kind === "comment" ? (message.clientId ?? `comment-${message.id}`) : `review-${i}`,
       author: message.author,
       avatarUrl: message.avatarUrl,
       at: message.at,
       body: message.body ?? "",
-      url: message.url,
+      url: message.url || undefined,
       grouped,
+      pending: message.kind === "comment" ? message.pending : undefined,
     };
     rows.push(row);
     last = row;

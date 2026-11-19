@@ -114,10 +114,11 @@ watch(
 );
 
 const draft = ref("");
-async function submit() {
-  if (!draft.value.trim() || props.talk.posting.value) return;
+/** Sends at once: the composer clears and the message shows as "Sending…" until GitHub has it. */
+function submit() {
+  if (!draft.value.trim()) return;
   sent = true;
-  if (await props.talk.comment(draft.value)) draft.value = "";
+  if (props.talk.comment(draft.value)) draft.value = "";
   else sent = false;
 }
 </script>
@@ -231,7 +232,12 @@ async function submit() {
                 data-kind="comment"
                 :data-grouped="row.grouped || undefined"
                 data-testid="review-timeline-comment"
-                :class="['hover:bg-elevated/50 rounded-md px-1', row.grouped ? 'py-0.5' : 'mt-1.5 py-1']"
+                :data-pending="row.pending"
+                :class="[
+                  'hover:bg-elevated/50 rounded-md px-1',
+                  row.grouped ? 'py-0.5' : 'mt-1.5 py-1',
+                  row.pending === 'sending' && 'opacity-60',
+                ]"
                 :ui="{
                   container: 'gap-2.5 pb-0',
                   leading: 'min-h-0 pt-0.5',
@@ -252,11 +258,38 @@ async function submit() {
                 <template #content>
                   <p v-if="!row.grouped" class="flex items-baseline gap-2" data-testid="review-message-header">
                     <span class="text-highlighted font-semibold">{{ row.author }}</span>
-                    <UTooltip :text="exactTime(row.at)">
+                    <span v-if="row.pending === 'sending'" class="text-muted text-xs" data-testid="review-message-sending">Sending…</span>
+                    <UTooltip v-else-if="!row.pending" :text="exactTime(row.at)">
                       <time :datetime="row.at" class="text-muted text-xs">{{ clockTime(row.at) }}</time>
                     </UTooltip>
                   </p>
                   <ReviewMarkdown :content="row.body" />
+                  <p v-if="row.grouped && row.pending === 'sending'" class="text-muted text-xs" data-testid="review-message-sending">
+                    Sending…
+                  </p>
+                  <p v-if="row.pending === 'failed'" class="text-error flex items-center gap-1 text-xs" data-testid="review-message-failed">
+                    <UIcon name="i-hugeicons-alert-circle" class="size-3.5 shrink-0" />
+                    Couldn't send.
+                    <UButton
+                      color="error"
+                      variant="link"
+                      size="xs"
+                      class="p-0"
+                      label="Retry"
+                      data-testid="review-message-retry"
+                      @click="talk.retry(row.key)"
+                    />
+                    <span aria-hidden="true">·</span>
+                    <UButton
+                      color="error"
+                      variant="link"
+                      size="xs"
+                      class="p-0"
+                      label="Delete"
+                      data-testid="review-message-delete"
+                      @click="talk.discard(row.key)"
+                    />
+                  </p>
                 </template>
               </UChatMessage>
 
@@ -344,16 +377,6 @@ async function submit() {
       </div>
 
       <div v-if="change.open" class="shrink-0 px-4 pt-1 pb-4" data-testid="review-comment-form">
-        <UAlert
-          v-if="talk.postError.value"
-          color="error"
-          variant="subtle"
-          icon="i-hugeicons-alert-circle"
-          :description="talk.postError.value"
-          role="alert"
-          class="mb-2"
-          data-testid="review-comment-error"
-        />
         <!-- ⌘/Ctrl+Enter sends; Enter alone is a new line. -->
         <UChatPrompt
           v-model="draft"
@@ -373,8 +396,7 @@ async function submit() {
               status="ready"
               size="sm"
               label="Send"
-              :loading="talk.posting.value"
-              :disabled="!draft.trim() || talk.posting.value"
+              :disabled="!draft.trim()"
               data-testid="review-comment-submit"
             />
           </template>

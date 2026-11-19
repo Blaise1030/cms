@@ -504,18 +504,116 @@ describe("ReviewChange", () => {
       expect(el.scrollTop).toBe(1000);
     });
 
-    it("keeps the comment and says why when posting fails", async () => {
-      const commentOnReview = vi.fn(async () => {
-        throw new ApiError("UNKNOWN", "Couldn't post your comment. Try again in a moment.", 502);
+    describe("sending optimistically", () => {
+      const deferred = <T,>() => {
+        let resolve!: (v: T) => void;
+        let reject!: (e: unknown) => void;
+        const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)));
+        return { promise, resolve, reject };
+      };
+      const send = async (w: Awaited<ReturnType<typeof mountChange>>["w"], body: string) => {
+        await w.get("[data-testid='review-comment-input']").setValue(body);
+        await w.get("[data-testid='review-comment-form'] form").trigger("submit");
+      };
+      const last = (w: Awaited<ReturnType<typeof mountChange>>["w"]) =>
+        w.findAll("[data-testid='review-timeline-comment']").at(-1)!;
+
+      it("shows the message at once as Sending…, clears the composer, then swaps in GitHub's copy in place", async () => {
+        const reply = deferred<unknown>();
+        const commentOnReview = vi.fn(() => reply.promise);
+        const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview }, "conversation");
+        const { useGithubStore } = await import("@/modules/github/store");
+        useGithubStore().user = { login: "me", id: 1, name: null, avatarUrl: "https://avatars.example/me" };
+        await send(w, "Ship **it**");
+        await flushPromises();
+        const row = last(w);
+        expect(row.attributes("data-pending")).toBe("sending");
+        expect(row.get("[data-testid='review-message-sending']").text()).toBe("Sending…");
+        expect(row.text()).toContain("me");
+        expect(row.get("img").attributes("src")).toBe("https://avatars.example/me");
+        await vi.waitFor(() => expect(row.find("strong").exists()).toBe(true));
+        expect(((w.get("[data-testid='review-comment-input']").element) as HTMLTextAreaElement).value).toBe("");
+
+        reply.resolve({ kind: "comment", id: 77, author: "me", at: "2026-01-08T12:00:00Z", body: "Ship **it**", url: "https://gh/c/77" });
+        await flushPromises();
+        const after = last(w);
+        expect(after.attributes("data-pending")).toBeUndefined();
+        expect(after.find("[data-testid='review-message-sending']").exists()).toBe(false);
+        // Same element: keyed by the client id, so it wasn't remounted.
+        expect(after.element).toBe(row.element);
       });
-      const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
-      const input = w.get("[data-testid='review-comment-input']");
-      await input.setValue("Ship it");
-      await w.get("[data-testid='review-comment-form'] form").trigger("submit");
-      await flushPromises();
-      expect(w.get("[data-testid='review-comment-error']").text()).toContain("Couldn't post your comment");
-      expect((input.element as HTMLTextAreaElement).value).toBe("Ship it");
-      expect(w.find("[data-testid='review-timeline-comment']").exists()).toBe(false);
+
+      it("marks a failed message with Retry and Delete, without re-reading the inbox", async () => {
+        const commentOnReview = vi
+          .fn()
+          .mockRejectedValueOnce(new ApiError("UNKNOWN", "GitHub is unreachable", 502))
+          .mockResolvedValueOnce({ kind: "comment", id: 78, author: "me", at: "2026-01-08T12:00:00Z", body: "Again", url: "u78" });
+        const { w, client } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview }, "conversation");
+        client.setQueryData(reviewKeys.inbox("site"), []);
+        await send(w, "Again");
+        await flushPromises();
+        const failed = last(w);
+        expect(failed.attributes("data-pending")).toBe("failed");
+        expect(failed.get("[data-testid='review-message-failed']").text()).toContain("Couldn't send.");
+        expect(client.getQueryState(reviewKeys.inbox("site"))?.isInvalidated).toBe(false);
+
+        await failed.get("[data-testid='review-message-retry']").trigger("click");
+        await flushPromises();
+        expect(commentOnReview).toHaveBeenCalledTimes(2);
+        expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Again");
+        expect(last(w).attributes("data-pending")).toBeUndefined();
+        expect(last(w).text()).toContain("Again");
+      });
+
+      it("deletes a failed message without putting it back in the composer", async () => {
+        const commentOnReview = vi.fn().mockRejectedValue(new ApiError("UNKNOWN", "nope", 502));
+        const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview }, "conversation");
+        await send(w, "Gone soon");
+        await flushPromises();
+        await last(w).get("[data-testid='review-message-delete']").trigger("click");
+        await flushPromises();
+        expect(w.text()).not.toContain("Gone soon");
+        expect(((w.get("[data-testid='review-comment-input']").element) as HTMLTextAreaElement).value).toBe("");
+      });
+
+      it("keeps a message that is still sending through a re-read of the conversation", async () => {
+        const reply = deferred<unknown>();
+        const reviewConversation = vi.fn(async () => TALK);
+        const { w } = await mountChange({ ...base(), reviewConversation, commentOnReview: vi.fn(() => reply.promise) }, "conversation");
+        await send(w, "Hold on");
+        await flushPromises();
+        const reads = reviewConversation.mock.calls.length;
+        await w.get("[data-testid='review-refresh']").trigger("click");
+        await flushPromises();
+        expect(reviewConversation.mock.calls.length).toBeGreaterThan(reads);
+        expect(last(w).text()).toContain("Hold on");
+        expect(last(w).attributes("data-pending")).toBe("sending");
+      });
+
+      it("sends quick messages one after another, in order", async () => {
+        const first = deferred<unknown>();
+        const commentOnReview = vi
+          .fn()
+          .mockImplementationOnce(() => first.promise)
+          .mockResolvedValueOnce({ kind: "comment", id: 81, author: "me", at: "2026-01-08T12:01:00Z", body: "Two", url: "u81" });
+        const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview }, "conversation");
+        await send(w, "One");
+        await send(w, "Two");
+        await flushPromises();
+        // The second waits for the first.
+        expect(commentOnReview).toHaveBeenCalledTimes(1);
+        const bodies = () => w.findAll("[data-testid='review-timeline-comment']").slice(-2).map((m) => m.text());
+        expect(bodies()[0]).toContain("One");
+        expect(bodies()[1]).toContain("Two");
+        first.resolve({ kind: "comment", id: 80, author: "me", at: "2026-01-08T12:00:00Z", body: "One", url: "u80" });
+        await flushPromises();
+        await vi.waitFor(() => expect(commentOnReview).toHaveBeenCalledTimes(2));
+        await flushPromises();
+        expect(commentOnReview.mock.calls.map((c) => c[2])).toEqual(["One", "Two"]);
+        expect(bodies()[0]).toContain("One");
+        expect(bodies()[1]).toContain("Two");
+        expect(w.findAll("[data-pending]")).toHaveLength(0);
+      });
     });
   });
 

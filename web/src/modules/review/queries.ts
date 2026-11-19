@@ -2,6 +2,7 @@ import { computed, reactive, ref } from "vue";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useDaemon } from "@/core/daemon";
 import type { ReviewConversation, ReviewDetail, ReviewItem, ReviewPreview, TimelineItem } from "@/core/types";
+import { useGithubStore } from "@/modules/github/store";
 import { errorMessage } from "@orso/utils";
 import type { ParsedDiff } from "../checkpoints/diff";
 
@@ -186,44 +187,104 @@ export function useConversation(projectId: () => string, number: () => number, h
       query && query.queryKey[3] === number() && query.queryKey[1] === projectId() ? keepPreviousData(previous) : undefined,
   });
 
+  /**
+   * Comments being sent, or that failed, shown after the server's items until they resolve.
+   * They live outside the query cache, so a background read of the conversation can't drop them.
+   */
+  const pending = ref<PendingComment[]>([]);
+  /** Server comment id → the client id its pending row had, so the row keeps its key (no remount). */
+  const clientKeys = reactive(new Map<number, string>());
+  const github = useGithubStore();
+  if (!github.user) void github.load().catch(() => undefined);
+  let seq = 0;
+
+  const setPending = (clientId: string, change: Partial<PendingComment> | null) => {
+    pending.value = change
+      ? pending.value.map((p) => (p.clientId === clientId ? { ...p, ...change } : p))
+      : pending.value.filter((p) => p.clientId !== clientId);
+  };
+
   const posting = useMutation({
-    mutationFn: (body: string) => daemon.api.commentOnReview(projectId(), number(), body),
-    onSuccess: (item) => {
-      // GitHub's answer is the comment as stored: added at the end (the feed is oldest
-      // first), without reading it all again.
-      client.setQueryData<ReviewConversation>([...key.value, headSha() ?? ""], (old) =>
-        old ? { ...old, items: [...old.items, item] } : old,
+    // One scope per change: quick sends reach GitHub (and the feed) in the order they were sent.
+    scope: { id: `review-comment:${projectId()}:${number()}` },
+    mutationFn: (v: { clientId: string; body: string }) => daemon.api.commentOnReview(projectId(), number(), v.body),
+    onMutate: (v) => {
+      if (pending.value.some((p) => p.clientId === v.clientId)) setPending(v.clientId, { state: "sending" });
+      else pending.value = [...pending.value, { clientId: v.clientId, body: v.body, at: new Date().toISOString(), state: "sending" }];
+    },
+    onSuccess: async (item, v) => {
+      const queryKey = [...key.value, headSha() ?? ""];
+      // A read already in flight would put the list back without this comment.
+      await client.cancelQueries({ queryKey: key.value });
+      if (item.kind === "comment") clientKeys.set(item.id, v.clientId);
+      // GitHub's answer replaces the pending row in place: appended to the server's items
+      // (oldest first) as the pending row leaves, in one update.
+      client.setQueryData<ReviewConversation>(queryKey, (old) =>
+        old && !old.items.some((i) => i.kind === "comment" && item.kind === "comment" && i.id === item.id)
+          ? { ...old, items: [...old.items, item] }
+          : old,
       );
+      setPending(v.clientId, null);
       // Its comment count changed.
       void client.invalidateQueries({ queryKey: reviewKeys.inbox(projectId()) });
     },
+    onError: (_e, v) => setPending(v.clientId, { state: "failed" }),
   });
-  const postError = ref<string | null>(null);
 
-  /** Posts `body`; true when it went through. */
-  async function comment(body: string): Promise<boolean> {
-    if (!body.trim() || posting.isPending.value) return false;
-    postError.value = null;
-    try {
-      await posting.mutateAsync(body);
-      return true;
-    } catch (e) {
-      postError.value = errorMessage(e);
-      return false;
-    }
+  /** Sends `body` at once, optimistically; false (and nothing sent) when it is blank. */
+  function comment(body: string): boolean {
+    if (!body.trim()) return false;
+    posting.mutate({ clientId: `pending-${Date.now()}-${++seq}`, body });
+    return true;
   }
+  /** Sends a failed message's same body again, in the same place. */
+  function retry(clientId: string) {
+    const failed = pending.value.find((p) => p.clientId === clientId && p.state === "failed");
+    if (failed) posting.mutate({ clientId, body: failed.body });
+  }
+  /** Drops a failed message; nothing goes back to the composer. */
+  const discard = (clientId: string) => setPending(clientId, null);
 
-  const conversation = computed<ReviewConversation | null>(() => q.data.value ?? null);
+  const conversation = computed<ReviewConversation | null>(() => {
+    const data = q.data.value;
+    if (!data) return null;
+    const me = github.user;
+    const items: TimelineItem[] = data.items.map((i) =>
+      i.kind === "comment" && clientKeys.has(i.id) ? { ...i, clientId: clientKeys.get(i.id) } : i,
+    );
+    for (const p of pending.value) {
+      items.push({
+        kind: "comment",
+        id: -1,
+        author: me?.login ?? "You",
+        avatarUrl: me?.avatarUrl,
+        at: p.at,
+        body: p.body,
+        url: "",
+        clientId: p.clientId,
+        pending: p.state,
+      });
+    }
+    return { ...data, items };
+  });
   return {
     conversation,
     error: computed(() => (q.error.value ? errorMessage(q.error.value) : null)),
     loading: computed(() => q.isFetching.value),
-    posting: computed(() => posting.isPending.value),
-    postError,
     count: computed(() => conversation.value?.items.filter(counted).length ?? null),
     reload: () => q.refetch(),
     comment,
+    retry,
+    discard,
   };
+}
+
+/** A comment on its way to GitHub, or one that didn't get there. */
+interface PendingComment {
+  clientId: string;
+  body: string;
+  at: string;
+  state: "sending" | "failed";
 }
 
 /**

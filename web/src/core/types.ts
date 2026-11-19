@@ -142,7 +142,19 @@ export interface ReviewLabel {
 
 /** One entry of a change's conversation (`kind` is the wire tag). */
 export type TimelineItem =
-  | { kind: "comment"; id: number; author: string; avatarUrl?: string; at: string; body: string; url: string }
+  | {
+      kind: "comment";
+      id: number;
+      author: string;
+      avatarUrl?: string;
+      at: string;
+      body: string;
+      url: string;
+      /** Client only: the row's key while it was being sent, kept after it arrives. */
+      clientId?: string;
+      /** Client only: still on its way to GitHub, or it didn't get there. */
+      pending?: "sending" | "failed";
+    }
   | {
       kind: "review";
       author: string;

@@ -84,9 +84,12 @@ and checked-out change are untouched throughout.
        `checkpoint:` prefix as a badge), merged or closed. Pending and empty reviews are
        left out.
      - **Composer** (`UChatPrompt`) pinned at the bottom: "Message…", grows to 8 rows,
-       ⌘/Ctrl+Enter sends (Enter is a new line), **Send** disabled while blank; it posts a
-       GitHub comment that lands at the bottom and scrolls into view; a failure shows
-       inline and keeps the text. Anyone signed in may comment; no push access needed.
+       ⌘/Ctrl+Enter sends (Enter is a new line), **Send** disabled while blank. Sending is
+       optimistic: the composer clears and the message appears at the bottom at once, muted,
+       as *Sending…* under your name and avatar, then GitHub's copy takes its place (same
+       row). A failure stays in place as "Couldn't send. **Retry** · **Delete**". Quick sends
+       go out in order, and a re-read of the conversation keeps unsent messages. Anyone
+       signed in may comment; no push access needed.
      - **Sidebar**: labels, checks (✕/✓ passed/total, expandable to each check linked to
        GitHub), the deploy preview link, and each reviewer's latest standing (or *Awaiting
        review*).

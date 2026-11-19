@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
+import { createPinia } from "pinia";
 import { createFakeDaemon } from "@/test/fakeDaemon";
 import { queryPlugin } from "@/test/queryClient";
 
@@ -15,7 +16,7 @@ function host<T>(setup: () => T) {
   let out!: T;
   const { client, plugin } = queryPlugin();
   const w = mount(defineComponent({ setup: () => ((out = setup()), () => h("div")) }), {
-    global: { plugins: [plugin] },
+    global: { plugins: [plugin, createPinia()] },
   });
   return { out, w, client };
 }
@@ -105,7 +106,7 @@ describe("usePreview", () => {
 });
 
 describe("useConversation", () => {
-  it("puts a posted comment in the conversation and marks the inbox stale", async () => {
+  it("shows a comment at once, swaps in GitHub's copy and marks the inbox stale", async () => {
     const item = { kind: "comment", id: 9, author: "me", at: "2026-01-02T00:00:00Z", body: "Hi", url: "u" };
     const reviewConversation = vi.fn(async () => ({ items: [], checks: [], reviewers: [] }));
     const commentOnReview = vi.fn(async () => item);
@@ -113,9 +114,13 @@ describe("useConversation", () => {
     const { out, client } = host(() => useConversation(() => "site", () => 7, () => "abc"));
     await vi.waitFor(() => expect(out.conversation.value).not.toBeNull());
     client.setQueryData(["review", "site", "inbox"], []);
-    expect(await out.comment("Hi")).toBe(true);
-    expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Hi");
-    expect(out.conversation.value?.items.some((i) => i.kind === "comment" && i.body === "Hi")).toBe(true);
+    expect(out.comment("Hi")).toBe(true);
+    // Shown at once, before GitHub answers.
+    expect(out.conversation.value?.items.at(-1)).toMatchObject({ kind: "comment", body: "Hi", pending: "sending" });
+    await flushPromises();
+    await vi.waitFor(() => expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Hi"));
+    await vi.waitFor(() => expect(out.conversation.value?.items.at(-1)).toMatchObject({ id: 9, body: "Hi" }));
+    expect(out.conversation.value?.items.at(-1)).not.toHaveProperty("pending");
     expect(client.getQueryState(["review", "site", "inbox"])?.isInvalidated).toBe(true);
   });
 
@@ -126,7 +131,7 @@ describe("useConversation", () => {
       commentOnReview,
     });
     const { out } = host(() => useConversation(() => "site", () => 7, () => "abc"));
-    expect(await out.comment("   ")).toBe(false);
+    expect(out.comment("   ")).toBe(false);
     expect(commentOnReview).not.toHaveBeenCalled();
   });
 });
