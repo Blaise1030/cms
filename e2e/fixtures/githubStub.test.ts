@@ -219,4 +219,48 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+
+  it("serves seeded review PRs and records review posts", async () => {
+    const stub = await startGithubStub();
+    const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };
+    const get = async (p: string) => (await fetch(`${stub.baseUrl}${p}`, { headers: auth })).json();
+    try {
+      stub.addReviewPr({ number: 3, title: "Fix", author: "bob", headSha: "a".repeat(40) });
+      const list = (await get("/repos/acme/site/pulls?state=open&per_page=100&page=1")) as {
+        number: number;
+        labels: { name: string }[];
+        user: { login: string };
+        head: { sha: string };
+      }[];
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        number: 3,
+        labels: [{ name: "orso" }],
+        user: { login: "bob" },
+        head: { sha: "a".repeat(40) },
+      });
+      expect(await get("/repos/acme/site/pulls?state=open&per_page=100&page=2")).toEqual([]);
+      expect(await get("/repos/acme/site/pulls/3")).toMatchObject({ number: 3, state: "open" });
+      expect(await get("/repos/acme/site")).toMatchObject({ permissions: { push: true } });
+      expect(await get("/repos/acme/site/pulls/3/reviews")).toEqual([]);
+
+      const res = await fetch(`${stub.baseUrl}/repos/acme/site/pulls/3/reviews`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ event: "REQUEST_CHANGES", body: "No", commit_id: "a".repeat(40) }),
+      });
+      expect(res.ok).toBe(true);
+      expect(stub.reviewPosts()).toEqual([
+        {
+          path: "/repos/acme/site/pulls/3/reviews",
+          body: { event: "REQUEST_CHANGES", body: "No", commit_id: "a".repeat(40) },
+        },
+      ]);
+      expect(await get("/repos/acme/site/pulls/3/reviews")).toMatchObject([
+        { user: { login: STUB_USER.login }, state: "CHANGES_REQUESTED", body: "No" },
+      ]);
+    } finally {
+      await stub.close();
+    }
+  });
 });

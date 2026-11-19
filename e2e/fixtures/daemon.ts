@@ -31,6 +31,8 @@ export type orsoEnv = {
     setMainRulesetRequiresPr: (requiresPr: boolean) => void;
     readyForReviewCalls: () => string[];
     setGraphqlStatus: (status: number | null) => void;
+    addReviewPr: (seed: import("./githubStub").ReviewPrSeed) => void;
+    reviewPosts: () => import("./githubStub").ReviewPost[];
   };
   stop: () => Promise<void>;
 };
@@ -145,6 +147,32 @@ export async function chatCheckpoint(
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error("timed out waiting for a checkpoint after the chat turn");
+}
+
+/**
+ * Push a teammate's change to the bare remote as `refs/pull/<number>/head` (what GitHub keeps for
+ * every PR): one commit on `main` that appends to `file`. Returns the commit's SHA.
+ */
+export function pushPullHead(
+  env: Pick<orsoEnv, "bareRemote" | "tmp">,
+  number: number,
+  file: string,
+  text: string,
+): string {
+  const work = fs.mkdtempSync(path.join(env.tmp, "pr-work-"));
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      ["-c", "user.name=Bob", "-c", "user.email=bob@example.com", ...args],
+      { cwd: work, encoding: "utf8" },
+    ).trim();
+  execFileSync("git", ["clone", "-q", "--branch", "main", env.bareRemote, work]);
+  fs.appendFileSync(path.join(work, file), text);
+  git("add", "-A");
+  git("commit", "-q", "-m", `Edit ${file}`);
+  const sha = git("rev-parse", "HEAD");
+  git("push", "-q", "origin", `HEAD:refs/pull/${number}/head`);
+  return sha;
 }
 
 async function signInAndClone(origin: string, token: string): Promise<string> {
@@ -285,6 +313,8 @@ export async function startorso(): Promise<orsoEnv> {
       setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
       readyForReviewCalls: () => stub.readyForReviewCalls(),
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
+      addReviewPr: (seed) => stub.addReviewPr(seed),
+      reviewPosts: () => stub.reviewPosts(),
     },
     stop: async () => {
       const exitedWithin = (ms: number) =>

@@ -24,7 +24,29 @@ export type PullsPost = {
 export const STUB_HEAD_SHA = "5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e";
 
 export type CheckRun = { status: string; conclusion: string | null };
-export type Review = { user: { login: string }; state: string };
+export type Review = {
+  user: { login: string };
+  state: string;
+  body?: string;
+  commit_id?: string;
+};
+
+/** A change opened by a teammate that waits in the review inbox. */
+export type ReviewPrSeed = {
+  number: number;
+  title: string;
+  author: string;
+  headSha: string;
+  body?: string;
+  labels?: string[];
+  draft?: boolean;
+};
+
+/** Body of a `POST /repos/{o}/{r}/pulls/{n}/reviews` the daemon sent. */
+export type ReviewPost = {
+  path: string;
+  body: { event?: string; body?: string; commit_id?: string };
+};
 
 /** Overrides applied to every stub PR (status endpoints read them). */
 export type PrStatusPatch = {
@@ -55,6 +77,10 @@ export type GithubStub = {
   readyForReviewCalls: () => string[];
   /** Force `POST /graphql` to return this HTTP status (null = normal). */
   setGraphqlStatus: (status: number | null) => void;
+  /** Add an open PR to the repo's list, as a teammate's change waiting for review. */
+  addReviewPr: (seed: ReviewPrSeed) => void;
+  /** Bodies of every `POST …/pulls/{n}/reviews` the daemon sent. */
+  reviewPosts: () => ReviewPost[];
   close: () => Promise<void>;
 };
 
@@ -89,6 +115,23 @@ export function startGithubStub(
   const readyCalls: string[] = [];
   const pullsPosts: PullsPost[] = [];
   const prs: StoredPr[] = [];
+  const reviewPrs: ReviewPrSeed[] = [];
+  const reviewPosts: ReviewPost[] = [];
+  const reviewsByPr = new Map<number, Review[]>();
+  const reviewPrJson = (p: ReviewPrSeed) => ({
+    number: p.number,
+    node_id: nodeId(p.number),
+    title: p.title,
+    body: p.body ?? "",
+    html_url: `https://github.com/acme/site/pull/${p.number}`,
+    draft: p.draft ?? false,
+    state: "open",
+    merged_at: null,
+    updated_at: "2026-11-01T00:00:00Z",
+    user: { login: p.author },
+    labels: (p.labels ?? ["orso"]).map((name) => ({ name })),
+    head: { ref: `review-${p.number}`, sha: p.headSha },
+  });
   let nextPr = 1;
   const status: Required<Omit<PrStatusPatch, "draft">> & { draft: boolean | null } = {
     draft: null,
@@ -297,7 +340,10 @@ export function startGithubStub(
         const matching = (head ? prs.filter((p) => p.head === head) : prs).filter(
           () => want === "all" || want === status.state,
         );
-        sendJson(res, 200, matching.map(pullJson));
+        // The review inbox lists every open PR (paged); only page 1 has any.
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const extra = !head && want !== "closed" && page === 1 ? reviewPrs.map(reviewPrJson) : [];
+        sendJson(res, 200, page > 1 ? [] : [...matching.map(pullJson), ...extra]);
         return;
       }
 
@@ -343,6 +389,49 @@ export function startGithubStub(
       }
     }
 
+    const reviewsPost = req.method === "POST" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/reviews$/);
+    if (reviewsPost) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        let body: ReviewPost["body"] = {};
+        try {
+          body = JSON.parse(raw) as ReviewPost["body"];
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        reviewPosts.push({ path: url.pathname, body });
+        const number = Number(reviewsPost[1]);
+        const state = body.event === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED";
+        const list = reviewsByPr.get(number) ?? [];
+        list.push({ user: { login: STUB_USER.login }, state, body: body.body ?? "", commit_id: body.commit_id ?? "" });
+        reviewsByPr.set(number, list);
+        sendJson(res, 200, { id: list.length, state });
+      });
+      return;
+    }
+
+    if (req.method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      sendJson(res, 200, {
+        full_name: "acme/site",
+        private: true,
+        default_branch: "main",
+        permissions: { push: true },
+      });
+      return;
+    }
+
     const repoGet =
       req.method === "GET" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+(\/.*)$/);
     if (repoGet) {
@@ -351,8 +440,16 @@ export function startGithubStub(
         return;
       }
       const rest = repoGet[1]!;
-      if (/^\/pulls\/\d+\/reviews$/.test(rest)) {
-        sendJson(res, 200, status.reviews);
+      const reviewsGet = rest.match(/^\/pulls\/(\d+)\/reviews$/);
+      if (reviewsGet) {
+        const mine = reviewsByPr.get(Number(reviewsGet[1]));
+        sendJson(res, 200, mine ?? (reviewPrs.some((p) => p.number === Number(reviewsGet[1])) ? [] : status.reviews));
+        return;
+      }
+      const pullGet = rest.match(/^\/pulls\/(\d+)$/);
+      const seeded = pullGet && reviewPrs.find((p) => p.number === Number(pullGet[1]));
+      if (seeded) {
+        sendJson(res, 200, reviewPrJson(seeded));
         return;
       }
       // Checks and deployments are served for whatever head SHA is asked about.
@@ -403,6 +500,10 @@ export function startGithubStub(
           rulesetRequiresPr = requiresPr;
         },
         readyForReviewCalls: () => readyCalls.slice(),
+        addReviewPr: (seed) => {
+          reviewPrs.push(seed);
+        },
+        reviewPosts: () => reviewPosts.slice(),
         setGraphqlStatus: (code) => {
           graphqlStatus = code;
         },
