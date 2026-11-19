@@ -21,6 +21,7 @@ pub mod preview;
 pub mod projects;
 pub mod providers;
 pub mod review;
+pub mod review_shots;
 pub mod runtime;
 pub mod settings;
 pub mod setup_prefs;

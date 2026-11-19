@@ -359,6 +359,21 @@ struct ApiLogin {
 }
 
 #[derive(Deserialize)]
+struct ApiSha {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiRef {
+    object: ApiSha,
+}
+
+#[derive(Deserialize)]
+struct ApiGitCommit {
+    tree: ApiSha,
+}
+
+#[derive(Deserialize)]
 struct ApiReview {
     #[serde(default)]
     user: Option<ApiLogin>,
@@ -2177,6 +2192,152 @@ impl GithubAuth {
             ),
             _ => ApiError::github("Couldn't send your review. Try again in a moment."),
         })
+    }
+
+    /// Commits `files` (path → bytes) to `branch` in `repo` through the Git Data API, creating
+    /// the branch as an orphan on first use, and returns the new commit's sha. Never touches
+    /// any other branch. A branch that moved underneath (non-fast-forward, or created in the
+    /// meantime) is retried once from its new tip.
+    pub async fn commit_files_to_branch(
+        &self,
+        repo: &str,
+        branch: &str,
+        message: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<String, ApiError> {
+        use base64::Engine;
+        let mut blobs = Vec::with_capacity(files.len());
+        for (path, bytes) in files {
+            let blob: ApiSha = self
+                .git_post(
+                    repo,
+                    "blobs",
+                    serde_json::json!({
+                        "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+                        "encoding": "base64",
+                    }),
+                )
+                .await?;
+            blobs.push((path.clone(), blob.sha));
+        }
+        let mut last = None;
+        for _ in 0..2 {
+            match self.commit_blobs(repo, branch, message, &blobs).await? {
+                Ok(sha) => return Ok(sha),
+                Err(refused) => last = Some(refused),
+            }
+        }
+        Err(last.unwrap_or_else(|| ApiError::github("Couldn't save the screenshots.")))
+    }
+
+    /// One attempt: tree and commit on the branch's current tip, then move (or create) the ref.
+    /// The outer `Err` is a failure; the inner one a ref update GitHub refused, worth a retry.
+    async fn commit_blobs(
+        &self,
+        repo: &str,
+        branch: &str,
+        message: &str,
+        blobs: &[(String, String)],
+    ) -> Result<Result<String, ApiError>, ApiError> {
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/ref/heads/{branch}"),
+                None,
+            )
+            .await?;
+        let parent = match status {
+            s if s.is_success() => Some(
+                serde_json::from_slice::<ApiRef>(&body)
+                    .map_err(|_| ApiError::github("unexpected response from GitHub"))?
+                    .object
+                    .sha,
+            ),
+            reqwest::StatusCode::NOT_FOUND => None,
+            s => return Err(github_error(s, &body)),
+        };
+        let base_tree = match &parent {
+            Some(sha) => {
+                let commit: ApiGitCommit = self
+                    .api_json(
+                        reqwest::Method::GET,
+                        &format!("/repos/{repo}/git/commits/{sha}"),
+                        None,
+                    )
+                    .await?;
+                Some(commit.tree.sha)
+            }
+            None => None,
+        };
+        let entries: Vec<_> = blobs
+            .iter()
+            .map(|(path, sha)| serde_json::json!({ "path": path, "mode": "100644", "type": "blob", "sha": sha }))
+            .collect();
+        let mut tree_body = serde_json::json!({ "tree": entries });
+        if let Some(base) = base_tree {
+            tree_body["base_tree"] = serde_json::json!(base);
+        }
+        let tree: ApiSha = self.git_post(repo, "trees", tree_body).await?;
+        let parents: Vec<&String> = parent.iter().collect();
+        let commit: ApiSha = self
+            .git_post(
+                repo,
+                "commits",
+                serde_json::json!({ "message": message, "tree": tree.sha, "parents": parents }),
+            )
+            .await?;
+        let (status, body) = match &parent {
+            Some(_) => {
+                self.api_raw(
+                    reqwest::Method::PATCH,
+                    &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                    Some(&serde_json::json!({ "sha": commit.sha, "force": false })),
+                )
+                .await?
+            }
+            None => {
+                self.api_raw(
+                    reqwest::Method::POST,
+                    &format!("/repos/{repo}/git/refs"),
+                    Some(&serde_json::json!({ "ref": format!("refs/heads/{branch}"), "sha": commit.sha })),
+                )
+                .await?
+            }
+        };
+        if status.is_success() {
+            Ok(Ok(commit.sha))
+        } else if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+            || status == reqwest::StatusCode::CONFLICT
+        {
+            Ok(Err(ApiError::conflict(
+                "Another screenshot upload landed at the same time. Try again.",
+            )))
+        } else {
+            Err(github_error(status, &body))
+        }
+    }
+
+    /// `POST /repos/{repo}/git/{what}` → its `{ sha }`.
+    async fn git_post<T: DeserializeOwned>(
+        &self,
+        repo: &str,
+        what: &str,
+        body: serde_json::Value,
+    ) -> Result<T, ApiError> {
+        self.api_json(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/git/{what}"),
+            Some(&body),
+        )
+        .await
+    }
+
+    /// A link that shows `path` at `commit` in `repo` as an image in GitHub markdown.
+    pub fn raw_blob_url(&self, repo: &str, commit: &str, path: &str) -> String {
+        format!(
+            "{}/{repo}/blob/{commit}/{path}?raw=true",
+            self.web().trim_end_matches('/')
+        )
     }
 
     async fn review_item(
@@ -4227,6 +4388,184 @@ esac"#,
         auth.cached_get("token-a", path).await.unwrap();
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    /// A Git Data API mock for `acme/site`: `tip` is the assets branch's commit (None: no
+    /// branch), `refuse` how many ref updates to refuse with 422 before accepting. Records every
+    /// write as (method, path, body).
+    async fn git_data_mock(
+        tip: Option<&'static str>,
+        refuse: usize,
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::Mutex<Vec<(String, String, serde_json::Value)>>>,
+    ) {
+        use axum::http::{Method, StatusCode, Uri};
+        use axum::response::IntoResponse;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        type Log = Arc<Mutex<Vec<(String, String, serde_json::Value)>>>;
+        let log: Log = Arc::default();
+        let refused = Arc::new(AtomicUsize::new(0));
+        // After a refused update the branch has moved on.
+        let tip_now = Arc::new(Mutex::new(tip.map(str::to_string)));
+        let (l, rf, t) = (log.clone(), refused.clone(), tip_now.clone());
+        let handler =
+            move |method: Method, uri: Uri, body: Option<axum::Json<serde_json::Value>>| {
+                let (log, refused, tip) = (l.clone(), rf.clone(), t.clone());
+                async move {
+                    let path = uri.path().to_string();
+                    let body = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
+                    if method != Method::GET {
+                        log.lock()
+                            .unwrap()
+                            .push((method.to_string(), path.clone(), body.clone()));
+                    }
+                    let ok = |v: serde_json::Value| (StatusCode::OK, axum::Json(v)).into_response();
+                    match (method.as_str(), path.as_str()) {
+                        ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
+                            match tip.lock().unwrap().clone() {
+                                Some(sha) => ok(serde_json::json!({ "object": { "sha": sha } })),
+                                None => StatusCode::NOT_FOUND.into_response(),
+                            }
+                        }
+                        ("GET", p) if p.starts_with("/repos/acme/site/git/commits/") => {
+                            let sha = p.rsplit('/').next().unwrap();
+                            ok(serde_json::json!({ "tree": { "sha": format!("tree-of-{sha}") } }))
+                        }
+                        ("POST", "/repos/acme/site/git/blobs") => {
+                            ok(serde_json::json!({ "sha": "blob1" }))
+                        }
+                        ("POST", "/repos/acme/site/git/trees") => {
+                            ok(serde_json::json!({ "sha": "tree1" }))
+                        }
+                        ("POST", "/repos/acme/site/git/commits") => {
+                            ok(serde_json::json!({ "sha": "commit1" }))
+                        }
+                        ("POST", "/repos/acme/site/git/refs")
+                        | ("PATCH", "/repos/acme/site/git/refs/heads/orso-review-assets") => {
+                            if refused.fetch_add(1, Ordering::SeqCst) < refuse {
+                                *tip.lock().unwrap() = Some("moved".into());
+                                return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+                            }
+                            ok(serde_json::json!({ "object": { "sha": "commit1" } }))
+                        }
+                        _ => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            };
+        let routes = axum::Router::new().fallback(handler);
+        let (base, stop) = mock_api(routes).await;
+        (base, stop, log)
+    }
+
+    fn writes(log: &std::sync::Mutex<Vec<(String, String, serde_json::Value)>>) -> Vec<String> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .map(|(m, p, _)| format!("{m} {}", p.trim_start_matches("/repos/acme/site/git/")))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn commit_files_creates_the_assets_branch_as_an_orphan() {
+        let (base, stop, log) = git_data_mock(None, 0).await;
+        let auth = status_auth(base, "assets-orphan");
+        let files = vec![("shots/3/2026-11-19/a.png".to_string(), b"png".to_vec())];
+        let sha = auth
+            .commit_files_to_branch(
+                "acme/site",
+                "orso-review-assets",
+                "Add review images",
+                &files,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sha, "commit1");
+        assert_eq!(
+            writes(&log),
+            ["POST blobs", "POST trees", "POST commits", "POST refs"]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[0].2["content"], "cG5n");
+        assert_eq!(log[0].2["encoding"], "base64");
+        // No base tree and no parent: the branch shares nothing with the site's history.
+        assert!(log[1].2.get("base_tree").is_none());
+        assert_eq!(log[1].2["tree"][0]["path"], "shots/3/2026-11-19/a.png");
+        assert_eq!(log[2].2["parents"], serde_json::json!([]));
+        assert_eq!(log[3].2["ref"], "refs/heads/orso-review-assets");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_appends_to_an_existing_assets_branch() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 0).await;
+        let auth = status_auth(base, "assets-append");
+        let files = vec![("shots/3/2026-11-19/b.png".to_string(), b"png".to_vec())];
+        auth.commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap();
+        assert_eq!(
+            writes(&log),
+            [
+                "POST blobs",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets"
+            ]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[1].2["base_tree"], "tree-of-tip0");
+        assert_eq!(log[2].2["parents"], serde_json::json!(["tip0"]));
+        assert_eq!(log[3].2["force"], false);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_retries_once_when_the_branch_moved() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 1).await;
+        let auth = status_auth(base, "assets-retry");
+        let files = vec![("shots/3/2026-11-19/c.png".to_string(), b"png".to_vec())];
+        auth.commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap();
+        // The blob is uploaded once; tree, commit and ref are redone on the moved tip.
+        assert_eq!(
+            writes(&log),
+            [
+                "POST blobs",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets",
+            ]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[5].2["parents"], serde_json::json!(["moved"]));
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_gives_up_after_a_second_refusal() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 2).await;
+        let auth = status_auth(base, "assets-refused");
+        let files = vec![("shots/3/x.png".to_string(), b"png".to_vec())];
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 409, "{err:?}");
+        assert_eq!(
+            writes(&log)
+                .iter()
+                .filter(|w| w.starts_with("PATCH"))
+                .count(),
+            2
+        );
         stop();
     }
 
