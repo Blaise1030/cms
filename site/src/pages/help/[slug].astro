@@ -5,7 +5,7 @@ import BlogToc from "../../components/BlogToc.astro";
 import HelpShell from "../../components/HelpShell.astro";
 import Icon from "../../components/Icon.astro";
 import { href } from "../../lib/href";
-import { categoryBadge } from "../../lib/pill";
+import UBadge from "@nuxt/ui/components/Badge.vue";
 import { loadHelp } from "../../lib/help";
 import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
 
@@ -60,7 +60,7 @@ const crumbs = [
     <article data-pagefind-body>
       <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
       <p class="rise-2 mt-4 max-w-prose text-body text-muted">{entry.data.description}</p>
-      {topic && <p class="mt-4"><a class={categoryBadge} href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
+      {topic && <p class="mt-4"><UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={href(`/help/categories/${topic.id}/`)} label={topic.title} /></p>}
       {toc.length > 1 && <BlogToc headings={toc} variant="inline" class="xl:hidden" />}
       <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
     </article>

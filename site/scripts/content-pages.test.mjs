@@ -27,13 +27,13 @@ test("built sample Blog and Help articles render Markdown and navigation", () =>
   assert.match(html(root, "blog/welcome"), /<h2[^>]*>.*Welcome/);
   assert.match(html(root, "help"), /Getting started/);
   assert.match(html(root, "help/getting-started"), /<h2[^>]*>.*First steps/);
-  assert.match(html(root, ""), /href="\/blog\/"[^>]*>Blog/);
-  assert.match(html(root, ""), /href="\/help\/"[^>]*>Help/);
+  assert.match(html(root, ""), /href="\/blog\/"[^>]*>(?:<[^>]+>)*Blog/);
+  assert.match(html(root, ""), /href="\/help\/"[^>]*>(?:<[^>]+>)*Help/);
   for (const id of ["hero", "logos", "features", "testimonials", "pricing", "faq", "cta"]) assert.match(html(root, ""), new RegExp(`id="${id}"`));
 });
 
 test("built sample categories, sections and topics link their articles", () => {
-  assert.match(html(root, "blog"), /href="\/blog\/categories\/guides\/"[^>]*>Guides/);
+  assert.match(html(root, "blog"), /href="\/blog\/categories\/guides\/"[^>]*>(?:<[^>]+>)*Guides/);
   assert.match(html(root, "blog/categories"), /<h1[^>]*>Blog categories/);
   const guides = html(root, "blog/categories/guides");
   assert.match(guides, /<h1[^>]*>Guides/);

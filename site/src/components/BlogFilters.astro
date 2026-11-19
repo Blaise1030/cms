@@ -1,6 +1,6 @@
 ---
 import { href } from "../lib/href";
-import { filterPillLg } from "../lib/pill";
+import UButton from "@nuxt/ui/components/Button.vue";
 import type { BlogCategory } from "../lib/blog";
 
 interface Props {
@@ -10,14 +10,21 @@ interface Props {
 }
 const { categories, active } = Astro.props;
 const shown = categories.filter((category) => category.posts.length > 0 || category.id === active);
-const item = filterPillLg;
 ---
 
 {shown.length > 0 && (
   <nav class="-mx-1 flex gap-2 overflow-x-auto px-1 py-1" aria-label="Blog categories">
-    <a class={item} href={href("/blog/")} aria-current={active ? undefined : "page"}>All posts</a>
+    <UButton color="neutral" variant={active ? "outline" : "soft"} size="lg" class="shrink-0 rounded-full px-4" label="All posts" to={href("/blog/")} aria-current={active ? undefined : "page"} />
     {shown.map((category) => (
-      <a class={item} href={href(`/blog/categories/${category.id}/`)} aria-current={category.id === active ? "page" : undefined}>{category.title}</a>
+      <UButton
+        color="neutral"
+        variant={category.id === active ? "soft" : "outline"}
+        size="lg"
+        class="shrink-0 rounded-full px-4"
+        label={category.title}
+        to={href(`/blog/categories/${category.id}/`)}
+        aria-current={category.id === active ? "page" : undefined}
+      />
     ))}
   </nav>
 )}

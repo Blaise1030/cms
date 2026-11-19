@@ -1,6 +1,6 @@
 ---
 import type { MarkdownHeading } from "astro";
-import Icon from "./Icon.astro";
+import TocCollapsible from "./vue/TocCollapsible.vue";
 
 interface Props {
   headings: MarkdownHeading[];
@@ -10,11 +10,8 @@ interface Props {
   class?: string;
 }
 const { headings, variant, class: className } = Astro.props;
-const link =
-  "block py-1.5 text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:text-ink";
 const railLink =
   "block text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:text-ink";
-const indent =(depth: number) => (depth === 3 ? "pl-8" : "pl-4");
 ---
 
 {variant === "rail" ? (
@@ -31,15 +28,5 @@ const indent =(depth: number) => (depth === 3 ? "pl-8" : "pl-4");
     </nav>
   </aside>
 ) : (
-  <details class:list={["group mt-10 border-y border-line", className ?? "lg:hidden"]} data-toc>
-    <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-small font-medium text-ink">
-      On this page
-      <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open:rotate-180" />
-    </summary>
-    <ul class="pb-2 text-small">
-      {headings.map((heading) => (
-        <li><a class:list={[link, indent(heading.depth)]} href={`#${heading.slug}`}>{heading.text}</a></li>
-      ))}
-    </ul>
-  </details>
+  <TocCollapsible client:idle class={className ?? "lg:hidden"} headings={headings.map(({ depth, slug, text }) => ({ depth, slug, text }))} />
 )}

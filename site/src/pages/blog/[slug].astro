@@ -6,10 +6,10 @@ import Painting from "../../components/Painting.astro";
 import { paintingFor } from "../../lib/paintings";
 import BlogCard from "../../components/BlogCard.astro";
 import BlogToc from "../../components/BlogToc.astro";
-import Icon from "../../components/Icon.astro";
 import CtaBand from "../../components/sections/CtaBand.astro";
 import { href } from "../../lib/href";
-import { backButton, categoryBadge } from "../../lib/pill";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { categoriesOf, formatDate, loadBlog, morePosts } from "../../lib/blog";
 import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
 import { site } from "../../site";
@@ -51,16 +51,13 @@ const jsonLd = [
       <!-- Three columns on desktop: back link | centred article | "On this page". -->
       <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,42rem)_minmax(0,1fr)] lg:gap-12">
         <div data-pagefind-ignore>
-          <a class:list={[backButton, "lg:sticky lg:top-28"]} href={href("/blog/")}>
-            <Icon name="arrow-left" data-icon="inline-start" class="" />
-            Blog
-          </a>
+          <UButton color="neutral" variant="outline" size="sm" class="rounded-full lg:sticky lg:top-28" icon="i-hugeicons-arrow-left-02" label="Blog" to={href("/blog/")} />
         </div>
         <div class="min-w-0">
           <div class="rise flex flex-wrap items-center gap-x-4 gap-y-1">
             <time class="label" datetime={entry.data.pubDate}>{formatDate(entry.data.pubDate)}</time>
             {postCategories.map((category) => (
-              <a class={categoryBadge} href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
+              <UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={href(`/blog/categories/${category.id}/`)} label={category.title} />
             ))}
           </div>
           <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>

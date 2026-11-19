@@ -1,7 +1,7 @@
 ---
-import { buttonVariants } from "../ui/button";
+import UButton from "@nuxt/ui/components/Button.vue";
 import Icon from "../Icon.astro";
-import { DownloadButton } from "../react/DownloadButton";
+import DownloadButton from "../vue/DownloadButton.vue";
 
 const facts = [
   { title: "Free and open source", detail: "MIT licence, no paid tier.", icon: "scale" as const },
@@ -22,11 +22,7 @@ const facts = [
         </p>
         <div class="mt-6 flex flex-wrap items-center gap-3">
           <DownloadButton client:visible />
-          <a
-            class={buttonVariants({ variant: "outline", size: "lg" })}
-            href="https://github.com/Blaise1030/cms"
-            rel="noopener noreferrer">View on GitHub</a
-          >
+          <UButton color="neutral" variant="outline" size="lg" label="View on GitHub" to="https://github.com/Blaise1030/cms" rel="noopener noreferrer" />
         </div>
         <p class="mt-2 text-small text-muted">macOS and Linux.</p>
       </div>

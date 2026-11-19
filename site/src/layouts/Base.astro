@@ -3,10 +3,9 @@ import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import Footer from "../components/Footer.astro";
 import Wordmark from "../components/Wordmark.astro";
-import { SiteNavLinks, SiteNavMenu } from "../components/react/SiteNav";
-import { buttonVariants } from "../components/ui/button";
+import UButton from "@nuxt/ui/components/Button.vue";
+import SiteNav from "../components/vue/SiteNav.vue";
 import { href } from "../lib/href";
-import { cn } from "../lib/utils";
 import { absoluteUrl, themeColors } from "../lib/seo";
 import { site } from "../site";
 import "../styles/global.css";
@@ -96,11 +95,14 @@ const navItems = site.nav.map((link) => ({
       <div class="mx-auto flex min-h-header w-full max-w-7xl items-center gap-x-4 border-x border-line px-3 py-1 md:px-6">
         <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-1">
-          <SiteNavLinks client:load items={navItems} />
+          <SiteNav part="links" items={navItems} />
           {site.secondaryCta && (
-            <a
-              class={cn(buttonVariants({ variant: "ghost", size: "lg" }), "hidden sm:inline-flex gap-2")}
-              href={href(site.secondaryCta.href)}
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="lg"
+              class="hidden sm:inline-flex"
+              to={href(site.secondaryCta.href)}
               rel={external(site.secondaryCta.href) ? "noopener noreferrer" : undefined}
             >
               <svg class="size-4" viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -112,19 +114,15 @@ const navItems = site.nav.map((link) => ({
                 ></path>
               </svg>
               {site.secondaryCta.label}
-            </a>
+            </UButton>
           )}
           {site.cta && (
-            <a
-              class={buttonVariants({ size: "lg" })}
-              href={href(site.cta.href)}
-              rel={external(site.cta.href) ? "noopener noreferrer" : undefined}
-            >
+            <UButton size="lg" to={href(site.cta.href)} rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>
               <span class="sm:hidden">Get Orso</span>
               <span class="hidden sm:inline">{site.cta.label}</span>
-            </a>
+            </UButton>
           )}
-          <SiteNavMenu client:load items={navItems} />
+          <SiteNav client:load part="menu" items={navItems} />
         </div>
       </div>
     </header>

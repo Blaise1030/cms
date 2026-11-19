@@ -1,7 +1,7 @@
 ---
 import Painting from "../Painting.astro";
-import { AppShot } from "../react/AppShot";
-import { buttonVariants } from "../ui/button";
+import UButton from "@nuxt/ui/components/Button.vue";
+import AppShot from "../vue/AppShot.vue";
 import { appShot } from "../../lib/appShots";
 import { href } from "../../lib/href";
 
@@ -16,8 +16,8 @@ const shot = await appShot("agent-band");
       </h2>
     </div>
     <div class="flex flex-wrap gap-2 md:col-span-5 md:justify-end">
-      <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#product")}>Agentic editing</a>
-      <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#faq")}>Which agents work</a>
+      <UButton color="neutral" variant="outline" size="lg" label="Agentic editing" to={href("#product")} />
+      <UButton color="neutral" variant="outline" size="lg" label="Which agents work" to={href("#faq")} />
     </div>
   </div>
 
@@ -30,7 +30,7 @@ const shot = await appShot("agent-band");
         alt="Orso's agent panel beside the site preview, where a teammate asks for changes in plain English."
         sizes="(min-width: 80rem) 76rem, 100vw"
         play
-        className="w-full lg:h-full lg:w-auto lg:max-w-full"
+        class="w-full lg:h-full lg:w-auto lg:max-w-full"
       />
     </div>
   </div>

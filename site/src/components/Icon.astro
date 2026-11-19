@@ -1,29 +1,29 @@
 ---
-// Hugeicons glyph for Astro markup, rendered to static SVG at build time (no client JS).
-// The set lives in ./icons.tsx; add a name here when an Astro page needs a new one.
-import * as icons from "./icons";
+// Hugeicons glyph for Astro markup: Nuxt UI's UIcon, rendered to static SVG at build time (no
+// client JS). Names describe the role; add one here when an Astro page needs a new icon. Keep
+// the full literal `i-hugeicons-…` name: Nuxt UI bundles only the names it finds in src/.
+import UIcon from "@nuxt/ui/components/Icon.vue";
 
 const byName = {
-  scale: icons.ScaleIcon,
-  "file-text": icons.FileTextIcon,
-  globe: icons.GlobeIcon,
-  "arrow-up-right": icons.ArrowUpRightIcon,
-  "arrow-left": icons.ArrowLeftIcon,
-  "arrow-right": icons.ArrowRightIcon,
-  "chevron-down": icons.ChevronDownIcon,
-  "chevron-right": icons.ChevronRightIcon,
-  search: icons.SearchIcon,
-};
+  scale: "i-hugeicons-justice-scale-01",
+  "file-text": "i-hugeicons-file-02",
+  globe: "i-hugeicons-globe-02",
+  "arrow-up-right": "i-hugeicons-arrow-up-right-01",
+  "arrow-left": "i-hugeicons-arrow-left-02",
+  "arrow-right": "i-hugeicons-arrow-right-02",
+  "chevron-down": "i-hugeicons-arrow-down-01",
+  "chevron-right": "i-hugeicons-arrow-right-01",
+  search: "i-hugeicons-search-01",
+} as const;
 
 interface Props {
   name: keyof typeof byName;
   class?: string;
-  /** Extra attributes for the svg, e.g. data-icon="inline-start" inside a button. */
+  /** Extra attributes for the icon, e.g. data-icon="inline-start" inside a button. */
   [attr: `data-${string}`]: string;
 }
 
 const { name, class: className = "size-5", ...rest } = Astro.props;
-const Glyph = byName[name];
 ---
 
-<Glyph className={className} strokeWidth={1.5} {...rest} />
+<UIcon name={byName[name]} class={className} aria-hidden="true" {...rest} />

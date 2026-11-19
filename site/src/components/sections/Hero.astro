@@ -1,7 +1,7 @@
 ---
-import { buttonVariants } from "../ui/button";
-import { ProductTabs } from "../react/ProductTabs";
-import { DownloadButton } from "../react/DownloadButton";
+import UButton from "@nuxt/ui/components/Button.vue";
+import ProductTabs from "../vue/ProductTabs.vue";
+import DownloadButton from "../vue/DownloadButton.vue";
 import { href } from "../../lib/href";
 import { appShot } from "../../lib/appShots";
 
@@ -32,7 +32,7 @@ const words = headline.split(" ");
       </p>
       <div class="rise-3 mt-8 flex flex-wrap items-center gap-3">
         <DownloadButton client:load />
-        <a class={buttonVariants({ variant: "outline", size: "lg" })} href={href("#scale")}>See what it does</a>
+        <UButton color="neutral" variant="outline" size="lg" label="See what it does" to={href("#scale")} />
       </div>
       <p class="rise-3 mt-4 text-small text-muted">Free and open source. Content stays in your repo.</p>
     </div>

@@ -1,23 +1,21 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-/*
- ---break---
- */
-@custom-variant dark (&:is(.dark *));
+@import "@nuxt/ui";
+/* Dark mode follows the visitor's system setting, like the tokens below (Nuxt UI's own
+   `dark:` classes included). */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 @plugin "@tailwindcss/typography";
 
 /*
  * Design tokens. DESIGN.md documents every value here; change both together.
  * Components use the generated utilities (bg-surface, text-muted, border-line, font-display,
  * duration-gentle, ease-gentle, py-section, max-w-page …) or var(--…). Tailwind's default
- * palette, radii, shadows and type scale are cleared so only these tokens exist.
+ * palette, radii, shadows and numeric type steps stay defined only because Nuxt UI's components
+ * use them internally; never use them in src/ (scripts/design-tokens.test.mjs checks colours).
  * Keep each token on one line: scripts/design-tokens.test.mjs allows colour literals only on
  * custom-property lines in this file.
  */
 @theme static {
   /* Colour: proof paper, ink, hairlines. Status colours carry meaning, not decoration. */
-  --color-*: initial;
   --color-surface: #fafaf9;
   --color-surface-raised: #ffffff;
   --color-sand: #f4f4f5;
@@ -53,7 +51,6 @@
   --font-weight-semibold: 600;
 
   /* Type scale: six roles. Use text-label … text-display everywhere; no numeric steps. */
-  --text-*: initial;
   --text-label: 0.75rem;
   --text-label--line-height: 1.5;
   --text-small: 0.875rem;
@@ -87,13 +84,11 @@
   --container-measure: 38rem;
 
   /* Shape and depth. Flat; one shadow lifts the product panel. */
-  --radius-*: initial;
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
   --radius-full: 9999px;
-  --shadow-*: initial;
   --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.05), 0 18px 40px -20px rgb(0 0 0 / 0.18);
   --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.06), 0 24px 48px -24px rgb(0 0 0 / 0.35), 0 48px 80px -40px rgb(0 0 0 / 0.25);
 
@@ -184,7 +179,7 @@
     border-radius: var(--radius-sm);
   }
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--color-line);
   }
 }
 
@@ -271,7 +266,7 @@ pagefind-modal-trigger:not(:defined) + .search-fallback {
   }
 }
 
-/* Legacy button utility — prefer shadcn <Button>. Primary matches app blue. */
+/* Legacy button utility — prefer Nuxt UI's <UButton>. Primary matches app blue. */
 @utility button {
   display: inline-flex;
   align-items: center;
@@ -441,83 +436,32 @@ pagefind-modal-trigger:not(:defined) + .search-fallback {
   }
 }
 /*
- * shadcn semantic tokens bridged to Orso. Primary = app blue.
- * Do not redefine --color-muted / --color-accent (Orso text + brand blue).
+ * Nuxt UI's semantic variables on the Orso tokens, so its components (UButton, UBadge, UModal,
+ * UAccordion, UTabs …) use the same paper, ink, hairlines and app blue in light and dark mode.
+ * Unlayered so it wins over Nuxt UI's defaults in @layer theme.
  */
-@theme inline {
-  --font-heading: var(--font-sans);
-  --color-background: var(--color-surface);
-  --color-foreground: var(--color-ink);
-  --color-card: var(--color-surface-raised);
-  --color-card-foreground: var(--color-ink);
-  --color-popover: var(--color-surface-raised);
-  --color-popover-foreground: var(--color-ink);
-  --color-primary: var(--color-accent);
-  --color-primary-foreground: var(--color-on-accent);
-  --color-secondary: var(--color-sand);
-  --color-secondary-foreground: var(--color-ink);
-  --color-muted-foreground: var(--color-muted);
-  --color-accent-foreground: var(--color-ink);
-  --color-destructive: var(--color-status-danger);
-  --color-border: var(--color-line);
-  --color-input: var(--color-line);
-  --color-ring: var(--color-accent);
-  --color-chart-1: var(--color-accent);
-  --color-chart-2: var(--color-status-live);
-  --color-chart-3: var(--color-status-draft);
-  --color-chart-4: var(--color-line-strong);
-  --color-chart-5: var(--color-night);
-  --color-sidebar: var(--color-surface);
-  --color-sidebar-foreground: var(--color-ink);
-  --color-sidebar-primary: var(--color-accent);
-  --color-sidebar-primary-foreground: var(--color-on-accent);
-  --color-sidebar-accent: var(--color-sand);
-  --color-sidebar-accent-foreground: var(--color-ink);
-  --color-sidebar-border: var(--color-line);
-  --color-sidebar-ring: var(--color-accent);
-}
-
 :root {
-  --background: var(--color-surface);
-  --foreground: var(--color-ink);
-  --card: var(--color-surface-raised);
-  --card-foreground: var(--color-ink);
-  --popover: var(--color-surface-raised);
-  --popover-foreground: var(--color-ink);
-  --primary: oklch(0.546 0.215 263);
-  --primary-foreground: #ffffff;
-  --secondary: var(--color-sand);
-  --secondary-foreground: var(--color-ink);
-  --muted: var(--color-sand);
-  --muted-foreground: var(--color-muted);
-  --accent: var(--color-sand);
-  --accent-foreground: var(--color-ink);
-  --destructive: var(--color-status-danger);
-  --border: var(--color-line);
-  --input: var(--color-line);
-  --ring: oklch(0.546 0.215 263);
-  --chart-1: var(--color-accent);
-  --chart-2: var(--color-status-live);
-  --chart-3: var(--color-status-draft);
-  --chart-4: var(--color-line-strong);
-  --chart-5: var(--color-night);
-  --radius: 0.5rem;
-  --sidebar: var(--color-surface);
-  --sidebar-foreground: var(--color-ink);
-  --sidebar-primary: oklch(0.546 0.215 263);
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: var(--color-sand);
-  --sidebar-accent-foreground: var(--color-ink);
-  --sidebar-border: var(--color-line);
-  --sidebar-ring: oklch(0.546 0.215 263);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --primary: oklch(0.62 0.19 260);
-    --primary-foreground: #0c0c0d;
-    --sidebar-primary: oklch(0.62 0.19 260);
-    --sidebar-primary-foreground: #0c0c0d;
-    --ring: oklch(0.62 0.19 260);
-  }
+  --ui-primary: var(--color-accent);
+  --ui-secondary: var(--color-ink);
+  --ui-success: var(--color-status-live);
+  --ui-info: var(--color-status-review);
+  --ui-warning: var(--color-status-draft);
+  --ui-error: var(--color-status-danger);
+  --ui-text-dimmed: var(--color-line-strong);
+  --ui-text-muted: var(--color-muted);
+  --ui-text-toned: var(--color-muted);
+  --ui-text: var(--color-ink);
+  --ui-text-highlighted: var(--color-ink);
+  --ui-text-inverted: var(--color-on-accent);
+  --ui-bg: var(--color-surface-raised);
+  --ui-bg-muted: var(--color-surface);
+  --ui-bg-elevated: var(--color-sand);
+  --ui-bg-accented: var(--color-mist);
+  --ui-bg-inverted: var(--color-ink);
+  --ui-border: var(--color-line);
+  --ui-border-muted: var(--color-line);
+  --ui-border-accented: var(--color-line-strong);
+  --ui-border-inverted: var(--color-ink);
+  --ui-radius: var(--radius-sm);
+  --ui-container: var(--container-page);
 }

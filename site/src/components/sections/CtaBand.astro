@@ -1,8 +1,8 @@
 ---
 // Slim closing call to action for content pages (blog posts): headline left, actions right.
 // The full home-page version with the facts row is Cta.astro.
-import { buttonVariants } from "../ui/button";
-import { DownloadButton } from "../react/DownloadButton";
+import UButton from "@nuxt/ui/components/Button.vue";
+import DownloadButton from "../vue/DownloadButton.vue";
 
 interface Props {
   title?: string;
@@ -16,11 +16,7 @@ const { title = "Ready to let your team run the site?", class: className } = Ast
     <h2 class="max-w-md text-heading tracking-tight text-ink" id="cta-band">{title}</h2>
     <div class="flex flex-wrap items-center gap-3">
       <DownloadButton client:visible />
-      <a
-        class={buttonVariants({ variant: "outline", size: "lg" })}
-        href="https://github.com/Blaise1030/cms"
-        rel="noopener noreferrer">View on GitHub</a
-      >
+      <UButton color="neutral" variant="outline" size="lg" label="View on GitHub" to="https://github.com/Blaise1030/cms" rel="noopener noreferrer" />
     </div>
   </div>
 </section>

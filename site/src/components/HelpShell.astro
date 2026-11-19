@@ -3,8 +3,10 @@
 // Desktop: the sidebar (search + every section, subsection and article) stays in view on the
 // left; the `rail` slot ("On this page") sits on the right from xl up. Mobile: search, then a
 // collapsible "Browse help" list, above the content.
+import type { BreadcrumbItem, NavigationMenuItem } from "@nuxt/ui";
+import UBreadcrumb from "@nuxt/ui/components/Breadcrumb.vue";
 import PagefindSearch from "./PagefindSearch.astro";
-import Icon from "./Icon.astro";
+import HelpNav from "./vue/HelpNav.vue";
 import { href } from "../lib/href";
 import { loadHelp, type Doc } from "../lib/help";
 
@@ -19,10 +21,27 @@ const { sections, docs } = await loadHelp();
 const shown = sections.filter((section) => section.docs.length > 0);
 const hasRail = Astro.slots.has("rail");
 
-const item =
-  "block rounded-md px-2.5 py-1.5 text-small text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink aria-[current=page]:bg-sand aria-[current=page]:font-medium aria-[current=page]:text-ink";
 const docPath = (doc: Doc) => `/help/${doc.id}/`;
-const isCurrent = (path: string) => (path === current ? "page" : undefined);
+const link = (label: string, path: string): NavigationMenuItem => ({ label, to: href(path), active: path === current });
+/** Overview, then one collapsible group per section; the section holding this page starts open. */
+const navItems: NavigationMenuItem[] = [
+  link("Overview", "/help/"),
+  ...shown.map((section) => {
+    const sectionPath = `/help/section/${section.id}/`;
+    return {
+      label: section.title,
+      defaultOpen: current === sectionPath || section.docs.some((doc) => docPath(doc) === current),
+      children: [
+        link("Overview", sectionPath),
+        ...section.loose.map((doc) => link(doc.data.title, docPath(doc))),
+        ...section.subsections
+          .filter((sub) => sub.docs.length > 0)
+          .map((sub) => ({ label: sub.title, defaultOpen: true, children: sub.docs.map((doc) => link(doc.data.title, docPath(doc))) })),
+      ],
+    };
+  }),
+];
+const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label, to: crumb.href ? href(crumb.href) : undefined }));
 ---
 
 <div
@@ -35,74 +54,19 @@ const isCurrent = (path: string) => (path === current ? "page" : undefined);
     <div class="flex flex-col gap-4 px-gutter py-4 lg:sticky lg:top-header lg:max-h-[calc(100dvh-var(--spacing-header))] lg:overflow-y-auto lg:px-4 lg:py-6">
       {docs.length > 0 && <PagefindSearch bundle="help" placeholder="Search help" />}
 
-      <details class="group lg:hidden">
-        <summary class="flex cursor-pointer list-none items-center justify-between text-small font-medium text-ink">
-          Browse help
-          <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open:rotate-180" />
-        </summary>
-        <div class="mt-3">
-          <ul class="flex flex-col gap-0.5">
-            <li><a class={item} href={href("/help/")} aria-current={isCurrent("/help/")}>Overview</a></li>
-          </ul>
-          {shown.map((section) => (
-            <div class="mt-4">
-              <a class:list={[item, "font-medium text-ink"]} href={href(`/help/section/${section.id}/`)} aria-current={isCurrent(`/help/section/${section.id}/`)}>{section.title}</a>
-              <ul class="mt-0.5 flex flex-col gap-0.5 pl-3">
-                {section.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </details>
-
-      <nav class="hidden lg:block">
-        <ul class="flex flex-col gap-0.5">
-          <li><a class={item} href={href("/help/")} aria-current={isCurrent("/help/")}>Overview</a></li>
-        </ul>
-        {/* One accordion item per section; the section holding this page starts open. */}
-        {shown.map((section) => {
-          const sectionPath = `/help/section/${section.id}/`;
-          const open = current === sectionPath || section.docs.some((doc) => docPath(doc) === current);
-          return (
-            <details class="group/section mt-2 first-of-type:mt-3" open={open}>
-              <summary class="flex cursor-pointer list-none items-center justify-between rounded-md px-2.5 py-1.5 text-small font-medium text-ink transition-colors duration-quick ease-gentle hover:bg-sand [&::-webkit-details-marker]:hidden">
-                {section.title}
-                <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open/section:rotate-180" />
-              </summary>
-              <div class="mt-0.5 pb-1 pl-3">
-                <ul class="flex flex-col gap-0.5">
-                  <li><a class={item} href={href(sectionPath)} aria-current={isCurrent(sectionPath)}>Overview</a></li>
-                  {section.loose.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
-                </ul>
-                {section.subsections.filter((sub) => sub.docs.length > 0).map((sub) => (
-                  <div class="mt-2">
-                    <p class="px-2.5 py-1 text-small text-ink/70">{sub.title}</p>
-                    <ul class="flex flex-col gap-0.5 pl-3">
-                      {sub.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </details>
-          );
-        })}
-      </nav>
+      <HelpNav client:load items={navItems} />
     </div>
   </aside>
 
   <div class="min-w-0 px-gutter py-10 md:px-gutter-wide md:py-14">
     <div class="mx-auto max-w-3xl">
-      {crumbs.length > 0 && (
-        <nav class="text-small text-muted" aria-label="Breadcrumb" data-pagefind-ignore>
-          <ol class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            {crumbs.map((crumb, index) => (
-              <li class="flex items-center gap-x-1.5">
-                {index > 0 && <Icon name="chevron-right" class="size-3.5" />}
-                {crumb.href ? <a class="transition-colors duration-quick ease-gentle hover:text-ink" href={href(crumb.href)}>{crumb.label}</a> : <span class="text-ink" aria-current="page">{crumb.label}</span>}
-              </li>
-            ))}
-          </ol>
-        </nav>
+      {breadcrumb.length > 0 && (
+        <UBreadcrumb
+          items={breadcrumb}
+          separator-icon="i-hugeicons-arrow-right-01"
+          data-pagefind-ignore
+          ui={{ link: "text-small font-normal text-muted hover:text-ink", linkLabel: "text-small", separatorIcon: "size-3.5 text-muted" }}
+        />
       )}
       <slot />
     </div>

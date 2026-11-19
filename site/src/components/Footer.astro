@@ -2,8 +2,7 @@
 // Site footer: an inset sand panel. The brand statement sits on the left, the link columns on
 // the right, and the legal row underneath. Group and link data live in `src/site.ts`.
 import BearMark from "./BearMark.astro";
-import Icon from "./Icon.astro";
-import { buttonVariants } from "./ui/button";
+import UButton from "@nuxt/ui/components/Button.vue";
 import { href } from "../lib/href";
 import { site } from "../site";
 
@@ -36,14 +35,16 @@ const legal = [...site.footer.links, site.footer.license];
           </p>
         )}
 
-        <a
-          class={`${buttonVariants({ variant: "outline", size: "lg" })} mt-8`}
-          href={site.cta.href}
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="lg"
+          class="mt-8"
+          label="Get Orso"
+          trailing-icon="i-hugeicons-arrow-up-right-01"
+          to={site.cta.href}
           rel="noopener noreferrer"
-        >
-          Get Orso
-          <Icon name="arrow-up-right" class="size-3.5" />
-        </a>
+        />
       </div>
 
       <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:col-span-7" aria-label="Footer">
@@ -53,11 +54,14 @@ const legal = [...site.footer.links, site.footer.license];
             <ul class="mt-4 -ml-2.5 space-y-1 text-small text-muted">
               {group.links.map((link) => (
                 <li>
-                  <a
-                    class={buttonVariants({ variant: "ghost", size: "default" })}
-                    href={href(link.href)}
-                    rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
-                  >
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    class="text-muted"
+                    label={link.label}
+                    to={href(link.href)}
+                    rel={external(link.href) ? "noopener noreferrer" : undefined}
+                  />
                 </li>
               ))}
             </ul>
@@ -71,11 +75,15 @@ const legal = [...site.footer.links, site.footer.license];
       <ul class="-mr-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-label text-muted">
         {legal.map((link) => (
           <li>
-            <a
-              class={buttonVariants({ variant: "ghost", size: "xs" })}
-              href={href(link.href)}
-              rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
-            >
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              class="text-muted"
+              label={link.label}
+              to={href(link.href)}
+              rel={external(link.href) ? "noopener noreferrer" : undefined}
+            />
           </li>
         ))}
       </ul>
