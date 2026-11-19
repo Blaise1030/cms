@@ -1,4 +1,7 @@
 ---
+import { Image } from "astro:assets";
+import Painting from "./Painting.astro";
+import { paintingFor } from "../lib/paintings";
 import { href } from "../lib/href";
 import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
 
@@ -17,16 +20,35 @@ const postCategories = categoriesOf(post, categories);
   data-blog-item
   data-search={search}
 >
-  <div class="page flex flex-col gap-3 py-14 md:py-20">
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
-      {postCategories.map((category) => (
-        <a class="label relative z-10 transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
-      ))}
+  <div class="page grid items-center gap-8 py-10 md:grid-cols-2 md:gap-12 md:py-20 lg:gap-16">
+    <div class="overflow-hidden rounded-lg border border-line bg-sand">
+      {post.data.coverImage ? (
+        <Image
+          class="aspect-16/10 w-full object-cover transition-transform duration-slow ease-settle group-hover:scale-102"
+          src={post.data.coverImage}
+          alt={post.data.coverAlt!}
+          widths={[400, 800, 1200]}
+          sizes="(min-width: 80rem) 36rem, (min-width: 48rem) 50vw, 100vw"
+          loading="eager"
+          fetchpriority="high"
+        />
+      ) : (
+        <div class="relative aspect-16/10 w-full transition-transform duration-slow ease-settle group-hover:scale-102">
+          <Painting id={paintingFor(post.id)} />
+        </div>
+      )}
     </div>
-    <h2 class="max-w-4xl text-title tracking-display text-ink">
-      <a class="after:absolute after:inset-0" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
-    </h2>
-    <p class="max-w-measure text-body text-muted">{post.data.description}</p>
+    <div class="flex flex-col gap-3">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
+        {postCategories.map((category) => (
+          <a class="label relative z-10 transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
+        ))}
+      </div>
+      <h2 class="text-title tracking-display text-ink">
+        <a class="after:absolute after:inset-0" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+      </h2>
+      <p class="max-w-measure text-body text-muted">{post.data.description}</p>
+    </div>
   </div>
 </article>
