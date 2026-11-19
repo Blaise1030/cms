@@ -66,7 +66,7 @@ pub async fn serve_until(
     // A sync that survived the restart is reconciled before anything watches it.
     changes::sync_chat::recover(&state).await;
     state.watch_all().await;
-    // Review previews a previous run left behind, before any new build starts.
+    // Previews a previous run left behind, before any new build starts.
     let mut checkouts = Vec::new();
     for info in state.projects.list().await {
         if let Some(project) = state.projects.get(&info.id).await {
@@ -74,6 +74,9 @@ pub async fn serve_until(
         }
     }
     review_previews.startup(&checkouts).await;
+    // No conflict session is live yet, so every conflict preview on disk is a leftover.
+    let repos: Vec<_> = checkouts.iter().map(|(_, dir)| dir.clone()).collect();
+    previews.startup(&repos).await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;
     let cleanup = tokio::spawn({

@@ -56,14 +56,41 @@ struct Snapshot {
     /// The built site; no checkout is kept once the build ends.
     dir: Option<PathBuf>,
 }
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ConflictPreviewManager {
     entries: Arc<Mutex<HashMap<(String, Source), Snapshot>>>,
+    /// Where built sides live; owned by this manager (swept at startup).
+    base: PathBuf,
+}
+
+impl Default for ConflictPreviewManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConflictPreviewManager {
+    /// A manager building under a fresh folder of its own in the system temp dir.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_base(std::env::temp_dir().join(format!(
+            "orso-conflict-previews-{:016x}",
+            rand::random::<u64>()
+        )))
+    }
+
+    /// A manager building under `base` (the daemon's state folder).
+    pub fn with_base(base: PathBuf) -> Self {
+        Self {
+            entries: Arc::default(),
+            base,
+        }
+    }
+
+    /// At daemon start, when no conflict session is live yet: removes every built side a
+    /// previous run left behind, plus legacy temp-dir builds, then prunes the checkouts'
+    /// stale worktrees.
+    pub async fn startup(&self, repos: &[PathBuf]) {
+        startup_sweep(&self.base, &std::env::temp_dir(), repos).await;
     }
 
     pub async fn prepare(
@@ -88,9 +115,7 @@ impl ConflictPreviewManager {
             "/preview/{project_id}/conflicts/{session_id}/{}/",
             source.as_str()
         );
-        let path = std::env::temp_dir()
-            .join("orso-conflict-previews")
-            .join(format!("{:016x}", rand::random::<u64>()));
+        let path = self.base.join(format!("{:016x}", rand::random::<u64>()));
         let state =
             match snapshot_build::build(project_dir, revision, &url, &path, BUILD_TIMEOUT).await {
                 Ok(()) => PreviewState::Ready { url },
@@ -254,6 +279,33 @@ fn safe_route(rest: &str) -> Option<PathBuf> {
     Some(path)
 }
 
+/// Removes `base` (this daemon's conflict previews), `tmp/orso-conflict-previews` and
+/// `tmp/wb-preview-*` (where older versions built), then runs `git worktree prune` in each
+/// of `repos` so worktrees whose folders went with them are forgotten.
+pub async fn startup_sweep(base: &Path, tmp: &Path, repos: &[PathBuf]) {
+    let _ = tokio::fs::remove_dir_all(base).await;
+    let _ = tokio::fs::remove_dir_all(tmp.join("orso-conflict-previews")).await;
+    if let Ok(mut entries) = tokio::fs::read_dir(tmp).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let legacy = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("wb-preview-"));
+            if legacy && entry.file_type().await.is_ok_and(|t| t.is_dir()) {
+                let _ = tokio::fs::remove_dir_all(entry.path()).await;
+            }
+        }
+    }
+    for repo in repos {
+        let _ = tokio::process::Command::new("git")
+            .args(["-c", "core.hooksPath=/dev/null", "worktree", "prune"])
+            .current_dir(repo)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await;
+    }
+}
+
 async fn remove_snapshot(old: Snapshot) {
     if let Some(dir) = old.dir {
         let _ = tokio::fs::remove_dir_all(dir).await;
@@ -268,5 +320,60 @@ mod tests {
         assert!(safe_route("../secret").is_none());
         assert!(safe_route("a/%2e%2e/b").is_none());
         assert_eq!(safe_route("page/").unwrap(), PathBuf::from("page"));
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_removes_leftovers_and_prunes_worktrees() {
+        let temp = tempfile::tempdir().unwrap();
+        let tmp = temp.path().join("tmp");
+        let base = temp.path().join("state/conflict-previews");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        // A worktree a crashed build left under the legacy temp base.
+        let stale = tmp.join("orso-conflict-previews/.build-1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "-q",
+                stale.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        std::fs::create_dir_all(base.join("0123/assets")).unwrap();
+        std::fs::create_dir_all(tmp.join("wb-preview-abc/dist")).unwrap();
+        std::fs::create_dir_all(tmp.join("unrelated")).unwrap();
+        std::fs::write(tmp.join("wb-preview-file"), "not a dir").unwrap();
+
+        startup_sweep(&base, &tmp, std::slice::from_ref(&repo)).await;
+
+        assert!(!base.exists());
+        assert!(!tmp.join("orso-conflict-previews").exists());
+        assert!(!tmp.join("wb-preview-abc").exists());
+        assert!(tmp.join("unrelated").is_dir(), "swept an unrelated folder");
+        assert!(tmp.join("wb-preview-file").is_file(), "swept a file");
+        let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
+        assert_eq!(worktrees.matches("worktree ").count(), 1, "{worktrees}");
     }
 }

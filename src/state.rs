@@ -239,7 +239,9 @@ impl AppState {
             github,
             preview: preview::new_client(),
             conflicts: Arc::new(ConflictSessions::new()),
-            conflict_previews: Arc::new(ConflictPreviewManager::new()),
+            conflict_previews: Arc::new(ConflictPreviewManager::with_base(
+                state_dir.join("conflict-previews"),
+            )),
             review_previews: Arc::new(ReviewPreviews::new(
                 state_dir.join("review-previews"),
                 std::time::SystemTime::now,
