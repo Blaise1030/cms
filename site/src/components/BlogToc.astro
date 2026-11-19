@@ -6,7 +6,7 @@ interface Props {
   headings: MarkdownHeading[];
   /** `rail` is the sticky desktop column; `inline` is the collapsible mobile block. */
   variant: "rail" | "inline";
-  /** Extra classes for the rail, so the page can place it in its grid. */
+  /** Extra classes: placement for the rail; for `inline`, the breakpoint it hides from (default lg:hidden). */
   class?: string;
 }
 const { headings, variant, class: className } = Astro.props;
@@ -31,7 +31,7 @@ const indent =(depth: number) => (depth === 3 ? "pl-8" : "pl-4");
     </nav>
   </aside>
 ) : (
-  <details class="group mt-10 border-y border-line lg:hidden" data-toc>
+  <details class:list={["group mt-10 border-y border-line", className ?? "lg:hidden"]} data-toc>
     <summary class="flex cursor-pointer list-none items-center justify-between py-3 text-small font-medium text-ink">
       On this page
       <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open:rotate-180" />

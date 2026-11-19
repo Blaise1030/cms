@@ -1,0 +1,107 @@
+---
+// Documentation layout for every Help page: section sidebar | centred content | optional rail.
+// Desktop: the sidebar (search + every section, subsection and article) stays in view on the
+// left; the `rail` slot ("On this page") sits on the right from xl up. Mobile: search, then a
+// collapsible "Browse help" list, above the content.
+import PagefindSearch from "./PagefindSearch.astro";
+import Icon from "./Icon.astro";
+import { href } from "../lib/href";
+import { loadHelp, type Doc } from "../lib/help";
+
+interface Props {
+  /** Site path of this page, e.g. "/help/" or "/help/create-a-project/", to mark it current. */
+  current: string;
+  /** Trail above the title; the last item is this page and is not linked. */
+  crumbs?: { label: string; href?: string }[];
+}
+const { current, crumbs = [] } = Astro.props;
+const { sections, docs } = await loadHelp();
+const shown = sections.filter((section) => section.docs.length > 0);
+const hasRail = Astro.slots.has("rail");
+
+const item =
+  "block rounded-md px-2.5 py-1.5 text-small text-muted transition-colors duration-quick ease-gentle hover:bg-sand hover:text-ink aria-[current=page]:bg-sand aria-[current=page]:font-medium aria-[current=page]:text-ink";
+const docPath = (doc: Doc) => `/help/${doc.id}/`;
+const isCurrent = (path: string) => (path === current ? "page" : undefined);
+---
+
+<div
+  class:list={[
+    "mx-auto w-full max-w-7xl border-x border-b border-line lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]",
+    hasRail && "xl:grid-cols-[16rem_minmax(0,1fr)_14rem]",
+  ]}
+>
+  <aside class="border-b border-line lg:border-r lg:border-b-0" aria-label="Help navigation" data-pagefind-ignore>
+    <div class="flex flex-col gap-4 px-gutter py-4 lg:sticky lg:top-header lg:max-h-[calc(100dvh-var(--spacing-header))] lg:overflow-y-auto lg:px-4 lg:py-6">
+      {docs.length > 0 && <PagefindSearch bundle="help" placeholder="Search help" />}
+
+      <details class="group lg:hidden">
+        <summary class="flex cursor-pointer list-none items-center justify-between text-small font-medium text-ink">
+          Browse help
+          <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open:rotate-180" />
+        </summary>
+        <div class="mt-3">
+          <ul class="flex flex-col gap-0.5">
+            <li><a class={item} href={href("/help/")} aria-current={isCurrent("/help/")}>Overview</a></li>
+          </ul>
+          {shown.map((section) => (
+            <div class="mt-4">
+              <a class:list={[item, "font-medium text-ink"]} href={href(`/help/section/${section.id}/`)} aria-current={isCurrent(`/help/section/${section.id}/`)}>{section.title}</a>
+              <ul class="mt-0.5 flex flex-col gap-0.5 pl-3">
+                {section.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </details>
+
+      <nav class="hidden lg:block">
+        <ul class="flex flex-col gap-0.5">
+          <li><a class={item} href={href("/help/")} aria-current={isCurrent("/help/")}>Overview</a></li>
+        </ul>
+        {shown.map((section) => (
+          <div class="mt-5">
+            <a class:list={[item, "font-medium text-ink"]} href={href(`/help/section/${section.id}/`)} aria-current={isCurrent(`/help/section/${section.id}/`)}>{section.title}</a>
+            {section.loose.length > 0 && (
+              <ul class="mt-0.5 flex flex-col gap-0.5 pl-3">
+                {section.loose.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
+              </ul>
+            )}
+            {section.subsections.filter((sub) => sub.docs.length > 0).map((sub) => (
+              <div class="mt-2 pl-3">
+                <p class="px-2.5 py-1 text-small text-ink/70">{sub.title}</p>
+                <ul class="flex flex-col gap-0.5 pl-3">
+                  {sub.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ))}
+      </nav>
+    </div>
+  </aside>
+
+  <div class="min-w-0 px-gutter py-10 md:px-gutter-wide md:py-14">
+    <div class="mx-auto max-w-3xl">
+      {crumbs.length > 0 && (
+        <nav class="text-small text-muted" aria-label="Breadcrumb" data-pagefind-ignore>
+          <ol class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            {crumbs.map((crumb, index) => (
+              <li class="flex items-center gap-x-1.5">
+                {index > 0 && <Icon name="chevron-right" class="size-3.5" />}
+                {crumb.href ? <a class="transition-colors duration-quick ease-gentle hover:text-ink" href={href(crumb.href)}>{crumb.label}</a> : <span class="text-ink" aria-current="page">{crumb.label}</span>}
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
+      <slot />
+    </div>
+  </div>
+
+  {hasRail && (
+    <div class="hidden border-l border-line xl:block">
+      <div class="sticky top-header px-5 py-14"><slot name="rail" /></div>
+    </div>
+  )}
+</div>

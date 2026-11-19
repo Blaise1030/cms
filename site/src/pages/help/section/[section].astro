@@ -1,7 +1,7 @@
 ---
 import Base from "../../../layouts/Base.astro";
 import DocList from "../../../components/DocList.astro";
-import PageHeader from "../../../components/PageHeader.astro";
+import HelpShell from "../../../components/HelpShell.astro";
 import { loadHelp } from "../../../lib/help";
 import { breadcrumbs } from "../../../lib/seo";
 
@@ -12,25 +12,25 @@ export async function getStaticPaths() {
 const { section } = Astro.props;
 const description = section.description ?? `Help articles about ${section.title.toLowerCase()}.`;
 const groups = [{ id: "", title: "", docs: section.loose }, ...section.subsections].filter((group) => group.docs.length > 0);
+const path = `/help/section/${section.id}/`;
 ---
 <Base
   title={`Help: ${section.title}`}
   description={description}
   jsonLd={[
     { "@context": "https://schema.org", "@type": "WebPage", name: section.title, description },
-    breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: section.title, path: `/help/section/${section.id}/` }]),
+    breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: section.title, path }]),
   ]}
 >
-  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
-    <PageHeader title={section.title} description={section.description} back={{ label: "Back to Help", href: "/help/" }} />
-    <div class="page">
-      {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
-      {groups.map((group) => (
-        <section class="mt-16 grid gap-6 md:grid-cols-12 md:gap-10">
-          <div class="md:col-span-4">{group.title && <h2 class="text-heading tracking-display text-ink">{group.title}</h2>}</div>
-          <div class="md:col-span-8"><DocList docs={group.docs} /></div>
-        </section>
-      ))}
-    </div>
-  </div>
+  <HelpShell current={path} crumbs={[{ label: "Help", href: "/help/" }, { label: section.title }]}>
+    <h1 class="mt-4 text-title tracking-display text-ink">{section.title}</h1>
+    {section.description && <p class="mt-4 max-w-prose text-body text-muted">{section.description}</p>}
+    {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
+    {groups.map((group) => (
+      <section class="mt-10">
+        {group.title && <h2 class="mb-3 text-heading tracking-tight text-ink">{group.title}</h2>}
+        <DocList docs={group.docs} />
+      </section>
+    ))}
+  </HelpShell>
 </Base>
