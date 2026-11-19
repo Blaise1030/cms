@@ -48,7 +48,7 @@ const jsonLd = [
     { name: entry.data.title, path },
   ]),
 ];
-const navLink = "group flex items-start gap-3 rounded-lg border border-line bg-surface-raised px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand";
+const navLink = "group flex h-full items-start gap-2 rounded-lg border border-line bg-surface-raised px-3 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand sm:gap-3 sm:px-4";
 const crumbs = [
   { label: "Help", href: "/help/" },
   { label: section.title, href: `/help/section/${section.id}/` },
@@ -65,7 +65,7 @@ const crumbs = [
       <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
     </article>
     {(previous || next) && (
-      <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label="More articles" data-pagefind-ignore>
+      <nav class="mt-14 grid grid-cols-2 gap-3 border-t border-line pt-8" aria-label="More articles" data-pagefind-ignore>
         <div>{previous && (
           <a class={navLink} href={href(`/help/${previous.id}/`)}>
             <Icon name="chevron-left" class="mt-0.5 size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:-translate-x-0.5" />
