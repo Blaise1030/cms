@@ -98,6 +98,14 @@ pub fn router(state: AppState) -> Router {
             get(reviews::preview),
         )
         .route(
+            "/api/projects/{id}/reviews/{n}/conversation",
+            get(reviews::conversation),
+        )
+        .route(
+            "/api/projects/{id}/reviews/{n}/comments",
+            post(reviews::comment),
+        )
+        .route(
             "/api/projects/{id}/reviews/{n}/decision",
             post(reviews::decide),
         )

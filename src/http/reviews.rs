@@ -9,7 +9,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::github::{Decision, DeployState};
+use crate::github::{Conversation, Decision, DeployState, ReviewDetail, TimelineItem};
 
 use crate::error::ApiError;
 use crate::projects::Project;
@@ -152,6 +152,65 @@ pub async fn diff(
         .into_response())
 }
 
+/// Whether change `number` carries one of the project's review labels (and so may be read
+/// here), with its detail.
+async fn labelled_detail(
+    state: &AppState,
+    project: &Project,
+    repo: &str,
+    number: u64,
+    me: &str,
+) -> Result<ReviewDetail, ApiError> {
+    let detail = state.github.review_detail(repo, number, me).await?;
+    let labels = settings::pr_labels(&project.dir);
+    let labelled = detail
+        .labels
+        .iter()
+        .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(l)));
+    if !labelled {
+        return Err(ApiError::enoent(GONE));
+    }
+    Ok(detail)
+}
+
+/// `GET /api/projects/{id}/reviews/{n}/conversation` → [`Conversation`]: readable for any
+/// labelled change, open or not.
+pub async fn conversation(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+) -> Result<Json<Conversation>, ApiError> {
+    let (project, repo) = project_repo(&state, &id).await?;
+    let me = state.github.signed_in_login().await?;
+    labelled_detail(&state, &project, &repo, number, &me).await?;
+    Ok(Json(state.github.conversation(&repo, number).await?))
+}
+
+/// Body of `POST /api/projects/{id}/reviews/{n}/comments`.
+#[derive(Deserialize)]
+pub struct CommentBody {
+    body: String,
+}
+
+/// `POST /api/projects/{id}/reviews/{n}/comments` → the new comment as a timeline entry.
+/// Anyone signed in may comment (no push access needed), but only on an open change.
+pub async fn comment(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+    Json(body): Json<CommentBody>,
+) -> Result<Json<TimelineItem>, ApiError> {
+    let text = body.body.trim();
+    if text.is_empty() {
+        return Err(ApiError::badreq("Write a comment first"));
+    }
+    let (project, repo) = project_repo(&state, &id).await?;
+    let me = state.github.signed_in_login().await?;
+    let detail = labelled_detail(&state, &project, &repo, number, &me).await?;
+    if !detail.open {
+        return Err(ApiError::enoent(GONE));
+    }
+    Ok(Json(state.github.add_comment(&repo, number, text).await?))
+}
+
 /// Where a change's deploy preview stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -199,13 +258,8 @@ pub async fn preview(
 ) -> Result<Json<ReviewPreview>, ApiError> {
     let (project, repo) = project_repo(&state, &id).await?;
     let me = state.github.signed_in_login().await?;
-    let detail = state.github.review_detail(&repo, number, &me).await?;
-    let labels = settings::pr_labels(&project.dir);
-    let labelled = detail
-        .labels
-        .iter()
-        .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(l)));
-    if !detail.open || detail.draft || !labelled {
+    let detail = labelled_detail(&state, &project, &repo, number, &me).await?;
+    if !detail.open || detail.draft {
         return Err(ApiError::enoent(GONE));
     }
     let sha = detail.item.head_sha;
@@ -339,6 +393,21 @@ mod tests {
                     };
                     axum::Json(json!({ "check_runs": runs }))
                 }),
+            )
+            .route(
+                "/repos/acme/site/issues/{n}/comments",
+                get(|| async {
+                    axum::Json(json!([{ "id": 1, "user": { "login": "carol" },
+                        "created_at": "2026-01-02T00:00:00Z", "body": "Nice", "html_url": "c1" }]))
+                })
+                .post(|axum::Json(b): axum::Json<Value>| async move {
+                    axum::Json(json!({ "id": 2, "user": { "login": "ada" },
+                        "created_at": "2026-01-03T00:00:00Z", "body": b["body"], "html_url": "c2" }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/{n}/commits",
+                get(|| async { axum::Json(json!([])) }),
             )
             .route(
                 "/repos/acme/site/branches/main",
@@ -684,6 +753,64 @@ mod tests {
         assert_eq!(none.state, PreviewState::None);
         let json = serde_json::to_value(&none).unwrap();
         assert!(json.get("url").is_none());
+    }
+
+    #[tokio::test]
+    async fn conversation_is_readable_for_any_labelled_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        // Open (#7) and closed (#9) alike.
+        for n in [7, 9] {
+            let c = conversation(State(state.clone()), Path((id.clone(), n)))
+                .await
+                .unwrap()
+                .0;
+            let json = serde_json::to_value(&c).unwrap();
+            assert_eq!(json["items"][0]["kind"], "comment", "#{n}");
+            assert_eq!(json["items"][0]["author"], "carol");
+        }
+        let err = conversation(State(state), Path((id, 11)))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 404);
+    }
+
+    fn comment_body(text: &str) -> Json<CommentBody> {
+        Json(CommentBody { body: text.into() })
+    }
+
+    #[tokio::test]
+    async fn a_comment_is_posted_and_comes_back_as_a_timeline_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No push access needed to comment.
+        let (state, id) = setup(tmp.path(), false, Some("acme/site")).await;
+        let item = comment(State(state), Path((id, 7)), comment_body("  Looks good  "))
+            .await
+            .unwrap()
+            .0;
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["kind"], "comment");
+        assert_eq!(json["author"], "ada");
+        assert_eq!(json["body"], "Looks good");
+    }
+
+    #[tokio::test]
+    async fn a_blank_comment_or_one_on_a_closed_change_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let err = comment(
+            State(state.clone()),
+            Path((id.clone(), 7)),
+            comment_body("  \n "),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code.status(), 400);
+        let err = comment(State(state), Path((id, 9)), comment_body("late"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 404);
+        assert_eq!(err.message, GONE);
     }
 
     #[tokio::test]

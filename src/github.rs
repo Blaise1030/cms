@@ -215,11 +215,19 @@ struct ApiPull {
     updated_at: String,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default)]
+    closed_at: Option<String>,
+    /// Reviewers asked for and not yet heard from.
+    #[serde(default)]
+    requested_reviewers: Vec<ApiLogin>,
 }
 
 #[derive(Deserialize)]
 struct ApiLabel {
     name: String,
+    /// Hex colour without `#`.
+    #[serde(default)]
+    color: String,
 }
 
 #[derive(Deserialize)]
@@ -355,6 +363,52 @@ struct ApiReview {
     /// The review comment.
     #[serde(default)]
     body: Option<String>,
+    /// Unset while the review is pending.
+    #[serde(default)]
+    submitted_at: Option<String>,
+}
+
+/// `GET /repos/{o}/{r}/issues/{n}/comments` item.
+#[derive(Deserialize)]
+struct ApiIssueComment {
+    #[serde(default)]
+    id: u64,
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    html_url: String,
+}
+
+/// `GET /repos/{o}/{r}/pulls/{n}/commits` item.
+#[derive(Deserialize)]
+struct ApiPullCommit {
+    sha: String,
+    commit: ApiCommitInfo,
+    /// The GitHub account, when the commit's email maps to one.
+    #[serde(default)]
+    author: Option<ApiLogin>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitInfo {
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    author: Option<ApiCommitPerson>,
+    #[serde(default)]
+    committer: Option<ApiCommitPerson>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitPerson {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    date: String,
 }
 
 /// The signed-in reviewer's standing on a pull request's current head.
@@ -391,9 +445,228 @@ pub struct ReviewDetail {
     pub description: Option<String>,
     pub open: bool,
     pub draft: bool,
-    /// The pull request's label names (server-side gating only; not sent to the UI).
+    pub merged: bool,
+    /// The pull request's label names (server-side gating).
     #[serde(skip)]
     pub labels: Vec<String>,
+    /// The labels as GitHub shows them.
+    #[serde(rename = "labels")]
+    pub label_tags: Vec<ReviewLabel>,
+}
+
+/// A label on a pull request, with its GitHub colour (hex, no `#`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReviewLabel {
+    pub name: String,
+    pub color: String,
+}
+
+/// How a review reads in a change's conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Greenlit,
+    SentBack,
+    Commented,
+}
+
+/// One pushed commit: short sha and the first line of its message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PushedCommit {
+    pub sha: String,
+    pub message: String,
+    pub author: String,
+}
+
+/// An entry of a change's conversation, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TimelineItem {
+    Comment {
+        id: u64,
+        author: String,
+        at: String,
+        body: String,
+        url: String,
+    },
+    Review {
+        author: String,
+        at: String,
+        verdict: ReviewVerdict,
+        body: Option<String>,
+    },
+    /// Consecutive commits with nothing else between them.
+    Push {
+        at: String,
+        commits: Vec<PushedCommit>,
+    },
+    /// The pull request was closed or merged (`state`).
+    State { at: String, state: String },
+}
+
+impl TimelineItem {
+    fn at(&self) -> &str {
+        match self {
+            Self::Comment { at, .. }
+            | Self::Review { at, .. }
+            | Self::Push { at, .. }
+            | Self::State { at, .. } => at,
+        }
+    }
+}
+
+/// One check run on the change's head.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckItem {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+}
+
+/// Where a reviewer stands: their latest decisive review, else `commented`, else `requested`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Reviewer {
+    pub login: String,
+    pub state: ReviewerState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewerState {
+    Requested,
+    Commented,
+    Greenlit,
+    SentBack,
+    Dismissed,
+}
+
+/// `GET /api/projects/{id}/reviews/{n}/conversation`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Conversation {
+    pub items: Vec<TimelineItem>,
+    pub checks: Vec<CheckItem>,
+    pub reviewers: Vec<Reviewer>,
+}
+
+/// Comments, reviews, pushes and the close/merge, oldest first, with consecutive commits
+/// grouped into one push. Pending reviews and empty comment-only reviews are left out.
+fn timeline(
+    comments: Vec<ApiIssueComment>,
+    reviews: &[ApiReview],
+    commits: Vec<ApiPullCommit>,
+    closed: Option<(String, bool)>,
+) -> Vec<TimelineItem> {
+    let login = |u: Option<&ApiLogin>| u.map_or_else(|| "ghost".to_string(), |u| u.login.clone());
+    let mut raw: Vec<TimelineItem> = Vec::new();
+    for c in comments {
+        raw.push(TimelineItem::Comment {
+            id: c.id,
+            author: login(c.user.as_ref()),
+            at: c.created_at,
+            body: c.body.unwrap_or_default(),
+            url: c.html_url,
+        });
+    }
+    for r in reviews {
+        let Some(at) = r.submitted_at.clone() else {
+            continue;
+        };
+        let body = r.body.clone().filter(|b| !b.trim().is_empty());
+        let verdict = match r.state.as_str() {
+            "APPROVED" => ReviewVerdict::Greenlit,
+            "CHANGES_REQUESTED" => ReviewVerdict::SentBack,
+            "COMMENTED" if body.is_some() => ReviewVerdict::Commented,
+            _ => continue,
+        };
+        raw.push(TimelineItem::Review {
+            author: login(r.user.as_ref()),
+            at,
+            verdict,
+            body,
+        });
+    }
+    for c in commits {
+        let person = c.commit.committer.as_ref().or(c.commit.author.as_ref());
+        let at = person.map(|p| p.date.clone()).unwrap_or_default();
+        // The GitHub account, else the name git recorded.
+        let author = c.author.map(|a| a.login).unwrap_or_else(|| {
+            c.commit
+                .author
+                .as_ref()
+                .or(c.commit.committer.as_ref())
+                .map(|p| p.name.clone())
+                .unwrap_or_default()
+        });
+        raw.push(TimelineItem::Push {
+            at,
+            commits: vec![PushedCommit {
+                sha: c.sha.chars().take(7).collect(),
+                message: c.commit.message.lines().next().unwrap_or("").to_string(),
+                author,
+            }],
+        });
+    }
+    if let Some((at, merged)) = closed {
+        let state = if merged { "merged" } else { "closed" };
+        raw.push(TimelineItem::State {
+            at,
+            state: state.to_string(),
+        });
+    }
+    // ISO 8601 UTC timestamps sort as strings; the sort is stable, so ties keep their order.
+    raw.sort_by(|a, b| a.at().cmp(b.at()));
+    let mut items: Vec<TimelineItem> = Vec::new();
+    for item in raw {
+        match (items.last_mut(), item) {
+            (
+                Some(TimelineItem::Push { commits, .. }),
+                TimelineItem::Push { commits: more, .. },
+            ) => {
+                commits.extend(more);
+            }
+            (_, item) => items.push(item),
+        }
+    }
+    items
+}
+
+/// Each reviewer's latest standing; requested reviewers who haven't answered come last.
+fn reviewers(reviews: &[ApiReview], requested: &[ApiLogin]) -> Vec<Reviewer> {
+    let mut out: Vec<Reviewer> = Vec::new();
+    for r in reviews.iter().filter(|r| r.submitted_at.is_some()) {
+        let Some(user) = r.user.as_ref() else {
+            continue;
+        };
+        let state = match r.state.as_str() {
+            "APPROVED" => ReviewerState::Greenlit,
+            "CHANGES_REQUESTED" => ReviewerState::SentBack,
+            "DISMISSED" => ReviewerState::Dismissed,
+            "COMMENTED" => ReviewerState::Commented,
+            _ => continue,
+        };
+        match out
+            .iter_mut()
+            .find(|o| o.login.eq_ignore_ascii_case(&user.login))
+        {
+            // A comment doesn't undo an earlier decision.
+            Some(_) if state == ReviewerState::Commented => {}
+            Some(o) => o.state = state,
+            None => out.push(Reviewer {
+                login: user.login.clone(),
+                state,
+            }),
+        }
+    }
+    for r in requested {
+        if !out.iter().any(|o| o.login.eq_ignore_ascii_case(&r.login)) {
+            out.push(Reviewer {
+                login: r.login.clone(),
+                state: ReviewerState::Requested,
+            });
+        }
+    }
+    out
 }
 
 /// The review inbox plus every open pull request's number, labelled or not (what prunes
@@ -440,6 +713,8 @@ struct ApiCheckRun {
     status: String,
     #[serde(default)]
     conclusion: Option<String>,
+    #[serde(default)]
+    html_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1589,15 +1864,110 @@ impl GithubAuth {
             .get_json(&format!("/repos/{repo}/pulls/{number}"))
             .await?;
         let open = pull.state.as_deref() == Some("open") && pull.merged_at.is_none();
-        let (draft, description) = (pull.draft, pull.body.clone());
+        let (draft, description, merged) =
+            (pull.draft, pull.body.clone(), pull.merged_at.is_some());
         let labels = pull.labels.iter().map(|l| l.name.clone()).collect();
+        let label_tags = pull
+            .labels
+            .iter()
+            .map(|l| ReviewLabel {
+                name: l.name.clone(),
+                color: l.color.clone(),
+            })
+            .collect();
         let item = self.review_item(repo, pull, me).await?;
         Ok(ReviewDetail {
             item,
             description,
             open,
             draft,
+            merged,
             labels,
+            label_tags,
+        })
+    }
+
+    /// Change `number`'s conversation: comments, reviews and pushes oldest first, its head's
+    /// checks, and where each reviewer stands.
+    pub async fn conversation(&self, repo: &str, number: u64) -> Result<Conversation, ApiError> {
+        let pull: ApiPull = self
+            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .await?;
+        let sha = pull
+            .head
+            .as_ref()
+            .map(|h| h.sha.clone())
+            .unwrap_or_default();
+        let comments_path = format!("/repos/{repo}/issues/{number}/comments");
+        let reviews_path = format!("/repos/{repo}/pulls/{number}/reviews");
+        let commits_path = format!("/repos/{repo}/pulls/{number}/commits");
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        let comments = self.get_all::<Vec<ApiIssueComment>, ApiIssueComment>(&comments_path, |p| p);
+        let reviews = self.get_all::<Vec<ApiReview>, ApiReview>(&reviews_path, |p| p);
+        let commits = self.get_all::<Vec<ApiPullCommit>, ApiPullCommit>(&commits_path, |p| p);
+        // Checks are a sidebar extra: unreadable checks show as none.
+        let runs = async {
+            if sha.is_empty() {
+                return Vec::new();
+            }
+            self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+                .await
+                .unwrap_or_default()
+        };
+        let (comments, reviews, commits, runs) = tokio::join!(comments, reviews, commits, runs);
+        let reviews = reviews?;
+        let closed = match (&pull.merged_at, &pull.closed_at) {
+            (Some(at), _) => Some((at.clone(), true)),
+            (None, Some(at)) if pull.state.as_deref() == Some("closed") => {
+                Some((at.clone(), false))
+            }
+            _ => None,
+        };
+        Ok(Conversation {
+            items: timeline(comments?, &reviews, commits?, closed),
+            checks: runs
+                .into_iter()
+                .map(|r| CheckItem {
+                    name: r.name,
+                    status: r.status,
+                    conclusion: r.conclusion,
+                    url: r.html_url.filter(|u| is_http_url(u)),
+                })
+                .collect(),
+            reviewers: reviewers(&reviews, &pull.requested_reviewers),
+        })
+    }
+
+    /// Comment on change `number` as the signed-in user; the new timeline entry.
+    pub async fn add_comment(
+        &self,
+        repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<TimelineItem, ApiError> {
+        let (status, bytes) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/issues/{number}/comments"),
+                Some(&serde_json::json!({ "body": body })),
+            )
+            .await?;
+        if !status.is_success() {
+            return Err(match status {
+                reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND => {
+                    ApiError::sandbox("GitHub didn't let you comment on this change.")
+                }
+                _ => ApiError::github("Couldn't post your comment. Try again in a moment."),
+            });
+        }
+        let c: ApiIssueComment = serde_json::from_slice(&bytes)
+            .map_err(|e| ApiError::github(format!("unexpected answer from GitHub: {e}")))?;
+        Ok(TimelineItem::Comment {
+            id: c.id,
+            author: c.user.map_or_else(|| "ghost".to_string(), |u| u.login),
+            at: c.created_at,
+            body: c.body.unwrap_or_default(),
+            url: c.html_url,
         })
     }
 
@@ -3061,6 +3431,7 @@ esac"#,
             state: state.into(),
             commit_id: String::new(),
             body: None,
+            submitted_at: None,
         }
     }
 
@@ -3334,6 +3705,7 @@ esac"#,
             name: name.into(),
             status: status.into(),
             conclusion: conclusion.map(Into::into),
+            html_url: None,
         }
     }
 
@@ -3440,6 +3812,7 @@ esac"#,
             state: state.to_string(),
             commit_id: commit.to_string(),
             body: None,
+            submitted_at: None,
         }
     }
 
@@ -3466,6 +3839,226 @@ esac"#,
         assert_eq!(
             serde_json::to_value(MyReviewState::SentBack).unwrap(),
             "sent_back"
+        );
+    }
+
+    fn submitted(user: &str, state: &str, at: Option<&str>, body: &str) -> ApiReview {
+        ApiReview {
+            user: Some(ApiLogin { login: user.into() }),
+            state: state.into(),
+            commit_id: "h".into(),
+            body: Some(body.into()),
+            submitted_at: at.map(String::from),
+        }
+    }
+
+    fn commit(sha: &str, message: &str, date: &str) -> ApiPullCommit {
+        ApiPullCommit {
+            sha: sha.into(),
+            commit: ApiCommitInfo {
+                message: message.into(),
+                author: Some(ApiCommitPerson {
+                    name: "Bob B".into(),
+                    date: date.into(),
+                }),
+                committer: Some(ApiCommitPerson {
+                    name: "Bob B".into(),
+                    date: date.into(),
+                }),
+            },
+            author: Some(ApiLogin {
+                login: "bob".into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn timeline_orders_everything_and_groups_consecutive_commits() {
+        let comments = vec![ApiIssueComment {
+            id: 9,
+            user: Some(ApiLogin {
+                login: "ada".into(),
+            }),
+            created_at: "2026-01-02T00:00:00Z".into(),
+            body: Some("Looks close".into()),
+            html_url: "https://gh/c/9".into(),
+        }];
+        let reviews = vec![
+            submitted("ada", "COMMENTED", Some("2026-01-02T01:00:00Z"), ""),
+            submitted("ada", "PENDING", None, "draft"),
+            submitted(
+                "ada",
+                "CHANGES_REQUESTED",
+                Some("2026-01-03T00:00:00Z"),
+                "Fix title",
+            ),
+            submitted("cy", "COMMENTED", Some("2026-01-03T01:00:00Z"), "nit"),
+            submitted("ada", "APPROVED", Some("2026-01-05T00:00:00Z"), ""),
+        ];
+        let commits = vec![
+            commit("aaaaaaaaaa", "First\n\nbody", "2026-01-01T00:00:00Z"),
+            commit("bbbbbbbbbb", "Second", "2026-01-01T01:00:00Z"),
+            commit("cccccccccc", "Fix the title", "2026-01-04T00:00:00Z"),
+        ];
+        let items = timeline(
+            comments,
+            &reviews,
+            commits,
+            Some(("2026-01-06T00:00:00Z".into(), true)),
+        );
+        let kinds: Vec<String> = items
+            .iter()
+            .map(|i| {
+                serde_json::to_value(i).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["push", "comment", "review", "review", "push", "review", "state"]
+        );
+        let TimelineItem::Push { commits, .. } = &items[0] else {
+            panic!("{:?}", items[0])
+        };
+        assert_eq!(
+            commits,
+            &vec![
+                PushedCommit {
+                    sha: "aaaaaaa".into(),
+                    message: "First".into(),
+                    author: "bob".into()
+                },
+                PushedCommit {
+                    sha: "bbbbbbb".into(),
+                    message: "Second".into(),
+                    author: "bob".into()
+                },
+            ]
+        );
+        assert_eq!(
+            items[2],
+            TimelineItem::Review {
+                author: "ada".into(),
+                at: "2026-01-03T00:00:00Z".into(),
+                verdict: ReviewVerdict::SentBack,
+                body: Some("Fix title".into()),
+            }
+        );
+        assert!(
+            matches!(&items[3], TimelineItem::Review { verdict: ReviewVerdict::Commented, author, .. } if author == "cy")
+        );
+        assert!(matches!(
+            &items[5],
+            TimelineItem::Review {
+                verdict: ReviewVerdict::Greenlit,
+                body: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            items[6],
+            TimelineItem::State {
+                at: "2026-01-06T00:00:00Z".into(),
+                state: "merged".into()
+            }
+        );
+        let json = serde_json::to_value(&items[2]).unwrap();
+        assert_eq!(json["verdict"], "sent_back");
+    }
+
+    #[test]
+    fn reviewers_keep_their_latest_decision_and_list_requested_ones() {
+        let reviews = vec![
+            submitted("ada", "CHANGES_REQUESTED", Some("1"), "x"),
+            submitted("ada", "COMMENTED", Some("2"), "but"),
+            submitted("cy", "COMMENTED", Some("2"), "q"),
+            submitted("bo", "APPROVED", Some("1"), ""),
+            submitted("bo", "DISMISSED", Some("3"), ""),
+            submitted("ed", "APPROVED", None, ""),
+        ];
+        let requested = vec![
+            ApiLogin {
+                login: "dee".into(),
+            },
+            ApiLogin { login: "CY".into() },
+        ];
+        let got = reviewers(&reviews, &requested);
+        let pairs: Vec<(&str, ReviewerState)> =
+            got.iter().map(|r| (r.login.as_str(), r.state)).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("ada", ReviewerState::SentBack),
+                ("cy", ReviewerState::Commented),
+                ("bo", ReviewerState::Dismissed),
+                ("dee", ReviewerState::Requested),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn conversation_reads_comments_reviews_commits_and_checks() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls/3",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "number": 3, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": "h3" },
+                        "requested_reviewers": [{ "login": "dee" }] }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/issues/3/comments",
+                get(|| async {
+                    Json(serde_json::json!([{ "id": 1, "user": { "login": "ada" },
+                        "created_at": "2026-01-02T00:00:00Z", "body": "hi", "html_url": "c1" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/commits",
+                get(|| async {
+                    Json(
+                        serde_json::json!([{ "sha": "abcdef123", "commit": { "message": "Edit",
+                        "committer": { "name": "b", "date": "2026-01-01T00:00:00Z" } } }]),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/h3/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({ "check_runs": [{ "name": "build",
+                        "status": "completed", "conclusion": "failure",
+                        "html_url": "https://gh/runs/1" }] }))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "conversation");
+        let c = auth.conversation("acme/site", 3).await.unwrap();
+        stop();
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["items"][0]["kind"], "push");
+        assert_eq!(json["items"][0]["commits"][0]["sha"], "abcdef1");
+        assert_eq!(json["items"][0]["commits"][0]["author"], "b");
+        assert_eq!(json["items"][1]["kind"], "comment");
+        assert_eq!(json["items"][1]["body"], "hi");
+        assert_eq!(
+            json["checks"],
+            serde_json::json!([{ "name": "build", "status": "completed",
+                "conclusion": "failure", "url": "https://gh/runs/1" }])
+        );
+        assert_eq!(
+            json["reviewers"],
+            serde_json::json!([{ "login": "dee", "state": "requested" }])
         );
     }
 
