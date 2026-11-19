@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{DefaultBodyLimit, Query};
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::routing::{any, delete, get, post};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
@@ -233,6 +233,8 @@ pub fn router(state: AppState) -> Router {
                     Method::OPTIONS,
                 ])
                 .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+                // The review diff's head commit, read by the hosted UI.
+                .expose_headers([HeaderName::from_static(reviews::HEAD_SHA_HEADER)])
                 .allow_credentials(true),
         );
     }
@@ -253,4 +255,42 @@ pub(crate) async fn project_dir(state: &AppState, id: &str) -> Result<PathBuf, A
 pub(crate) fn query_or_badreq<T>(q: Result<Query<T>, QueryRejection>) -> Result<T, ApiError> {
     q.map(|Query(v)| v)
         .map_err(|e| ApiError::badreq(format!("invalid query: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn the_hosted_origin_can_read_the_review_head_header() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::with_scaffold_install(
+            crate::config::Config {
+                origin: Some("https://app.orso.test".into()),
+                projects_dir: tmp.path().to_path_buf(),
+                no_auth: true,
+                ..Default::default()
+            },
+            false,
+        );
+        let res = router(state)
+            .oneshot(
+                Request::get("/api/projects")
+                    .header(header::ORIGIN, "https://app.orso.test")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let exposed = res
+            .headers()
+            .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(exposed.contains("x-head-sha"), "exposed: {exposed:?}");
+    }
 }

@@ -18,7 +18,7 @@ use crate::{review, settings};
 
 const GONE: &str = "This change is no longer waiting";
 /// Response header of `/diff`: the head commit that was diffed.
-const HEAD_SHA_HEADER: &str = "x-head-sha";
+pub(crate) const HEAD_SHA_HEADER: &str = "x-head-sha";
 const OWN_CHANGE: &str = "This is your change";
 const NEEDS_EDIT_ACCESS: &str = "You need edit access to this site's repository to greenlight";
 
