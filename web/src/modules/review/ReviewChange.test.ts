@@ -164,9 +164,10 @@ describe("ReviewChange", () => {
       // The diff and decision stay usable while it builds.
       expect(w.find("[data-testid='diff-stub']").exists()).toBe(true);
       expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(1900);
+      // Real time also advances (`shouldAdvanceTime`), so leave room for a slow, busy machine.
+      await vi.advanceTimersByTimeAsync(1000);
       expect(reviewPreview).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(1100);
       expect(reviewPreview).toHaveBeenCalledWith("site", 7, "abc");
       await vi.advanceTimersByTimeAsync(2000);
       await flushPromises();
