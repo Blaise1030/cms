@@ -46,7 +46,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
             )}
           </section>
           {shown.map((section) => (
-            <section class="page mt-24 grid gap-6 md:grid-cols-12 md:gap-10">
+            <section class="page mt-16 grid gap-6 border-t border-line pt-16 md:mt-20 md:grid-cols-12 md:gap-10 md:pt-20">
               <div class="md:col-span-4">
                 <h2 class="text-heading tracking-display text-ink">{section.title}</h2>
                 <p class="label mt-2">{count(section.docs.length)}</p>
