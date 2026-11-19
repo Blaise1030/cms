@@ -9,9 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::{
-    Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
-};
+use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 /// How long the daemon gets to stop its children after SIGTERM before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(10);
@@ -282,7 +280,10 @@ mod tests {
         }
         // An existing query is kept, and a link that already has a token is left alone.
         let q = Url::parse("http://127.0.0.1:5000/preview/x?page=2").unwrap();
-        assert_eq!(with_daemon_token(&q).as_str(), "http://127.0.0.1:5000/preview/x?page=2&t=abc");
+        assert_eq!(
+            with_daemon_token(&q).as_str(),
+            "http://127.0.0.1:5000/preview/x?page=2&t=abc"
+        );
         let has = Url::parse("http://127.0.0.1:5000/?t=zzz").unwrap();
         assert_eq!(with_daemon_token(&has), has);
     }
