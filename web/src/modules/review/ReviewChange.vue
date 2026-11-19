@@ -264,7 +264,10 @@ const macDesktop = isMacDesktop();
     <!-- No project top bar here: on the macOS desktop app this row clears the traffic lights and
          is where the window is dragged from. -->
     <div
-      :class="['flex min-h-10 shrink-0 items-center gap-3 px-3 pt-2 pb-3', macDesktop && 'pl-10 fullscreen:pl-3']"
+      :class="[
+        'flex min-h-10 shrink-0 items-center gap-3 px-3 pb-3',
+        macDesktop ? 'pt-4 pl-10 fullscreen:pt-2 fullscreen:pl-3' : 'pt-2',
+      ]"
       :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
       data-testid="review-change-header"
     >

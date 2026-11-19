@@ -163,7 +163,7 @@ const macDesktop = isMacDesktop();
       <!-- No project top bar here: on the macOS desktop app the header clears the traffic lights
            and is where the window is dragged from. -->
       <header
-        :class="['flex shrink-0 flex-col gap-0.5 pt-1', macDesktop && 'pl-7 fullscreen:pl-0']"
+        :class="['flex shrink-0 flex-col gap-0.5', macDesktop ? 'pt-4 pl-7 fullscreen:pt-1 fullscreen:pl-0' : 'pt-1']"
         :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
         data-testid="review-inbox-header"
       >
