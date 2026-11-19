@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { ApiError } from "@/core/api";
 import { createFakeDaemon } from "@/test/fakeDaemon";
 import { queryPlugin } from "@/test/queryClient";
@@ -21,7 +21,6 @@ const item = (note: string, image = true): ShotItem => ({
   note,
   createdAt: "2026-11-19T12:00:00Z",
 });
-const body = () => new DOMWrapper(document.body);
 
 async function mountQueue(reviewWithShots: ReturnType<typeof vi.fn>) {
   h.daemon = createFakeDaemon({ reviewWithShots });
