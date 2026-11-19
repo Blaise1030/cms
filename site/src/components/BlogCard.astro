@@ -1,6 +1,7 @@
 ---
 import { Image } from "astro:assets";
-import Artwork from "./Artwork.astro";
+import Painting from "./Painting.astro";
+import { paintingFor } from "../lib/paintings";
 import { href } from "../lib/href";
 import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
 
@@ -34,7 +35,9 @@ const postCategories = categoriesOf(post, categories);
         sizes="(min-width: 1024px) 26rem, (min-width: 640px) 50vw, 100vw"
       />
     ) : (
-      <Artwork seed={post.id} class="aspect-16/10 w-full transition-transform duration-slow ease-settle group-hover:scale-102" />
+      <div class="relative aspect-16/10 w-full transition-transform duration-slow ease-settle group-hover:scale-102">
+        <Painting id={paintingFor(post.id)} />
+      </div>
     )}
   </div>
   <div class="flex flex-col gap-2">

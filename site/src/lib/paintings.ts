@@ -37,6 +37,14 @@ export const paintings = {
 
 export type PaintingId = keyof typeof paintings;
 
+/** Picks a stable painting for a seed (e.g. a post id), so each card keeps the same backdrop. */
+export const paintingFor = (seed: string): PaintingId => {
+  const ids = Object.keys(paintings) as PaintingId[];
+  // FNV-1a: small, stable hash.
+  const n = [...seed].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0, 2166136261);
+  return ids[n % ids.length];
+};
+
 /** Base-aware URL for a painting in `public/paintings/`. */
 export const paintingUrl = (id: PaintingId) =>
   `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}paintings/${paintings[id].file}`;

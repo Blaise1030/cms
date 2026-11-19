@@ -2,7 +2,8 @@
 import { render } from "astro:content";
 import { Image } from "astro:assets";
 import Base from "../../layouts/Base.astro";
-import Artwork from "../../components/Artwork.astro";
+import Painting from "../../components/Painting.astro";
+import { paintingFor } from "../../lib/paintings";
 import BlogCard from "../../components/BlogCard.astro";
 import BlogToc from "../../components/BlogToc.astro";
 import { href } from "../../lib/href";
@@ -61,7 +62,7 @@ const navLink = "group block border-t border-line pt-6";
               {entry.data.coverImage ? (
                 <Image class="aspect-16/9 w-full object-cover" src={entry.data.coverImage} alt={entry.data.coverAlt!} widths={[800, 1200, 1600]} sizes="(min-width: 1024px) 46rem, 100vw" loading="eager" />
               ) : (
-                <Artwork seed={entry.id} class="aspect-16/9 w-full" />
+                <div class="relative aspect-16/9 w-full"><Painting id={paintingFor(entry.id)} eager /></div>
               )}
             </div>
             {toc.length > 1 && <BlogToc headings={toc} variant="inline" />}
