@@ -20,6 +20,7 @@ pub mod preview;
 pub mod projects;
 pub mod providers;
 pub mod review;
+pub mod review_preview;
 pub mod runtime;
 pub mod settings;
 pub mod setup_prefs;
@@ -57,6 +58,7 @@ pub async fn serve_until(
     let devservers = state.devservers.clone();
     let watchers = state.watchers.clone();
     let previews = state.conflict_previews.clone();
+    let review_previews = state.review_previews.clone();
     let sessions = state.conflicts.clone();
     let identity = state.github.identity().await;
     state.projects.ensure_identities(&identity).await;
@@ -64,6 +66,14 @@ pub async fn serve_until(
     // A sync that survived the restart is reconciled before anything watches it.
     changes::sync_chat::recover(&state).await;
     state.watch_all().await;
+    // Review previews a previous run left behind, before any new build starts.
+    let mut checkouts = Vec::new();
+    for info in state.projects.list().await {
+        if let Some(project) = state.projects.get(&info.id).await {
+            checkouts.push((project.id, project.dir));
+        }
+    }
+    review_previews.startup(&checkouts).await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;
     let cleanup = tokio::spawn({
@@ -96,6 +106,7 @@ pub async fn serve_until(
     watchers.shutdown();
     cleanup.abort();
     previews.shutdown().await;
+    review_previews.shutdown().await;
     served
 }
 

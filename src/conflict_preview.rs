@@ -171,17 +171,7 @@ impl ConflictPreviewManager {
             .dir
             .as_ref()
             .ok_or_else(|| ApiError::enoent("preview unavailable"))?;
-        let safe = safe_route(rest).ok_or_else(|| ApiError::badreq("invalid preview path"))?;
-        let mut file = dir.join(safe);
-        if file.is_dir() {
-            file = file.join("index.html");
-        }
-        if !file.exists() && file.extension().is_none() {
-            file = file.join("index.html");
-        }
-        let mut bytes = tokio::fs::read(&file)
-            .await
-            .map_err(|_| ApiError::enoent("preview page not found"))?;
+        let (file, mut bytes) = read_page(dir, rest).await?;
         if file.extension().is_some_and(|e| e == "html") {
             if let Some(id) = section.filter(|s| {
                 !s.is_empty()
@@ -204,28 +194,50 @@ impl ConflictPreviewManager {
                 }
             }
         }
-        let content_type = match file.extension().and_then(|s| s.to_str()).unwrap_or("") {
-            "html" => "text/html; charset=utf-8",
-            "js" | "mjs" => "text/javascript; charset=utf-8",
-            "css" => "text/css; charset=utf-8",
-            "svg" => "image/svg+xml",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "webp" => "image/webp",
-            "woff2" => "font/woff2",
-            "json" => "application/json",
-            _ => "application/octet-stream",
-        };
-        let mut response = Response::new(Body::from(bytes));
-        *response.status_mut() = StatusCode::OK;
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-        response
-            .headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        Ok(response)
+        Ok(page_response(&file, bytes))
     }
+}
+
+/// Reads the file a preview route names inside the built site `dir`: a folder or an
+/// extensionless route means its `index.html`; `..` and encoded segments are refused.
+pub(crate) async fn read_page(dir: &Path, rest: &str) -> Result<(PathBuf, Vec<u8>), ApiError> {
+    let safe = safe_route(rest).ok_or_else(|| ApiError::badreq("invalid preview path"))?;
+    let mut file = dir.join(safe);
+    if file.is_dir() {
+        file = file.join("index.html");
+    }
+    if !file.exists() && file.extension().is_none() {
+        file = file.join("index.html");
+    }
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|_| ApiError::enoent("preview page not found"))?;
+    Ok((file, bytes))
+}
+
+/// An uncached `200` carrying `bytes`, typed by `file`'s extension.
+pub(crate) fn page_response(file: &Path, bytes: Vec<u8>) -> Response {
+    let content_type = match file.extension().and_then(|s| s.to_str()).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "woff2" => "font/woff2",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    };
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn safe_route(rest: &str) -> Option<PathBuf> {

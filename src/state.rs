@@ -19,6 +19,7 @@ use crate::github::GithubAuth;
 use crate::http::setup::SetupProbes;
 use crate::preview::{self, UpstreamClient};
 use crate::projects::{DevserverStatus, ProjectRegistry};
+use crate::review_preview::ReviewPreviews;
 use crate::runtime::login::LoginManager;
 use crate::runtime::{LockFile, RuntimeManager, RuntimeResolver, RuntimeTarget};
 use crate::watch::WatchManager;
@@ -42,6 +43,8 @@ pub struct AppState {
     /// Proposed conflict resolutions; never mutates a branch until Finish.
     pub conflicts: Arc<ConflictSessions>,
     pub conflict_previews: Arc<ConflictPreviewManager>,
+    /// Built previews of teammates' changes in the Review inbox.
+    pub review_previews: Arc<ReviewPreviews>,
     /// Serializes Get latest through session creation as one operation.
     pub conflict_updates: Arc<Mutex<()>>,
     /// Projects whose Get latest skipped the checked-out change while an agent was live.
@@ -217,7 +220,7 @@ impl AppState {
         let projects = Arc::new(projects);
         let events = EventBus::new();
         let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
-        let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
+        let chats = Arc::new(ChatManager::new(events.clone(), state_dir.clone()));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
@@ -237,6 +240,10 @@ impl AppState {
             preview: preview::new_client(),
             conflicts: Arc::new(ConflictSessions::new()),
             conflict_previews: Arc::new(ConflictPreviewManager::new()),
+            review_previews: Arc::new(ReviewPreviews::new(
+                state_dir.join("review-previews"),
+                std::time::SystemTime::now,
+            )),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
             runtimes: Arc::new(runtimes),

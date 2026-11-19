@@ -44,6 +44,7 @@ pub async fn list(
     let reviews = state.github.review_inbox(&repo, &labels, &me).await?;
     let open: Vec<u64> = reviews.iter().map(|r| r.number).collect();
     review::prune_refs(&project.dir, &open).await;
+    state.review_previews.prune(&project.id, &open).await;
     Ok(Json(json!({ "reviews": reviews })))
 }
 
