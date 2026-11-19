@@ -19,4 +19,9 @@ fi
 
 mkdir -p "$here/binaries"
 cp "$root/target/$profile/orso" "$here/binaries/orso-$triple"
+# tauri-build copies the sidecar next to the app only when its build script reruns, which a
+# changed daemon alone doesn't trigger; refresh that copy too so the app never runs a stale one.
+if [ -d "$here/target/$profile" ]; then
+  cp "$here/binaries/orso-$triple" "$here/target/$profile/orso"
+fi
 echo "sidecar: binaries/orso-$triple ($profile)"
