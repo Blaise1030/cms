@@ -11,6 +11,7 @@ const parserOptions: StreamMarkdownParserOptions = { plugins: [{ name: "html" }]
 
 <template>
   <div class="text-default min-w-0 text-sm" data-testid="review-markdown" @click.capture="openWebLink">
-    <Markdown :content="content" :parser-options="parserOptions" />
+    <!-- Static: the text is complete, so the last block (often an image) never waits on more input. -->
+    <Markdown mode="static" :content="content" :parser-options="parserOptions" />
   </div>
 </template>
