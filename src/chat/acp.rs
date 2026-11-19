@@ -630,6 +630,10 @@ def update(session_id, upd):
 
 MODEL = {"current": "fast"}
 
+# Like OpenCode: after a cancel, a `linger` prompt stays active for a while,
+# and any `session/prompt` until then fails with the busy error.
+BUSY = {"until": 0.0}
+
 def model_options():
     return [{
         "id": "model", "name": "Model", "category": "model",
@@ -669,6 +673,12 @@ while True:
         sid = params.get("sessionId", "")
         text = "".join(c.get("text", "") for c in params.get("prompt", [])
                        if c.get("type") == "text")
+        if time.time() < BUSY["until"]:
+            send({"jsonrpc": "2.0", "id": mid, "error": {
+                "code": -32603,
+                "message": "Internal error: Session already has an active ACP prompt: " + sid,
+                "data": {"service": "session"}}})
+            continue
         # A sync chat's provider runs a shell script in the worktree first, so a
         # test can leave the merge untouched or move git the way a wrong agent would.
         if len(sys.argv) > 1 and sys.argv[1].startswith("sync:"):
@@ -680,6 +690,18 @@ while True:
                 nxt = sys.stdin.readline()
                 if not nxt:
                     break
+            continue
+        if "linger" in text:
+            update(sid, {"sessionUpdate": "agent_message_chunk",
+                         "content": {"type": "text", "text": "linger started"}})
+            while True:
+                nxt = sys.stdin.readline()
+                if not nxt:
+                    break
+                if json.loads(nxt).get("method") == "session/cancel":
+                    BUSY["until"] = time.time() + (30 if "linger-long" in text else 0.3)
+                    break
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "cancelled"}})
             continue
         if "hold" in text:
             update(sid, {"sessionUpdate": "agent_message_chunk",
