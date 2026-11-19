@@ -77,8 +77,8 @@ const jsonLd = [
             ]}
           ><Content /></div>
           {entry.data.tags.length > 0 && (
-            <ul class="mt-10 flex max-w-prose flex-wrap gap-x-4 gap-y-1 text-small text-muted" aria-label="Tags">
-              {entry.data.tags.map((tag) => <li>#{tag}</li>)}
+            <ul class="mt-10 flex max-w-prose flex-wrap gap-2" aria-label="Tags">
+              {entry.data.tags.map((tag) => <li><UBadge color="neutral" variant="soft" class="text-muted" label={`#${tag}`} /></li>)}
             </ul>
           )}
         </div>
