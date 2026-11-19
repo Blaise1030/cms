@@ -1154,6 +1154,7 @@ version = "0.1.9"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "bytes",
  "clap",
  "flate2",
  "futures-util",

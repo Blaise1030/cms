@@ -20,6 +20,9 @@ pub struct GithubConfig {
     pub gh_path: PathBuf,
     /// Global git config file to read the commit identity from (tests); `None` = the real one.
     pub git_global_config: Option<PathBuf>,
+    /// How long a GitHub GET is reused without asking again (see `github_cache`). Zero still
+    /// revalidates with ETags.
+    pub get_cache_ttl: std::time::Duration,
 }
 
 impl Default for GithubConfig {
@@ -31,6 +34,7 @@ impl Default for GithubConfig {
             git_url: "https://github.com".into(),
             gh_path: "gh".into(),
             git_global_config: None,
+            get_cache_ttl: crate::github_cache::TTL,
         }
     }
 }
@@ -96,6 +100,8 @@ impl Default for Config {
             agents_config: None,
             github: GithubConfig {
                 gh_path: PathBuf::new(),
+                // Tests change GitHub's state behind the daemon's back.
+                get_cache_ttl: std::time::Duration::ZERO,
                 ..GithubConfig::default()
             },
             ui_url: None,

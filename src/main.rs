@@ -50,6 +50,9 @@ enum Command {
         /// Base for clone URLs: `{git_url}/{owner}/{repo}.git` (e2e: local bare repo root).
         #[arg(long, env = "ORSO_GITHUB_GIT_URL")]
         github_git_url: Option<String>,
+        /// Milliseconds a GitHub GET is reused before revalidating (e2e: 0).
+        #[arg(long, env = "ORSO_GITHUB_CACHE_TTL_MS", hide = true)]
+        github_cache_ttl_ms: Option<u64>,
         /// Base URL to print in the ready link (e.g. the Vite dev server in `just dev`).
         #[arg(long, env = "ORSO_UI_URL")]
         ui_url: Option<String>,
@@ -96,6 +99,7 @@ async fn main() -> ExitCode {
         github_api_url,
         github_web_url,
         github_git_url,
+        github_cache_ttl_ms,
         ui_url,
         runtime_dir,
         open,
@@ -127,6 +131,9 @@ async fn main() -> ExitCode {
             web_url,
             git_url,
             gh_path: orso::config::resolve_gh(std::path::Path::new("gh")),
+            get_cache_ttl: github_cache_ttl_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(github_defaults.get_cache_ttl),
             ..github_defaults
         },
         ui_url,

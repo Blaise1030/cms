@@ -176,6 +176,7 @@ fn config(projects: &Path, base: &str, git_root: &Path) -> Config {
             git_url: format!("file://{}", git_root.display()),
             gh_path: no_gh(),
             git_global_config: None,
+            get_cache_ttl: std::time::Duration::ZERO,
         },
         ..Default::default()
     }
@@ -227,6 +228,7 @@ fn cli_config(projects: &Path, git_root: &Path, gh: &Path) -> Config {
             gh_path: gh.to_path_buf(),
             // Never the real global git config; tests that need one set their own.
             git_global_config: Some(git_root.join("no-such-gitconfig")),
+            get_cache_ttl: std::time::Duration::ZERO,
         },
         ..Default::default()
     }

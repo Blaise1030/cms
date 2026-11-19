@@ -15,6 +15,7 @@ pub mod fs;
 pub mod git;
 pub mod git_shim;
 pub mod github;
+pub mod github_cache;
 pub mod http;
 pub mod preview;
 pub mod projects;

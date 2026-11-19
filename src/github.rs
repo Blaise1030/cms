@@ -1103,6 +1103,8 @@ pub struct GithubAuth {
     cli: Mutex<Option<CliState>>,
     /// The identity last written to the projects, to notice changes (see `identity_change`).
     applied: Mutex<Option<Identity>>,
+    /// Token-made REST GETs, reused briefly and revalidated with ETags (see `github_cache`).
+    get_cache: crate::github_cache::GetCache,
 }
 
 impl GithubAuth {
@@ -1117,6 +1119,7 @@ impl GithubAuth {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("HTTP client");
+        let cfg_ttl = cfg.get_cache_ttl;
         Self {
             cfg,
             path,
@@ -1127,6 +1130,7 @@ impl GithubAuth {
             }),
             cli: Mutex::new(None),
             applied: Mutex::new(None),
+            get_cache: crate::github_cache::GetCache::new(cfg_ttl),
         }
     }
 
@@ -1728,6 +1732,8 @@ impl GithubAuth {
                 }
             }
         };
+        // GraphQL names no repository path: drop every cached GET.
+        self.get_cache.clear();
         let excerpt =
             |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
         if status == reqwest::StatusCode::FORBIDDEN {
@@ -2401,13 +2407,127 @@ impl GithubAuth {
         Ok(all)
     }
 
+    /// A GET of `path`. With a token it goes through the GET cache; through `gh api` it
+    /// doesn't.
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
-        self.api_json(reqwest::Method::GET, path, None).await
+        let Some(token) = self.token().await else {
+            return self.api_json(reqwest::Method::GET, path, None).await;
+        };
+        let body = self.cached_get(&token, path).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))
+    }
+
+    /// The body of a token GET of `path`: reused while fresh, revalidated once stale, and
+    /// fetched once for concurrent identical calls.
+    async fn cached_get(&self, token: &str, path: &str) -> Result<bytes::Bytes, ApiError> {
+        let url = format!("{}{path}", self.api());
+        let key = crate::github_cache::GetCache::key(token, &url);
+        let flight = self.get_cache.flight(&key).await;
+        let out = self.cached_get_in_flight(token, &url, &key).await;
+        self.get_cache.land(flight).await;
+        out
+    }
+
+    async fn cached_get_in_flight(
+        &self,
+        token: &str,
+        url: &str,
+        key: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        use crate::github_cache::Lookup;
+        use reqwest::header::{IF_MODIFIED_SINCE, IF_NONE_MATCH};
+        let (etag, last_modified) = match self.get_cache.lookup(key) {
+            Lookup::Fresh(body) => return Ok(body),
+            Lookup::Stale {
+                etag,
+                last_modified,
+            } => (etag, last_modified),
+            Lookup::Miss => (None, None),
+        };
+        let get = || {
+            self.http
+                .get(url)
+                .bearer_auth(token)
+                .header(ACCEPT, GITHUB_JSON)
+        };
+        let mut req = get();
+        if let Some(etag) = &etag {
+            req = req.header(IF_NONE_MATCH, etag);
+        }
+        if let Some(since) = &last_modified {
+            req = req.header(IF_MODIFIED_SINCE, since);
+        }
+        let res = req.send().await.map_err(unreachable)?;
+        if res.status() == reqwest::StatusCode::NOT_MODIFIED {
+            if let Some(body) = self.get_cache.revalidated(key) {
+                return Ok(body);
+            }
+            // Evicted in the meantime: ask again without validators.
+            let res = get().send().await.map_err(unreachable)?;
+            return self.store_get(res, token, url, key).await;
+        }
+        self.store_get(res, token, url, key).await
+    }
+
+    /// A GET response's body, stored when 2xx; otherwise the same errors as `parse_github`.
+    async fn store_get(
+        &self,
+        res: reqwest::Response,
+        token: &str,
+        url: &str,
+        key: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        use reqwest::header::{ETAG, LAST_MODIFIED};
+        let status = res.status();
+        let header = |name| {
+            res.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        let (etag, last_modified) = (header(ETAG), header(LAST_MODIFIED));
+        let body = res.bytes().await.map_err(unreachable)?;
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let _ = self.sign_out_if_token(token).await;
+            return Err(ApiError::unauth(
+                "your GitHub session expired — sign in again",
+            ));
+        }
+        if !status.is_success() {
+            return Err(github_error(status, &body));
+        }
+        self.get_cache
+            .store(key, url, body.clone(), etag, last_modified);
+        Ok(body)
+    }
+
+    /// After a write to `path`, cached GETs of its repository (or, for a path that names
+    /// none, every cached GET) may be out of date.
+    fn forget_after_write(&self, path: &str) {
+        match crate::github_cache::repo_prefix(path) {
+            Some(repo) => self.get_cache.invalidate(&format!("{}{repo}", self.api())),
+            None => self.get_cache.clear(),
+        }
     }
 
     /// A REST call to `path` with the session token, else through `gh api` when only the
-    /// GitHub CLI is logged in.
+    /// GitHub CLI is logged in. A write also drops the cached GETs it may have changed.
     async fn api_json<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, ApiError> {
+        let write = method != reqwest::Method::GET;
+        let out = self.api_json_uncached(method, path, body).await;
+        if write {
+            self.forget_after_write(path);
+        }
+        out
+    }
+
+    async fn api_json_uncached<T: DeserializeOwned>(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -2436,6 +2556,20 @@ impl GithubAuth {
     /// Like [`Self::api_json`], but returns GitHub's status and body instead of mapping a
     /// failure to an error, so the caller can say what a refusal means for its own action.
     async fn api_raw(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), ApiError> {
+        let write = method != reqwest::Method::GET;
+        let out = self.api_raw_uncached(method, path, body).await;
+        if write {
+            self.forget_after_write(path);
+        }
+        out
+    }
+
+    async fn api_raw_uncached(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -3919,6 +4053,155 @@ esac"#,
             deploy_state_of(&[named("test", "completed", Some("success"))]),
             DeployState::Unknown
         );
+    }
+
+    /// A mock whose `/repos/acme/site/pulls/1` answers with an ETag (and 304 when it
+    /// matches), counting every request and the `If-None-Match` headers it saw.
+    async fn cache_mock(
+        delay: Duration,
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::IntoResponse;
+        use axum::routing::{get, post};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (h, sn) = (hits.clone(), seen.clone());
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls/1",
+                get(move |headers: HeaderMap| {
+                    let (h, sn) = (h.clone(), sn.clone());
+                    async move {
+                        h.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(delay).await;
+                        if let Some(v) = headers.get("if-none-match") {
+                            sn.lock().unwrap().push(v.to_str().unwrap().to_string());
+                            if v == "\"v1\"" {
+                                return StatusCode::NOT_MODIFIED.into_response();
+                            }
+                        }
+                        (
+                            [("etag", "\"v1\"")],
+                            axum::Json(serde_json::json!({ "n": 1 })),
+                        )
+                            .into_response()
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/issues/1/comments",
+                post(|| async {
+                    (
+                        StatusCode::CREATED,
+                        axum::Json(serde_json::json!({ "id": 5, "user": { "login": "ada" },
+                            "created_at": "2026-01-01T00:00:00Z", "body": "hi",
+                            "html_url": "u" })),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        (base, stop, hits, seen)
+    }
+
+    #[tokio::test]
+    async fn get_cache_reuses_a_fresh_response_without_asking() {
+        let (base, stop, hits, _) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-fresh");
+        for _ in 0..2 {
+            let v: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+            assert_eq!(v["n"], 1);
+        }
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_revalidates_a_stale_response_and_reuses_it_on_304() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-stale");
+        auth.get_cache.set_ttl(Duration::ZERO);
+        let first: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+        let second: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(*seen.lock().unwrap(), vec!["\"v1\"".to_string()]);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_shares_one_request_between_concurrent_calls() {
+        let (base, stop, hits, _) = cache_mock(Duration::from_millis(150)).await;
+        let auth = status_auth(base, "cache-dedupe");
+        let path = "/repos/acme/site/pulls/1";
+        let (a, b) = tokio::join!(
+            auth.get_json::<serde_json::Value>(path),
+            auth.get_json::<serde_json::Value>(path)
+        );
+        assert_eq!(a.unwrap(), b.unwrap());
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_forgets_a_repository_after_a_write_to_it() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-write");
+        let path = "/repos/acme/site/pulls/1";
+        auth.get_json::<serde_json::Value>(path).await.unwrap();
+        auth.add_comment("acme/site", 1, "hi").await.unwrap();
+        auth.get_json::<serde_json::Value>(path).await.unwrap();
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // Dropped, not merely stale: the re-read is unconditional.
+        assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_never_shares_responses_between_tokens() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-tokens");
+        let path = "/repos/acme/site/pulls/1";
+        auth.cached_get("token-a", path).await.unwrap();
+        auth.cached_get("token-b", path).await.unwrap();
+        auth.cached_get("token-a", path).await.unwrap();
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_keeps_no_failed_response() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        let routes = axum::Router::new().route(
+            "/repos/acme/site/pulls/2",
+            get(move || {
+                let h = h.clone();
+                async move {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::BAD_GATEWAY
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "cache-error");
+        for _ in 0..2 {
+            assert!(auth
+                .get_json::<serde_json::Value>("/repos/acme/site/pulls/2")
+                .await
+                .is_err());
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        stop();
     }
 
     fn status_auth(base: String, tag: &str) -> GithubAuth {

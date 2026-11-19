@@ -267,6 +267,8 @@ export async function startorso(): Promise<orsoEnv> {
         ...process.env,
         ORSO_GITHUB_CLIENT_ID: "cid",
         ORSO_GITHUB_API_URL: stub.baseUrl,
+        // The stub changes state behind the daemon's back; skip the 15 s reuse.
+        ORSO_GITHUB_CACHE_TTL_MS: "0",
         ORSO_GITHUB_WEB_URL: stub.baseUrl,
         ORSO_GITHUB_GIT_URL: gitUrl,
       },
