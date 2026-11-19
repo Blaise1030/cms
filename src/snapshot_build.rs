@@ -45,13 +45,31 @@ pub async fn build(
     let tmp = parent.join(format!(".build-{:016x}", rand::random::<u64>()));
 
     // Armed before `git worktree add`, so even a half-made worktree is removed.
-    let _worktree = Worktree {
+    // Normally removed off the runtime once the build ends; if this future is
+    // dropped mid-build instead, the guard's `Drop` removes it synchronously.
+    let worktree = Worktree {
         repo: repo.to_owned(),
         dir: tmp.clone(),
     };
+    let result = build_in(repo, revision, base_url, out, timeout, &settings, &tmp).await;
+    worktree.remove().await;
+    result
+}
+
+/// Everything that happens inside the throwaway worktree at `tmp`.
+async fn build_in(
+    repo: &Path,
+    revision: &str,
+    base_url: &str,
+    out: &Path,
+    timeout: Duration,
+    settings: &ProjectSettings,
+    tmp: &Path,
+) -> Result<(), BuildError> {
+    let unavailable = |e: std::io::Error| BuildError::Unavailable(e.to_string());
     let output = Command::new("git")
         .args(["worktree", "add", "--detach", "--quiet"])
-        .arg(&tmp)
+        .arg(tmp)
         .arg(revision)
         .current_dir(repo)
         .kill_on_drop(true)
@@ -63,10 +81,10 @@ pub async fn build(
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ));
     }
-    link_node_modules(&settings.install_path(repo), &settings.install_path(&tmp))
+    link_node_modules(&settings.install_path(repo), &settings.install_path(tmp))
         .map_err(unavailable)?;
 
-    let site = settings.site_dir(&tmp);
+    let site = settings.site_dir(tmp);
     let mut command = Command::new("npm");
     command
         .args(["run", "build"])
@@ -78,8 +96,8 @@ pub async fn build(
         .kill_on_drop(true)
         .process_group(0);
     let child = command.spawn().map_err(unavailable)?;
-    // Declared after the worktree guard, so on every exit the build's whole
-    // process group dies before its worktree is removed.
+    // Dropped on every exit from here, so the build's whole process group
+    // dies before its worktree is removed.
     let group = BuildGroup(child.id().map(|pid| pid as i32));
     let output = tokio::time::timeout(timeout, child.wait_with_output())
         .await
@@ -164,26 +182,41 @@ struct Worktree {
     repo: PathBuf,
     dir: PathBuf,
 }
+impl Worktree {
+    /// Removes the worktree on a blocking thread, disarming the guard.
+    async fn remove(mut self) {
+        let repo = std::mem::take(&mut self.repo);
+        let dir = std::mem::take(&mut self.dir);
+        // If this await is cancelled the blocking task still runs to completion.
+        let _ = tokio::task::spawn_blocking(move || remove_worktree(&repo, &dir)).await;
+    }
+}
 impl Drop for Worktree {
     fn drop(&mut self) {
-        // Synchronous so it also runs when the build future is cancelled.
-        let _ = std::process::Command::new("git")
-            .args(["worktree", "remove", "--force"])
-            .arg(&self.dir)
-            .current_dir(&self.repo)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = std::fs::remove_dir_all(&self.dir);
-        let _ = std::process::Command::new("git")
-            .args(["worktree", "prune"])
-            .current_dir(&self.repo)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // Still armed only when the build future was dropped (cancelled or
+        // panicked) before `remove`; synchronous because nothing awaits a drop.
+        if !self.dir.as_os_str().is_empty() {
+            remove_worktree(&self.repo, &self.dir);
+        }
     }
+}
+fn remove_worktree(repo: &Path, dir: &Path) {
+    let _ = std::process::Command::new("git")
+        .args(["worktree", "remove", "--force"])
+        .arg(dir)
+        .current_dir(repo)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::process::Command::new("git")
+        .args(["worktree", "prune"])
+        .current_dir(repo)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Lets a checkout at `dir` build with the dependencies installed at `installed`.
@@ -318,23 +351,38 @@ mod tests {
     async fn build_removes_worktree_after_timeout() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");
+        let started = temp.path().join("started");
         let marker = temp.path().join("still-running");
+        // The build starts a grandchild that outlives npm unless the whole
+        // process group is killed, then never finishes on its own. npm alone
+        // takes about 2 s to start, hence a timeout well past that.
         let script = format!(
-            "setTimeout(() => require('fs').writeFileSync({:?}, 'x'), 1500);\n",
-            marker.to_string_lossy()
+            "const fs = require('fs');\n\
+             fs.writeFileSync({started:?}, 'x');\n\
+             require('child_process').spawn('sh', ['-c', 'sleep 7; touch \"' + {marker:?} + '\"'], {{ stdio: 'ignore' }});\n\
+             setInterval(() => {{}}, 1000);\n",
+            started = started.to_string_lossy(),
+            marker = marker.to_string_lossy(),
         );
         let rev = fixture(&repo, ".", &script);
         let base = temp.path().join("previews");
         let out = base.join("out");
-        let result = build(&repo, &rev, "/p/x/", &out, Duration::from_millis(200)).await;
+        let result = build(&repo, &rev, "/p/x/", &out, Duration::from_secs(6)).await;
         assert!(
             matches!(result, Err(BuildError::Unavailable(ref m)) if m == "Preview build timed out"),
             "{result:?}"
         );
+        assert!(started.exists(), "the build never reached its script");
         assert!(!out.exists());
         assert_eq!(worktrees(&repo), 1);
         assert!(leftovers(&base, &out).is_empty());
-        tokio::time::sleep(Duration::from_millis(2500)).await;
+        // The grandchild would touch the marker 7 s after the script started,
+        // well after the timeout killed the build.
+        let began = fs::metadata(&started).unwrap().modified().unwrap();
+        let due = began + Duration::from_secs(8);
+        if let Ok(wait) = due.duration_since(std::time::SystemTime::now()) {
+            tokio::time::sleep(wait).await;
+        }
         assert!(!marker.exists(), "the build kept running after the timeout");
     }
 
