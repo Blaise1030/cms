@@ -34,11 +34,11 @@ and checked-out change are untouched throughout.
 | Who reviews | Content leads inside orso; no GitHub knowledge needed |
 | Which changes appear | Open, non-draft PRs with any `prLabels` label, yours included (marked **Yours**, view-only, not counted in the badge) |
 | Inbox scope | Per site (project) for v1 |
-| How the change is shown rendered | Static build of the PR head in a temporary worktree |
-| "Before" side | **View live site** link; no build of `main` in v1 |
+| How the change is shown rendered | The PR head's deploy preview (GitHub Deployments), framed next to the live site; nothing is built locally |
+| "Before" side | The live site, framed beside the change (**Side by side**), plus the **View live site** link |
 | Send-back comment | Required (GitHub requires a body for Request changes) |
 | Who can decide | Push access to the repo, and not your own change |
-| Disk use | Worktree exists only during a build; built output cached with limits |
+| Disk use | None: previews are the site's own deploys, so cost doesn't grow with the site |
 
 ## User flow
 
@@ -52,9 +52,17 @@ and checked-out change are untouched throughout.
    your greenlight."
 2. **Open a change** (`/p/:id/review/:number`). Header: title, creator, description,
    **View live site**. Two panes:
-   - **Preview**: the built change, navigable like the normal preview. While building:
-     "Preparing the preview…". On failure: the build's last output and **Try again**;
-     the rest of the screen still works.
+   - **Preview**: a browser frame like the preview page's (back/forward, reload, address
+     bar, viewport size with zoom-to-fit, open in new tab) with **This change · Live site ·
+     Side by side**, side by side by default when the live site is known. One address
+     opens the same page on both sides; each side fits desktop (1440 px) to its own width.
+     - Deploy running: "Deploying preview…", checked again every 10 s while the page is
+       visible.
+     - Deploy failed: "The preview deploy failed." with a link to the PR's checks.
+     - No deployment and no deploy check: "This site doesn't publish previews for
+       changes. See What changed."
+     - No live site: that side says "No live site found for this project."
+     The rest of the screen works in every state.
    - **What changed**: the existing `ChangedFilesTree` + `DiffView`, comparing the head
      with its merge-base on `main`.
 3. **Decide.**
@@ -80,24 +88,24 @@ object store only. No branch is created and the working tree is untouched.
 `git diff <merge-base(origin/main, head)>..<head>`, same response shape as the
 checkpoint diff so the web components are reused unchanged.
 
-**Snapshot preview service** (generalizes `src/conflict_preview.rs`). One build pipeline
-keyed by a snapshot id: a conflict side, or `(project, PR number, head SHA)`.
-- Builds in the `orso.json` `root` (via `settings::load`), linking `node_modules` from the
-  `installDir`. This also fixes conflict previews for sites not at the repo root.
-- Steps: `git worktree add --detach` at the revision → link `node_modules` →
-  `npm run build` with `PUBLIC_BASE` (90 s timeout, process group killed on timeout) →
-  move `dist/` into the cache → **remove the worktree**. The worktree is removed on
-  success, failure and timeout alike.
-- Serves cached `dist/` files with the existing safe-route handling, at
-  `/review-preview/{project}/{sha}/…` for reviews (conflict URLs unchanged).
-- Conflict previews switch to this service and so also stop keeping worktrees.
+**Preview from the site's own deploys.** The template deploys every PR to its own preview
+URL and records a GitHub Deployment; orso already reads that for **Share preview** and
+**View live site**. The review preview reuses it:
+- `url`: `environment_url` of the newest successful deployment of the head SHA.
+- Otherwise the head's deploy check run says `deploying` (running) or `failed`; with
+  neither, `none`.
+- `liveUrl`: the production URL (deployment of `main`'s tip, or derived from a preview
+  URL and the worker name), best effort.
 
-**Cache limits** (review snapshots):
-- Key `(PR, head SHA)`; a new head deletes the previous build for that PR.
-- Deleted when the PR is no longer open (checked on each inbox load).
-- At most 3 builds per project (least recently viewed evicted) and none older than 24 h.
-- On daemon start and shutdown: remove leftover worktree and cache folders that no live
-  entry owns, `git worktree prune`, and delete `refs/orso/review/*` for PRs not open.
+Nothing is checked out or built for a review, so the cost doesn't grow with the size of
+the site. Deploy previews are on their own origin, so the frames may run the site's
+scripts (`sandbox="allow-scripts allow-same-origin allow-forms allow-popups"`, only
+http(s) URLs); the cross-origin frame can't report where a page navigates, so the address
+bar holds the path it opened. Conflict previews keep their own local build (unchanged by
+this spec). A site whose deploy records no GitHub Deployment gets no rendered preview,
+only **What changed**.
+
+**Refs.** `refs/orso/review/*` for PRs no longer open are deleted on each inbox load.
 
 **GitHub** (`src/github.rs`, token or `gh` CLI as today):
 - List: open PRs for the repo filtered by label (search or `GET /pulls` + labels), drop
@@ -118,8 +126,7 @@ keyed by a snapshot id: a conflict side, or `(project, PR number, head SHA)`.
 | `GET /` | Inbox rows: number, title, author, updatedAt, checks, myState |
 | `GET /{n}` | Title, author, description, headSha, myState, `canDecide`, `reason` |
 | `GET /{n}/diff` | Changed files + unified diff (checkpoint diff shape) |
-| `POST /{n}/preview` | Start or reuse the build for the current head |
-| `GET /{n}/preview` | `building` / `ready` (url) / `failed` (message) |
+| `GET /{n}/preview` | `{ state: deploying \| ready \| failed \| none, headSha, url?, liveUrl? }` for the current head |
 | `POST /{n}/decision` | `{ decision: "greenlight" \| "send_back", comment?, headSha }` |
 
 Errors: 403 → "You don't have push access"; 409 `head_moved`; `send_back` without a
@@ -137,13 +144,15 @@ non-blank comment → 400; PR not open → 404 "This change is no longer waiting
 
 - **Rust unit:** inbox filtering (label, draft, own); myState from reviews vs head SHA;
   `canDecide` reasons; decision body carries `commit_id`; moved head → 409 and no
-  submit; send-back without comment → 400; `changes_requested` mapping; cache eviction
-  (new head, PR closed, cap of 3, 24 h); worktree removed after success, failure and
-  timeout; startup sweep removes orphans and stale refs; build runs in `orso.json` root.
+  submit; send-back without comment → 400; `changes_requested` mapping; preview state from
+  deployment and deploy check, with the live URL; preview of a change not waiting → 404.
 - **Web unit:** inbox rows and badge count; disabled buttons show their reason; send-back
-  requires a comment; head-moved message reloads; `PrMenu` Sent back view.
-- **E2E** (GitHub stub + a stub PR head ref in the bare remote): open Review → see the
-  PR → open it → preview builds, diff lists the file → Give greenlight → stub received
+  requires a comment; head-moved message reloads; `PrMenu` Sent back view; preview states
+  and This change / Live site / Side by side; BrowserFrame opens one path on every side,
+  reloads, sizes and fits each side, refuses non-http URLs.
+- **E2E** (GitHub stub + a stub PR head ref in the bare remote + a stub deployment whose
+  page the stub serves): open Review → see the PR → open it → the deploy preview shows,
+  diff lists the file → Give greenlight → stub received
   `APPROVE` with the right `commit_id` → reviewer's own checkout and branch unchanged.
   Second spec: Send back with comment → creator's project shows **Sent back** and the
   comment.
@@ -154,13 +163,15 @@ non-blank comment → 400; PR not open → 404 "This change is no longer waiting
    preview, no decisions).
 2. **Decisions**: Give greenlight / Send back with `commit_id` pinning and `head_moved`;
    creator's **Sent back** state and comment.
-3. **Preview**: snapshot preview service (orso.json root, worktree removed after build,
-   cache limits, startup sweep) wired into the review view; conflict previews migrated.
+3. **Preview**: the change's deploy preview beside the live site in a shared
+   BrowserFrame (This change / Live site / Side by side). No local build for reviews;
+   conflict previews build in the `orso.json` root and remove their worktree after each
+   build.
 
 ## Out of scope
 
 - Inline or threaded comments, replies, suggestions (stay on GitHub).
 - A cross-site inbox; notifications outside orso.
-- Building `main` for a side-by-side "before" preview.
+- Building anything locally for a review, including `main` (the live site is the "before").
 - Merging on the creator's behalf (unchanged: creators publish their own changes).
 - Reviewing PRs that orso did not label.
