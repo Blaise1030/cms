@@ -2528,9 +2528,11 @@ impl GithubAuth {
             }
             body
         } else {
-            let accept = format!("Accept: {RAW}");
+            // Not `RAW`: gh reads a `+json` type as JSON and fails on binary ("transform: short
+            // source buffer"). Plain `.raw` gets the file's bytes through untouched.
+            let accept = "Accept: application/vnd.github.raw";
             let out = self
-                .run_gh_input(&["api", "-H", &accept, &api_path], 30, None)
+                .run_gh_input(&["api", "-H", accept, &api_path], 30, None)
                 .await
                 .map_err(|f| f.err.with_status(502))?;
             if out.code != Some(0) {
@@ -3611,6 +3613,31 @@ mod tests {
 
     async fn expire(auth: &GithubAuth) {
         auth.cli.lock().await.as_mut().unwrap().expires = Instant::now();
+    }
+
+    #[tokio::test]
+    async fn raw_file_through_gh_asks_for_plain_raw_bytes() {
+        // Like real gh: a `+json` Accept makes it parse binary as JSON and fail.
+        let dir = tmp_dir("ghraw");
+        let gh = write_gh(
+            &dir,
+            r#"case "$*" in
+  *raw+json*) echo 'transform: short source buffer' >&2; exit 1 ;;
+  *vnd.github.raw*) printf '\211PNG\r\n' ;;
+  *) echo "unexpected: $*" >&2; exit 1 ;;
+esac"#,
+        );
+        let cfg = GithubConfig {
+            gh_path: gh,
+            git_global_config: Some(dir.join("none")),
+            ..GithubConfig::default()
+        };
+        let auth = GithubAuth::open(cfg, &dir);
+        let bytes = auth
+            .raw_file("acme/site", "abc123", "uploads/7/2026-11-19/x.png")
+            .await
+            .unwrap();
+        assert_eq!(&bytes[..], b"\x89PNG\r\n");
     }
 
     #[tokio::test]
