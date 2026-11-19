@@ -59,24 +59,33 @@ const isCurrent = (path: string) => (path === current ? "page" : undefined);
         <ul class="flex flex-col gap-0.5">
           <li><a class={item} href={href("/help/")} aria-current={isCurrent("/help/")}>Overview</a></li>
         </ul>
-        {shown.map((section) => (
-          <div class="mt-5">
-            <a class:list={[item, "font-medium text-ink"]} href={href(`/help/section/${section.id}/`)} aria-current={isCurrent(`/help/section/${section.id}/`)}>{section.title}</a>
-            {section.loose.length > 0 && (
-              <ul class="mt-0.5 flex flex-col gap-0.5 pl-3">
-                {section.loose.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
-              </ul>
-            )}
-            {section.subsections.filter((sub) => sub.docs.length > 0).map((sub) => (
-              <div class="mt-2 pl-3">
-                <p class="px-2.5 py-1 text-small text-ink/70">{sub.title}</p>
-                <ul class="flex flex-col gap-0.5 pl-3">
-                  {sub.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
+        {/* One accordion item per section; the section holding this page starts open. */}
+        {shown.map((section) => {
+          const sectionPath = `/help/section/${section.id}/`;
+          const open = current === sectionPath || section.docs.some((doc) => docPath(doc) === current);
+          return (
+            <details class="group/section mt-2 first-of-type:mt-3" open={open}>
+              <summary class="flex cursor-pointer list-none items-center justify-between rounded-md px-2.5 py-1.5 text-small font-medium text-ink transition-colors duration-quick ease-gentle hover:bg-sand [&::-webkit-details-marker]:hidden">
+                {section.title}
+                <Icon name="chevron-down" class="size-4 text-muted transition-transform duration-quick ease-gentle group-open/section:rotate-180" />
+              </summary>
+              <div class="mt-0.5 pb-1 pl-3">
+                <ul class="flex flex-col gap-0.5">
+                  <li><a class={item} href={href(sectionPath)} aria-current={isCurrent(sectionPath)}>Overview</a></li>
+                  {section.loose.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
                 </ul>
+                {section.subsections.filter((sub) => sub.docs.length > 0).map((sub) => (
+                  <div class="mt-2">
+                    <p class="px-2.5 py-1 text-small text-ink/70">{sub.title}</p>
+                    <ul class="flex flex-col gap-0.5 pl-3">
+                      {sub.docs.map((doc) => <li><a class={item} href={href(docPath(doc))} aria-current={isCurrent(docPath(doc))}>{doc.data.title}</a></li>)}
+                    </ul>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        ))}
+            </details>
+          );
+        })}
       </nav>
     </div>
   </aside>
