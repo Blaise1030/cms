@@ -4,6 +4,15 @@
 //! runs: it is removed after success, failure, timeout and cancellation alike,
 //! so previews never keep a checkout on disk. Only the built `dist` survives,
 //! moved to the caller's output directory.
+//!
+//! The revision's code runs on this machine, so git hooks are off for every git
+//! call here and the build's environment drops anything that looks like a secret
+//! (see [`is_secret`]).
+//!
+//! `orso.json` settings (`root`, `installDir`) are read from the reviewer's own
+//! checkout at `repo`, not from the revision being built: a change cannot point
+//! the build at another folder, and a change that edits `orso.json` builds with
+//! the checkout's settings.
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -20,8 +29,9 @@ pub enum BuildError {
 
 /// Builds `revision` with `PUBLIC_BASE=base_url` and moves its `dist` to `out`.
 ///
-/// The project's `orso.json` decides where the site builds (`root`) and whose
-/// `node_modules` it uses (`installDir`); a file that fails to load means the defaults.
+/// The project's `orso.json` — read from the checkout at `repo`, not from
+/// `revision` — decides where the site builds (`root`) and whose `node_modules`
+/// it uses (`installDir`); a file that fails to load means the defaults.
 pub async fn build(
     repo: &Path,
     revision: &str,
@@ -68,6 +78,7 @@ async fn build_in(
 ) -> Result<(), BuildError> {
     let unavailable = |e: std::io::Error| BuildError::Unavailable(e.to_string());
     let output = Command::new("git")
+        .args(NO_HOOKS)
         .args(["worktree", "add", "--detach", "--quiet"])
         .arg(tmp)
         .arg(revision)
@@ -86,8 +97,9 @@ async fn build_in(
 
     let site = settings.site_dir(tmp);
     let mut command = Command::new("npm");
+    command.args(["run", "build"]);
+    scrub_secrets(&mut command);
     command
-        .args(["run", "build"])
         .env("PUBLIC_BASE", base_url)
         .current_dir(&site)
         .stdin(Stdio::null())
@@ -123,6 +135,32 @@ async fn build_in(
     }
     tokio::fs::rename(&dist, out).await.map_err(unavailable)?;
     Ok(())
+}
+
+/// Git config that keeps a checked-out revision's hooks (and the repo's) from running.
+const NO_HOOKS: [&str; 2] = ["-c", "core.hooksPath=/dev/null"];
+
+/// Whether an environment variable likely holds a credential the build must not see.
+fn is_secret(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.ends_with("_TOKEN")
+        || name.ends_with("_SECRET")
+        || name.ends_with("_KEY")
+        || name.ends_with("_PASSWORD")
+        || name.starts_with("AWS_")
+        || matches!(
+            name.as_str(),
+            "GH_TOKEN" | "GITHUB_TOKEN" | "GH_ENTERPRISE_TOKEN" | "NPM_TOKEN" | "TOKEN"
+        )
+}
+
+/// Removes every secret-looking variable this process would pass to the build.
+fn scrub_secrets(command: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_none_or(is_secret) {
+            command.env_remove(name);
+        }
+    }
 }
 
 fn classify_failure(stdout: &[u8], stderr: &[u8]) -> BuildError {
@@ -170,6 +208,7 @@ pub async fn sweep(repo: &Path, base: &Path, keep: &[PathBuf]) {
         }
     }
     let _ = Command::new("git")
+        .args(NO_HOOKS)
         .args(["worktree", "prune"])
         .current_dir(repo)
         .stdin(Stdio::null())
@@ -202,6 +241,7 @@ impl Drop for Worktree {
 }
 fn remove_worktree(repo: &Path, dir: &Path) {
     let _ = std::process::Command::new("git")
+        .args(NO_HOOKS)
         .args(["worktree", "remove", "--force"])
         .arg(dir)
         .current_dir(repo)
@@ -211,6 +251,7 @@ fn remove_worktree(repo: &Path, dir: &Path) {
         .status();
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::process::Command::new("git")
+        .args(NO_HOOKS)
         .args(["worktree", "prune"])
         .current_dir(repo)
         .stdin(Stdio::null())
@@ -441,5 +482,67 @@ mod tests {
         assert!(!base.join("orphan").exists());
         assert!(!stale.exists());
         assert_eq!(worktrees(&repo), 1);
+    }
+
+    #[test]
+    fn secret_names_are_recognised() {
+        for name in [
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GH_ENTERPRISE_TOKEN",
+            "NPM_TOKEN",
+            "FOO_TOKEN",
+            "stripe_secret",
+            "API_KEY",
+            "AWS_REGION",
+            "DB_PASSWORD",
+        ] {
+            assert!(is_secret(name), "{name}");
+        }
+        for name in ["PATH", "HOME", "NODE_ENV", "PUBLIC_BASE", "KEYBOARD"] {
+            assert!(!is_secret(name), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn build_does_not_see_secrets() {
+        // Set for the whole test process; names are unique to this test.
+        std::env::set_var("ORSO_SCRUB_TEST_TOKEN", "t0ken");
+        std::env::set_var("ORSO_SCRUB_TEST_VISIBLE", "shown");
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let script = "const fs = require('fs');\n\
+            fs.mkdirSync('dist', { recursive: true });\n\
+            fs.writeFileSync('dist/index.html', String(process.env.ORSO_SCRUB_TEST_TOKEN) + ' ' + process.env.ORSO_SCRUB_TEST_VISIBLE);\n";
+        let rev = fixture(&repo, ".", script);
+        let out = temp.path().join("previews/out");
+        build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60))
+            .await
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(
+            fs::read_to_string(out.join("index.html")).unwrap(),
+            "undefined shown"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_does_not_run_git_hooks() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let rev = fixture(&repo, ".", WRITES_DIST);
+        let marker = temp.path().join("hook-ran");
+        let hook = repo.join(".git/hooks/post-checkout");
+        fs::write(&hook, format!("#!/bin/sh\ntouch {:?}\n", marker)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let out = temp.path().join("previews/out");
+        build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60))
+            .await
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(out.join("index.html").is_file());
+        assert!(!marker.exists(), "post-checkout hook ran");
     }
 }
