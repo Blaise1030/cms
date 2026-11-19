@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from "vue";
 import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import UTextarea from "@nuxt/ui/components/Textarea.vue";
 import type { ReviewDetail, ReviewPreview, ReviewReviewer, TimelineItem } from "@/core/types";
@@ -49,6 +51,24 @@ const REVIEWER: Record<ReviewReviewer["state"], { label: string; class: string }
 const pushers = (item: Extract<TimelineItem, { kind: "push" }>) =>
   [...new Set(item.commits.map((c) => c.author).filter(Boolean))].join(", ") || "Someone";
 const commitsLabel = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
+
+/** A push of more than this many commits shows only the first ones until opened. */
+const PUSH_PREVIEW = 3;
+/** Opened push groups, by timeline position (not remembered). */
+const openPushes = ref(new Set<number>());
+const pushOpen = (i: number) => openPushes.value.has(i);
+function setPushOpen(i: number, open: boolean) {
+  const next = new Set(openPushes.value);
+  if (open) next.add(i);
+  else next.delete(i);
+  openPushes.value = next;
+}
+const togglePush = (i: number) => setPushOpen(i, !pushOpen(i));
+/** orso's checkpoint commits read "checkpoint: …": shown as a badge plus the subject. */
+function commitSubject(message: string): { checkpoint: boolean; text: string } {
+  const m = message.match(/^checkpoint:\s*/i);
+  return m ? { checkpoint: true, text: message.slice(m[0].length) } : { checkpoint: false, text: message };
+}
 
 const draft = ref("");
 async function submit() {
@@ -118,20 +138,80 @@ async function submit() {
             </div>
 
             <div v-else-if="item.kind === 'push'" data-testid="review-timeline-push">
-              <p class="flex items-center gap-2 text-sm">
+              <p
+                class="flex items-center gap-2 text-sm"
+                :class="item.commits.length > PUSH_PREVIEW && 'cursor-pointer'"
+                data-testid="review-push-header"
+                @click="item.commits.length > PUSH_PREVIEW && togglePush(i)"
+              >
                 <UIcon name="i-hugeicons-git-commit" class="text-muted size-4 shrink-0" />
-                <span>
+                <span class="min-w-0 flex-1">
                   <span class="text-highlighted font-medium">{{ pushers(item) }}</span>
                   pushed {{ commitsLabel(item.commits.length) }}
-                  <span class="text-muted">{{ relativeTime(item.at) }}</span>
+                  <span class="text-muted">· {{ relativeTime(item.at) }}</span>
                 </span>
+                <UButton
+                  v-if="item.commits.length > PUSH_PREVIEW"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  :icon="pushOpen(i) ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
+                  :aria-label="pushOpen(i) ? 'Show fewer commits' : 'Show all commits'"
+                  :aria-expanded="pushOpen(i)"
+                  data-testid="review-push-toggle"
+                  @click.stop="togglePush(i)"
+                />
               </p>
               <ul class="m-0 mt-1 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
-                <li v-for="c in item.commits" :key="c.sha" class="flex min-w-0 gap-2">
+                <li v-for="c in item.commits.slice(0, PUSH_PREVIEW)" :key="c.sha" class="flex min-w-0 items-center gap-2" data-testid="review-push-commit">
                   <code class="text-muted shrink-0 font-mono text-xs leading-5">{{ c.sha }}</code>
-                  <span class="truncate">{{ c.message }}</span>
+                  <UBadge
+                    v-if="commitSubject(c.message).checkpoint"
+                    color="neutral"
+                    variant="soft"
+                    size="sm"
+                    label="checkpoint"
+                    class="text-muted shrink-0"
+                    data-testid="review-commit-checkpoint"
+                  />
+                  <span class="truncate" data-testid="review-commit-subject">{{ commitSubject(c.message).text }}</span>
                 </li>
               </ul>
+              <UCollapsible
+                v-if="item.commits.length > PUSH_PREVIEW"
+                :open="pushOpen(i)"
+                data-testid="review-push-rest"
+                @update:open="setPushOpen(i, $event)"
+              >
+                <template #content>
+                  <ul class="m-0 mt-0.5 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
+                    <li v-for="c in item.commits.slice(PUSH_PREVIEW)" :key="c.sha" class="flex min-w-0 items-center gap-2" data-testid="review-push-commit">
+                      <code class="text-muted shrink-0 font-mono text-xs leading-5">{{ c.sha }}</code>
+                      <UBadge
+                        v-if="commitSubject(c.message).checkpoint"
+                        color="neutral"
+                        variant="soft"
+                        size="sm"
+                        label="checkpoint"
+                        class="text-muted shrink-0"
+                        data-testid="review-commit-checkpoint"
+                      />
+                      <span class="truncate" data-testid="review-commit-subject">{{ commitSubject(c.message).text }}</span>
+                    </li>
+                  </ul>
+                </template>
+              </UCollapsible>
+              <UButton
+                v-if="item.commits.length > PUSH_PREVIEW"
+                color="neutral"
+                variant="link"
+                size="xs"
+                class="ml-6"
+                :label="pushOpen(i) ? 'Show fewer' : `Show all ${item.commits.length} commits`"
+                :aria-expanded="pushOpen(i)"
+                data-testid="review-push-more"
+                @click="togglePush(i)"
+              />
             </div>
 
             <p v-else-if="item.kind === 'state'" class="flex items-center gap-2 text-sm" data-testid="review-timeline-state">

@@ -314,6 +314,46 @@ describe("ReviewChange", () => {
       expect(w.get("[data-testid='review-timeline-state']").text()).toContain("Merged");
     });
 
+    it("folds a long push to its first three commits and badges checkpoints", async () => {
+      const commits = Array.from({ length: 5 }, (_, n) => ({
+        sha: `c${n}00000`,
+        message: n === 0 ? "checkpoint: Edit the hero" : `Edit ${n}`,
+        author: "Ada",
+      }));
+      const talk = { ...TALK, items: [{ kind: "push", at: "2026-01-01T00:00:00Z", commits }] };
+      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => talk) }, "conversation");
+      const push = () => w.get("[data-testid='review-timeline-push']");
+      const shown = () => push().findAll("[data-testid='review-push-commit']");
+      expect(push().text()).toContain("pushed 5 commits");
+      expect(shown()).toHaveLength(3);
+      // The checkpoint prefix is a badge, not text.
+      expect(shown()[0]!.get("[data-testid='review-commit-checkpoint']").text()).toBe("checkpoint");
+      expect(shown()[0]!.get("[data-testid='review-commit-subject']").text()).toBe("Edit the hero");
+      expect(shown()[1]!.find("[data-testid='review-commit-checkpoint']").exists()).toBe(false);
+
+      const more = push().get("[data-testid='review-push-more']");
+      expect(more.text()).toBe("Show all 5 commits");
+      expect(more.attributes("aria-expanded")).toBe("false");
+      await more.trigger("click");
+      await flushPromises();
+      expect(shown()).toHaveLength(5);
+      expect(push().get("[data-testid='review-push-more']").text()).toBe("Show fewer");
+      expect(push().get("[data-testid='review-push-toggle']").attributes("aria-expanded")).toBe("true");
+
+      // The header row toggles too.
+      await push().get("[data-testid='review-push-header']").trigger("click");
+      await flushPromises();
+      expect(shown()).toHaveLength(3);
+    });
+
+    it("shows a short push in full with no toggle", async () => {
+      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
+      const push = w.get("[data-testid='review-timeline-push']");
+      expect(push.findAll("[data-testid='review-push-commit']")).toHaveLength(2);
+      expect(push.find("[data-testid='review-push-more']").exists()).toBe(false);
+      expect(push.find("[data-testid='review-push-toggle']").exists()).toBe(false);
+    });
+
     it("renders the description as markdown with raw HTML left inert", async () => {
       const description = "Hello **there**\n\n<script>window.__pwned = 1</script><img src=x onerror=\"window.__pwned=1\">";
       const { w } = await mountChange(
