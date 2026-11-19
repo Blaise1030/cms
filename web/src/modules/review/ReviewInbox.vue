@@ -42,8 +42,8 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
 
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-inbox">
-    <div class="p-3">
-      <p v-if="store.loading && store.items.length === 0" class="text-muted flex items-center gap-2 text-sm">
+    <div class="flex min-h-full flex-col p-3">
+      <p v-if="store.loading && store.items.length === 0" class="text-muted m-auto flex items-center gap-2 text-sm">
         <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
         Loading changes…
       </p>
@@ -57,6 +57,7 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
       />
       <UEmpty
         v-else-if="store.items.length === 0"
+        class="m-auto"
         variant="naked"
         icon="i-hugeicons-task-done-01"
         title="Nothing waiting for your greenlight."
