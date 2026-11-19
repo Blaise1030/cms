@@ -597,6 +597,15 @@ mod tests {
         assert_eq!(last, Some(want));
         let page = state.review_previews.serve(&id, 7, &sha, "").await.unwrap();
         assert_eq!(page.status(), 200);
+        // A path cannot climb out of the build folder, plain or encoded.
+        for rest in ["../../x", "a/../../x", "%2e%2e/x", "a/%2E%2E/x"] {
+            let err = state
+                .review_previews
+                .serve(&id, 7, &sha, rest)
+                .await
+                .unwrap_err();
+            assert!(matches!(err.http_status(), 400 | 404), "{rest}");
+        }
     }
 
     #[tokio::test]

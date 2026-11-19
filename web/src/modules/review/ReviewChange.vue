@@ -83,18 +83,36 @@ function settle(run: number, headSha: string, next: ReviewPreview) {
   if (next.state === "building") pollTimer = setTimeout(() => void poll(run, headSha), POLL_MS);
 }
 
+/** Network or server errors in a row tolerated while polling before the preview counts as failed. */
+const MAX_POLL_ERRORS = 3;
+let pollErrors = 0;
+/** A build the cache dropped (404) is prepared again once per start, so a loop cannot form. */
+let reprepared = false;
+
 async function poll(run: number, headSha: string) {
   try {
     const next = await daemon.api.reviewPreview(props.projectId, props.number, headSha);
+    pollErrors = 0;
     settle(run, headSha, next);
   } catch (e) {
-    if (run === previewRun) preview.value = { state: "failed", message: errorMessage(e) };
+    if (run !== previewRun) return;
+    const status = (e as { status?: number }).status;
+    if (status === 404 && !reprepared) {
+      reprepared = true;
+      void preparePreview(true);
+    } else if (status !== 404 && ++pollErrors < MAX_POLL_ERRORS) {
+      pollTimer = setTimeout(() => void poll(run, headSha), POLL_MS);
+    } else {
+      preview.value = { state: "failed", message: errorMessage(e) };
+    }
   }
 }
 
-async function preparePreview() {
+async function preparePreview(auto = false) {
   stopPolling();
   const run = ++previewRun;
+  if (!auto) reprepared = false;
+  pollErrors = 0;
   const headSha = change.value?.headSha;
   if (!headSha) {
     preview.value = null;
@@ -104,7 +122,14 @@ async function preparePreview() {
   try {
     settle(run, headSha, await daemon.api.prepareReviewPreview(props.projectId, props.number, headSha));
   } catch (e) {
-    if (run === previewRun) preview.value = { state: "failed", message: errorMessage(e) };
+    if (run !== previewRun) return;
+    const err = e as { status?: number; reason?: string };
+    if (err.status === 409 && err.reason === "head_moved") {
+      // The change moved on: reload it, which restarts the preview for the new head.
+      await store.open(props.projectId, props.number);
+    } else {
+      preview.value = { state: "failed", message: errorMessage(e) };
+    }
   }
 }
 

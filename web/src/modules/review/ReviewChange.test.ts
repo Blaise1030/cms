@@ -194,6 +194,93 @@ describe("ReviewChange", () => {
       expect(w.get("[data-testid='review-preview-failed']").text()).toContain("GitHub is unreachable");
     });
 
+    it("prepares again when the poll finds the build gone, once", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
+      const reviewPreview = vi
+        .fn()
+        .mockRejectedValueOnce(new ApiError("UNKNOWN", "not prepared", 404))
+        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
+      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
+      await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
+      expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "abc");
+      expect(w.text()).toContain("Preparing the preview…");
+      await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
+    });
+
+    it("fails when the build keeps vanishing", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
+      const reviewPreview = vi.fn(async () => {
+        throw new ApiError("UNKNOWN", "not prepared", 404);
+      });
+      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
+      await vi.advanceTimersByTimeAsync(2100);
+      await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
+      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("not prepared");
+    });
+
+    it("keeps polling after one network error", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const reviewPreview = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
+      const { w } = await mountChange({
+        ...base(),
+        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
+        reviewPreview,
+      });
+      await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(w.find("[data-testid='review-preview-failed']").exists()).toBe(false);
+      await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
+    });
+
+    it("fails after three errors in a row", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const reviewPreview = vi.fn(async () => {
+        throw new Error("offline");
+      });
+      const { w } = await mountChange({
+        ...base(),
+        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
+        reviewPreview,
+      });
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(2100);
+      await flushPromises();
+      expect(reviewPreview).toHaveBeenCalledTimes(3);
+      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("offline");
+    });
+
+    it("reloads the change when preparing finds the head moved", async () => {
+      const review = vi
+        .fn()
+        .mockResolvedValueOnce({ ...DETAIL })
+        .mockResolvedValue({ ...DETAIL, headSha: "def" });
+      const prepareReviewPreview = vi
+        .fn()
+        .mockRejectedValueOnce(new ApiError("CONFLICT", "This change was updated since you opened it", 409, { reason: "head_moved" }))
+        .mockResolvedValue({ state: "building" });
+      const { w } = await mountChange({
+        review,
+        reviewDiff: vi.fn(async () => DIFF),
+        prepareReviewPreview,
+        reviewPreview: vi.fn(async () => ({ state: "building" })),
+      });
+      await vi.waitFor(() => expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "def"));
+      expect(review).toHaveBeenCalledTimes(2);
+      expect(w.find("[data-testid='review-preview-failed']").exists()).toBe(false);
+    });
+
     it("stops polling on unmount", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const reviewPreview = vi.fn(async () => ({ state: "building" }));
