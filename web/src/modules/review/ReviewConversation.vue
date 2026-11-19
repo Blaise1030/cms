@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, defineAsyncComponent, ref } from "vue";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
@@ -8,8 +8,10 @@ import type { ReviewDetail, ReviewPreview, ReviewReviewer, TimelineItem } from "
 import { relativeTime } from "@/lib/relativeTime";
 import { checkState, checkSummary } from "./checks";
 import { labelStyle } from "./labels";
-import ReviewMarkdown from "./ReviewMarkdown.vue";
 import type { useReviewConversation } from "./useReviewConversation";
+
+// Lazy: the markdown renderer must stay out of the precached app shell.
+const ReviewMarkdown = defineAsyncComponent(() => import("./ReviewMarkdown.vue"));
 
 /** A change's Conversation page: description, timeline, comment box, and a sidebar of facts. */
 const props = defineProps<{
