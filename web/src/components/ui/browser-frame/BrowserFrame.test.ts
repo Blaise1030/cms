@@ -302,3 +302,71 @@ describe("BrowserFrame pick mode", () => {
     w.unmount();
   });
 });
+
+describe("BrowserFrame preview bridge", () => {
+  function mountWithBridge() {
+    let exposed!: { canCapture: (side: string) => boolean; captureSide: (side: string, rect: { x: number; y: number; width: number; height: number }) => Promise<string> };
+    const Host = defineComponent({
+      setup: () => () =>
+        h(TooltipProvider, null, {
+          default: () =>
+            h(BrowserFrame, {
+              frames: [CHANGE, LIVE],
+              ref: (r: unknown) => r && (exposed = r as typeof exposed),
+            }),
+        }),
+    });
+    const w = mount(Host, { attachTo: document.body });
+    return { w, bridge: () => exposed };
+  }
+  /** happy-dom frames have no window; give one a stand-in that records what it was sent. */
+  function fakeWindow(el: Element) {
+    const win = { postMessage: vi.fn() };
+    Object.defineProperty(el, "contentWindow", { configurable: true, value: win });
+    return win;
+  }
+  const reply = (source: unknown, data: Record<string, unknown>) =>
+    window.dispatchEvent(new MessageEvent("message", { data: { type: "orso:preview", ...data }, source: source as Window }));
+
+  it("says hello on load and learns which side can capture itself", async () => {
+    const { w, bridge } = mountWithBridge();
+    const iframe = w.get("iframe[data-testid='browser-frame-iframe-change']");
+    const win = fakeWindow(iframe.element);
+    const posted = win.postMessage;
+    await iframe.trigger("load");
+    expect(posted).toHaveBeenCalledWith({ type: "orso:preview", op: "hello" }, "*");
+    expect(bridge().canCapture("change")).toBe(false);
+    // A message from some other window is ignored.
+    reply(window, { op: "ready", capture: true });
+    expect(bridge().canCapture("change")).toBe(false);
+    reply(win, { op: "ready", capture: true });
+    expect(bridge().canCapture("change")).toBe(true);
+    expect(bridge().canCapture("live")).toBe(false);
+    w.unmount();
+  });
+
+  it("asks the page for its own pixels in the frame's CSS px, allowing for zoom", async () => {
+    const { w, bridge } = mountWithBridge();
+    const el = w.get("iframe[data-testid='browser-frame-iframe-change']").element as HTMLIFrameElement;
+    const win = fakeWindow(el);
+    const posted = win.postMessage;
+    reply(win, { op: "ready", capture: true });
+    // Shown at half size: 1440 px of page in 720 px on screen, at (100, 50).
+    el.getBoundingClientRect = () => DOMRect.fromRect({ x: 100, y: 50, width: 720, height: 450 });
+    Object.defineProperty(el, "offsetWidth", { configurable: true, value: 1440 });
+    const shot = bridge().captureSide("change", { x: 110, y: 60, width: 100, height: 40 });
+    const sent = posted.mock.calls.at(-1)![0] as { op: string; id: number; rect: unknown };
+    expect(sent.op).toBe("capture");
+    expect(sent.rect).toEqual({ x: 20, y: 20, width: 200, height: 80 });
+    reply(win, { op: "capture", id: sent.id, ok: true, dataUrl: "data:image/png;base64,AAA" });
+    await expect(shot).resolves.toBe("data:image/png;base64,AAA");
+    // A refusal comes back as an error.
+    const refused = bridge().captureSide("change", { x: 110, y: 60, width: 100, height: 40 });
+    const again = posted.mock.calls.at(-1)![0] as { id: number };
+    reply(win, { op: "capture", id: again.id, ok: false, error: "The capture came out blank." });
+    await expect(refused).rejects.toThrow("The capture came out blank.");
+    // A side without the bridge doesn't ask at all.
+    await expect(bridge().captureSide("live", { x: 0, y: 0, width: 10, height: 10 })).rejects.toThrow("No preview bridge.");
+    w.unmount();
+  });
+});

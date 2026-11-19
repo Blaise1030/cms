@@ -6,15 +6,27 @@ import UPopover from "@nuxt/ui/components/Popover.vue";
 import UTextarea from "@nuxt/ui/components/Textarea.vue";
 import type { BrowserFramePick } from "@/components/ui/browser-frame";
 import { DEVICE_WIDTH } from "@/modules/preview/store";
-import { CaptureUnavailable, TabCapture } from "./capture";
+import { CaptureUnavailable, fitShot, TabCapture } from "./capture";
+import type { CssRect } from "./crop";
+import { desktopCapture, desktopCaptureAvailable } from "./desktop";
 import { newShotId, useShotQueue } from "./queue";
 
 /**
- * Turns an area picked on the Review page's frames into a queued screenshot comment: the tab is
- * shared once (the browser asks when picking starts), the area is cut out of it, and a note is
- * written in a popover at the selection. Without screen sharing a note is still possible.
+ * Turns an area picked on the Review page's frames into a queued screenshot comment, and a note
+ * written in a popover at the selection. The screenshot comes from, in order:
+ * 1. the preview itself, when its build carries orso's bridge (`ORSO_PREVIEW=1`);
+ * 2. the desktop app's snapshot of its own window;
+ * 3. sharing this tab (the browser asks once, when picking starts).
+ * Without any of them a note is still possible.
  */
-const props = defineProps<{ projectId: string; number: number; picking: string | null; picked: BrowserFramePick | null }>();
+const props = defineProps<{
+  projectId: string;
+  number: number;
+  picking: string | null;
+  picked: BrowserFramePick | null;
+  /** The frame's bridge to its pages, for previews that can capture themselves. */
+  bridge?: { canCapture: (side: string) => boolean; captureSide: (side: string, rect: CssRect) => Promise<string> } | null;
+}>();
 const emit = defineEmits<{ cancel: []; done: [] }>();
 
 const queue = useShotQueue(
@@ -28,11 +40,15 @@ onBeforeUnmount(() => capture.stop());
 const unavailable = ref<string | null>(null);
 const notesOnly = ref(false);
 
-// Asked from the Pick click, so the browser accepts the request to share the tab.
+/** A way to screenshot `side` that doesn't ask to share the screen. */
+const promptFree = (side: string) => !!props.bridge?.canCapture(side) || desktopCaptureAvailable();
+
+// Asked from the Pick click, so the browser accepts the request to share the tab; not needed
+// when the preview or the desktop app can take the screenshot.
 watch(
   () => props.picking,
   async (side) => {
-    if (!side || notesOnly.value || capture.active) return;
+    if (!side || notesOnly.value || capture.active || promptFree(side)) return;
     try {
       await capture.start();
       unavailable.value = null;
@@ -42,7 +58,27 @@ watch(
   },
 );
 
-const draft = ref<{ area: BrowserFramePick; image: string | null } | null>(null);
+type Source = "preview" | "desktop" | "tab";
+const draft = ref<{ area: BrowserFramePick; image: string | null; source: Source | null } | null>(null);
+
+/** The screenshot of `area`, from the first source that gives one. */
+async function shoot(area: BrowserFramePick): Promise<{ dataUrl: string; source: Source }> {
+  if (props.bridge?.canCapture(area.side)) {
+    try {
+      return { dataUrl: (await fitShot(await props.bridge.captureSide(area.side, area.rect))).dataUrl, source: "preview" };
+    } catch {
+      // The page couldn't (cross-origin images, a blank result…): try the next way.
+    }
+  }
+  if (desktopCaptureAvailable()) {
+    try {
+      return { dataUrl: (await fitShot(await desktopCapture(area.rect))).dataUrl, source: "desktop" };
+    } catch {
+      // Fall back to sharing the tab.
+    }
+  }
+  return { dataUrl: (await capture.grab(area.rect)).dataUrl, source: "tab" };
+}
 const note = ref("");
 const busy = ref(false);
 
@@ -52,19 +88,21 @@ watch(
     if (!area) return;
     note.value = "";
     let image: string | null = null;
-    if (!notesOnly.value && !unavailable.value) {
+    let source: Source | null = null;
+    if (!notesOnly.value) {
       busy.value = true;
       try {
-        // Two frames: the dimming overlay is gone from the screen before the tab is grabbed.
+        // Two frames: the dimming overlay is gone from the screen before anything is captured.
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        image = (await capture.grab(area.rect)).dataUrl;
+        ({ dataUrl: image, source } = await shoot(area));
+        unavailable.value = null;
       } catch (e) {
         unavailable.value = e instanceof CaptureUnavailable ? e.message : "Couldn't take the screenshot.";
       } finally {
         busy.value = false;
       }
     }
-    draft.value = { area, image };
+    draft.value = { area, image, source };
   },
 );
 
@@ -139,7 +177,7 @@ function withoutScreenshots() {
     @update:open="(open: boolean) => !open && close()"
   >
     <template #content>
-      <form class="flex w-80 flex-col gap-2 p-3" data-testid="shot-note" @submit.prevent="add">
+      <form class="flex w-80 flex-col gap-2 p-3" data-testid="shot-note" :data-source="draft?.source ?? undefined" @submit.prevent="add">
         <img
           v-if="draft?.image"
           :src="draft.image"

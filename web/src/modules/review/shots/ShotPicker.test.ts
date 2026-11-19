@@ -5,6 +5,11 @@ import ShotPicker from "./ShotPicker.vue";
 import { resetShotQueuesForTest, useShotQueue } from "./queue";
 
 const cap = vi.hoisted(() => ({ start: vi.fn(), grab: vi.fn(), active: false }));
+const desk = vi.hoisted(() => ({ available: false, capture: vi.fn() }));
+vi.mock("./desktop", () => ({
+  desktopCaptureAvailable: () => desk.available,
+  desktopCapture: desk.capture,
+}));
 vi.mock("./capture", async (orig) => {
   const actual = await orig<typeof import("./capture")>();
   class TabCapture {
@@ -15,7 +20,9 @@ vi.mock("./capture", async (orig) => {
     grab = cap.grab;
     stop() {}
   }
-  return { ...actual, TabCapture };
+  // Images from the preview or the desktop app pass through as they are.
+  const fitShot = async (dataUrl: string) => ({ dataUrl, mime: "image/png" as const });
+  return { ...actual, TabCapture, fitShot };
 });
 
 const AREA = { side: "change", path: "/pricing", device: "mobile" as const, rect: { x: 10, y: 20, width: 100, height: 50 } };
@@ -25,6 +32,8 @@ beforeEach(() => {
   resetShotQueuesForTest();
   cap.start.mockReset().mockResolvedValue(undefined);
   cap.grab.mockReset().mockResolvedValue({ dataUrl: "data:image/png;base64,AAA=", mime: "image/png" });
+  desk.available = false;
+  desk.capture.mockReset();
   vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
 });
 afterEach(() => {
@@ -32,9 +41,68 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function mountPicker() {
-  return mount(ShotPicker, { props: { projectId: "site", number: 7, picking: null, picked: null }, attachTo: document.body });
+function mountPicker(
+  bridge: { canCapture: (side: string) => boolean; captureSide: (side: string, rect: unknown) => Promise<string> } | null = null,
+) {
+  return mount(ShotPicker, { props: { projectId: "site", number: 7, picking: null, picked: null, bridge }, attachTo: document.body });
 }
+
+/** Picks `AREA` and waits for the note popover; returns where its screenshot came from. */
+async function pickArea(w: ReturnType<typeof mountPicker>, side = "change") {
+  await w.setProps({ picking: side });
+  await flushPromises();
+  await w.setProps({ picking: null, picked: { ...AREA, side } });
+  await vi.waitFor(() => expect(body().find("[data-testid='shot-note']").exists()).toBe(true));
+  const note = body().get("[data-testid='shot-note']");
+  return { source: note.attributes("data-source"), image: body().find("[data-testid='shot-note-image']") };
+}
+
+describe("ShotPicker capture order", () => {
+  it("takes the screenshot from the preview itself, without asking to share the screen", async () => {
+    const captureSide = vi.fn(async () => "data:image/png;base64,PREVIEW=");
+    const w = mountPicker({ canCapture: (side) => side === "change", captureSide });
+    const { source, image } = await pickArea(w);
+    expect(cap.start).not.toHaveBeenCalled();
+    expect(captureSide).toHaveBeenCalledWith("change", AREA.rect);
+    expect(source).toBe("preview");
+    expect(image.attributes("src")).toBe("data:image/png;base64,PREVIEW=");
+    expect(cap.grab).not.toHaveBeenCalled();
+  });
+
+  it("uses the desktop app's snapshot when the preview can't capture itself", async () => {
+    desk.available = true;
+    desk.capture.mockResolvedValue("data:image/png;base64,DESKTOP=");
+    const captureSide = vi.fn(async () => {
+      throw new Error("The capture came out blank.");
+    });
+    const w = mountPicker({ canCapture: () => true, captureSide });
+    const { source, image } = await pickArea(w);
+    expect(cap.start).not.toHaveBeenCalled();
+    expect(captureSide).toHaveBeenCalled();
+    expect(desk.capture).toHaveBeenCalledWith(AREA.rect);
+    expect(source).toBe("desktop");
+    expect(image.attributes("src")).toBe("data:image/png;base64,DESKTOP=");
+  });
+
+  it("falls back to sharing the tab, asked for when picking starts, without a bridge or the desktop app", async () => {
+    const w = mountPicker({ canCapture: () => false, captureSide: vi.fn() });
+    const { source } = await pickArea(w, "live");
+    expect(cap.start).toHaveBeenCalledTimes(1);
+    expect(cap.grab).toHaveBeenCalledWith(AREA.rect);
+    expect(source).toBe("tab");
+  });
+
+  it("falls back to the tab when the desktop snapshot fails too", async () => {
+    desk.available = true;
+    desk.capture.mockRejectedValue(new Error("no"));
+    const w = mountPicker(null);
+    const { source } = await pickArea(w);
+    // No prompt at Pick time (the desktop app was expected to work), so the tab is asked now.
+    expect(cap.start).not.toHaveBeenCalled();
+    expect(cap.grab).toHaveBeenCalled();
+    expect(source).toBe("tab");
+  });
+});
 
 describe("ShotPicker", () => {
   it("shares the tab when picking starts, cuts out the picked area and queues it with a note", async () => {

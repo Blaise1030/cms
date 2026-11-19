@@ -133,3 +133,25 @@ const toDataUrl = (blob: Blob) =>
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
+
+/**
+ * An image from another capture (the preview's own, the desktop app's) at most 1600 px on its
+ * longest side, PNG or JPEG over 1 MB, like a tab capture.
+ */
+export async function fitShot(dataUrl: string): Promise<Shot> {
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new CaptureUnavailable("The screenshot couldn't be read.", "unsupported"));
+    img.src = dataUrl;
+  });
+  const size = outputSize(img.naturalWidth || img.width, img.naturalHeight || img.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new CaptureUnavailable("Couldn't draw the screenshot.", "unsupported");
+  ctx.drawImage(img, 0, 0, size.width, size.height);
+  return encode(canvas);
+}
+

@@ -10,7 +10,7 @@ import type { Device } from "@/modules/preview/store";
  * resizes, the same way the preview page fits its frame.
  */
 const props = defineProps<{ src: string | null; title: string; device: Device; reloadNonce: number; testid: string }>();
-const emit = defineEmits<{ fit: [scale: number] }>();
+const emit = defineEmits<{ fit: [scale: number]; load: [frame: HTMLIFrameElement] }>();
 defineSlots<{ default(): unknown }>();
 
 const viewport = ref<HTMLElement | null>(null);
@@ -47,6 +47,7 @@ watch(
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
         referrerpolicy="no-referrer"
         :data-testid="testid"
+        @load="emit('load', $event.target as HTMLIFrameElement)"
       />
       <!-- A device-sized frame has no visible edge against the pane; outline it. -->
       <div

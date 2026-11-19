@@ -118,7 +118,11 @@ async function sendBack(comment: string) {
 /** Screenshot comments: the side being picked on, the area just picked, and the queue. */
 const picking = ref<string | null>(null);
 const pickedArea = ref<BrowserFramePick | null>(null);
-const frame = ref<{ open: (path: string) => void } | null>(null);
+const frame = ref<{
+  open: (path: string) => void;
+  canCapture: (side: string) => boolean;
+  captureSide: (side: string, rect: BrowserFramePick["rect"]) => Promise<string>;
+} | null>(null);
 const shotQueue = useShotQueue(
   () => props.projectId,
   () => props.number,
@@ -456,6 +460,7 @@ function reveal(path: string) {
                   :number="number"
                   :picking="picking"
                   :picked="pickedArea"
+              :bridge="frame"
                   @cancel="picking = null"
                   @done="pickedArea = null"
                 />

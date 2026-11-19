@@ -152,11 +152,82 @@ watch(picking, (side) => {
 });
 onBeforeUnmount(() => window.removeEventListener("keydown", onPickKey));
 
-defineExpose({ open });
+/**
+ * orso's preview bridge in a framed page (pull request previews built with `ORSO_PREVIEW=1`):
+ * a `hello` on each load, answered with `ready` and whether the page can capture itself.
+ */
+const BRIDGE = "orso:preview";
+const root = ref<HTMLElement | null>(null);
+const bridges = ref<Record<string, { capture: boolean }>>({});
+const waiting = new Map<number, { resolve: (url: string) => void; reject: (e: Error) => void }>();
+let nextCapture = 0;
+const frameOf = (key: string) =>
+  root.value?.querySelector<HTMLIFrameElement>(`iframe[data-testid='browser-frame-iframe-${key}']`) ?? null;
+
+function onFrameLoad(key: string, frame: HTMLIFrameElement) {
+  const { [key]: _gone, ...rest } = bridges.value;
+  bridges.value = rest;
+  frame.contentWindow?.postMessage({ type: BRIDGE, op: "hello" }, "*");
+}
+function onBridgeMessage(e: MessageEvent) {
+  const data = e.data as { type?: string; op?: string; id?: number; capture?: boolean; ok?: boolean; dataUrl?: string; error?: string };
+  if (!data || data.type !== BRIDGE) return;
+  // Only the frames this component shows.
+  const key = props.frames.find((f) => frameOf(f.key)?.contentWindow === e.source)?.key;
+  if (!key) return;
+  if (data.op === "ready") bridges.value = { ...bridges.value, [key]: { capture: !!data.capture } };
+  else if (data.op === "capture" && typeof data.id === "number") {
+    const pending = waiting.get(data.id);
+    waiting.delete(data.id);
+    if (!pending) return;
+    if (data.ok && typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:image/")) pending.resolve(data.dataUrl);
+    else pending.reject(new Error(data.error || "The preview couldn't capture itself."));
+  }
+}
+window.addEventListener("message", onBridgeMessage);
+onBeforeUnmount(() => {
+  window.removeEventListener("message", onBridgeMessage);
+  for (const p of waiting.values()) p.reject(new Error("The frame went away."));
+  waiting.clear();
+});
+
+/** Whether `side`'s page can screenshot itself (its bridge said so). */
+const canCapture = (side: string) => !!bridges.value[side]?.capture;
+
+/**
+ * A PNG of `rect` (CSS px of the page) cut out of `side`'s page by its bridge: the rect is
+ * turned into the frame's own CSS px (allowing for its zoom). Rejects when the page can't.
+ */
+function captureSide(side: string, rect: BrowserFramePick["rect"], timeoutMs = 10_000): Promise<string> {
+  const frame = frameOf(side);
+  if (!frame?.contentWindow || !canCapture(side)) return Promise.reject(new Error("No preview bridge."));
+  const box = frame.getBoundingClientRect();
+  const k = (frame.offsetWidth || box.width) / (box.width || 1);
+  const x0 = Math.max(rect.x, box.left);
+  const y0 = Math.max(rect.y, box.top);
+  const x1 = Math.min(rect.x + rect.width, box.right);
+  const y1 = Math.min(rect.y + rect.height, box.bottom);
+  if (x1 - x0 < 1 || y1 - y0 < 1) return Promise.reject(new Error("The area is outside the page."));
+  const local = { x: (x0 - box.left) * k, y: (y0 - box.top) * k, width: (x1 - x0) * k, height: (y1 - y0) * k };
+  const id = ++nextCapture;
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiting.delete(id);
+      reject(new Error("The preview didn't answer."));
+    }, timeoutMs);
+    waiting.set(id, {
+      resolve: (url) => (clearTimeout(timer), resolve(url)),
+      reject: (e) => (clearTimeout(timer), reject(e)),
+    });
+    frame.contentWindow!.postMessage({ type: BRIDGE, op: "capture", id, rect: local }, "*");
+  });
+}
+
+defineExpose({ open, canCapture, captureSide });
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col" data-testid="browser-frame">
+  <div ref="root" class="flex h-full min-h-0 flex-col" data-testid="browser-frame">
     <div class="bg-background border-default flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5">
       <UTooltip text="Back">
         <UButton
@@ -323,6 +394,7 @@ defineExpose({ open });
             :reload-nonce="reloadNonce"
             :testid="`browser-frame-iframe-${frame.key}`"
             @fit="scales = { ...scales, [frame.key]: $event }"
+            @load="onFrameLoad(frame.key, $event)"
           >
             <slot name="placeholder" :frame="frame" />
           </BrowserFramePane>
