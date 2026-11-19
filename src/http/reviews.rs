@@ -259,18 +259,60 @@ pub async fn conversation(
 /// Body of `POST /api/projects/{id}/reviews/{n}/comments`.
 #[derive(Deserialize)]
 pub struct CommentBody {
+    #[serde(default)]
     body: String,
+    /// Attached images (PNG, JPEG, GIF or WebP; at most 10 of 5 MB).
+    #[serde(default)]
+    images: Vec<crate::review_shots::UploadIn>,
+}
+
+/// Stores `images` on the repo's `orso-review-assets` branch under `{folder}/{pr}/{date}/`, in
+/// one commit, and returns the GitHub link of each (one that renders for anyone with access).
+async fn store_images(
+    state: &AppState,
+    repo: &str,
+    folder: &str,
+    pr: u64,
+    images: Vec<(Vec<u8>, &'static str)>,
+) -> Result<Vec<String>, ApiError> {
+    use crate::review_shots::{asset_path, new_id, ASSETS_BRANCH};
+    if images.is_empty() {
+        return Ok(Vec::new());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let files: Vec<(String, Vec<u8>)> = images
+        .into_iter()
+        .map(|(bytes, ext)| (asset_path(folder, pr, now, &new_id(), ext), bytes))
+        .collect();
+    let commit = state
+        .github
+        .commit_files_to_branch(
+            repo,
+            ASSETS_BRANCH,
+            &format!("Review images for #{pr}"),
+            &files,
+        )
+        .await?;
+    Ok(files
+        .iter()
+        .map(|(path, _)| state.github.raw_blob_url(repo, &commit, path))
+        .collect())
 }
 
 /// `POST /api/projects/{id}/reviews/{n}/comments` → the new comment as a timeline entry.
-/// Anyone signed in may comment (no push access needed), but only on an open change.
+/// Anyone signed in may comment (no push access needed), but only on an open change. Attached
+/// images are stored on the `orso-review-assets` branch and appended as `![image](…)` lines; a
+/// repository that refuses that branch answers 403 `assets_refused`.
 pub async fn comment(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, u64)>,
     Json(body): Json<CommentBody>,
 ) -> Result<Json<TimelineItem>, ApiError> {
     let text = body.body.trim();
-    if text.is_empty() {
+    let images = crate::review_shots::validate_uploads(&body.images)?;
+    if text.is_empty() && images.is_empty() {
         return Err(ApiError::badreq("Write a comment first"));
     }
     let (project, repo) = project_repo(&state, &id).await?;
@@ -279,7 +321,11 @@ pub async fn comment(
     if !detail.open {
         return Err(ApiError::enoent(GONE));
     }
-    Ok(Json(state.github.add_comment(&repo, number, text).await?))
+    let urls = store_images(&state, &repo, "uploads", number, images).await?;
+    let markdown = crate::review_shots::comment_markdown(text, &urls);
+    Ok(Json(
+        state.github.add_comment(&repo, number, &markdown).await?,
+    ))
 }
 
 /// Where a change's deploy preview stands.
@@ -490,6 +536,18 @@ mod tests {
                     };
                     axum::Json(json!({ "check_runs": runs }))
                 }),
+            )
+            .route(
+                "/repos/acme/site/git/ref/heads/orso-review-assets",
+                get(|| async { StatusCode::NOT_FOUND }),
+            )
+            .route(
+                "/repos/acme/site/git/{what}",
+                axum::routing::post(
+                    |axum::extract::Path(what): axum::extract::Path<String>| async move {
+                        axum::Json(json!({ "sha": format!("{what}-sha"), "ref": "r" }))
+                    },
+                ),
             )
             .route(
                 "/repos/acme/site/issues/{n}/comments",
@@ -971,7 +1029,59 @@ mod tests {
     }
 
     fn comment_body(text: &str) -> Json<CommentBody> {
-        Json(CommentBody { body: text.into() })
+        Json(CommentBody {
+            body: text.into(),
+            images: Vec::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_comment_with_images_stores_them_and_appends_their_links() {
+        use base64::Engine;
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), false, Some("acme/site")).await;
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
+        let body = Json(CommentBody {
+            body: "".into(),
+            images: vec![crate::review_shots::UploadIn {
+                base64: png,
+                mime: "image/png".into(),
+                name: "hero.png".into(),
+            }],
+        });
+        let item = comment(State(state), Path((id, 7)), body).await.unwrap().0;
+        let json = serde_json::to_value(&item).unwrap();
+        let text = json["body"].as_str().unwrap();
+        // Blank text is fine with an image; the link names the new commit on the assets branch.
+        assert!(text.starts_with("![image]("), "{text}");
+        assert!(
+            text.contains("/acme/site/blob/commits-sha/uploads/7/"),
+            "{text}"
+        );
+        assert!(text.ends_with(".png?raw=true)"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_comment_with_a_bad_image_is_refused_before_anything_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), false, Some("acme/site")).await;
+        let body = Json(CommentBody {
+            body: "look".into(),
+            images: vec![crate::review_shots::UploadIn {
+                base64: "PHN2Zz4=".into(),
+                mime: "image/png".into(),
+                name: "x.png".into(),
+            }],
+        });
+        let err = comment(State(state), Path((id, 7)), body)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 400);
+        assert!(
+            err.message.contains("isn't the image type"),
+            "{}",
+            err.message
+        );
     }
 
     #[tokio::test]

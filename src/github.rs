@@ -2308,31 +2308,40 @@ impl GithubAuth {
             }
         };
         if status.is_success() {
-            Ok(Ok(commit.sha))
-        } else if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-            || status == reqwest::StatusCode::CONFLICT
-        {
-            Ok(Err(ApiError::conflict(
-                "Another screenshot upload landed at the same time. Try again.",
-            )))
-        } else {
-            Err(github_error(status, &body))
+            return Ok(Ok(commit.sha));
         }
+        // Behind (someone else's upload landed first) is worth one more try; a refusal isn't.
+        let text = String::from_utf8_lossy(&body).to_lowercase();
+        if status == reqwest::StatusCode::CONFLICT
+            || (status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                && (text.contains("fast forward") || text.contains("already exists")))
+        {
+            return Ok(Err(ApiError::conflict(
+                "Another image upload landed at the same time. Try again.",
+            )));
+        }
+        Err(assets_write_error(status, &body))
     }
 
-    /// `POST /repos/{repo}/git/{what}` → its `{ sha }`.
+    /// `POST /repos/{repo}/git/{what}` → its `{ sha }`; a refusal is `assets_refused`.
     async fn git_post<T: DeserializeOwned>(
         &self,
         repo: &str,
         what: &str,
         body: serde_json::Value,
     ) -> Result<T, ApiError> {
-        self.api_json(
-            reqwest::Method::POST,
-            &format!("/repos/{repo}/git/{what}"),
-            Some(&body),
-        )
-        .await
+        let (status, bytes) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/git/{what}"),
+                Some(&body),
+            )
+            .await?;
+        if !status.is_success() {
+            return Err(assets_write_error(status, &bytes));
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))
     }
 
     /// The bytes of `path` at commit `sha` in `repo`, kept in memory once read (a commit's file
@@ -3095,6 +3104,23 @@ async fn parse_github<T: DeserializeOwned>(
         return Err(github_error(status, &body));
     }
     serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
+}
+
+/// Why images can't be stored in the repository: the account may not create or move the
+/// assets branch (no push access, or a ruleset restricting branches).
+pub const ASSETS_REFUSED: &str = "Couldn't upload images to this repository";
+
+/// A refused write to the assets branch (403, 404 or 422) is `assets_refused`, so the reviewer
+/// is offered to send without images; anything else is an ordinary GitHub error.
+fn assets_write_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
+    match status {
+        reqwest::StatusCode::FORBIDDEN
+        | reqwest::StatusCode::NOT_FOUND
+        | reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+            ApiError::sandbox(ASSETS_REFUSED).with_reason("assets_refused")
+        }
+        _ => github_error(status, body),
+    }
 }
 
 /// A failed (non-401) GitHub API response: 403 and 422 get their own [`ApiError`] codes.
@@ -4473,50 +4499,64 @@ esac"#,
         // After a refused update the branch has moved on.
         let tip_now = Arc::new(Mutex::new(tip.map(str::to_string)));
         let (l, rf, t) = (log.clone(), refused.clone(), tip_now.clone());
-        let handler =
-            move |method: Method, uri: Uri, body: Option<axum::Json<serde_json::Value>>| {
-                let (log, refused, tip) = (l.clone(), rf.clone(), t.clone());
-                async move {
-                    let path = uri.path().to_string();
-                    let body = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
-                    if method != Method::GET {
-                        log.lock()
-                            .unwrap()
-                            .push((method.to_string(), path.clone(), body.clone()));
-                    }
-                    let ok = |v: serde_json::Value| (StatusCode::OK, axum::Json(v)).into_response();
-                    match (method.as_str(), path.as_str()) {
-                        ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
-                            match tip.lock().unwrap().clone() {
-                                Some(sha) => ok(serde_json::json!({ "object": { "sha": sha } })),
-                                None => StatusCode::NOT_FOUND.into_response(),
-                            }
-                        }
-                        ("GET", p) if p.starts_with("/repos/acme/site/git/commits/") => {
-                            let sha = p.rsplit('/').next().unwrap();
-                            ok(serde_json::json!({ "tree": { "sha": format!("tree-of-{sha}") } }))
-                        }
-                        ("POST", "/repos/acme/site/git/blobs") => {
-                            ok(serde_json::json!({ "sha": "blob1" }))
-                        }
-                        ("POST", "/repos/acme/site/git/trees") => {
-                            ok(serde_json::json!({ "sha": "tree1" }))
-                        }
-                        ("POST", "/repos/acme/site/git/commits") => {
-                            ok(serde_json::json!({ "sha": "commit1" }))
-                        }
-                        ("POST", "/repos/acme/site/git/refs")
-                        | ("PATCH", "/repos/acme/site/git/refs/heads/orso-review-assets") => {
-                            if refused.fetch_add(1, Ordering::SeqCst) < refuse {
-                                *tip.lock().unwrap() = Some("moved".into());
-                                return StatusCode::UNPROCESSABLE_ENTITY.into_response();
-                            }
-                            ok(serde_json::json!({ "object": { "sha": "commit1" } }))
-                        }
-                        _ => StatusCode::NOT_FOUND.into_response(),
-                    }
+        let handler = move |method: Method,
+                            uri: Uri,
+                            body: Option<axum::Json<serde_json::Value>>| {
+            let (log, refused, tip) = (l.clone(), rf.clone(), t.clone());
+            async move {
+                let path = uri.path().to_string();
+                let body = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
+                if method != Method::GET {
+                    log.lock()
+                        .unwrap()
+                        .push((method.to_string(), path.clone(), body.clone()));
                 }
-            };
+                let ok = |v: serde_json::Value| (StatusCode::OK, axum::Json(v)).into_response();
+                match (method.as_str(), path.as_str()) {
+                    ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
+                        match tip.lock().unwrap().clone() {
+                            Some(sha) => ok(serde_json::json!({ "object": { "sha": sha } })),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
+                    }
+                    ("GET", p) if p.starts_with("/repos/acme/site/git/commits/") => {
+                        let sha = p.rsplit('/').next().unwrap();
+                        ok(serde_json::json!({ "tree": { "sha": format!("tree-of-{sha}") } }))
+                    }
+                    ("POST", "/repos/acme/site/git/blobs") if refuse == usize::MAX => {
+                        // No push access.
+                        StatusCode::FORBIDDEN.into_response()
+                    }
+                    ("POST", "/repos/acme/site/git/blobs") => {
+                        ok(serde_json::json!({ "sha": "blob1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/trees") => {
+                        ok(serde_json::json!({ "sha": "tree1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/commits") => {
+                        ok(serde_json::json!({ "sha": "commit1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/refs")
+                    | ("PATCH", "/repos/acme/site/git/refs/heads/orso-review-assets") => {
+                        if refuse == usize::MAX - 1 {
+                            // A ruleset: branch creation is restricted.
+                            let msg = serde_json::json!({ "message": "Repository rule violations found" });
+                            return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(msg))
+                                .into_response();
+                        }
+                        if refused.fetch_add(1, Ordering::SeqCst) < refuse {
+                            *tip.lock().unwrap() = Some("moved".into());
+                            let msg =
+                                serde_json::json!({ "message": "Update is not a fast forward" });
+                            return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(msg))
+                                .into_response();
+                        }
+                        ok(serde_json::json!({ "object": { "sha": "commit1" } }))
+                    }
+                    _ => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        };
         let routes = axum::Router::new().fallback(handler);
         let (base, stop) = mock_api(routes).await;
         (base, stop, log)
@@ -4627,6 +4667,40 @@ esac"#,
                 .count(),
             2
         );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_reports_a_refused_branch_without_retrying() {
+        // A ruleset refuses creating the branch: no second attempt.
+        let (base, stop, log) = git_data_mock(None, usize::MAX - 1).await;
+        let auth = status_auth(base, "assets-rules");
+        let files = vec![("uploads/3/x.png".to_string(), b"png".to_vec())];
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.reason, Some("assets_refused"), "{err:?}");
+        assert_eq!(err.message, ASSETS_REFUSED);
+        assert_eq!(
+            writes(&log)
+                .iter()
+                .filter(|w| w.starts_with("POST refs"))
+                .count(),
+            1
+        );
+        stop();
+
+        // No push access: refused at the first blob.
+        let (base, stop, log) = git_data_mock(None, usize::MAX).await;
+        let auth = status_auth(base, "assets-403");
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.reason, Some("assets_refused"));
+        assert_eq!(err.code.status(), 403);
+        assert_eq!(writes(&log), ["POST blobs"]);
         stop();
     }
 

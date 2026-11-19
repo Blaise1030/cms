@@ -19,6 +19,10 @@ export interface FeedMessage {
   grouped: boolean;
   /** Still being sent, or it didn't get there (the client id is then in `key`). */
   pending?: "sending" | "failed";
+  /** Images it is sending (data URLs). */
+  images?: string[];
+  /** It failed because the repository refused to store its images. */
+  imagesRefused?: boolean;
 }
 
 /** Something that happened: a greenlight or send-back (with its comment), a push, a merge or close. */
@@ -87,6 +91,8 @@ export function buildFeed(items: TimelineItem[], now = new Date()): FeedRow[] {
       url: message.url || undefined,
       grouped,
       pending: message.kind === "comment" ? message.pending : undefined,
+      images: message.kind === "comment" ? message.images : undefined,
+      imagesRefused: message.kind === "comment" ? message.imagesRefused : undefined,
     };
     rows.push(row);
     last = row;

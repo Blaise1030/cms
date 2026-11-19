@@ -154,6 +154,10 @@ export type TimelineItem =
       clientId?: string;
       /** Client only: still on its way to GitHub, or it didn't get there. */
       pending?: "sending" | "failed";
+      /** Client only: the images it is sending (data URLs), shown until GitHub has them. */
+      images?: string[];
+      /** Client only: it failed because the repository refused to store its images. */
+      imagesRefused?: boolean;
     }
   | {
       kind: "review";

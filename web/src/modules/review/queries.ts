@@ -207,10 +207,21 @@ export function useConversation(projectId: () => string, number: () => number, h
   const posting = useMutation({
     // One scope per change: quick sends reach GitHub (and the feed) in the order they were sent.
     scope: { id: `review-comment:${projectId()}:${number()}` },
-    mutationFn: (v: { clientId: string; body: string }) => daemon.api.commentOnReview(projectId(), number(), v.body),
+    mutationFn: (v: SendComment) =>
+      daemon.api.commentOnReview(
+        projectId(),
+        number(),
+        v.body,
+        v.images.map((i) => ({ base64: i.dataUrl.slice(i.dataUrl.indexOf(",") + 1), mime: i.mime, name: i.name })),
+      ),
     onMutate: (v) => {
-      if (pending.value.some((p) => p.clientId === v.clientId)) setPending(v.clientId, { state: "sending" });
-      else pending.value = [...pending.value, { clientId: v.clientId, body: v.body, at: new Date().toISOString(), state: "sending" }];
+      if (pending.value.some((p) => p.clientId === v.clientId))
+        setPending(v.clientId, { state: "sending", images: v.images, imagesRefused: false });
+      else
+        pending.value = [
+          ...pending.value,
+          { clientId: v.clientId, body: v.body, images: v.images, at: new Date().toISOString(), state: "sending" },
+        ];
     },
     onSuccess: async (item, v) => {
       const queryKey = [...key.value, headSha() ?? ""];
@@ -228,19 +239,27 @@ export function useConversation(projectId: () => string, number: () => number, h
       // Its comment count changed.
       void client.invalidateQueries({ queryKey: reviewKeys.inbox(projectId()) });
     },
-    onError: (_e, v) => setPending(v.clientId, { state: "failed" }),
+    onError: (e, v) => {
+      const err = e as { status?: number; reason?: string };
+      setPending(v.clientId, { state: "failed", imagesRefused: err.reason === "assets_refused" });
+    },
   });
 
-  /** Sends `body` at once, optimistically; false (and nothing sent) when it is blank. */
-  function comment(body: string): boolean {
-    if (!body.trim()) return false;
-    posting.mutate({ clientId: `pending-${Date.now()}-${++seq}`, body });
+  /** Sends `body` (and `images`) at once, optimistically; false (nothing sent) when both are empty. */
+  function comment(body: string, images: AttachedImage[] = []): boolean {
+    if (!body.trim() && images.length === 0) return false;
+    posting.mutate({ clientId: `pending-${Date.now()}-${++seq}`, body, images });
     return true;
   }
-  /** Sends a failed message's same body again, in the same place. */
+  /** Sends a failed message again, images and all, in the same place. */
   function retry(clientId: string) {
     const failed = pending.value.find((p) => p.clientId === clientId && p.state === "failed");
-    if (failed) posting.mutate({ clientId, body: failed.body });
+    if (failed) posting.mutate({ clientId, body: failed.body, images: failed.images ?? [] });
+  }
+  /** Sends a failed message's text alone (its images couldn't be stored), in the same place. */
+  function sendWithoutImages(clientId: string) {
+    const failed = pending.value.find((p) => p.clientId === clientId && p.state === "failed");
+    if (failed?.body.trim()) posting.mutate({ clientId, body: failed.body, images: [] });
   }
   /** Drops a failed message; nothing goes back to the composer. */
   const discard = (clientId: string) => setPending(clientId, null);
@@ -263,6 +282,8 @@ export function useConversation(projectId: () => string, number: () => number, h
         url: "",
         clientId: p.clientId,
         pending: p.state,
+        images: p.images?.map((i) => i.dataUrl),
+        imagesRefused: p.imagesRefused,
       });
     }
     return { ...data, items };
@@ -275,16 +296,36 @@ export function useConversation(projectId: () => string, number: () => number, h
     reload: () => q.refetch(),
     comment,
     retry,
+    sendWithoutImages,
+    /** A message's images as they were attached, for copying when GitHub couldn't store them. */
+    imagesOf: (clientId: string) => pending.value.find((p) => p.clientId === clientId)?.images ?? [],
     discard,
   };
+}
+
+/** An image attached in the composer. */
+export interface AttachedImage {
+  name: string;
+  mime: string;
+  /** `data:{mime};base64,…` */
+  dataUrl: string;
+}
+
+interface SendComment {
+  clientId: string;
+  body: string;
+  images: AttachedImage[];
 }
 
 /** A comment on its way to GitHub, or one that didn't get there. */
 interface PendingComment {
   clientId: string;
   body: string;
+  images?: AttachedImage[];
   at: string;
   state: "sending" | "failed";
+  /** The repository refused to store its images. */
+  imagesRefused?: boolean;
 }
 
 /**

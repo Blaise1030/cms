@@ -32,6 +32,14 @@ export type Review = {
   submitted_at?: string;
 };
 
+/** A commit made through the stub's Git Data API, with the paths it added. */
+export interface GitCommit {
+  sha: string;
+  message: string;
+  parents: string[];
+  files: string[];
+}
+
 /** A comment on a pull request's conversation (`/issues/{n}/comments`). */
 export type IssueComment = {
   id: number;
@@ -95,6 +103,10 @@ export type GithubStub = {
   reviewPosts: () => ReviewPost[];
   /** Bodies of every `POST …/issues/{n}/comments` the daemon sent. */
   commentPosts: () => { path: string; body: { body?: string } }[];
+  /** Commits made through the Git Data API, oldest first, with the files each added. */
+  gitCommits: () => GitCommit[];
+  /** A branch's tip commit (null when the branch doesn't exist). */
+  branchTip: (branch: string) => string | null;
   /** Serve `html` at `GET /sites{path}`: a deployed site a deployment's URL can point at. */
   addSitePage: (path: string, html: string) => void;
   close: () => Promise<void>;
@@ -176,6 +188,14 @@ export function startGithubStub(
   };
 
   const sitePages = new Map<string, string>();
+  // A tiny Git Data API: blobs, trees (path → blob), commits and refs, all in memory.
+  const blobs = new Map<string, Buffer>();
+  const trees = new Map<string, Map<string, string>>();
+  const commits = new Map<string, { tree: string; parents: string[]; message: string }>();
+  const gitCommitLog: GitCommit[] = [];
+  const refs = new Map<string, string>();
+  let gitSeq = 0;
+  const gitSha = (kind: string) => `${kind}${String(++gitSeq).padStart(40 - kind.length, "0")}`;
   const commentsByPr = new Map<number, IssueComment[]>();
   const commentPosts: { path: string; body: { body?: string } }[] = [];
   let nextCommentId = 100;
@@ -459,6 +479,70 @@ export function startGithubStub(
       return;
     }
 
+    const git = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/(git\/.+|contents\/.+)$/);
+    if (git) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        const what = git[1]!;
+        const refGet = what.match(/^git\/ref\/heads\/(.+)$/);
+        if (req.method === "GET" && refGet) {
+          const tip = refs.get(refGet[1]!);
+          return tip ? sendJson(res, 200, { object: { sha: tip } }) : sendJson(res, 404, { message: "Not Found" });
+        }
+        const commitGet = what.match(/^git\/commits\/(.+)$/);
+        if (req.method === "GET" && commitGet) {
+          const c = commits.get(commitGet[1]!);
+          return c ? sendJson(res, 200, { sha: commitGet[1], tree: { sha: c.tree } }) : sendJson(res, 404, {});
+        }
+        if (req.method === "POST" && what === "git/blobs") {
+          const sha = gitSha("b");
+          blobs.set(sha, Buffer.from(String(body.content), "base64"));
+          return sendJson(res, 201, { sha });
+        }
+        if (req.method === "POST" && what === "git/trees") {
+          const base = typeof body.base_tree === "string" ? (trees.get(body.base_tree) ?? new Map()) : new Map();
+          const tree = new Map(base);
+          for (const e of body.tree as { path: string; sha: string }[]) tree.set(e.path, e.sha);
+          const sha = gitSha("t");
+          trees.set(sha, tree);
+          return sendJson(res, 201, { sha });
+        }
+        if (req.method === "POST" && what === "git/commits") {
+          const sha = gitSha("c");
+          const c = { tree: String(body.tree), parents: body.parents as string[], message: String(body.message) };
+          commits.set(sha, c);
+          const parentTree = c.parents[0] ? trees.get(commits.get(c.parents[0])!.tree) : undefined;
+          const files = [...(trees.get(c.tree)?.keys() ?? [])].filter((p) => !parentTree?.has(p));
+          gitCommitLog.push({ sha, message: c.message, parents: c.parents, files });
+          return sendJson(res, 201, { sha });
+        }
+        const refPatch = what.match(/^git\/refs\/heads\/(.+)$/);
+        if ((req.method === "POST" && what === "git/refs") || (req.method === "PATCH" && refPatch)) {
+          const name = refPatch ? refPatch[1]! : String(body.ref).replace(/^refs\/heads\//, "");
+          refs.set(name, String(body.sha));
+          return sendJson(res, 200, { ref: `refs/heads/${name}`, object: { sha: body.sha } });
+        }
+        const contents = what.match(/^contents\/(.+)$/);
+        if (req.method === "GET" && contents) {
+          const c = commits.get(url.searchParams.get("ref") ?? "");
+          const blob = c && trees.get(c.tree)?.get(decodeURIComponent(contents[1]!));
+          if (!blob) return sendJson(res, 404, { message: "Not Found" });
+          res.writeHead(200, { "content-type": "application/octet-stream" }).end(blobs.get(blob));
+          return;
+        }
+        sendJson(res, 404, { message: "Not Found" });
+      });
+      return;
+    }
+
     const commentsPost = req.method === "POST" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/);
     if (commentsPost) {
       if (auth !== `Bearer ${STUB_TOKEN}`) {
@@ -597,6 +681,8 @@ export function startGithubStub(
           );
         },
         commentPosts: () => commentPosts.slice(),
+        gitCommits: () => gitCommitLog.slice(),
+        branchTip: (branch) => refs.get(branch) ?? null,
         reviewPosts: () => reviewPosts.slice(),
         addSitePage: (path, html) => {
           sitePages.set(path, html);

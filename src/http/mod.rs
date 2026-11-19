@@ -104,7 +104,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/{id}/reviews/{n}/comments",
-            post(reviews::comment),
+            post(reviews::comment).layer(DefaultBodyLimit::max(
+                crate::review_shots::MAX_COMMENT_BODY_BYTES,
+            )),
         )
         .route(
             "/api/projects/{id}/reviews/{n}/decision",

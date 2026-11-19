@@ -485,7 +485,7 @@ describe("ReviewChange", () => {
       Object.defineProperty(feed, "scrollHeight", { configurable: true, value: 900 });
       await w.get("[data-testid='review-comment-form'] form").trigger("submit");
       await flushPromises();
-      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Ship it");
+      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Ship it", []);
       const messages = w.findAll("[data-testid='review-timeline-comment']");
       expect(messages.at(-1)!.text()).toContain("Ship it");
       expect(kindsOf(w).at(-1)).toBe("comment");
@@ -505,11 +505,11 @@ describe("ReviewChange", () => {
       expect(commentOnReview).not.toHaveBeenCalled();
       await input.trigger("keydown", { key: "Enter", metaKey: true });
       await flushPromises();
-      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Line one");
+      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Line one", []);
       await input.setValue("Line two");
       await input.trigger("keydown", { key: "Enter", ctrlKey: true });
       await flushPromises();
-      expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Line two");
+      expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Line two", []);
     });
 
     it("keeps your place when entries arrive while you read further up, and follows at the bottom", async () => {
@@ -599,7 +599,7 @@ describe("ReviewChange", () => {
         await failed.get("[data-testid='review-message-retry']").trigger("click");
         await flushPromises();
         expect(commentOnReview).toHaveBeenCalledTimes(2);
-        expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Again");
+        expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Again", []);
         expect(last(w).attributes("data-pending")).toBeUndefined();
         expect(last(w).text()).toContain("Again");
       });
@@ -627,6 +627,78 @@ describe("ReviewChange", () => {
         expect(reviewConversation.mock.calls.length).toBeGreaterThan(reads);
         expect(last(w).text()).toContain("Hold on");
         expect(last(w).attributes("data-pending")).toBe("sending");
+      });
+
+      describe("images", () => {
+        const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        const pngFile = (name = "hero.png") => new File([PNG], name, { type: "image/png" });
+        async function pick(w: Awaited<ReturnType<typeof mountChange>>["w"], files: File[]) {
+          const input = w.get("[data-testid='review-attach-input']");
+          Object.defineProperty(input.element, "files", { configurable: true, value: files });
+          await input.trigger("change");
+          await vi.waitFor(() => expect(w.findAll("[data-testid='review-attachment']").length).toBeGreaterThan(0));
+        }
+
+        it("attaches from the picker, shows thumbnails with a remove button, and sends images alone", async () => {
+          const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => commentReply(body || "![image](u)"));
+          const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview }, "conversation");
+          await pick(w, [pngFile("a.png"), pngFile("b.png")]);
+          expect(w.findAll("[data-testid='review-attachment']")).toHaveLength(2);
+          await w.findAll("[data-testid='review-attachment-remove']")[1]!.trigger("click");
+          expect(w.findAll("[data-testid='review-attachment']")).toHaveLength(1);
+          // No text, one image: Send is enabled.
+          expect(w.get("[data-testid='review-comment-submit']").attributes("disabled")).toBeUndefined();
+          await w.get("[data-testid='review-comment-submit']").trigger("click");
+          await flushPromises();
+          expect(commentOnReview).toHaveBeenCalledWith("site", 7, "", [
+            { base64: btoa(String.fromCharCode(...PNG)), mime: "image/png", name: "a.png" },
+          ]);
+          expect(w.findAll("[data-testid='review-attachment']")).toHaveLength(0);
+        });
+
+        it("takes pasted images and refuses what it can't attach", async () => {
+          const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
+          const paste = new Event("paste", { bubbles: true, cancelable: true });
+          Object.defineProperty(paste, "clipboardData", {
+            value: { files: [pngFile(), new File(["<svg/>"], "x.svg", { type: "image/svg+xml" })] },
+          });
+          w.get("[data-testid='review-comment-input']").element.dispatchEvent(paste);
+          await vi.waitFor(() => expect(w.findAll("[data-testid='review-attachment']")).toHaveLength(1));
+          expect(w.get("[data-testid='review-attach-error']").text()).toContain("Only PNG, JPEG, GIF and WebP");
+        });
+
+        it("shows a sending message's own images, then offers a fallback when the repo won't store them", async () => {
+          const reply = deferred<unknown>();
+          const commentOnReview = vi
+            .fn()
+            .mockImplementationOnce(() => reply.promise)
+            .mockResolvedValueOnce({ kind: "comment", id: 90, author: "me", at: "2026-01-08T12:00:00Z", body: "Look", url: "u90" });
+          const write = vi.fn(async () => undefined);
+          Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+          vi.stubGlobal("ClipboardItem", class { items: unknown; constructor(items: unknown) { this.items = items; } });
+          const { w } = await mountChange(
+            { ...base(), review: vi.fn(async () => ({ ...DETAIL, url: "https://github.com/acme/site/pull/7" })), reviewConversation: vi.fn(async () => TALK), commentOnReview },
+            "conversation",
+          );
+          await pick(w, [pngFile()]);
+          await send(w, "Look");
+          await flushPromises();
+          expect(last(w).findAll("[data-testid='review-message-images'] img")).toHaveLength(1);
+
+          reply.reject(new ApiError("SANDBOX", "Couldn't upload images to this repository", 403, { reason: "assets_refused" }));
+          await flushPromises();
+          const refused = last(w).get("[data-testid='review-message-images-refused']");
+          expect(refused.text()).toContain("Couldn't upload images to this repository.");
+          expect(refused.get("[data-testid='review-message-open-github']").attributes("href")).toBe("https://github.com/acme/site/pull/7");
+          await last(w).get("[data-testid='review-message-copy-image']").trigger("click");
+          await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+          await refused.get("[data-testid='review-message-send-text']").trigger("click");
+          await flushPromises();
+          expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Look", []);
+          expect(last(w).attributes("data-pending")).toBeUndefined();
+          vi.unstubAllGlobals();
+        });
       });
 
       it("sends quick messages one after another, in order", async () => {

@@ -89,6 +89,122 @@ pub struct ShotItem {
 const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 const JPEG_MAGIC: &[u8] = &[0xFF, 0xD8, 0xFF];
 
+/// Screenshot types, as the picker makes them.
+const SHOT_TYPES: &[&str] = &["image/png", "image/jpeg"];
+/// Images attached to a comment.
+const UPLOAD_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+/// Most images on one comment.
+pub const MAX_UPLOADS: usize = 10;
+/// Largest attached image, decoded.
+pub const MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
+/// The comment request body limit: every image at its largest, base64-encoded, plus the text.
+pub const MAX_COMMENT_BODY_BYTES: usize =
+    MAX_UPLOADS * (MAX_UPLOAD_BYTES * 4 / 3 + 1024) + 256 * 1024;
+
+/// An image attached to a comment, as the web sends it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UploadIn {
+    pub base64: String,
+    pub mime: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// The file extension for an image type.
+fn extension(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        _ => "webp",
+    }
+}
+
+/// "PNG, JPEG, GIF or WebP" for a list of image types.
+fn type_names(allowed: &[&str]) -> String {
+    let n: Vec<_> = allowed
+        .iter()
+        .map(|m| match *m {
+            "image/png" => "PNG",
+            "image/jpeg" => "JPEG",
+            "image/gif" => "GIF",
+            _ => "WebP",
+        })
+        .collect();
+    match n.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => n.join(""),
+    }
+}
+
+/// `b64` decoded, checked to be one of `allowed` by its own bytes (not just the declared
+/// type) and at most `max` bytes, with its file extension. `label` names it in errors.
+pub fn decode_image(
+    b64: &str,
+    mime: Option<&str>,
+    allowed: &[&str],
+    max: usize,
+    label: &str,
+) -> Result<(Vec<u8>, &'static str), ApiError> {
+    let Some(mime) = mime.filter(|m| allowed.contains(m)) else {
+        return Err(ApiError::badreq(format!(
+            "{label} must be a {} image",
+            type_names(allowed)
+        )));
+    };
+    let too_big = || ApiError::badreq(format!("{label} is larger than {} MB", max / (1024 * 1024)));
+    // Over the limit before decoding is over the limit after it.
+    if b64.len() > max * 4 / 3 + 4 {
+        return Err(too_big());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .map_err(|_| ApiError::badreq(format!("{label} isn't valid base64")))?;
+    if bytes.len() > max {
+        return Err(too_big());
+    }
+    if image_mime(&bytes) != Some(mime) {
+        return Err(ApiError::badreq(format!(
+            "{label} isn't the image type it says it is"
+        )));
+    }
+    Ok((bytes, extension(mime)))
+}
+
+/// Checks a comment's images: at most 10, PNG, JPEG, GIF or WebP (by their bytes), 5 MB each.
+pub fn validate_uploads(images: &[UploadIn]) -> Result<Vec<(Vec<u8>, &'static str)>, ApiError> {
+    if images.len() > MAX_UPLOADS {
+        return Err(ApiError::badreq(format!(
+            "Attach at most {MAX_UPLOADS} images to a comment"
+        )));
+    }
+    images
+        .iter()
+        .enumerate()
+        .map(|(i, img)| {
+            decode_image(
+                &img.base64,
+                Some(&img.mime),
+                UPLOAD_TYPES,
+                MAX_UPLOAD_BYTES,
+                &format!("Image {}", i + 1),
+            )
+        })
+        .collect()
+}
+
+/// A comment's text with its images appended, one `![image](url)` per line.
+pub fn comment_markdown(body: &str, image_urls: &[String]) -> String {
+    let mut out = body.trim().to_string();
+    for url in image_urls {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&format!("![image]({url})"));
+    }
+    out
+}
+
 /// Checks the request: at most 10 items, PNG or JPEG only (by their bytes, not just the
 /// declared type), 2 MB each, a summary when sending back, and something to say at all.
 pub fn validate(req: &ShotReviewIn) -> Result<Vec<ShotItem>, ApiError> {
@@ -112,39 +228,13 @@ pub fn validate(req: &ShotReviewIn) -> Result<Vec<ShotItem>, ApiError> {
             let n = i + 1;
             let image = match &item.image_base64 {
                 None => None,
-                Some(b64) => {
-                    let (magic, ext): (&[u8], &str) = match item.mime.as_deref() {
-                        Some("image/png") => (PNG_MAGIC, "png"),
-                        Some("image/jpeg") => (JPEG_MAGIC, "jpg"),
-                        _ => {
-                            return Err(ApiError::badreq(format!(
-                                "Screenshot {n} must be a PNG or JPEG image"
-                            )))
-                        }
-                    };
-                    // Over the limit before decoding is over the limit after it.
-                    if b64.len() > MAX_IMAGE_BYTES * 4 / 3 + 4 {
-                        return Err(ApiError::badreq(format!(
-                            "Screenshot {n} is larger than 2 MB"
-                        )));
-                    }
-                    let bytes = base64::engine::general_purpose::STANDARD
-                        .decode(b64.trim())
-                        .map_err(|_| {
-                            ApiError::badreq(format!("Screenshot {n} isn't valid base64"))
-                        })?;
-                    if bytes.len() > MAX_IMAGE_BYTES {
-                        return Err(ApiError::badreq(format!(
-                            "Screenshot {n} is larger than 2 MB"
-                        )));
-                    }
-                    if !bytes.starts_with(magic) {
-                        return Err(ApiError::badreq(format!(
-                            "Screenshot {n} isn't the image type it says it is"
-                        )));
-                    }
-                    Some((bytes, ext))
-                }
+                Some(b64) => Some(decode_image(
+                    b64,
+                    item.mime.as_deref(),
+                    SHOT_TYPES,
+                    MAX_IMAGE_BYTES,
+                    &format!("Screenshot {n}"),
+                )?),
             };
             if image.is_none() && item.note.trim().is_empty() {
                 return Err(ApiError::badreq(format!(
@@ -223,10 +313,11 @@ pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// `shots/{pr}/{yyyy-mm-dd}/{uuid}.{ext}` for an image saved `unix_secs` after the epoch.
-pub fn asset_path(pr: u64, unix_secs: u64, id: &str, ext: &str) -> String {
+/// `{folder}/{pr}/{yyyy-mm-dd}/{uuid}.{ext}` for an image saved `unix_secs` after the epoch;
+/// `folder` is `shots` (screenshot comments) or `uploads` (images attached to comments).
+pub fn asset_path(folder: &str, pr: u64, unix_secs: u64, id: &str, ext: &str) -> String {
     let (y, m, d) = civil_date(unix_secs / 86_400);
-    format!("shots/{pr}/{y:04}-{m:02}-{d:02}/{id}.{ext}")
+    format!("{folder}/{pr}/{y:04}-{m:02}-{d:02}/{id}.{ext}")
 }
 
 /// A random v4 UUID.
@@ -383,10 +474,13 @@ mod tests {
     fn asset_paths_are_dated_and_unique() {
         // 2026-11-19T12:00:00Z
         assert_eq!(
-            asset_path(83, 1_795_089_600, "abc", "png"),
+            asset_path("shots", 83, 1_795_089_600, "abc", "png"),
             "shots/83/2026-11-19/abc.png"
         );
-        assert_eq!(asset_path(1, 0, "x", "jpg"), "shots/1/1970-01-01/x.jpg");
+        assert_eq!(
+            asset_path("uploads", 1, 0, "x", "jpg"),
+            "uploads/1/1970-01-01/x.jpg"
+        );
         let (a, b) = (new_id(), new_id());
         assert_ne!(a, b);
         assert_eq!(a.len(), 36);
@@ -456,6 +550,46 @@ mod tests {
         assert_eq!(image_mime(b"GIF89a.."), Some("image/gif"));
         assert_eq!(image_mime(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
         assert_eq!(image_mime(b"<svg onload=alert(1)>"), None);
+    }
+
+    #[test]
+    fn comment_images_allow_gif_and_webp_up_to_5_mb_and_ten() {
+        let up = |b: &[u8], m: &str| UploadIn {
+            base64: b64(b),
+            mime: m.into(),
+            name: "x".into(),
+        };
+        let ok = validate_uploads(&[
+            up(&png(), "image/png"),
+            up(b"GIF89a....", "image/gif"),
+            up(b"RIFF\0\0\0\0WEBPVP8 ", "image/webp"),
+        ])
+        .unwrap();
+        assert_eq!(
+            ok.iter().map(|(_, e)| *e).collect::<Vec<_>>(),
+            ["png", "gif", "webp"]
+        );
+        let err = |r: Result<Vec<(Vec<u8>, &str)>, ApiError>| r.unwrap_err().message;
+        assert!(err(validate_uploads(&[up(b"<svg/>", "image/svg+xml")]))
+            .contains("PNG, JPEG, GIF or WebP"));
+        assert!(
+            err(validate_uploads(&[up(b"GIF89a", "image/png")])).contains("isn't the image type")
+        );
+        let mut big = png();
+        big.resize(MAX_UPLOAD_BYTES + 1, 0);
+        assert!(err(validate_uploads(&[up(&big, "image/png")])).contains("larger than 5 MB"));
+        let many: Vec<_> = (0..11).map(|_| up(&png(), "image/png")).collect();
+        assert!(err(validate_uploads(&many)).contains("at most 10"));
+    }
+
+    #[test]
+    fn comment_markdown_appends_each_image() {
+        let urls = vec!["https://u/1".to_string(), "https://u/2".to_string()];
+        assert_eq!(
+            comment_markdown(" Look ", &urls),
+            "Look\n\n![image](https://u/1)\n\n![image](https://u/2)"
+        );
+        assert_eq!(comment_markdown("", &urls[..1]), "![image](https://u/1)");
     }
 
     #[test]

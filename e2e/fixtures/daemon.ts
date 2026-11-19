@@ -6,7 +6,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { createBareRemote, DEFAULT_REPO, fileGitUrl } from "./bareRemote";
-import { startGithubStub } from "./githubStub";
+import { startGithubStub, type GitCommit } from "./githubStub";
 
 export const E2E_TOKEN = "a".repeat(64);
 /** The stream-json turn the e2e `cursor` agent replays (after appending to `notes.md`). */
@@ -34,6 +34,9 @@ export type orsoEnv = {
     addReviewPr: (seed: import("./githubStub").ReviewPrSeed) => void;
     reviewPosts: () => import("./githubStub").ReviewPost[];
     commentPosts: () => { path: string; body: { body?: string } }[];
+    /** Commits made through the stub's Git Data API (e.g. on `orso-review-assets`). */
+    gitCommits: () => GitCommit[];
+    branchTip: (branch: string) => string | null;
     /** Serve a deployed site's page from the stub, at `${baseUrl}/sites{path}`. */
     addSitePage: (path: string, html: string) => void;
   };
@@ -324,6 +327,8 @@ export async function startorso(): Promise<orsoEnv> {
       reviewPosts: () => stub.reviewPosts(),
       addSitePage: (path, html) => stub.addSitePage(path, html),
       commentPosts: () => stub.commentPosts(),
+      gitCommits: () => stub.gitCommits(),
+      branchTip: (branch) => stub.branchTip(branch),
     },
     stop: async () => {
       const exitedWithin = (ms: number) =>

@@ -445,8 +445,16 @@ export function createApi(
     reviewConversation: (project: string, number: number) =>
       json<ReviewConversation>("GET", `/api/projects/${enc(project)}/reviews/${number}/conversation`),
     /** Comment on an open change as the signed-in user; the new timeline entry. */
-    commentOnReview: (project: string, number: number, body: string) =>
-      json<TimelineItem>("POST", `/api/projects/${enc(project)}/reviews/${number}/comments`, { body: { body } }),
+    /** Posts a comment; `images` (base64, no `data:` prefix) are stored on the assets branch. */
+    commentOnReview: (
+      project: string,
+      number: number,
+      body: string,
+      images: { base64: string; mime: string; name: string }[] = [],
+    ) =>
+      json<TimelineItem>("POST", `/api/projects/${enc(project)}/reviews/${number}/comments`, {
+        body: images.length ? { body, images } : { body },
+      }),
     /** The change's deploy preview and the live site; 404 when it is no longer waiting. */
     reviewPreview: (project: string, number: number) =>
       json<ReviewPreview>("GET", `/api/projects/${enc(project)}/reviews/${number}/preview`),

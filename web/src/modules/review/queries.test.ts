@@ -118,7 +118,7 @@ describe("useConversation", () => {
     // Shown at once, before GitHub answers.
     expect(out.conversation.value?.items.at(-1)).toMatchObject({ kind: "comment", body: "Hi", pending: "sending" });
     await flushPromises();
-    await vi.waitFor(() => expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Hi"));
+    await vi.waitFor(() => expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Hi", []));
     await vi.waitFor(() => expect(out.conversation.value?.items.at(-1)).toMatchObject({ id: 9, body: "Hi" }));
     expect(out.conversation.value?.items.at(-1)).not.toHaveProperty("pending");
     expect(client.getQueryState(["review", "site", "inbox"])?.isInvalidated).toBe(true);

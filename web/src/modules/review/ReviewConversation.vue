@@ -17,6 +17,8 @@ import { checkState, checkSummary } from "./checks";
 import { useDaemon } from "@/core/daemon";
 import { ASSET_IMAGES, repoOfPullUrl, rewriteAssetImages } from "./assetImages";
 import { buildFeed, clockTime, exactTime } from "./feed";
+import { copyImageToClipboard, IMAGE_TYPES, pickImages, readImage } from "./attachments";
+import type { AttachedImage } from "./queries";
 import { labelStyle } from "./labels";
 import type { useConversation } from "./queries";
 
@@ -126,13 +128,70 @@ watch(
 );
 
 const draft = ref("");
+/** Images attached in the composer, sent with the next message. */
+const attached = ref<AttachedImage[]>([]);
+const attachError = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const dropping = ref(false);
+const canSend = computed(() => !!draft.value.trim() || attached.value.length > 0);
+
 /** Sends at once: the composer clears and the message shows as "Sending…" until GitHub has it. */
 function submit() {
-  if (!draft.value.trim()) return;
+  if (!canSend.value) return;
   sent = true;
-  if (props.talk.comment(draft.value)) draft.value = "";
-  else sent = false;
+  if (props.talk.comment(draft.value, attached.value)) {
+    draft.value = "";
+    attached.value = [];
+    attachError.value = null;
+  } else sent = false;
 }
+/** `UChatPrompt` won't send blank text; with images attached, ⌘/Ctrl+Enter still sends. */
+function onComposerKeydown(e: KeyboardEvent) {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !draft.value.trim() && attached.value.length) {
+    e.preventDefault();
+    submit();
+  }
+}
+
+/** Adds `files` that are images within the limits; says why any were left out. */
+async function attach(files: File[]) {
+  const { accepted, refused } = pickImages(files, attached.value.length);
+  attachError.value = refused;
+  attached.value = [...attached.value, ...(await Promise.all(accepted.map(readImage)))];
+}
+function onFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  if (input.files?.length) void attach([...input.files]);
+  input.value = "";
+}
+function onPaste(e: ClipboardEvent) {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (!files.length) return;
+  e.preventDefault();
+  void attach(files);
+}
+const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+function onDragOver(e: DragEvent) {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  dropping.value = true;
+}
+function onDragLeave(e: DragEvent) {
+  if (!(e.currentTarget as Element).contains(e.relatedTarget as Node | null)) dropping.value = false;
+}
+function onDrop(e: DragEvent) {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  dropping.value = false;
+  void attach([...(e.dataTransfer?.files ?? [])]);
+}
+
+/** Copies one of a failed message's images, to paste on GitHub instead. */
+async function copyImage(clientId: string, index: number) {
+  const img = props.talk.imagesOf(clientId)[index];
+  if (img) copied.value = (await copyImageToClipboard(img.dataUrl)) ? `${clientId}:${index}` : null;
+}
+const copied = ref<string | null>(null);
 </script>
 
 <template>
@@ -273,11 +332,79 @@ function submit() {
                       <time :datetime="row.at" class="text-muted text-xs">{{ clockTime(row.at) }}</time>
                     </UTooltip>
                   </p>
-                  <ReviewMarkdown :content="row.body" />
+                  <ReviewMarkdown v-if="row.body.trim()" :content="row.body" />
+                  <!-- A message on its way shows the images it is sending from this device. -->
+                  <div v-if="row.images?.length" class="flex flex-wrap gap-1.5" data-testid="review-message-images">
+                    <div
+                      v-for="(src, i) in row.images"
+                      :key="i"
+                      class="border-default group/img relative size-24 overflow-hidden rounded-md border"
+                    >
+                      <img :src="src" alt="" class="size-full object-cover" />
+                      <UTooltip v-if="row.imagesRefused" :text="copied === `${row.key}:${i}` ? 'Copied' : 'Copy image'">
+                        <UButton
+                          color="neutral"
+                          variant="solid"
+                          size="xs"
+                          :icon="copied === `${row.key}:${i}` ? 'i-hugeicons-tick-02' : 'i-hugeicons-copy-01'"
+                          class="absolute right-1 bottom-1"
+                          aria-label="Copy image"
+                          data-testid="review-message-copy-image"
+                          @click="copyImage(row.key, i)"
+                        />
+                      </UTooltip>
+                    </div>
+                  </div>
                   <p v-if="row.grouped && row.pending === 'sending'" class="text-muted text-xs" data-testid="review-message-sending">
                     Sending…
                   </p>
-                  <p v-if="row.pending === 'failed'" class="text-error flex items-center gap-1 text-xs" data-testid="review-message-failed">
+                  <!-- The repository won't store images: send the text alone, or paste them on GitHub. -->
+                  <p
+                    v-if="row.pending === 'failed' && row.imagesRefused"
+                    class="text-error flex flex-wrap items-center gap-1 text-xs"
+                    data-testid="review-message-images-refused"
+                  >
+                    <UIcon name="i-hugeicons-alert-circle" class="size-3.5 shrink-0" />
+                    Couldn't upload images to this repository.
+                    <template v-if="row.body.trim()">
+                      <UButton
+                        color="error"
+                        variant="link"
+                        size="xs"
+                        class="p-0"
+                        label="Send without images"
+                        data-testid="review-message-send-text"
+                        @click="talk.sendWithoutImages(row.key)"
+                      />
+                      <span aria-hidden="true">·</span>
+                    </template>
+                    <UButton
+                      :to="change.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      color="error"
+                      variant="link"
+                      size="xs"
+                      class="p-0"
+                      label="Open on GitHub"
+                      data-testid="review-message-open-github"
+                    />
+                    <span aria-hidden="true">·</span>
+                    <UButton
+                      color="error"
+                      variant="link"
+                      size="xs"
+                      class="p-0"
+                      label="Delete"
+                      data-testid="review-message-delete"
+                      @click="talk.discard(row.key)"
+                    />
+                  </p>
+                  <p
+                    v-else-if="row.pending === 'failed'"
+                    class="text-error flex items-center gap-1 text-xs"
+                    data-testid="review-message-failed"
+                  >
                     <UIcon name="i-hugeicons-alert-circle" class="size-3.5 shrink-0" />
                     Couldn't send.
                     <UButton
@@ -386,7 +513,24 @@ function submit() {
         </UChatMessages>
       </div>
 
-      <div v-if="change.open" class="shrink-0 px-4 pt-1 pb-4" data-testid="review-comment-form">
+      <div
+        v-if="change.open"
+        class="relative shrink-0 px-4 pt-1 pb-4"
+        data-testid="review-comment-form"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
+      >
+        <div
+          v-if="dropping"
+          class="bg-default/80 border-accented pointer-events-none absolute inset-x-4 top-1 bottom-4 z-10 flex items-center justify-center rounded-lg border border-dashed text-sm"
+          data-testid="review-drop-overlay"
+        >
+          Drop images to attach
+        </div>
+        <p v-if="attachError" class="text-error mb-1.5 text-xs" role="alert" data-testid="review-attach-error">
+          {{ attachError }}
+        </p>
         <!-- ⌘/Ctrl+Enter sends; Enter alone is a new line. -->
         <UChatPrompt
           v-model="draft"
@@ -397,17 +541,66 @@ function submit() {
           :maxrows="8"
           aria-label="Message"
           data-testid="review-comment-input"
-          :ui="{ base: 'max-h-48 min-h-10 px-0 py-1' }"
+          :ui="{ root: 'bg-background', base: 'max-h-48 min-h-10 px-0 py-1', header: 'flex-wrap' }"
           @submit="submit"
+          @keydown="onComposerKeydown"
+          @paste="onPaste"
         >
+          <template v-if="attached.length" #header>
+            <div
+              v-for="(img, i) in attached"
+              :key="i"
+              class="border-default relative size-14 overflow-hidden rounded-md border"
+              data-testid="review-attachment"
+            >
+              <img :src="img.dataUrl" :alt="img.name" class="size-full object-cover" />
+              <UButton
+                color="neutral"
+                variant="solid"
+                size="xs"
+                icon="i-hugeicons-cancel-01"
+                class="absolute top-0.5 right-0.5 rounded-full p-0.5"
+                :ui="{ leadingIcon: 'size-3' }"
+                :aria-label="`Remove ${img.name}`"
+                data-testid="review-attachment-remove"
+                @click="attached.splice(i, 1)"
+              />
+            </div>
+          </template>
           <template #footer>
-            <span class="text-dimmed text-xs">Markdown · ⌘/Ctrl+Enter to send</span>
+            <div class="flex min-w-0 items-center gap-2">
+              <!-- Hidden native picker (no Nuxt UI equivalent for a headless file dialog trigger). -->
+              <input
+                ref="fileInput"
+                type="file"
+                multiple
+                class="hidden"
+                :accept="IMAGE_TYPES.join(',')"
+                data-testid="review-attach-input"
+                @change="onFileChange"
+              />
+              <UTooltip text="Attach images">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-hugeicons-image-add-01"
+                  class="shrink-0"
+                  aria-label="Attach images"
+                  data-testid="review-attach"
+                  @click="fileInput?.click()"
+                />
+              </UTooltip>
+              <span class="text-dimmed truncate text-xs">⌘/Ctrl+Enter to send</span>
+            </div>
             <UChatPromptSubmit
+              type="button"
               status="ready"
               size="sm"
               label="Send"
-              :disabled="!draft.trim()"
+              :disabled="!canSend"
               data-testid="review-comment-submit"
+              @click="submit"
             />
           </template>
         </UChatPrompt>

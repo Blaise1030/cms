@@ -61,6 +61,23 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
     { path: `/repos/acme/site/issues/${PR}/comments`, body: { body: "Yes, keeping it." } },
   ]);
 
+  // An attached image goes to the repo's orso-review-assets branch; the comment links it there.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  await page.getByTestId("review-attach-input").setInputFiles({ name: "hero.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByTestId("review-attachment")).toHaveCount(1);
+  await page.getByTestId("review-comment-input").fill("Here's the hero");
+  await page.getByTestId("review-comment-submit").click();
+  await expect(comments).toHaveCount(3);
+  await expect(comments.last()).not.toHaveAttribute("data-pending", /.*/);
+  const [upload] = github.gitCommits();
+  expect(upload!.parents).toEqual([]);
+  expect(upload!.files).toHaveLength(1);
+  expect(upload!.files[0]).toMatch(new RegExp(`^uploads/${PR}/\\d{4}-\\d{2}-\\d{2}/[0-9a-f-]{36}\\.png$`));
+  expect(github.branchTip("orso-review-assets")).toBe(upload!.sha);
+  const posted = github.commentPosts()[1]!.body.body!;
+  expect(posted).toMatch(/^Here's the hero\n\n!\[image\]\(/);
+  expect(posted).toContain(`/acme/site/blob/${upload!.sha}/${upload!.files[0]}?raw=true)`);
+
   // Review holds the preview and what changed.
   await page.getByTestId("review-tab-files").click();
   await expect(page).toHaveURL(new RegExp(`/p/${projectId}/review/${PR}/files$`));
