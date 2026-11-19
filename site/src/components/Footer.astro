@@ -13,7 +13,9 @@ const groups = [
   { title: "Product", links: site.nav.filter((link) => link.href.startsWith("#")) },
   { title: "Resources", links: site.nav.filter((link) => !link.href.startsWith("#")) },
   { title: "More", links: [site.footer.source, ...site.socials.filter((social) => social.href !== site.footer.source.href)] },
-].filter((group) => group.links.length > 0);
+]
+  .map((group) => ({ ...group, links: [...group.links, ...(site.footer.extra[group.title] ?? [])] }))
+  .filter((group) => group.links.length > 0);
 const legal = [...site.footer.links, site.footer.license];
 ---
 

@@ -42,6 +42,22 @@ export const site = {
     ],
     source: { label: "Open source", href: "https://github.com/Blaise1030/cms" },
     license: { label: "MIT licence", href: "https://github.com/Blaise1030/cms/blob/main/LICENSE" },
+    /** Footer-only links, appended to the column of the same name after the header nav links. */
+    extra: {
+      Product: [
+        { label: "Download", href: "#cta" },
+        { label: "Releases", href: "https://github.com/Blaise1030/cms/releases" },
+      ],
+      Resources: [
+        { label: "Blog topics", href: "/blog/categories/" },
+        { label: "Help topics", href: "/help/categories/" },
+        { label: "llms.txt", href: "/llms.txt" },
+      ],
+      More: [
+        { label: "Report an issue", href: "https://github.com/Blaise1030/cms/issues" },
+        { label: "Buy me a coffee", href: "https://buymeacoffee.com/blaise1030" },
+      ],
+    } as Record<string, { label: string; href: string }[]>,
   },
   socials: [
     { label: "GitHub", href: "https://github.com/Blaise1030/cms", icon: "github" as const },
