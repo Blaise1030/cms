@@ -6,6 +6,14 @@ import { TooltipProvider } from "reka-ui";
 import BrowserFrame, { type BrowserFrameSide } from "./BrowserFrame.vue";
 import { frameUrl, isHttpUrl, normalizePath } from "./frameUrl";
 
+// Every measured pane reports this size (happy-dom lays nothing out); 0 = unmeasured.
+const size = vi.hoisted(() => ({ width: 0, height: 0 }));
+vi.mock("@vueuse/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@vueuse/core")>();
+  const { ref } = await import("vue");
+  return { ...actual, useElementSize: () => ({ width: ref(size.width), height: ref(size.height), stop: () => {} }) };
+});
+
 // The size menu's items as plain buttons, so a test can pick one without a portal.
 vi.mock("@nuxt/ui/components/DropdownMenu.vue", async () => {
   const { defineComponent, h } = await import("vue");
@@ -52,6 +60,8 @@ async function go(w: ReturnType<typeof mountFrame>, path: string) {
 }
 
 afterEach(() => {
+  size.width = 0;
+  size.height = 0;
   document.body.innerHTML = "";
   vi.restoreAllMocks();
 });
@@ -133,6 +143,37 @@ describe("BrowserFrame", () => {
     await flushPromises();
     expect(w.get("iframe[data-testid='browser-frame-iframe-change']").element).not.toBe(before[0]);
     expect(w.get("iframe[data-testid='browser-frame-iframe-live']").element).not.toBe(before[1]);
+  });
+
+  it("lays desktop out at 1440 px and scales it to fill each side's own width", async () => {
+    // Side by side on a 1440 px screen: each side is 720 px wide.
+    size.width = 720;
+    size.height = 900;
+    const w = mountFrame([CHANGE, LIVE]);
+    await flushPromises();
+    for (const key of ["change", "live"]) {
+      const frame = w.get(`iframe[data-testid='browser-frame-iframe-${key}']`).element as HTMLElement;
+      expect(frame.style.width).toBe("1440px");
+      expect(frame.style.transform).toBe("scale(0.5)");
+      // Scaled back down to the pane's height, so it fills the pane without scrolling.
+      expect(frame.style.height).toBe("1800px");
+      const canvas = w.get(`[data-testid='browser-frame-iframe-${key}-canvas']`).element as HTMLElement;
+      expect(canvas.style.width).toBe("720px");
+    }
+    const sizeButton = w.get("[data-testid='browser-frame-size']");
+    expect(sizeButton.text()).toContain("50%");
+    expect(sizeButton.attributes("aria-label")).toBe("Viewport: Desktop, 50%");
+  });
+
+  it("does not scale a side wide enough for desktop", async () => {
+    size.width = 1600;
+    size.height = 900;
+    const w = mountFrame([CHANGE]);
+    await flushPromises();
+    const frame = w.get("iframe[data-testid='browser-frame-iframe-change']").element as HTMLElement;
+    expect(frame.style.width).toBe("100%");
+    expect(frame.style.transform).toBe("");
+    expect(w.get("[data-testid='browser-frame-size']").text()).not.toContain("%");
   });
 
   it("lays every side out at the chosen device width", async () => {

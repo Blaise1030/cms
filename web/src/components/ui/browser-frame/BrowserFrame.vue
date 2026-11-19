@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useElementSize } from "@vueuse/core";
 import type { DropdownMenuItem } from "@nuxt/ui";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
-import { DESKTOP_MIN_WIDTH, frameFit } from "@/modules/preview/frameFit";
+import { DESKTOP_MIN_WIDTH } from "@/modules/preview/frameFit";
 import { DEVICE_WIDTH, type Device } from "@/modules/preview/store";
+import BrowserFramePane from "./BrowserFramePane.vue";
 import { frameUrl, normalizePath } from "./frameUrl";
 
 /** One framed site. `url` is its base; `null` (or a non-http URL) shows the `placeholder` slot. */
@@ -47,15 +47,13 @@ const goBack = () => canGoBack.value && at.value--;
 const goForward = () => canGoForward.value && at.value++;
 const reload = () => reloadNonce.value++;
 
-
 const srcs = computed(() => props.frames.map((f) => frameUrl(f.url, path.value)));
 
-/** Every side gets the same width, so one measurement sizes them all. */
-const pane = ref<HTMLElement | null>(null);
-const paneSize = useElementSize(pane);
-const fit = computed(() => frameFit(device.value, paneSize.width.value, paneSize.height.value));
-const zoomed = computed(() => fit.value.scale < 1);
-const zoomPercent = computed(() => Math.round(fit.value.scale * 100));
+/** Each side fits its own width; the toolbar shows the first side's zoom (side by side, they match). */
+const scales = ref<Record<string, number>>({});
+const scale = computed(() => scales.value[props.frames[0]?.key ?? ""] ?? 1);
+const zoomed = computed(() => scale.value < 1);
+const zoomPercent = computed(() => Math.round(scale.value * 100));
 
 const DEVICES: { id: Device; label: string; icon: string }[] = [
   { id: "desktop", label: "Desktop", icon: "i-hugeicons-computer" },
@@ -191,38 +189,16 @@ function openExternal(src: string | null) {
             />
           </UTooltip>
         </div>
-        <div
-          :ref="i === 0 ? (el) => (pane = el as HTMLElement | null) : undefined"
-          class="bg-background flex min-h-0 flex-1 justify-center overflow-auto"
+        <BrowserFramePane
+          :src="srcs[i] ?? null"
+          :title="frame.label"
+          :device="device"
+          :reload-nonce="reloadNonce"
+          :testid="`browser-frame-iframe-${frame.key}`"
+          @fit="scales = { ...scales, [frame.key]: $event }"
         >
-          <slot v-if="!srcs[i]" name="placeholder" :frame="frame" />
-          <!-- Sized to the scaled frame, so the pane centres and clips what is actually shown. -->
-          <div
-            v-else
-            class="relative h-full shrink-0 overflow-hidden"
-            :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
-          >
-            <!-- Another site: its scripts run in its own origin, never orso's. -->
-            <iframe
-              :key="`${srcs[i]}:${reloadNonce}`"
-              :src="srcs[i]!"
-              :title="frame.label"
-              class="h-full origin-top-left border-0 bg-white"
-              :style="{
-                width: fit.width ? `${fit.width}px` : '100%',
-                ...(zoomed ? { height: `${fit.height}px`, transform: `scale(${fit.scale})` } : {}),
-              }"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              referrerpolicy="no-referrer"
-              :data-testid="`browser-frame-iframe-${frame.key}`"
-            />
-            <div
-              v-if="device !== 'desktop'"
-              class="border-default pointer-events-none absolute inset-0 border"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
+          <slot name="placeholder" :frame="frame" />
+        </BrowserFramePane>
       </section>
     </div>
   </div>
