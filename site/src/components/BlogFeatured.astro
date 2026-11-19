@@ -3,6 +3,7 @@ import { Image } from "astro:assets";
 import Painting from "./Painting.astro";
 import { paintingFor } from "../lib/paintings";
 import { href } from "../lib/href";
+import { categoryBadge } from "../lib/pill";
 import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
 
 interface Props {
@@ -42,7 +43,7 @@ const postCategories = categoriesOf(post, categories);
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
         <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
         {postCategories.map((category) => (
-          <a class="label relative z-10 transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
+          <a class={categoryBadge} href={href(`/blog/categories/${category.id}/`)}>{category.title}</a>
         ))}
       </div>
       <h2 class="text-title tracking-display text-ink">

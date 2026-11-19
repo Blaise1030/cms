@@ -1,3 +1,4 @@
+import { badgeVariants } from "../components/ui/badge";
 import { buttonVariants } from "../components/ui/button";
 import { cn } from "./utils";
 
@@ -9,6 +10,9 @@ export const filterPill = cn(
   buttonVariants({ variant: "outline", size: "sm" }),
   "rounded-full px-3 aria-[current=page]:bg-secondary aria-[current=page]:text-foreground",
 );
+
+/** Blog category label on cards and posts: the shadcn outline badge, as a link. */
+export const categoryBadge = cn(badgeVariants({ variant: "outline" }), "relative z-10");
 
 /** Larger filter pill, used where the filters sit beside the search bar (blog list). */
 export const filterPillLg = cn(
