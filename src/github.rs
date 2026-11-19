@@ -2112,8 +2112,27 @@ impl GithubAuth {
         decision: Decision,
         comment: Option<&str>,
     ) -> Result<(), ApiError> {
+        let event = match decision {
+            Decision::Greenlight => "APPROVE",
+            Decision::SendBack => "REQUEST_CHANGES",
+        };
+        self.submit_review_event(repo, number, head_sha, event, comment.unwrap_or_default())
+            .await
+    }
+
+    /// 409 `head_moved` unless `number`'s head is still `head_sha` (read fresh, not cached).
+    pub async fn ensure_head(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), ApiError> {
         let pull: ApiPull = self
-            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/pulls/{number}"),
+                None,
+            )
             .await?;
         if pull.head.as_ref().map(|h| h.sha.as_str()) != Some(head_sha) {
             return Err(
@@ -2121,17 +2140,27 @@ impl GithubAuth {
                     .with_reason("head_moved"),
             );
         }
-        let event = match decision {
-            Decision::Greenlight => "APPROVE",
-            Decision::SendBack => "REQUEST_CHANGES",
-        };
+        Ok(())
+    }
+
+    /// A review of `number` with GitHub's `event` (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`)
+    /// and `body`, pinned to `head_sha` (409 `head_moved` when the head has moved since).
+    pub async fn submit_review_event(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+        event: &str,
+        body: &str,
+    ) -> Result<(), ApiError> {
+        self.ensure_head(repo, number, head_sha).await?;
         let (status, _) = self
             .api_raw(
                 reqwest::Method::POST,
                 &format!("/repos/{repo}/pulls/{number}/reviews"),
                 Some(&serde_json::json!({
                     "event": event,
-                    "body": comment.unwrap_or_default(),
+                    "body": body,
                     "commit_id": head_sha,
                 })),
             )
@@ -4198,6 +4227,66 @@ esac"#,
         auth.cached_get("token-a", path).await.unwrap();
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn head_check_reads_past_the_get_cache() {
+        use axum::routing::{get, post};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let reads = std::sync::Arc::new(AtomicUsize::new(0));
+        let posts = std::sync::Arc::new(AtomicUsize::new(0));
+        let (r, p) = (reads.clone(), posts.clone());
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls/3",
+                get(move || {
+                    let r = r.clone();
+                    async move {
+                        // The creator pushes right after the first read.
+                        let head = if r.fetch_add(1, Ordering::SeqCst) == 0 {
+                            "h1"
+                        } else {
+                            "h2"
+                        };
+                        axum::Json(
+                            serde_json::json!({ "number": 3, "html_url": "u", "title": "t",
+                            "head": { "sha": head } }),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/reviews",
+                post(move || {
+                    let p = p.clone();
+                    async move {
+                        p.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({}))
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "head-fresh");
+        // A cached read still says h1 for the next 15 s.
+        let cached: ApiPull = auth.get_json("/repos/acme/site/pulls/3").await.unwrap();
+        assert_eq!(cached.head.unwrap().sha, "h1");
+        let again: ApiPull = auth.get_json("/repos/acme/site/pulls/3").await.unwrap();
+        assert_eq!(again.head.unwrap().sha, "h1");
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        let err = auth
+            .submit_review("acme/site", 3, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 409, "{err:?}");
+        assert_eq!(err.reason, Some("head_moved"));
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "the head check asked GitHub"
+        );
+        assert_eq!(posts.load(Ordering::SeqCst), 0, "nothing was submitted");
         stop();
     }
 
