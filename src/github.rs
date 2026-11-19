@@ -8,6 +8,7 @@
 //! The token is sent to the GitHub API as a bearer token and to git per command through
 //! `GIT_CONFIG_*` environment variables, so it never appears in argv or in a repo's config.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -217,6 +218,8 @@ struct ApiPull {
     body: Option<String>,
     #[serde(default)]
     closed_at: Option<String>,
+    #[serde(default)]
+    created_at: String,
     /// Reviewers asked for and not yet heard from.
     #[serde(default)]
     requested_reviewers: Vec<ApiLogin>,
@@ -368,6 +371,25 @@ struct ApiReview {
     submitted_at: Option<String>,
 }
 
+/// `GET /repos/{o}/{r}/issues` item: just its conversation's comment count.
+#[derive(Deserialize)]
+struct ApiIssueCount {
+    number: u64,
+    #[serde(default)]
+    comments: u64,
+}
+
+/// `items` with their comment counts filled in from `counts`.
+fn with_comments(items: Vec<ReviewItem>, counts: &HashMap<u64, u64>) -> Vec<ReviewItem> {
+    items
+        .into_iter()
+        .map(|mut i| {
+            i.comments = counts.get(&i.number).copied().unwrap_or(0);
+            i
+        })
+        .collect()
+}
+
 /// `GET /repos/{o}/{r}/issues/{n}/comments` item.
 #[derive(Deserialize)]
 struct ApiIssueComment {
@@ -431,10 +453,32 @@ pub struct ReviewItem {
     pub updated_at: String,
     pub head_sha: String,
     pub checks: ChecksState,
+    /// Check runs that passed (success, neutral or skipped), of `checks_total`.
+    pub checks_passed: u64,
+    pub checks_total: u64,
     pub my_state: MyReviewState,
     /// `me` opened it: shown for viewing, but GitHub will not take a decision from its author.
     pub mine: bool,
+    /// Labels as GitHub shows them.
+    pub labels: Vec<ReviewLabel>,
+    pub created_at: String,
+    /// Conversation comments (best effort: 0 when GitHub couldn't say).
+    pub comments: u64,
+    /// `open`, `closed` or `merged`.
+    pub state: String,
+    pub draft: bool,
 }
+
+/// Labelled closed or merged changes, most recently updated first; `more` when GitHub had
+/// a full page, so there may be older ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClosedReviews {
+    pub reviews: Vec<ReviewItem>,
+    pub more: bool,
+}
+
+/// Closed changes listed at most (one page).
+pub const CLOSED_PAGE: usize = 30;
 
 /// A single change opened for review.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -446,12 +490,9 @@ pub struct ReviewDetail {
     pub open: bool,
     pub draft: bool,
     pub merged: bool,
-    /// The pull request's label names (server-side gating).
+    /// The pull request's label names (server-side gating; the UI reads `item.labels`).
     #[serde(skip)]
     pub labels: Vec<String>,
-    /// The labels as GitHub shows them.
-    #[serde(rename = "labels")]
-    pub label_tags: Vec<ReviewLabel>,
 }
 
 /// A label on a pull request, with its GitHub colour (hex, no `#`).
@@ -1850,7 +1891,67 @@ impl GithubAuth {
             .buffered(INBOX_CONCURRENCY)
             .try_collect()
             .await?;
-        Ok(ReviewInbox { reviews, open })
+        let counts = self.comment_counts(repo, false).await;
+        Ok(ReviewInbox {
+            reviews: with_comments(reviews, &counts),
+            open,
+        })
+    }
+
+    /// The most recently updated closed or merged pull requests carrying any of `labels`
+    /// (one page of [`CLOSED_PAGE`]), each as an inbox row.
+    pub async fn closed_reviews(
+        &self,
+        repo: &str,
+        labels: &[String],
+        me: &str,
+    ) -> Result<ClosedReviews, ApiError> {
+        use futures_util::{StreamExt, TryStreamExt};
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page={CLOSED_PAGE}"
+            ))
+            .await?;
+        let more = pulls.len() >= CLOSED_PAGE;
+        let kept: Vec<ApiPull> = pulls
+            .into_iter()
+            .filter(|p| {
+                p.labels
+                    .iter()
+                    .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(&l.name)))
+            })
+            .collect();
+        let reviews = futures_util::stream::iter(kept)
+            .map(|p| self.review_item(repo, p, me))
+            .buffered(INBOX_CONCURRENCY)
+            .try_collect()
+            .await?;
+        let counts = self.comment_counts(repo, true).await;
+        Ok(ClosedReviews {
+            reviews: with_comments(reviews, &counts),
+            more,
+        })
+    }
+
+    /// Conversation comment counts by number, from the issues listing (which includes pull
+    /// requests). Best effort: an unreadable listing counts nothing. Open ones are every page;
+    /// closed ones the most recently updated page, matching [`Self::closed_reviews`].
+    async fn comment_counts(&self, repo: &str, closed: bool) -> HashMap<u64, u64> {
+        let path = format!("/repos/{repo}/issues");
+        let issues = if closed {
+            self.get_json::<Vec<ApiIssueCount>>(&format!(
+                "{path}?state=closed&sort=updated&direction=desc&per_page=100"
+            ))
+            .await
+        } else {
+            self.get_all_query::<Vec<ApiIssueCount>, ApiIssueCount>(&path, "state=open&", |p| p)
+                .await
+        };
+        issues
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| (i.number, i.comments))
+            .collect()
     }
 
     /// One pull request opened for review.
@@ -1867,14 +1968,6 @@ impl GithubAuth {
         let (draft, description, merged) =
             (pull.draft, pull.body.clone(), pull.merged_at.is_some());
         let labels = pull.labels.iter().map(|l| l.name.clone()).collect();
-        let label_tags = pull
-            .labels
-            .iter()
-            .map(|l| ReviewLabel {
-                name: l.name.clone(),
-                color: l.color.clone(),
-            })
-            .collect();
         let item = self.review_item(repo, pull, me).await?;
         Ok(ReviewDetail {
             item,
@@ -1883,7 +1976,6 @@ impl GithubAuth {
             draft,
             merged,
             labels,
-            label_tags,
         })
     }
 
@@ -2030,20 +2122,37 @@ impl GithubAuth {
         let reviews_path = format!("/repos/{repo}/pulls/{}/reviews", pull.number);
         let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
         let reviews = self.get_all::<Vec<ApiReview>, ApiReview>(&reviews_path, |p| p);
-        let checks = async {
+        let runs = async {
             if sha.is_empty() {
-                return ChecksState::None;
+                return Vec::new();
             }
             self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
                 .await
-                .map_or(ChecksState::None, |r| aggregate_checks(&r))
+                .unwrap_or_default()
         };
-        let (reviews, checks) = tokio::join!(reviews, checks);
+        let (reviews, runs) = tokio::join!(reviews, runs);
         let my_state = my_review_state(&reviews?, me, &sha);
         let mine = pull
             .user
             .as_ref()
             .is_some_and(|u| u.login.eq_ignore_ascii_case(me));
+        let passed = runs
+            .iter()
+            .filter(|r| {
+                r.status == "completed"
+                    && matches!(
+                        r.conclusion.as_deref(),
+                        Some("success" | "neutral" | "skipped")
+                    )
+            })
+            .count();
+        let state = if pull.merged_at.is_some() {
+            "merged"
+        } else if pull.state.as_deref() == Some("closed") {
+            "closed"
+        } else {
+            "open"
+        };
         Ok(ReviewItem {
             number: pull.number,
             title: pull.title,
@@ -2051,9 +2160,23 @@ impl GithubAuth {
             url: pull.html_url,
             updated_at: pull.updated_at,
             head_sha: sha,
-            checks,
+            checks: aggregate_checks(&runs),
+            checks_passed: passed as u64,
+            checks_total: runs.len() as u64,
             my_state,
             mine,
+            labels: pull
+                .labels
+                .iter()
+                .map(|l| ReviewLabel {
+                    name: l.name.clone(),
+                    color: l.color.clone(),
+                })
+                .collect(),
+            created_at: pull.created_at,
+            comments: 0,
+            state: state.to_string(),
+            draft: pull.draft,
         })
     }
 
@@ -3996,6 +4119,40 @@ esac"#,
                 ("dee", ReviewerState::Requested),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn closed_reviews_say_there_may_be_more_after_a_full_page() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    let pulls: Vec<_> = (1..=CLOSED_PAGE as u64)
+                        .map(|n| serde_json::json!({ "number": n, "html_url": "u", "title": "t",
+                            "state": "closed", "labels": [{ "name": if n == 1 { "orso" } else { "x" } }],
+                            "user": { "login": "bob" }, "head": { "sha": "" } }))
+                        .collect();
+                    Json(serde_json::Value::Array(pulls))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/1/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "closedmore");
+        let closed = auth
+            .closed_reviews("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        stop();
+        assert!(closed.more);
+        assert_eq!(closed.reviews.len(), 1);
+        assert_eq!(closed.reviews[0].state, "closed");
+        // No issues listing here: counts fall back to 0.
+        assert_eq!(closed.reviews[0].comments, 0);
     }
 
     #[tokio::test]

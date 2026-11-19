@@ -2,7 +2,7 @@
 //! `GET /api/projects/{id}/reviews/{n}/diff`, `GET /api/projects/{id}/reviews/{n}/preview`,
 //! `POST /api/projects/{id}/reviews/{n}/decision`: the review inbox over HTTP.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -21,6 +21,7 @@ const GONE: &str = "This change is no longer waiting";
 pub(crate) const HEAD_SHA_HEADER: &str = "x-head-sha";
 const OWN_CHANGE: &str = "This is your change";
 const NEEDS_EDIT_ACCESS: &str = "You need edit access to this site's repository to greenlight";
+const CLOSED: &str = "This change is closed";
 
 /// The project and its `owner/name`; a project without a GitHub remote has nothing to review.
 async fn project_repo(state: &AppState, id: &str) -> Result<(Project, String), ApiError> {
@@ -35,14 +36,30 @@ async fn project_repo(state: &AppState, id: &str) -> Result<(Project, String), A
     Ok((project, repo))
 }
 
-/// `GET /api/projects/{id}/reviews` → `{ reviews: ReviewItem[] }`.
+/// Query of `GET /api/projects/{id}/reviews`.
+#[derive(Deserialize, Default)]
+pub struct ListQuery {
+    /// `closed` for closed and merged changes; anything else (or nothing) lists open ones.
+    #[serde(default)]
+    state: Option<String>,
+}
+
+/// `GET /api/projects/{id}/reviews` → `{ reviews: ReviewItem[] }`; with `?state=closed`,
+/// `{ reviews, more }` of the most recently updated labelled closed or merged changes.
 pub async fn list(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let (project, repo) = project_repo(&state, &id).await?;
     let me = state.github.signed_in_login().await?;
     let labels = settings::pr_labels(&project.dir);
+    if query.state.as_deref() == Some("closed") {
+        let closed = state.github.closed_reviews(&repo, &labels, &me).await?;
+        return Ok(Json(
+            json!({ "reviews": closed.reviews, "more": closed.more }),
+        ));
+    }
     let inbox = state.github.review_inbox(&repo, &labels, &me).await?;
     // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref until
     // it actually closes.
@@ -66,18 +83,26 @@ async fn refusal(
     }
 }
 
-/// `GET /api/projects/{id}/reviews/{n}` → the change plus `{ canDecide, reason }`.
+/// `GET /api/projects/{id}/reviews/{n}` → the change plus `{ canDecide, reason }`. A closed or
+/// merged labelled change reads too, with decisions off ("This change is closed"); an open
+/// draft is not waiting for review (404).
 pub async fn detail(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, u64)>,
 ) -> Result<Json<Value>, ApiError> {
-    let (_, repo) = project_repo(&state, &id).await?;
+    let (project, repo) = project_repo(&state, &id).await?;
     let me = state.github.signed_in_login().await?;
     let detail = state.github.review_detail(&repo, number, &me).await?;
-    if !detail.open || detail.draft {
+    if detail.open && detail.draft {
         return Err(ApiError::enoent(GONE));
     }
-    let reason = refusal(&state, &repo, &detail.item.author, &me).await?;
+    let reason = if detail.open {
+        refusal(&state, &repo, &detail.item.author, &me).await?
+    } else {
+        // Closed: only one this project reviews is shown at all.
+        labelled(&project, &detail)?;
+        Some(CLOSED)
+    };
     let mut body = serde_json::to_value(&detail)
         .map_err(|e| ApiError::io(format!("could not encode the change: {e}")))?;
     body["canDecide"] = json!(reason.is_none());
@@ -162,15 +187,22 @@ async fn labelled_detail(
     me: &str,
 ) -> Result<ReviewDetail, ApiError> {
     let detail = state.github.review_detail(repo, number, me).await?;
+    labelled(project, &detail)?;
+    Ok(detail)
+}
+
+/// 404 unless `detail` carries one of the project's review labels.
+fn labelled(project: &Project, detail: &ReviewDetail) -> Result<(), ApiError> {
     let labels = settings::pr_labels(&project.dir);
-    let labelled = detail
+    let ok = detail
         .labels
         .iter()
         .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(l)));
-    if !labelled {
-        return Err(ApiError::enoent(GONE));
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiError::enoent(GONE))
     }
-    Ok(detail)
 }
 
 /// `GET /api/projects/{id}/reviews/{n}/conversation` → [`Conversation`]: readable for any
@@ -259,7 +291,8 @@ pub async fn preview(
     let (project, repo) = project_repo(&state, &id).await?;
     let me = state.github.signed_in_login().await?;
     let detail = labelled_detail(&state, &project, &repo, number, &me).await?;
-    if !detail.open || detail.draft {
+    // A closed change still shows its deploy, if one is left.
+    if detail.open && detail.draft {
         return Err(ApiError::enoent(GONE));
     }
     let sha = detail.item.head_sha;
@@ -299,7 +332,6 @@ mod tests {
     use crate::config::{Config, GithubConfig};
     use crate::projects::Source;
     use axum::body::to_bytes;
-    use axum::extract::Query;
     use axum::routing::get;
     use axum::Router;
     use std::path::Path as FsPath;
@@ -352,12 +384,27 @@ mod tests {
         let routes = Router::new()
             .route(
                 "/repos/acme/site/pulls",
+                get(
+                    |Query(q): Query<std::collections::HashMap<String, String>>| async move {
+                        if q.get("state").map(String::as_str) == Some("closed") {
+                            let mut merged = pull(20, "bob", "closed", false);
+                            merged["merged_at"] = json!("2026-01-05T00:00:00Z");
+                            let mut other = pull(21, "bob", "closed", false);
+                            other["labels"] = json!([{ "name": "release" }]);
+                            return axum::Json(json!([merged, pull(22, "cy", "closed", false), other]));
+                        }
+                        axum::Json(json!([
+                            pull(7, "bob", "open", false),
+                            pull(8, "ada", "open", false),
+                            pull(9, "carol", "open", false)
+                        ]))
+                    },
+                ),
+            )
+            .route(
+                "/repos/acme/site/issues",
                 get(|| async {
-                    axum::Json(json!([
-                        pull(7, "bob", "open", false),
-                        pull(8, "ada", "open", false),
-                        pull(9, "carol", "open", false)
-                    ]))
+                    axum::Json(json!([{ "number": 7, "comments": 3 }, { "number": 20, "comments": 1 }]))
                 }),
             )
             .route(
@@ -509,7 +556,7 @@ mod tests {
     async fn list_returns_every_labelled_change_marking_your_own() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        let v = body_json(list(State(state), Path(id)).await).await;
+        let v = body_json(list(State(state), Path(id), Query(ListQuery::default())).await).await;
         let nums: Vec<u64> = v["reviews"]
             .as_array()
             .unwrap()
@@ -556,23 +603,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detail_of_closed_or_draft_change_is_gone() {
+    async fn detail_of_an_open_draft_is_gone() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        for n in [9, 10] {
-            let err = detail(State(state.clone()), Path((id.clone(), n)))
-                .await
-                .unwrap_err();
-            assert_eq!(err.message, "This change is no longer waiting");
-            assert_eq!(err.code.status(), 404);
-        }
+        let err = detail(State(state), Path((id, 10))).await.unwrap_err();
+        assert_eq!(err.message, "This change is no longer waiting");
+        assert_eq!(err.code.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn detail_of_a_closed_labelled_change_reads_without_decisions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let v = body_json(detail(State(state), Path((id, 9))).await).await;
+        assert_eq!(v["open"], false);
+        assert_eq!(v["state"], "closed");
+        assert_eq!(v["canDecide"], false);
+        assert_eq!(v["reason"], "This change is closed");
+    }
+
+    #[tokio::test]
+    async fn list_rows_carry_labels_counts_and_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let v = body_json(list(State(state), Path(id), Query(ListQuery::default())).await).await;
+        let row = &v["reviews"][0];
+        assert_eq!(row["number"], 7);
+        assert_eq!(row["labels"], json!([{ "name": "orso", "color": "" }]));
+        assert_eq!(row["comments"], 3);
+        assert_eq!(row["state"], "open");
+        assert_eq!(row["draft"], false);
+        assert_eq!(row["checksPassed"], 0);
+        assert_eq!(row["checksTotal"], 0);
+        assert_eq!(v["reviews"][1]["comments"], 0);
+    }
+
+    #[tokio::test]
+    async fn closed_list_has_labelled_closed_and_merged_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let q = Query(ListQuery {
+            state: Some("closed".into()),
+        });
+        let v = body_json(list(State(state), Path(id), q).await).await;
+        let rows: Vec<(u64, String)> = v["reviews"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["number"].as_u64().unwrap(),
+                    r["state"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(rows, vec![(20, "merged".into()), (22, "closed".into())]);
+        assert_eq!(v["reviews"][0]["comments"], 1);
+        assert_eq!(v["more"], false);
     }
 
     #[tokio::test]
     async fn project_without_github_remote_is_a_bad_request() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, None).await;
-        let err = list(State(state), Path(id)).await.unwrap_err();
+        let err = list(State(state), Path(id), Query(ListQuery::default()))
+            .await
+            .unwrap_err();
         assert_eq!(
             err.message,
             "this project has no GitHub remote — open a repository first"
@@ -817,11 +913,16 @@ mod tests {
     async fn preview_of_a_change_not_waiting_is_gone() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        // Closed, draft, unlabelled.
-        for n in [9, 10, 11] {
+        // Draft, unlabelled.
+        for n in [10, 11] {
             let err = preview_of(&state, &id, n).await.unwrap_err();
             assert_eq!(err.message, GONE, "#{n}");
             assert_eq!(err.code.status(), 404);
         }
+        // A closed change still answers with whatever deploy it has.
+        assert_eq!(
+            preview_of(&state, &id, 9).await.unwrap().state,
+            PreviewState::None
+        );
     }
 }
