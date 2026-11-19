@@ -110,6 +110,8 @@ export interface ReviewItem {
   headSha: string;
   checks: ChecksState;
   myState: MyReviewState;
+  /** The signed-in user opened it: viewable, but they can't greenlight it. */
+  mine: boolean;
 }
 
 /** `GET /api/projects/{id}/reviews/{n}`. */

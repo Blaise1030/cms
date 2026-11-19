@@ -60,7 +60,7 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
         class="m-auto"
         variant="naked"
         icon="i-hugeicons-task-done-01"
-        title="Nothing waiting for your greenlight."
+        title="No changes waiting for review."
       />
       <ul v-else class="m-0 flex w-full list-none flex-col gap-1 p-0">
         <li v-for="item in store.items" :key="item.number">
@@ -86,7 +86,8 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
                 :data-checks="item.checks"
                 data-testid="review-checks"
               />
-              <UBadge variant="soft" :color="STATE[item.myState].color" :label="STATE[item.myState].label" />
+              <UBadge v-if="item.mine" variant="soft" color="neutral" label="Yours" data-testid="review-mine" />
+              <UBadge v-else variant="soft" :color="STATE[item.myState].color" :label="STATE[item.myState].label" />
               <UIcon name="i-hugeicons-arrow-right-01" class="text-muted size-4" />
             </span>
           </UButton>

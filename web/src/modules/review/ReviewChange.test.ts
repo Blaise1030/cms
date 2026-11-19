@@ -37,7 +37,7 @@ import ReviewChange from "./ReviewChange.vue";
 
 const DETAIL: ReviewDetail = {
   number: 7, title: "Fresh homepage hero", author: "Ada", url: "https://example.test/7",
-  updatedAt: new Date().toISOString(), headSha: "abc", checks: "passing", myState: "new",
+  updatedAt: new Date().toISOString(), headSha: "abc", checks: "passing", myState: "new", mine: false,
   description: "Rewrote the hero copy.", open: true, draft: false, canDecide: true, reason: null,
 };
 const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-x\n+y\n";

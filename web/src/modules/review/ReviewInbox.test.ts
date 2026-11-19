@@ -21,6 +21,7 @@ const item = (over: Partial<ReviewItem>): ReviewItem => ({
   headSha: "abc",
   checks: "passing",
   myState: "new",
+  mine: false,
   ...over,
 });
 
@@ -64,7 +65,7 @@ describe("ReviewInbox", () => {
 
   it("shows the empty copy", async () => {
     const { w } = await mountInbox([]);
-    expect(w.text()).toContain("Nothing waiting for your greenlight.");
+    expect(w.text()).toContain("No changes waiting for review.");
   });
 
   it("opens a change by routing to project-review", async () => {
@@ -77,6 +78,16 @@ describe("ReviewInbox", () => {
 
   it("counts only new items as waiting", async () => {
     await mountInbox([item({ number: 1 }), item({ number: 2, myState: "greenlit" })]);
+    expect(useReviewStore().waitingCount).toBe(1);
+  });
+
+  it("lists your own changes marked Yours, without counting them as waiting", async () => {
+    const { w } = await mountInbox([item({ number: 1 }), item({ number: 2, mine: true, title: "Mine" })]);
+    const rows = w.findAll("[data-testid='review-item']");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.find("[data-testid='review-mine']").text()).toBe("Yours");
+    expect(rows[1]!.text()).not.toContain("New");
+    expect(rows[0]!.find("[data-testid='review-mine']").exists()).toBe(false);
     expect(useReviewStore().waitingCount).toBe(1);
   });
 

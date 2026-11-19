@@ -378,6 +378,8 @@ pub struct ReviewItem {
     pub head_sha: String,
     pub checks: ChecksState,
     pub my_state: MyReviewState,
+    /// `me` opened it: shown for viewing, but GitHub will not take a decision from its author.
+    pub mine: bool,
 }
 
 /// A single change opened for review.
@@ -1540,8 +1542,8 @@ impl GithubAuth {
         Ok(r.permissions.is_some_and(|p| p.push))
     }
 
-    /// Open, non-draft pull requests carrying any of `labels` (case-insensitive) that `me`
-    /// did not author, each with `me`'s review standing and the head's checks.
+    /// Open, non-draft pull requests carrying any of `labels` (case-insensitive), `me`'s own
+    /// included (marked `mine`), each with `me`'s review standing and the head's checks.
     pub async fn review_inbox(
         &self,
         repo: &str,
@@ -1564,10 +1566,6 @@ impl GithubAuth {
                     && p.labels
                         .iter()
                         .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(&l.name)))
-                    && !p
-                        .user
-                        .as_ref()
-                        .is_some_and(|u| u.login.eq_ignore_ascii_case(me))
             })
             .collect();
         // Bounded, so a busy repository does not fire every PR's requests at once; `buffered`
@@ -1672,6 +1670,10 @@ impl GithubAuth {
         };
         let (reviews, checks) = tokio::join!(reviews, checks);
         let my_state = my_review_state(&reviews?, me, &sha);
+        let mine = pull
+            .user
+            .as_ref()
+            .is_some_and(|u| u.login.eq_ignore_ascii_case(me));
         Ok(ReviewItem {
             number: pull.number,
             title: pull.title,
@@ -1681,6 +1683,7 @@ impl GithubAuth {
             head_sha: sha,
             checks,
             my_state,
+            mine,
         })
     }
 
@@ -3467,7 +3470,7 @@ esac"#,
     }
 
     #[tokio::test]
-    async fn review_inbox_filters_label_draft_and_author() {
+    async fn review_inbox_filters_label_and_draft_and_marks_mine() {
         use axum::routing::get;
         use axum::{Json, Router};
 
@@ -3500,6 +3503,10 @@ esac"#,
                 }),
             )
             .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
                 "/repos/acme/site/pulls/5/reviews",
                 get(|| async { Json(serde_json::json!([])) }),
             )
@@ -3519,14 +3526,18 @@ esac"#,
             .unwrap();
         assert_eq!(inbox.open, vec![1, 2, 3, 4, 5]);
         let items = inbox.reviews;
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 3);
         assert_eq!(items[0].number, 1);
+        assert!(!items[0].mine);
         assert_eq!(items[0].author, "bob");
         assert_eq!(items[0].head_sha, "h1");
         assert_eq!(items[0].checks, ChecksState::Passing);
         assert_eq!(items[0].my_state, MyReviewState::Greenlit);
-        assert_eq!(items[1].number, 5);
-        assert_eq!(items[1].author, "ghost");
+        assert_eq!(items[1].number, 4);
+        assert!(items[1].mine, "the signed-in user's own change is listed, marked mine");
+        assert_eq!(items[2].number, 5);
+        assert_eq!(items[2].author, "ghost");
+        assert!(!items[2].mine);
         let json = serde_json::to_value(&items[0]).unwrap();
         assert_eq!(json["headSha"], "h1");
         assert_eq!(json["myState"], "greenlit");

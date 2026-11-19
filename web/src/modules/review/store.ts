@@ -45,7 +45,7 @@ export const useReviewStore = defineStore("review", () => {
     opening.value = false;
   }
 
-  const waitingCount = computed(() => items.value.filter((i) => i.myState === "new").length);
+  const waitingCount = computed(() => items.value.filter((i) => !i.mine && i.myState === "new").length);
 
   async function load(id: string) {
     scope(id);

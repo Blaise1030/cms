@@ -11,7 +11,7 @@ import { useReviewStore } from "./store";
 
 const item = (number: number, myState: ReviewItem["myState"] = "new"): ReviewItem => ({
   number, title: `T${number}`, author: "Ada", url: "u", updatedAt: new Date().toISOString(),
-  headSha: "s", checks: "none", myState,
+  headSha: "s", checks: "none", myState, mine: false,
 });
 const DETAIL = { ...item(7), description: null, open: true, draft: false, canDecide: true, reason: null };
 const deferred = <T>() => {

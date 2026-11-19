@@ -32,7 +32,7 @@ and checked-out change are untouched throughout.
 | Question | Decision |
 | --- | --- |
 | Who reviews | Content leads inside orso; no GitHub knowledge needed |
-| Which changes appear | Open, non-draft PRs with any `prLabels` label, not authored by you |
+| Which changes appear | Open, non-draft PRs with any `prLabels` label, yours included (marked **Yours**, view-only, not counted in the badge) |
 | Inbox scope | Per site (project) for v1 |
 | How the change is shown rendered | Static build of the PR head in a temporary worktree |
 | "Before" side | **View live site** link; no build of `main` in v1 |
