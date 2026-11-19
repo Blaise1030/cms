@@ -20,7 +20,20 @@ export const site = {
   /** Header secondary action; set to `null` to hide it. */
   secondaryCta: { label: "GitHub", href: "https://github.com/Blaise1030/cms" },
   /** Header call to action; set to `null` to hide it. */
-  cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
+  cta: { label: "Get Orso", href: "https://github.com/Blaise1030/cms" },
+  /** Download button: bump `version` when a new GitHub release ships; asset names must match the release. */
+  release: {
+    version: "v0.1.9",
+    repo: "https://github.com/Blaise1030/cms",
+    /** Shown in the thank-you popup after a download. Placeholder: replace with your real page. */
+    coffeeUrl: "https://buymeacoffee.com/blaise1030",
+    downloads: [
+      { os: "mac", label: "macOS", detail: "Apple Silicon", target: "aarch64-apple-darwin" },
+      { os: "mac", label: "macOS", detail: "Intel", target: "x86_64-apple-darwin" },
+      { os: "linux", label: "Linux", detail: "x64", target: "x86_64-unknown-linux-gnu" },
+      { os: "linux", label: "Linux", detail: "ARM64", target: "aarch64-unknown-linux-gnu" },
+    ],
+  },
   footer: {
     text: "© 2026 Project Orso",
     links: [

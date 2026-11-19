@@ -3,7 +3,7 @@ import Base from "../../layouts/Base.astro";
 import BlogCard from "../../components/BlogCard.astro";
 import BlogFeatured from "../../components/BlogFeatured.astro";
 import BlogFilters from "../../components/BlogFilters.astro";
-import BlogSearch from "../../components/BlogSearch.astro";
+import PagefindSearch from "../../components/PagefindSearch.astro";
 import { loadBlog, searchText } from "../../lib/blog";
 import { breadcrumbs } from "../../lib/seo";
 const { posts, categories } = await loadBlog();
@@ -15,27 +15,28 @@ const [lead, ...rest] = posts;
   jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: "Blog" }, breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }])]}
 >
   <h1 class="sr-only">Blog</h1>
-  {posts.length === 0 ? (
-    <p class="page py-16 text-muted">No blog posts yet. Check back soon for news and stories.</p>
-  ) : (
-    <>
-      <BlogFeatured post={lead} categories={categories} search={searchText(lead, categories)} />
-      <div class="border-y border-line">
-        <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
-          <h2 class="text-heading tracking-tight text-ink">Recent posts</h2>
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-            <BlogFilters categories={categories} />
-            <span class="hidden h-4 w-px shrink-0 bg-line-strong sm:mt-2 sm:block" aria-hidden="true"></span>
-            <BlogSearch />
+  <div class="mx-auto w-full max-w-7xl border-x border-line">
+    {posts.length === 0 ? (
+      <p class="page py-16 text-muted">No blog posts yet. Check back soon for news and stories.</p>
+    ) : (
+      <>
+        <BlogFeatured post={lead} categories={categories} search={searchText(lead, categories)} />
+        <div class="border-y border-line">
+          <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
+            <h2 class="text-heading tracking-tight text-ink">Recent posts</h2>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+              <BlogFilters categories={categories} />
+              <span class="hidden h-4 w-px shrink-0 bg-line-strong sm:mt-2 sm:block" aria-hidden="true"></span>
+              <PagefindSearch bundle="blog" placeholder="Search posts" class="w-full sm:w-72" />
+            </div>
           </div>
         </div>
-      </div>
-      {rest.length > 0 && (
-        <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3" data-blog-grid>
-          {rest.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
-        </div>
-      )}
-      <p class="page py-16 text-muted" data-blog-empty hidden>No posts match your search.</p>
-    </>
-  )}
+        {rest.length > 0 && (
+          <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3" data-blog-grid>
+            {rest.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
+          </div>
+        )}
+      </>
+    )}
+  </div>
 </Base>

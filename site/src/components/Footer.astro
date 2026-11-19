@@ -18,8 +18,8 @@ const groups = [
 const legal = [...site.footer.links, site.footer.license];
 ---
 
-<footer class="page mt-section pb-gutter md:pb-gutter-wide" id="site-footer">
-  <div class="rounded-xl bg-sand px-5 py-10 md:px-10 md:py-12 lg:px-14 lg:py-16">
+<footer class="relative mx-auto -mt-px w-full max-w-7xl border-x border-t border-line" id="site-footer">
+  <div class="px-5 py-10 md:px-10 md:py-12 lg:px-14 lg:py-16">
     <div class="grid gap-12 md:grid-cols-12 md:gap-10">
       <div class="md:col-span-5">
         <a class="inline-flex items-center gap-2.5 text-ink" href={base} aria-label={`${site.name} home`}>
@@ -27,11 +27,11 @@ const legal = [...site.footer.links, site.footer.license];
           <span class="text-body font-medium tracking-tight">{site.name}</span>
         </a>
 
-        <p class="mt-8 max-w-md text-title leading-tight font-medium tracking-display text-ink md:mt-10">
+        <p class="mt-8 max-w-md text-heading leading-snug font-medium tracking-display text-ink md:mt-10">
           {lead}.
         </p>
         {tail.length > 0 && (
-          <p class="mt-2 max-w-md text-title leading-tight font-medium tracking-display text-muted">
+          <p class="mt-2 max-w-md text-heading leading-snug font-medium tracking-display text-muted">
             {tail.join(". ")}
           </p>
         )}

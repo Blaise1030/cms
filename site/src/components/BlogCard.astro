@@ -1,6 +1,7 @@
 ---
 import { Image } from "astro:assets";
-import Artwork from "./Artwork.astro";
+import Painting from "./Painting.astro";
+import { paintingFor } from "../lib/paintings";
 import { href } from "../lib/href";
 import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
 
@@ -20,7 +21,7 @@ const postCategories = categoriesOf(post, categories);
 ---
 
 <article
-  class:list={["group relative flex flex-col gap-5 bg-surface p-6 transition-colors duration-gentle ease-gentle hover:bg-sand lg:p-10", className]}
+  class:list={["group relative flex flex-col gap-5 bg-surface p-2 transition-colors duration-gentle ease-gentle hover:bg-sand lg:p-3", className]}
   data-blog-item
   data-search={search}
 >
@@ -34,10 +35,12 @@ const postCategories = categoriesOf(post, categories);
         sizes="(min-width: 1024px) 26rem, (min-width: 640px) 50vw, 100vw"
       />
     ) : (
-      <Artwork seed={post.id} class="aspect-16/10 w-full transition-transform duration-slow ease-settle group-hover:scale-102" />
+      <div class="relative aspect-16/10 w-full transition-transform duration-slow ease-settle group-hover:scale-102">
+        <Painting id={paintingFor(post.id)} />
+      </div>
     )}
   </div>
-  <div class="flex flex-col gap-2">
+  <div class="flex flex-col gap-2 px-1 pb-2 lg:pb-3">
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
       <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
       {postCategories.map((category) => (
@@ -45,7 +48,7 @@ const postCategories = categoriesOf(post, categories);
       ))}
     </div>
     <Heading class="text-heading tracking-tight text-ink">
-      <a class="decoration-line-strong decoration-1 underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+      <a class="after:absolute after:inset-0" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
     </Heading>
     <p class="text-muted">{post.data.description}</p>
   </div>

@@ -1,6 +1,6 @@
 # Painted backdrops
 
-Public-domain Renaissance landscapes used behind the product previews on the home page. Every
+Public-domain Renaissance landscapes used behind the product previews on the home page and as blog card covers. Every
 image is a landscape with no figures; two are cropped details of larger works so the staffage is
 out of frame. Each file is a resized, WebP-compressed copy of the Wikimedia Commons original.
 

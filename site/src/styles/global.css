@@ -210,16 +210,35 @@
 
 /* Brand marks: pair `.logo-on-light` + `.logo-on-dark` so the correct press-kit SVG shows
    with the same prefers-color-scheme switch as the design tokens. */
-.logo-on-dark {
+.logo-on-dark,
+.scheme-dark {
   display: none;
 }
 @media (prefers-color-scheme: dark) {
-  .logo-on-light {
+  .logo-on-light,
+  .scheme-light {
     display: none;
   }
-  .logo-on-dark {
+  .logo-on-dark,
+  .scheme-dark {
     display: block;
   }
+}
+
+/* Pagefind Component UI (PagefindSearch.astro) on the site tokens, light and dark. Not named
+   pf-*: Pagefind resets every element whose class starts with "pf-" (all: revert). */
+.search-theme {
+  --pf-font: var(--font-sans);
+  --pf-text: var(--color-ink);
+  --pf-text-secondary: var(--color-muted);
+  --pf-text-muted: var(--color-muted);
+  --pf-background: var(--color-surface-raised);
+  --pf-border: var(--color-line);
+  --pf-border-focus: var(--color-line-strong);
+  --pf-hover: var(--color-sand);
+  --pf-mark: var(--color-ink);
+  --pf-outline-focus: var(--color-accent);
+  --pf-border-radius: var(--radius-lg);
 }
 
 /* A quiet text link: hairline underline that darkens on hover. */
@@ -337,6 +356,10 @@
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
+  }
+  /* Lenis drives wheel scrolling; native smooth scrolling would fight it. */
+  html.lenis {
+    scroll-behavior: auto;
   }
   /* Hero words arrive once, in one sequence. */
   .word {

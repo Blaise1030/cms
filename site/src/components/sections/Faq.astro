@@ -24,13 +24,29 @@ const faqs = [
       "No. Orso reads the Markdown already in your repo. Open the repo and your posts and docs show up as collections.",
   },
   {
+    question: "Which sites does it work with, and what does it add to my repo?",
+    answer:
+      "Astro 7 sites with a main branch. New sites start from Orso's template. For an existing site, Orso adds a small integration and loads your collections through it. A setup skill makes those changes on a branch for you to review.",
+  },
+  {
+    question: "Who decides what goes live?",
+    answer:
+      "You do, through GitHub. Every change is a pull request into main, and Publish merges it once it's approved. Turn on branch protection and nothing merges without a review.",
+  },
+  {
+    question: "How is this different from a hosted or Git-based CMS?",
+    answer:
+      "A hosted CMS keeps your content in its own database. A Git-based CMS keeps it in your repo and gives editors forms for the fields you configure. Orso also keeps it in your repo, then adds live previews of the real site, pull-request review and a coding agent for changes a form can't make.",
+  },
+  {
     question: "Can someone break the live site?",
     answer:
       "Not by accident. Every change lands in a draft with its own preview, nothing goes live until someone hits Publish, and every save is a checkpoint you can roll back in one click.",
   },
   {
     question: "Which AI agent do I need?",
-    answer: "Claude, Cursor or Codex. If your team already pays for one of them, that's everything Orso needs.",
+    answer:
+      "Claude, Cursor, Codex or OpenCode. If your team already pays for one of the first three, that's everything Orso needs. OpenCode runs free models and needs no account.",
   },
   {
     question: "How is this free?",
@@ -54,7 +70,7 @@ const jsonLd = {
 };
 ---
 
-<section class="page grid gap-12 py-section md:grid-cols-12 md:gap-10" id="faq">
+<section class="page mx-auto max-w-7xl border-x border-line grid gap-12 py-section md:grid-cols-12 md:gap-10" id="faq">
   <div class="md:col-span-4">
     <h2 class="text-title tracking-display text-ink">Questions, answered.</h2>
     <p class="mt-5 text-muted">

@@ -21,16 +21,18 @@ const description = category.description ?? `Blog posts about ${category.title.t
     breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }, { name: category.title, path: `/blog/categories/${category.id}/` }]),
   ]}
 >
-  <PageHeader title={category.title} description={category.description} back={{ label: "All categories", href: "/blog/categories/" }} />
-  <div class="mt-12 border-y border-line">
-    <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
-      <h2 class="text-heading tracking-tight text-ink">Posts</h2>
-      <BlogFilters categories={categories} active={category.id} />
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
+    <PageHeader title={category.title} description={category.description} back={{ label: "All categories", href: "/blog/categories/" }} />
+    <div class="mt-12 border-y border-line">
+      <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">
+        <h2 class="text-heading tracking-tight text-ink">Posts</h2>
+        <BlogFilters categories={categories} active={category.id} />
+      </div>
     </div>
+    {category.posts.length === 0 ? <p class="page py-16 text-muted">No posts in this category yet.</p> : (
+      <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">
+        {category.posts.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
+      </div>
+    )}
   </div>
-  {category.posts.length === 0 ? <p class="page py-16 text-muted">No posts in this category yet.</p> : (
-    <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">
-      {category.posts.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
-    </div>
-  )}
 </Base>

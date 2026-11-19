@@ -1,19 +1,27 @@
 ---
 import { OpsCarousel } from "../react/OpsCarousel";
+import { appShot } from "../../lib/appShots";
+
+const shots = {
+  content: await appShot("ops-content"),
+  preview: await appShot("ops-preview"),
+  publish: await appShot("ops-publish"),
+  agent: await appShot("ops-agent"),
+  history: await appShot("ops-history"),
+};
 ---
 
-<section class="py-section" id="scale">
+<section class="mx-auto max-w-7xl border border-line pt-10 md:pt-12" id="scale">
   <div class="page">
     <div class="max-w-2xl">
       <h2 class="text-title tracking-display text-ink">Handle content work at scale</h2>
       <p class="mt-4 max-w-measure text-muted">
-        The desk your team uses for drafts, previews, Publish and history — built on the repo your developer already set
-        up.
+        The desk your team uses for drafts, previews, Publish and history, built on the repo you already set up.
       </p>
     </div>
   </div>
 
-  <div class="mt-10">
-    <OpsCarousel client:visible />
+  <div class="mt-6">
+    <OpsCarousel client:visible shots={shots} />
   </div>
 </section>

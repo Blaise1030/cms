@@ -21,14 +21,16 @@ const groups = [{ id: "", title: "", docs: section.loose }, ...section.subsectio
     breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: section.title, path: `/help/section/${section.id}/` }]),
   ]}
 >
-  <PageHeader title={section.title} description={section.description} back={{ label: "Back to Help", href: "/help/" }} />
-  <div class="page">
-    {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
-    {groups.map((group) => (
-      <section class="mt-16 grid gap-6 md:grid-cols-12 md:gap-10">
-        <div class="md:col-span-4">{group.title && <h2 class="text-heading tracking-display text-ink">{group.title}</h2>}</div>
-        <div class="md:col-span-8"><DocList docs={group.docs} /></div>
-      </section>
-    ))}
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
+    <PageHeader title={section.title} description={section.description} back={{ label: "Back to Help", href: "/help/" }} />
+    <div class="page">
+      {section.docs.length === 0 && <p class="mt-12 text-muted">No articles in this section yet.</p>}
+      {groups.map((group) => (
+        <section class="mt-16 grid gap-6 md:grid-cols-12 md:gap-10">
+          <div class="md:col-span-4">{group.title && <h2 class="text-heading tracking-display text-ink">{group.title}</h2>}</div>
+          <div class="md:col-span-8"><DocList docs={group.docs} /></div>
+        </section>
+      ))}
+    </div>
   </div>
 </Base>
