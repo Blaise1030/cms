@@ -165,6 +165,21 @@ describe("ReviewChange", () => {
     resetShotQueuesForTest();
   });
 
+  it("clears the macOS desktop traffic lights and drags the window from its header", async () => {
+    document.documentElement.dataset.desktop = "macos";
+    try {
+      const { w } = await mountChange({
+        review: vi.fn(async () => DETAIL),
+        reviewDiff: vi.fn(async () => diffOf(DIFF)),
+      });
+      const header = w.get("[data-testid='review-change-header']");
+      expect(header.classes()).toContain("pl-10");
+      expect(header.attributes("data-tauri-drag-region")).toBe("deep");
+    } finally {
+      delete document.documentElement.dataset.desktop;
+    }
+  });
+
   it("lists a binary-only change", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),

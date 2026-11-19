@@ -16,6 +16,7 @@ import { applyQuery, DEFAULT_QUERY, parseQuery, setQualifier, SORT_KEY, type Inb
 import { labelStyle } from "./labels";
 import { useProjectsStore } from "@/modules/projects/store";
 import { useClosedInbox, useInbox } from "./queries";
+import { isMacDesktop } from "@/lib/desktop";
 
 const props = defineProps<{ projectId: string }>();
 const inbox = useInbox(() => props.projectId);
@@ -152,12 +153,20 @@ function prIcon(item: ReviewItem) {
 
 const draft = ref<string | null>(null);
 const open = (number: number) => router.push(reviewPath(props.projectId, number));
+/** The macOS desktop app's traffic lights sit over this page's top-left corner. */
+const macDesktop = isMacDesktop();
 </script>
 
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-inbox">
     <div class="flex min-h-full flex-col gap-3 p-3">
-      <header class="flex shrink-0 flex-col gap-0.5 pt-1" data-testid="review-inbox-header">
+      <!-- No project top bar here: on the macOS desktop app the header clears the traffic lights
+           and is where the window is dragged from. -->
+      <header
+        :class="['flex shrink-0 flex-col gap-0.5 pt-1', macDesktop && 'pl-7 fullscreen:pl-0']"
+        :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
+        data-testid="review-inbox-header"
+      >
         <h1 class="text-highlighted text-lg font-semibold">Changes for review</h1>
         <p v-if="subtitle" class="text-muted truncate text-sm" data-testid="review-inbox-subtitle">{{ subtitle }}</p>
       </header>

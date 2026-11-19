@@ -20,6 +20,7 @@ import { RouterLink } from "vue-router";
 import SendBackDialog from "./SendBackDialog.vue";
 import { useChange, useConversation, usePreview } from "./queries";
 import { labelStyle } from "./labels";
+import { isMacDesktop } from "@/lib/desktop";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/ChangedFilesTree.vue"));
@@ -254,11 +255,19 @@ function reveal(path: string) {
   );
   section?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+/** The macOS desktop app's traffic lights sit over this page's top-left corner. */
+const macDesktop = isMacDesktop();
 </script>
 
 <template>
   <div class="relative flex h-full min-h-0 flex-col" data-testid="review-change">
-    <div class="flex min-h-10 shrink-0 items-center gap-3 px-3 pt-2 pb-3">
+    <!-- No project top bar here: on the macOS desktop app this row clears the traffic lights and
+         is where the window is dragged from. -->
+    <div
+      :class="['flex min-h-10 shrink-0 items-center gap-3 px-3 pt-2 pb-3', macDesktop && 'pl-10 fullscreen:pl-3']"
+      :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
+      data-testid="review-change-header"
+    >
       <UTooltip text="Back to inbox">
         <UButton
           color="neutral"

@@ -115,6 +115,20 @@ describe("ReviewInbox", () => {
     expect(labelsOnly.w.get("[data-testid='review-inbox-subtitle']").text()).toBe("Shared changes labelled orso");
   });
 
+  it("clears the macOS desktop traffic lights and drags the window from its header", async () => {
+    document.documentElement.dataset.desktop = "macos";
+    try {
+      const { w } = await mountInbox([]);
+      const header = w.get("[data-testid='review-inbox-header']");
+      expect(header.classes()).toContain("pl-7");
+      expect(header.attributes("data-tauri-drag-region")).toBe("deep");
+    } finally {
+      delete document.documentElement.dataset.desktop;
+    }
+    const { w } = await mountInbox([]);
+    expect(w.get("[data-testid='review-inbox-header']").attributes("data-tauri-drag-region")).toBeUndefined();
+  });
+
   it("shows the empty copy", async () => {
     const { w } = await mountInbox([]);
     expect(w.text()).toContain("No changes waiting for review.");
