@@ -929,6 +929,31 @@ describe("ReviewChange", () => {
       await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
     });
 
+    it("greenlights with the queued screenshot comments in the same review, then empties the queue", async () => {
+      const { resetShotQueuesForTest, useShotQueue } = await import("./shots/queue");
+      resetShotQueuesForTest();
+      const queue = useShotQueue(() => "site", () => 7);
+      queue.add({
+        id: "s1", side: "live", path: "/", viewport: "desktop", rect: { x: 0, y: 0, width: 9, height: 9 },
+        imageDataUrl: null, note: "Old copy still live", createdAt: "2026-11-19T12:00:00Z",
+      });
+      const decideReview = vi.fn(async () => undefined);
+      const reviewWithShots = vi.fn(async () => undefined);
+      const { w } = await mountChange({ ...base(), decideReview, reviewWithShots });
+      await vi.waitFor(() => expect(w.find("[data-testid='shot-queue-open']").exists()).toBe(true));
+      expect(w.get("[data-testid='shot-queue-open']").text()).toBe("Queued (1)");
+      await w.get("[data-testid='review-greenlight']").trigger("click");
+      await flushPromises();
+      expect(decideReview).not.toHaveBeenCalled();
+      expect(reviewWithShots).toHaveBeenCalledWith("site", 7, {
+        event: "APPROVE",
+        body: "",
+        headSha: "abc",
+        items: [{ note: "Old copy still live", path: "/", side: "live", viewport: "desktop" }],
+      });
+      expect(queue.items.value).toEqual([]);
+    });
+
     it("says the change was updated and reloads detail and diff on head_moved", async () => {
       const decideReview = vi.fn(async () => {
         throw new ApiError("UNKNOWN", "This change was updated since you opened it", 409, { reason: "head_moved" });

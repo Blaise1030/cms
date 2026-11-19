@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { SplitterItem, TabsItem } from "@nuxt/ui";
 import UAlert from "@nuxt/ui/components/Alert.vue";
@@ -11,7 +11,8 @@ import USplitter from "@nuxt/ui/components/Splitter.vue";
 import UTabs from "@nuxt/ui/components/Tabs.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
-import { BrowserFrame, isHttpUrl, type BrowserFrameSide } from "@/components/ui/browser-frame";
+import { BrowserFrame, isHttpUrl, type BrowserFramePick, type BrowserFrameSide } from "@/components/ui/browser-frame";
+import { useShotQueue, type ShotItem } from "./shots/queue";
 import type { ReviewPreview } from "@/core/types";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath, type ReviewPage } from "@/router";
@@ -25,6 +26,9 @@ const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/Chang
 const DiffView = defineAsyncComponent(() => import("../checkpoints/DiffView.vue"));
 // Lazy too: the chat feed keeps the precached app shell under its 2.5 MiB cap.
 const ReviewConversation = defineAsyncComponent(() => import("./ReviewConversation.vue"));
+// Lazy as well: the screenshot picker and queue (capture, popover, slideover).
+const ShotPicker = defineAsyncComponent(() => import("./shots/ShotPicker.vue"));
+const ShotQueue = defineAsyncComponent(() => import("./shots/ShotQueue.vue"));
 
 const props = defineProps<{ projectId: string; number: number; page: ReviewPage }>();
 const store = useChange(
@@ -97,13 +101,35 @@ function openSendBack() {
   store.decideError = null;
   sendingBack.value = true;
 }
+/** Queued screenshot comments ride along with a greenlight or send-back, then leave the queue. */
 async function greenlight() {
-  await store.decide("greenlight");
+  const shots = [...shotQueue.items.value];
+  if ((await store.decide("greenlight", undefined, shots)) === true && shots.length) shotQueue.clear();
 }
 async function sendBack(comment: string) {
+  const shots = [...shotQueue.items.value];
+  const done = await store.decide("send_back", comment, shots);
+  if (done === true && shots.length) shotQueue.clear();
   // A moved change closes the dialog (and drops the comment) so the reviewer sees the reloaded
   // change before choosing again; other failures stay in the dialog with the comment.
-  if ((await store.decide("send_back", comment)) || store.gone) sendingBack.value = false;
+  if (done || store.gone) sendingBack.value = false;
+}
+
+/** Screenshot comments: the side being picked on, the area just picked, and the queue. */
+const picking = ref<string | null>(null);
+const pickedArea = ref<BrowserFramePick | null>(null);
+const frame = ref<{ open: (path: string) => void } | null>(null);
+const shotQueue = useShotQueue(
+  () => props.projectId,
+  () => props.number,
+);
+/** Opens a queued comment's page, on the Review page's preview, with its side showing. */
+async function revisitShot(item: ShotItem) {
+  if (props.page !== "files") await router.push(reviewPath(props.projectId, props.number, "files"));
+  view.value = "preview";
+  collapsed.value = null;
+  await nextTick();
+  frame.value?.open(item.path);
 }
 
 /** The change's deploy preview next to the live site; nothing is built on this machine. */
@@ -327,6 +353,16 @@ function reveal(path: string) {
             Review
             <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
           </RouterLink>
+          <!-- Queued screenshot comments, when there are any. -->
+          <ShotQueue
+            v-if="change"
+            :project-id="projectId"
+            :number="number"
+            :head-sha="change.headSha"
+            :open="change.open"
+            class="ml-auto"
+            @navigate="revisitShot"
+          />
           <!-- Review only: what the card below shows, as a compact switch beside Refresh. -->
           <UTabs
             v-if="page === 'files'"
@@ -336,7 +372,7 @@ function reveal(path: string) {
             size="xs"
             variant="pill"
             color="neutral"
-            class="ml-auto w-auto self-center"
+            :class="['w-auto self-center', !shotQueue.items.value.length && 'ml-auto']"
             :ui="{ trigger: 'data-[state=active]:text-highlighted' }"
             data-testid="review-view-tabs"
           />
@@ -346,7 +382,7 @@ function reveal(path: string) {
               variant="ghost"
               size="sm"
               icon="i-hugeicons-refresh"
-              :class="['self-center', page !== 'files' && 'ml-auto']"
+              :class="['self-center', page !== 'files' && !shotQueue.items.value.length && 'ml-auto']"
               aria-label="Refresh"
               :disabled="refreshing"
               :aria-busy="refreshing"
@@ -366,13 +402,26 @@ function reveal(path: string) {
         <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
           <div
             v-show="view === 'preview'"
-            class="flex min-h-0 flex-1 flex-col"
+            class="relative flex min-h-0 flex-1 flex-col"
             data-testid="review-preview"
           >
+            <ShotPicker
+              v-if="change?.open"
+              :project-id="projectId"
+              :number="number"
+              :picking="picking"
+              :picked="pickedArea"
+              @cancel="picking = null"
+              @done="pickedArea = null"
+            />
             <BrowserFrame
               :key="`${projectId}:${number}`"
+              ref="frame"
               v-model:collapsed="collapsed"
+              v-model:picking="picking"
+              :pickable="!!change?.open"
               :frames="frames"
+              @pick="pickedArea = $event"
               class="min-h-0 flex-1"
             >
               <template #placeholder="{ frame }">

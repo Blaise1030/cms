@@ -328,6 +328,53 @@ pub async fn comment(
     ))
 }
 
+/// `POST /api/projects/{id}/reviews/{n}/review-with-shots` → `204`: one review (comment,
+/// greenlight or send back) carrying the reviewer's queued screenshot comments. The images are
+/// stored on the `orso-review-assets` branch (never the change's branch or `main`), after the
+/// head is checked, so a moved change (409 `head_moved`) stores nothing.
+pub async fn review_with_shots(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+    Json(req): Json<crate::review_shots::ShotReviewIn>,
+) -> Result<StatusCode, ApiError> {
+    use crate::review_shots::{review_markdown, validate, ReviewEvent};
+    let items = validate(&req)?;
+    let (project, repo) = project_repo(&state, &id).await?;
+    let me = state.github.signed_in_login().await?;
+    let detail = labelled_detail(&state, &project, &repo, number, &me).await?;
+    if !detail.open || detail.draft {
+        return Err(ApiError::enoent(GONE));
+    }
+    if req.event != ReviewEvent::Comment {
+        if let Some(reason) = refusal(&state, &repo, &detail.item.author, &me).await? {
+            return Err(ApiError::sandbox(reason));
+        }
+    }
+    state
+        .github
+        .ensure_head(&repo, number, &req.head_sha)
+        .await?;
+    // Store the screenshots, keeping each item's place (notes without one stay None).
+    let with_image: Vec<usize> = (0..items.len())
+        .filter(|&i| items[i].image.is_some())
+        .collect();
+    let images = with_image
+        .iter()
+        .filter_map(|&i| items[i].image.clone())
+        .collect();
+    let stored = store_images(&state, &repo, "shots", number, images).await?;
+    let mut urls: Vec<Option<String>> = vec![None; items.len()];
+    for (i, url) in with_image.into_iter().zip(stored) {
+        urls[i] = Some(url);
+    }
+    let body = review_markdown(&req.body, &items, &urls);
+    state
+        .github
+        .submit_review_event(&repo, number, &req.head_sha, req.event.as_github(), &body)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Where a change's deploy preview stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -457,6 +504,120 @@ mod tests {
         bare.to_str().unwrap().to_string()
     }
 
+    /// Every review body the mock received, from all tests (find yours by its body).
+    static REVIEWS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
+    fn review_with_body(text: &str) -> Option<Value> {
+        REVIEWS
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r["body"].as_str().is_some_and(|b| b.contains(text)))
+            .cloned()
+    }
+
+    fn shots_request(
+        event: &str,
+        body: &str,
+        head: &str,
+        items: Value,
+    ) -> Json<crate::review_shots::ShotReviewIn> {
+        Json(
+            serde_json::from_value(
+                json!({ "event": event, "body": body, "headSha": head, "items": items }),
+            )
+            .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn screenshot_comments_become_one_review_with_their_images() {
+        use base64::Engine;
+        let tmp = tempfile::tempdir().unwrap();
+        // Commenting needs no push access.
+        let (state, id) = setup(tmp.path(), false, Some("acme/site")).await;
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nrest");
+        let req = shots_request(
+            "COMMENT",
+            "A few things",
+            "h7",
+            json!([
+                { "note": "Hero is cut off", "path": "/pricing", "side": "change", "viewport": "mobile 390px",
+                  "imageBase64": png, "mime": "image/png" },
+                { "note": "Old copy", "path": "/", "side": "live", "viewport": "desktop" }
+            ]),
+        );
+        let status = review_with_shots(State(state), Path((id, 7)), req)
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let sent = review_with_body("A few things").unwrap();
+        assert_eq!(sent["event"], "COMMENT");
+        assert_eq!(sent["commit_id"], "h7");
+        let body = sent["body"].as_str().unwrap();
+        assert!(
+            body.starts_with("A few things\n\n### 1. Hero is cut off"),
+            "{body}"
+        );
+        assert!(
+            body.contains("Page: `/pricing` (change, mobile 390px)"),
+            "{body}"
+        );
+        assert!(
+            body.contains("/acme/site/blob/commits-sha/shots/7/"),
+            "{body}"
+        );
+        assert!(body.contains("### 2. Old copy"), "{body}");
+        assert_eq!(body.matches("![screenshot]").count(), 1, "{body}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_reviews_check_the_head_and_the_rules_before_storing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let note = json!([{ "note": "x", "path": "/", "side": "change" }]);
+        // Moved head: 409, nothing submitted.
+        let err = review_with_shots(
+            State(state.clone()),
+            Path((id.clone(), 7)),
+            shots_request("COMMENT", "moved-head probe", "old", note.clone()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code.status(), 409);
+        assert_eq!(err.reason, Some("head_moved"));
+        assert!(review_with_body("moved-head probe").is_none());
+        // Sending back needs a summary.
+        let err = review_with_shots(
+            State(state.clone()),
+            Path((id.clone(), 7)),
+            shots_request("REQUEST_CHANGES", " ", "h7", note.clone()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code.status(), 400);
+        // Your own change (#8 is ada's) can't be greenlit, with or without screenshots.
+        let err = review_with_shots(
+            State(state.clone()),
+            Path((id.clone(), 8)),
+            shots_request("APPROVE", "", "h8", note.clone()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.message, OWN_CHANGE);
+        // A greenlight with screenshots goes through as APPROVE.
+        review_with_shots(
+            State(state),
+            Path((id, 7)),
+            shots_request("APPROVE", "greenlight probe", "h7", note),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            review_with_body("greenlight probe").unwrap()["event"],
+            "APPROVE"
+        );
+    }
+
     fn pull(number: u64, author: &str, state: &str, draft: bool) -> Value {
         json!({ "number": number, "html_url": format!("u{number}"), "title": "t",
             "state": state, "draft": draft, "labels": [{ "name": "orso" }],
@@ -522,8 +683,12 @@ mod tests {
             )
             .route(
                 "/repos/acme/site/pulls/{n}/reviews",
-                get(|| async { axum::Json(json!([])) })
-                    .post(|| async { axum::Json(json!({ "id": 1 })) }),
+                get(|| async { axum::Json(json!([])) }).post(
+                    |axum::Json(b): axum::Json<Value>| async move {
+                        REVIEWS.lock().unwrap().push(b);
+                        axum::Json(json!({ "id": 1 }))
+                    },
+                ),
             )
             .route(
                 "/repos/acme/site/commits/{sha}/check-runs",

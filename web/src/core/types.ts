@@ -763,3 +763,19 @@ export interface SettingsDoc {
   /** The site folder the daemon uses: the normalized `root`, or `.` when the file is missing or invalid. */
   siteRoot: string;
 }
+
+/** Body of `POST /api/projects/{id}/reviews/{n}/review-with-shots`. */
+export interface ReviewWithShots {
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  body: string;
+  headSha: string;
+  items: {
+    note: string;
+    path: string;
+    side: "change" | "live";
+    viewport: string;
+    /** Base64 without the `data:` prefix; absent for a note without a screenshot. */
+    imageBase64?: string;
+    mime?: string;
+  }[];
+}

@@ -3,6 +3,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useDaemon } from "@/core/daemon";
 import type { ReviewConversation, ReviewDetail, ReviewItem, ReviewPreview, TimelineItem } from "@/core/types";
 import { useGithubStore } from "@/modules/github/store";
+import type { ShotItem } from "./shots/queue";
+import { shotItemsForReview } from "./shots/send";
 import { errorMessage } from "@orso/utils";
 import type { ParsedDiff } from "../checkpoints/diff";
 
@@ -103,12 +105,20 @@ export function useChange(projectId: () => string, number: () => number) {
 
   const decideError = ref<string | null>(null);
   const decision = useMutation({
-    mutationFn: (v: { detail: ReviewDetail; decision: "greenlight" | "send_back"; comment?: string }) =>
-      daemon.api.decideReview(projectId(), v.detail.number, {
-        decision: v.decision,
-        comment: v.comment,
-        headSha: v.detail.headSha,
-      }),
+    mutationFn: (v: { detail: ReviewDetail; decision: "greenlight" | "send_back"; comment?: string; shots?: ShotItem[] }) =>
+      v.shots?.length
+        ? // Queued screenshot comments go in the same review.
+          daemon.api.reviewWithShots(projectId(), v.detail.number, {
+            event: v.decision === "greenlight" ? "APPROVE" : "REQUEST_CHANGES",
+            body: v.comment ?? "",
+            headSha: v.detail.headSha,
+            items: shotItemsForReview(v.shots),
+          })
+        : daemon.api.decideReview(projectId(), v.detail.number, {
+            decision: v.decision,
+            comment: v.comment,
+            headSha: v.detail.headSha,
+          }),
   });
 
   /**
@@ -116,13 +126,19 @@ export function useChange(projectId: () => string, number: () => number) {
    * then the inbox, the change and its conversation are read again. `head_moved` reloads the
    * change and says why. Resolves true when it went through, or "head_moved" when the change moved.
    */
-  async function decide(choice: "greenlight" | "send_back", comment?: string): Promise<boolean | "head_moved"> {
+  async function decide(
+    choice: "greenlight" | "send_back",
+    comment?: string,
+    shots?: ShotItem[],
+  ): Promise<boolean | "head_moved"> {
     const detail = q.data.value?.detail;
     if (!detail || decision.isPending.value) return false;
     const id = projectId();
     decideError.value = null;
     try {
-      await decision.mutateAsync({ detail, decision: choice, comment });
+      await decision.mutateAsync({ detail, decision: choice, comment, shots });
+      // The screenshots are in the review now; the conversation shows it.
+      if (shots?.length) void client.invalidateQueries({ queryKey: reviewKeys.conversation(id, detail.number) });
       const myState = choice === "greenlight" ? "greenlit" : "sent_back";
       client.setQueryData<OpenedChange>(reviewKeys.change(id, detail.number), (old) =>
         old ? { ...old, detail: { ...old.detail, myState } } : old,

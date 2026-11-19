@@ -113,6 +113,11 @@ pub fn router(state: AppState) -> Router {
             post(reviews::decide),
         )
         .route(
+            "/api/projects/{id}/reviews/{n}/review-with-shots",
+            post(reviews::review_with_shots)
+                .layer(DefaultBodyLimit::max(crate::review_shots::MAX_BODY_BYTES)),
+        )
+        .route(
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
         )

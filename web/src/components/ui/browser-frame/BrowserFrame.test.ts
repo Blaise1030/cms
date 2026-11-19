@@ -249,3 +249,56 @@ describe("BrowserFrame", () => {
     expect(open).toHaveBeenCalledWith("https://pr-7.site.test/", "_blank", "noopener,noreferrer");
   });
 });
+
+describe("BrowserFrame pick mode", () => {
+  function mountPickable() {
+    const picking = ref<string | null>(null);
+    const picks: unknown[] = [];
+    const Host = defineComponent({
+      setup: () => () =>
+        h(TooltipProvider, null, {
+          default: () =>
+            h(BrowserFrame, {
+              frames: [CHANGE, LIVE],
+              pickable: true,
+              picking: picking.value,
+              "onUpdate:picking": (v: string | null) => (picking.value = v),
+              onPick: (a: unknown) => picks.push(a),
+            }),
+        }),
+    });
+    return { w: mount(Host, { attachTo: document.body }), picking, picks };
+  }
+
+  it("dims one side for picking and turns a drag into an area of the page", async () => {
+    const { w, picking, picks } = mountPickable();
+    await w.get("[data-testid='browser-frame-pick-change']").trigger("click");
+    expect(picking.value).toBe("change");
+    const overlay = w.get("[data-testid='browser-frame-pick-overlay-change']");
+    expect(w.find("[data-testid='browser-frame-pick-overlay-live']").exists()).toBe(false);
+    await overlay.trigger("pointerdown", { clientX: 120, clientY: 90, pointerId: 1 });
+    await overlay.trigger("pointermove", { clientX: 40, clientY: 30, pointerId: 1 });
+    expect(w.find("[data-testid='browser-frame-pick-box']").exists()).toBe(true);
+    await overlay.trigger("pointerup", { clientX: 40, clientY: 30, pointerId: 1 });
+    await flushPromises();
+    // The overlay leaves first, then the area is reported.
+    expect(picking.value).toBeNull();
+    expect(picks).toEqual([{ side: "change", path: "/", device: "desktop", rect: { x: 40, y: 30, width: 80, height: 60 } }]);
+    w.unmount();
+  });
+
+  it("ignores a click-sized drag, and Esc stops picking", async () => {
+    const { w, picking, picks } = mountPickable();
+    await w.get("[data-testid='browser-frame-pick-live']").trigger("click");
+    const overlay = w.get("[data-testid='browser-frame-pick-overlay-live']");
+    await overlay.trigger("pointerdown", { clientX: 10, clientY: 10, pointerId: 1 });
+    await overlay.trigger("pointerup", { clientX: 14, clientY: 30, pointerId: 1 });
+    expect(picks).toEqual([]);
+    expect(picking.value).toBe("live");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(picking.value).toBeNull();
+    expect(w.find("[data-testid='browser-frame-pick-overlay-live']").exists()).toBe(false);
+    w.unmount();
+  });
+});

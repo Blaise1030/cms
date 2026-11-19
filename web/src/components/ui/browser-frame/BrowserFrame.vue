@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { DropdownMenuItem } from "@nuxt/ui";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
@@ -9,6 +9,18 @@ import { DESKTOP_MIN_WIDTH } from "@/modules/preview/frameFit";
 import { DEVICE_WIDTH, type Device } from "@/modules/preview/store";
 import BrowserFramePane from "./BrowserFramePane.vue";
 import { frameUrl, normalizePath } from "./frameUrl";
+
+/** An area dragged out on one side, in CSS pixels of the page (`clientX`/`clientY` space). */
+export interface BrowserFramePick {
+  side: string;
+  /** The path the frames were showing. */
+  path: string;
+  device: Device;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+/** A drag smaller than this on either side is a click, not an area. */
+const MIN_PICK = 8;
 
 /** One framed site. `url` is its base; `null` (or a non-http URL) shows the `placeholder` slot. */
 export interface BrowserFrameSide {
@@ -25,7 +37,12 @@ export interface BrowserFrameSide {
  * address bar holds the path it opened, and opening a path opens it on every side. The path
  * survives sides coming and going; give the frame a new `key` to start again at `/`.
  */
-const props = defineProps<{ frames: BrowserFrameSide[] }>();
+const props = defineProps<{
+  frames: BrowserFrameSide[];
+  /** Offer "Pick an area to comment on" on each side's header. */
+  pickable?: boolean;
+}>();
+const emit = defineEmits<{ pick: [area: BrowserFramePick] }>();
 defineSlots<{ placeholder(props: { frame: BrowserFrameSide }): unknown }>();
 const device = defineModel<Device>("device", { default: "desktop" });
 /**
@@ -33,6 +50,8 @@ const device = defineModel<Device>("device", { default: "desktop" });
  * unfolds the other), so the rest fill the width.
  */
 const collapsed = defineModel<string | null>("collapsed", { default: null });
+/** The side being picked on (its frame dimmed, a crosshair to drag an area), or null. */
+const picking = defineModel<string | null>("picking", { default: null });
 const isCollapsed = (frame: BrowserFrameSide) => props.frames.length > 1 && collapsed.value === frame.key;
 /** "This change" → "this change", for "Hide this change". */
 const lower = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
@@ -87,6 +106,53 @@ const deviceItems = computed<DropdownMenuItem[]>(() =>
 function openExternal(src: string | null) {
   if (src) window.open(src, "_blank", "noopener,noreferrer");
 }
+
+/** The drag in progress, in the overlay's own coordinates. */
+const drag = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+const dragBox = computed(() => {
+  const d = drag.value;
+  if (!d) return null;
+  return { left: Math.min(d.x0, d.x1), top: Math.min(d.y0, d.y1), width: Math.abs(d.x1 - d.x0), height: Math.abs(d.y1 - d.y0) };
+});
+function onPickDown(e: PointerEvent) {
+  const el = e.currentTarget as HTMLElement;
+  const box = el.getBoundingClientRect();
+  el.setPointerCapture?.(e.pointerId);
+  drag.value = { x0: e.clientX - box.left, y0: e.clientY - box.top, x1: e.clientX - box.left, y1: e.clientY - box.top };
+}
+function onPickMove(e: PointerEvent) {
+  if (!drag.value) return;
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  drag.value = { ...drag.value, x1: e.clientX - box.left, y1: e.clientY - box.top };
+}
+async function onPickUp(e: PointerEvent, side: string) {
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const area = dragBox.value;
+  drag.value = null;
+  if (!area || area.width < MIN_PICK || area.height < MIN_PICK) return;
+  // The overlay leaves first, so a screenshot of the page shows the page, not the dimming.
+  picking.value = null;
+  await nextTick();
+  emit("pick", {
+    side,
+    path: path.value,
+    device: device.value,
+    rect: { x: box.left + area.left, y: box.top + area.top, width: area.width, height: area.height },
+  });
+}
+function onPickKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && picking.value) {
+    drag.value = null;
+    picking.value = null;
+  }
+}
+watch(picking, (side) => {
+  if (side) window.addEventListener("keydown", onPickKey);
+  else window.removeEventListener("keydown", onPickKey);
+});
+onBeforeUnmount(() => window.removeEventListener("keydown", onPickKey));
+
+defineExpose({ open });
 </script>
 
 <template>
@@ -212,6 +278,19 @@ function openExternal(src: string | null) {
           class="bg-background border-default flex h-8 shrink-0 items-center gap-1 border-b pr-1 pl-3"
         >
           <span class="text-muted min-w-0 flex-1 truncate text-xs font-medium">{{ frame.label }}</span>
+          <UTooltip v-if="pickable" :text="picking === frame.key ? 'Stop picking (Esc)' : 'Pick an area to comment on'">
+            <UButton
+              color="neutral"
+              :variant="picking === frame.key ? 'soft' : 'ghost'"
+              size="xs"
+              icon="i-hugeicons-crop"
+              :aria-label="`Pick an area of ${lower(frame.label)} to comment on`"
+              :aria-pressed="picking === frame.key"
+              :disabled="!srcs[i]"
+              :data-testid="`browser-frame-pick-${frame.key}`"
+              @click="picking = picking === frame.key ? null : frame.key"
+            />
+          </UTooltip>
           <UTooltip :text="`Hide ${lower(frame.label)}`">
             <UButton
               color="neutral"
@@ -236,16 +315,34 @@ function openExternal(src: string | null) {
             />
           </UTooltip>
         </div>
-        <BrowserFramePane
-          :src="srcs[i] ?? null"
-          :title="frame.label"
-          :device="device"
-          :reload-nonce="reloadNonce"
-          :testid="`browser-frame-iframe-${frame.key}`"
-          @fit="scales = { ...scales, [frame.key]: $event }"
-        >
-          <slot name="placeholder" :frame="frame" />
-        </BrowserFramePane>
+        <div class="relative flex min-h-0 flex-1 flex-col">
+          <BrowserFramePane
+            :src="srcs[i] ?? null"
+            :title="frame.label"
+            :device="device"
+            :reload-nonce="reloadNonce"
+            :testid="`browser-frame-iframe-${frame.key}`"
+            @fit="scales = { ...scales, [frame.key]: $event }"
+          >
+            <slot name="placeholder" :frame="frame" />
+          </BrowserFramePane>
+          <!-- Picking: the page is dimmed and a drag marks the area to comment on. -->
+          <div
+            v-if="picking === frame.key"
+            class="absolute inset-0 z-10 cursor-crosshair touch-none bg-black/25 select-none"
+            :data-testid="`browser-frame-pick-overlay-${frame.key}`"
+            @pointerdown.prevent="onPickDown"
+            @pointermove="onPickMove"
+            @pointerup="onPickUp($event, frame.key)"
+          >
+            <div
+              v-if="dragBox"
+              class="border-primary bg-primary/10 pointer-events-none absolute border-2"
+              :style="{ left: `${dragBox.left}px`, top: `${dragBox.top}px`, width: `${dragBox.width}px`, height: `${dragBox.height}px` }"
+              data-testid="browser-frame-pick-box"
+            />
+          </div>
+        </div>
       </section>
       </template>
     </div>

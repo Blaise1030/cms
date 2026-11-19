@@ -51,6 +51,7 @@ import {
   type SetupSnapshot,
   type SetupStatus,
   type Tree,
+  type ReviewWithShots,
 } from "./types";
 
 export interface ApiErrorDetail { path: (string | number)[]; message: string }
@@ -311,6 +312,9 @@ export function createApi(
     attachChatFile: async (project: string, file: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/chat/${enc(project)}/attachments`, { blob: file })).path,
     /** A saved attachment by file name, for `<img>` (authenticated by the session cookie). */
+    /** One review (comment, greenlight or send back) carrying queued screenshot comments. */
+    reviewWithShots: (project: string, number: number, body: ReviewWithShots) =>
+      send("POST", `/api/projects/${enc(project)}/reviews/${number}/review-with-shots`, { body }).then(() => undefined),
     /** A review image on the project's `orso-review-assets` branch, through the daemon. */
     reviewAssetUrl: (project: string, sha: string, path: string) =>
       `${cfg().origin}/api/projects/${enc(project)}/reviews/assets?path=${encodeURIComponent(path)}&sha=${encodeURIComponent(sha)}`,

@@ -153,3 +153,56 @@ test("reviewer sends a change back and the author sees why", async ({ page, orso
   await expect(page.getByTestId("pr-sent-back-reviewer")).toContainText("bob");
   await expect(page.getByTestId("pr-sent-back-comment")).toHaveText("Please fix the title");
 });
+
+test("reviewer queues a screenshot comment and sends it with the image on the assets branch", async ({ page, orso }) => {
+  const { github } = orso;
+  // Screen sharing without a prompt: a canvas painted like a page stands in for the tab.
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext("2d")!;
+      const paint = () => {
+        ctx.fillStyle = "#2b6cb0";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(paint);
+      };
+      paint();
+      return canvas.captureStream(30);
+    };
+  });
+  await openReview(page, orso);
+  await expectPreview(page);
+
+  await page.getByTestId("browser-frame-pick-change").click();
+  const overlay = page.getByTestId("browser-frame-pick-overlay-change");
+  const box = (await overlay.boundingBox())!;
+  await page.mouse.move(box.x + 40, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 240, box.y + 160, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(page.getByTestId("shot-note-image")).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId("shot-note-input").fill("Hero headline is cut off");
+  await page.getByTestId("shot-note-add").click();
+  await expect(page.getByTestId("shot-queue-open")).toHaveText("Queued (1)");
+
+  await page.getByTestId("shot-queue-open").click();
+  await expect(page.getByTestId("shot-queue-item")).toHaveCount(1);
+  await page.getByTestId("shot-queue-send").click();
+  await expect.poll(() => github.reviewPosts().length).toBe(1);
+  await expect(page.getByTestId("shot-queue-open")).toHaveCount(0);
+
+  // Opening the review already attached an image to a comment (uploads/); the screenshot is its own commit.
+  const commit = github.gitCommits().find((c) => c.files.some((f) => f.startsWith("shots/")));
+  expect(commit!.files).toHaveLength(1);
+  expect(commit!.files[0]).toMatch(new RegExp(`^shots/${PR}/\\d{4}-\\d{2}-\\d{2}/[0-9a-f-]{36}\\.(png|jpg)$`));
+  expect(github.branchTip("orso-review-assets")).toBe(commit!.sha);
+  const review = github.reviewPosts()[0]!.body;
+  expect(review.event).toBe("COMMENT");
+  expect(review.body).toContain("### 1. Hero headline is cut off");
+  expect(review.body).toContain("Page: `/` (change, desktop)");
+  expect(review.body).toContain(`![screenshot](`);
+  expect(review.body).toContain(`/acme/site/blob/${commit!.sha}/${commit!.files[0]}?raw=true)`);
+});
