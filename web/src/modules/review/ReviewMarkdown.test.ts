@@ -25,3 +25,16 @@ describe("ReviewMarkdown", () => {
     expect(w.get("code").text()).toBe("<!-- x -->");
   });
 });
+
+describe("ReviewMarkdown image grid", () => {
+  it("lays neighbouring images out as a grid of links and drops unsafe ones", async () => {
+    const w = mount(ReviewMarkdown, {
+      props: { content: "Test images\n\n![a](https://x.test/a.png)\n![b](/api/b.png)\n![c](javascript:alert(1))" },
+    });
+    await flushPromises();
+    const grid = w.get("[data-testid='review-image-grid']");
+    expect(grid.findAll("img").map((i) => i.attributes("src"))).toEqual(["https://x.test/a.png", "/api/b.png"]);
+    expect(grid.findAll("a").every((a) => a.attributes("target") === "_blank")).toBe(true);
+    expect(w.text()).toContain("Test images");
+  });
+});
