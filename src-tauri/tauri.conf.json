@@ -5,7 +5,7 @@
   "identifier": "io.github.blaise1030.orso",
   "build": {
     "frontendDist": "ui",
-    "beforeDevCommand": "./scripts/prepare-sidecar.sh debug",
+    "beforeDevCommand": { "script": "./scripts/prepare-sidecar.sh debug", "wait": true },
     "beforeBuildCommand": "./scripts/prepare-sidecar.sh release"
   },
   "app": {
