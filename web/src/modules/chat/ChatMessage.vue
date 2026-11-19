@@ -197,7 +197,8 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
               :label="seg.label"
               data-testid="element-tag"
               :title="seg.full"
-              class="bg-default/60 align-baseline font-mono"
+              class="bg-default/60 max-w-64 align-baseline font-mono"
+              :ui="{ label: 'truncate' }"
             />
             <template v-else>{{ seg.text }}</template>
           </template>

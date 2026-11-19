@@ -52,13 +52,15 @@ describe("titleParts", () => {
   it("turns complete and cut-off element references into labels", () => {
     expect(titleParts('[element <div class="page hero">] Please move the menu')).toEqual({
       elements: ["div.page"],
+      icons: ["i-hugeicons-cursor-pointer-01"],
       text: "Please move the menu",
     });
-    expect(titleParts('[element <div class="rel…')).toEqual({ elements: ["div"], text: "" });
-    expect(titleParts('[element <img src="/preview/x.png" class="logo"')).toEqual({ elements: ["img.logo"], text: "" });
-    expect(titleParts('[element <section id="hero" class="x"')).toEqual({ elements: ["section#hero"], text: "" });
+    expect(titleParts('[element <div class="rel…')).toEqual({ elements: ["div"], icons: ["i-hugeicons-cursor-pointer-01"], text: "" });
+    expect(titleParts('[element <img src="/preview/x.png" class="logo"')).toEqual({ elements: ["img.logo"], icons: ["i-hugeicons-cursor-pointer-01"], text: "" });
+    expect(titleParts('[element <section id="hero" class="x"')).toEqual({ elements: ["section#hero"], icons: ["i-hugeicons-cursor-pointer-01"], text: "" });
     expect(titleParts("We would need a download button")).toEqual({
       elements: [],
+      icons: [],
       text: "We would need a download button",
     });
   });
@@ -81,6 +83,6 @@ describe("selection references", () => {
   });
 
   it("labels a title cut inside a selection by its file", () => {
-    expect(titleParts('[selection in site/blog/design.md: "The desig')).toEqual({ elements: ["design.md"], text: "" });
+    expect(titleParts('[selection in site/blog/design.md: "The desig')).toEqual({ elements: ["design.md"], icons: ["i-hugeicons-text-selection"], text: "" });
   });
 });

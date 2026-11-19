@@ -11,7 +11,8 @@ import {
   writeSessionOrder,
 } from "@/lib/sessionOrder";
 import { cn } from "@/lib/utils";
-import { titleParts } from "./references";
+import ChatTitle from "./ChatTitle.vue";
+import { readableTitle } from "./references";
 import AgentPanel from "./AgentPanel.vue";
 import { useChatStore } from "./store";
 
@@ -69,7 +70,6 @@ const tabs = computed(() =>
     return {
       id,
       title,
-      parts: titleParts(title),
       status,
       running: status === "running",
       active: activeId.value === id,
@@ -223,8 +223,8 @@ defineExpose({ expand, minimize, close: closePanel });
           :data-status="tab.status"
           :aria-selected="tab.active"
           :aria-current="tab.active ? 'page' : undefined"
-          :aria-label="`${tab.title}, ${STATUS[tab.status].label}`"
-          :title="`${tab.title}: ${STATUS[tab.status].label}. Drag, or Alt+←/→, to reorder`"
+          :aria-label="`${readableTitle(tab.title)}, ${STATUS[tab.status].label}`"
+          :title="`${readableTitle(tab.title)}: ${STATUS[tab.status].label}. Drag, or Alt+←/→, to reorder`"
           :class="
             cn(
               'group relative flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pl-3 pr-3 text-left text-xs font-normal transition-all active:translate-y-px',
@@ -258,19 +258,8 @@ defineExpose({ expand, minimize, close: closePanel });
             :class="cn('size-1.5 shrink-0 rounded-full', STATUS[tab.status].class)"
             aria-hidden="true"
           />
-          <!-- A picked element shows as its tag (div.page), like in the chat, not raw markup. -->
-          <span
-            v-for="(el, k) in tab.parts.elements.slice(0, 1)"
-            :key="k"
-            class="border-default bg-default/60 inline-flex shrink-0 items-center gap-1 rounded-sm border px-1 font-mono text-[11px]"
-            data-testid="agent-tab-element"
-          >
-            <UIcon name="i-hugeicons-cursor-pointer-01" class="size-3" aria-hidden="true" />
-            {{ el }}
-          </span>
-          <span v-if="tab.parts.text || !tab.parts.elements.length" class="min-w-0 flex-1 truncate">{{
-            tab.parts.text || tab.title
-          }}</span>
+          <!-- A picked element or selection shows as its tag, like in the chat, not raw markup. -->
+          <ChatTitle class="min-w-0 flex-1" :title="tab.title" />
           <UButton
             v-if="!tab.running"
             type="button"

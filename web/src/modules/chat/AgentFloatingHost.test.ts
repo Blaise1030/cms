@@ -299,10 +299,11 @@ describe("session tab titles", () => {
     const w = mountHost();
     await flushPromises();
     const tabs = w.findAll("[data-testid='agent-session-tab']");
-    expect(tabs[0]!.get("[data-testid='agent-tab-element']").text()).toBe("div.page");
+    expect(tabs[0]!.get("[data-testid='chat-title-tag']").text()).toBe("div.page");
     expect(tabs[0]!.text()).toContain("Move the menu");
     expect(tabs[0]!.text()).not.toContain("<div");
-    expect(tabs[1]!.get("[data-testid='agent-tab-element']").text()).toBe("img");
+    expect(tabs[1]!.get("[data-testid='chat-title-tag']").text()).toBe("img");
     expect(tabs[1]!.text()).not.toContain("[element");
+    expect(tabs[0]!.attributes("aria-label")).toBe("div.page Move the menu, Idle");
   });
 });

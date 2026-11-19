@@ -70,6 +70,8 @@ function splitSelections(text: string): Segment[] {
 /** A chat title split for a tab: picked-element labels first, then the words. */
 export interface TitleParts {
   elements: string[];
+  /** The icon for each of `elements`: a picked element or an editor selection. */
+  icons: string[];
   text: string;
 }
 
@@ -79,10 +81,12 @@ export interface TitleParts {
  */
 export function titleParts(title: string): TitleParts {
   const elements: string[] = [];
+  const icons: string[] = [];
   const words: string[] = [];
   for (const seg of segmentReferences(title)) {
     if (seg.kind === "element") {
       elements.push(seg.label);
+      icons.push(seg.icon);
       continue;
     }
     const sel = /\[selection in ([^:\]\n]+)(?::.*)?$/.exec(seg.text);
@@ -90,6 +94,7 @@ export function titleParts(title: string): TitleParts {
       // A title cut inside a selection reference: keep the file it came from.
       words.push(seg.text.slice(0, sel.index));
       elements.push(sel[1]!.split("/").pop() || sel[1]!);
+      icons.push(SELECTION_ICON);
       continue;
     }
     const cut = seg.text.indexOf("[element <");
@@ -101,6 +106,13 @@ export function titleParts(title: string): TitleParts {
     // Close the cut tag at its last whole attribute so `label` can read it.
     const tag = seg.text.slice(cut + "[element ".length).replace(/\s+[\w-]+(="[^"]*)?…?$/, "");
     elements.push(label(`${tag}>`));
+    icons.push(ELEMENT_ICON);
   }
-  return { elements, text: words.join(" ").replace(/\s+/g, " ").trim() };
+  return { elements, icons, text: words.join(" ").replace(/\s+/g, " ").trim() };
+}
+
+/** A chat title read aloud or in a tooltip: `div.page Move the menu`, not raw markup. */
+export function readableTitle(title: string): string {
+  const { elements, text } = titleParts(title);
+  return [elements[0], text].filter(Boolean).join(" ") || title;
 }
