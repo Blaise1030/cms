@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { SplitterItem, TabsItem } from "@nuxt/ui";
 import UAlert from "@nuxt/ui/components/Alert.vue";
@@ -11,12 +11,12 @@ import USplitter from "@nuxt/ui/components/Splitter.vue";
 import UTabs from "@nuxt/ui/components/Tabs.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
-import type { ReviewPreview } from "@/core/types";
-import { errorMessage } from "@orso/utils";
+import { BrowserFrame, isHttpUrl, type BrowserFrameSide } from "@/components/ui/browser-frame";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
 import SendBackDialog from "./SendBackDialog.vue";
 import { useReviewStore } from "./store";
+import { useReviewPreview } from "./useReviewPreview";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/ChangedFilesTree.vue"));
@@ -66,86 +66,41 @@ async function sendBack(comment: string) {
   if ((await store.decide("send_back", comment)) || store.gone) sendingBack.value = false;
 }
 
-/** The rendered site of the change's head. A plain frame: the live-preview bridge belongs to the dev server. */
-const POLL_MS = 2000;
-const preview = ref<ReviewPreview | null>(null);
-let pollTimer: ReturnType<typeof setTimeout> | null = null;
-let previewRun = 0;
-
-function stopPolling() {
-  if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = null;
-}
-
-/** Applies an answer for run `run`; keeps polling while the site is still building. */
-function settle(run: number, headSha: string, next: ReviewPreview) {
-  if (run !== previewRun) return;
-  preview.value = next;
-  if (next.state === "building") pollTimer = setTimeout(() => void poll(run, headSha), POLL_MS);
-}
-
-/** Network or server errors in a row tolerated while polling before the preview counts as failed. */
-const MAX_POLL_ERRORS = 3;
-let pollErrors = 0;
-/** A build the cache dropped (404) is prepared again once per start, so a loop cannot form. */
-let reprepared = false;
-
-async function poll(run: number, headSha: string) {
-  try {
-    const next = await daemon.api.reviewPreview(props.projectId, props.number, headSha);
-    pollErrors = 0;
-    settle(run, headSha, next);
-  } catch (e) {
-    if (run !== previewRun) return;
-    const status = (e as { status?: number }).status;
-    if (status === 404 && !reprepared) {
-      reprepared = true;
-      void preparePreview(true);
-    } else if (status !== 404 && ++pollErrors < MAX_POLL_ERRORS) {
-      pollTimer = setTimeout(() => void poll(run, headSha), POLL_MS);
-    } else {
-      preview.value = { state: "failed", message: errorMessage(e) };
-    }
-  }
-}
-
-async function preparePreview(auto = false) {
-  stopPolling();
-  const run = ++previewRun;
-  if (!auto) reprepared = false;
-  pollErrors = 0;
-  const headSha = change.value?.headSha;
-  if (!headSha) {
-    preview.value = null;
-    return;
-  }
-  preview.value = { state: "building" };
-  try {
-    settle(run, headSha, await daemon.api.prepareReviewPreview(props.projectId, props.number, headSha));
-  } catch (e) {
-    if (run !== previewRun) return;
-    const err = e as { status?: number; reason?: string };
-    if (err.status === 409 && err.reason === "head_moved") {
-      // The change moved on: reload it, which restarts the preview for the new head.
-      await store.open(props.projectId, props.number);
-    } else {
-      preview.value = { state: "failed", message: errorMessage(e) };
-    }
-  }
-}
-
-// Opening a change, or its head moving, starts the build for that head; leaving stops the polling.
-watch(() => [props.projectId, props.number, change.value?.headSha] as const, () => void preparePreview(), {
-  immediate: true,
-});
-onBeforeUnmount(() => {
-  previewRun++;
-  stopPolling();
-});
-
-const previewSrc = computed(() =>
-  preview.value?.state === "ready" ? new URL(preview.value.url, daemon.config.value.origin).toString() : "",
+/** The change's deploy preview next to the live site; nothing is built on this machine. */
+const { preview, error: previewError, loading: previewLoading, reload: reloadPreview } = useReviewPreview(
+  () => props.projectId,
+  () => props.number,
+  () => change.value?.headSha,
 );
+const previewLive = computed(() => preview.value?.liveUrl ?? liveUrl.value);
+
+type Compare = "change" | "live" | "side";
+const COMPARE: TabsItem[] = [
+  { label: "This change", value: "change" },
+  { label: "Live site", value: "live" },
+  { label: "Side by side", value: "side" },
+];
+/** `null` until the reviewer picks: side by side when the live site is there to compare with. */
+const picked = ref<Compare | null>(null);
+const compare = computed<Compare>(() => {
+  if (picked.value) return picked.value;
+  const coming = preview.value?.state === "ready" || preview.value?.state === "deploying";
+  return coming && isHttpUrl(previewLive.value) ? "side" : "change";
+});
+watch(
+  () => [props.projectId, props.number] as const,
+  () => (picked.value = null),
+);
+const CHANGE_LABEL = "This change";
+const LIVE_LABEL = "Live site";
+const frames = computed<BrowserFrameSide[]>(() => {
+  const mine = { key: "change", label: CHANGE_LABEL, url: preview.value?.url ?? null };
+  const live = { key: "live", label: LIVE_LABEL, url: previewLive.value ?? null };
+  if (compare.value === "change") return [mine];
+  if (compare.value === "live") return [live];
+  return [mine, live];
+});
+const checksUrl = computed(() => (change.value?.url ? `${change.value.url.replace(/\/+$/, "")}/checks` : null));
 
 /** The rendered change fills the view by default; What changed is one click away. */
 type View = "preview" | "changes";
@@ -285,44 +240,107 @@ function reveal(path: string) {
         />
         <div
           v-show="view === 'preview'"
-          class="bg-muted min-h-0 flex-1 overflow-hidden"
+          class="flex min-h-0 flex-1 flex-col"
           data-testid="review-preview"
         >
-          <p
-            v-if="preview?.state === 'building'"
-            class="text-muted flex h-full items-center justify-center gap-2 text-sm"
-            data-testid="review-preview-building"
-          >
-            <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
-            Preparing the preview…
-          </p>
-          <iframe
-            v-else-if="preview?.state === 'ready'"
-            :key="previewSrc"
-            :src="previewSrc"
-            title="Preview of the change"
-            class="bg-default h-full w-full border-0"
-            sandbox="allow-same-origin"
-            referrerpolicy="no-referrer"
-            data-testid="review-preview-frame"
-          />
-          <div
-            v-else-if="preview?.state === 'failed'"
-            class="flex h-full flex-col items-start gap-2 overflow-hidden p-3"
-            data-testid="review-preview-failed"
-          >
-            <p class="text-default shrink-0 text-sm">The preview could not be prepared.</p>
-            <pre class="text-muted min-h-0 w-full flex-1 overflow-auto font-mono text-xs whitespace-pre-wrap">{{ preview.message }}</pre>
-            <UButton
+          <div class="border-default flex shrink-0 items-center border-b px-3 py-1.5">
+            <UTabs
+              :model-value="compare"
+              :items="COMPARE"
+              :content="false"
+              size="xs"
+              variant="pill"
               color="neutral"
-              variant="outline"
-              size="sm"
-              label="Try again"
-              class="shrink-0"
-              data-testid="review-preview-retry"
-              @click="preparePreview()"
+              data-testid="review-compare"
+              @update:model-value="picked = $event as Compare"
             />
           </div>
+          <BrowserFrame :key="`${projectId}:${number}`" :frames="frames" class="min-h-0 flex-1">
+            <template #placeholder="{ frame }">
+              <UEmpty
+                v-if="frame.key === 'live'"
+                variant="naked"
+                icon="i-hugeicons-globe-02"
+                title="No live site found for this project."
+                class="m-auto"
+                data-testid="review-live-missing"
+              />
+              <UEmpty
+                v-else-if="previewError"
+                variant="naked"
+                icon="i-hugeicons-alert-circle"
+                title="The preview could not be loaded."
+                :description="previewError"
+                class="m-auto"
+                role="alert"
+                data-testid="review-preview-error"
+              >
+                <template #actions>
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    label="Try again"
+                    data-testid="review-preview-retry"
+                    @click="reloadPreview()"
+                  />
+                </template>
+              </UEmpty>
+              <UEmpty
+                v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
+                variant="naked"
+                :title="preview ? 'Deploying preview…' : 'Loading preview…'"
+                class="m-auto"
+                data-testid="review-preview-deploying"
+              >
+                <template #leading>
+                  <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
+                </template>
+              </UEmpty>
+              <UEmpty
+                v-else-if="preview?.state === 'failed'"
+                variant="naked"
+                icon="i-hugeicons-alert-02"
+                title="The preview deploy failed."
+                class="m-auto"
+                data-testid="review-preview-failed"
+              >
+                <template v-if="checksUrl" #actions>
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    label="See the checks on GitHub"
+                    trailing-icon="i-hugeicons-link-square-02"
+                    :to="checksUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="review-preview-checks"
+                  />
+                </template>
+              </UEmpty>
+              <UEmpty
+                v-else-if="preview?.state === 'none'"
+                variant="naked"
+                icon="i-hugeicons-computer-video"
+                title="This site doesn't publish previews for changes."
+                description="See What changed."
+                class="m-auto"
+                data-testid="review-preview-none"
+              >
+                <template #actions>
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    label="What changed"
+                    data-testid="review-preview-to-changes"
+                    @click="view = 'changes'"
+                  />
+                </template>
+              </UEmpty>
+            </template>
+          </BrowserFrame>
         </div>
         <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
           <UEmpty

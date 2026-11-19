@@ -124,11 +124,17 @@ export interface ReviewDetail extends ReviewItem {
   reason: string | null;
 }
 
-/** The rendered preview of a change under review (`state` is the wire tag). */
-export type ReviewPreview =
-  | { state: "building" }
-  | { state: "ready"; url: string }
-  | { state: "failed"; message: string };
+/**
+ * `GET /api/projects/{id}/reviews/{n}/preview`: the change's deploy preview (`url`, once a
+ * deployment of its head succeeded) and the live site to compare it with.
+ */
+export interface ReviewPreview {
+  state: "deploying" | "ready" | "failed" | "none";
+  /** The head commit this describes. */
+  headSha: string;
+  url?: string;
+  liveUrl?: string;
+}
 
 /** `pr` of `GET /api/changes/{branch}/status`. */
 export interface PrStatus {

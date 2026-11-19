@@ -45,7 +45,11 @@ const BINARY = "Binary files a/site/logo.png and b/site/logo.png differ\n";
 const diffOf = (text: string, headSha: string | null = null) => ({ text, headSha });
 
 async function mountChange(api: Record<string, unknown>) {
-  h.daemon = createFakeDaemon({ liveSiteUrl: vi.fn(async () => "https://acme.pages.dev"), ...api });
+  h.daemon = createFakeDaemon({
+    liveSiteUrl: vi.fn(async () => "https://acme.pages.dev"),
+    reviewPreview: vi.fn(async () => ({ state: "none", headSha: "abc" })),
+    ...api,
+  });
   setActivePinia(createPinia());
   const router = createRouter({
     history: createMemoryHistory(),
@@ -150,194 +154,143 @@ describe("ReviewChange", () => {
 
   describe("preview", () => {
     const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
+    const READY = {
+      state: "ready",
+      headSha: "abc",
+      url: "https://pr-7.acme.pages.dev/",
+      liveUrl: "https://acme.pages.dev/",
+    };
+    const frame = (w: Awaited<ReturnType<typeof mountChange>>["w"], key: string) =>
+      w.find(`iframe[data-testid='browser-frame-iframe-${key}']`);
 
-    it("prepares the current head and shows the building copy, polling every 2 s until ready", async () => {
+    it("shows the change and the live site side by side once deployed", async () => {
+      const reviewPreview = vi.fn(async () => READY);
+      const { w } = await mountChange({ ...base(), reviewPreview });
+      expect(reviewPreview).toHaveBeenCalledWith("site", 7);
+      expect(frame(w, "change").attributes("src")).toBe("https://pr-7.acme.pages.dev/");
+      expect(frame(w, "live").attributes("src")).toBe("https://acme.pages.dev/");
+      // Another origin: its own scripts may run, never with orso's.
+      expect(frame(w, "change").attributes("sandbox")).toBe("allow-scripts allow-same-origin allow-forms allow-popups");
+      const tabs = w.findAll("[data-testid='review-compare'] [role='tab']");
+      expect(tabs.map((t) => t.text())).toEqual(["This change", "Live site", "Side by side"]);
+      expect(tabs[2]!.attributes("aria-selected")).toBe("true");
+    });
+
+    it("switches between the change, the live site and both", async () => {
+      const { w } = await mountChange({ ...base(), reviewPreview: vi.fn(async () => READY) });
+      const tab = (i: number) => w.findAll("[data-testid='review-compare'] [role='tab']")[i]!;
+      await tab(0).trigger("mousedown", { button: 0 });
+      await flushPromises();
+      expect(frame(w, "change").exists()).toBe(true);
+      expect(frame(w, "live").exists()).toBe(false);
+      await tab(1).trigger("mousedown", { button: 0 });
+      await flushPromises();
+      expect(frame(w, "change").exists()).toBe(false);
+      expect(frame(w, "live").attributes("src")).toBe("https://acme.pages.dev/");
+      await tab(2).trigger("mousedown", { button: 0 });
+      await flushPromises();
+      expect(frame(w, "change").exists()).toBe(true);
+      expect(frame(w, "live").exists()).toBe(true);
+    });
+
+    it("says the deploy is running and checks again every 10 s until it is ready", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const reviewPreview = vi
         .fn()
-        .mockResolvedValueOnce({ state: "building" })
-        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
-      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
-      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
-      expect(prepareReviewPreview).toHaveBeenCalledWith("site", 7, "abc");
-      expect(w.text()).toContain("Preparing the preview…");
-      // The diff and decision stay usable while it builds.
-      expect(w.find("[data-testid='diff-stub']").exists()).toBe(true);
+        .mockResolvedValueOnce({ state: "deploying", headSha: "abc", liveUrl: "https://acme.pages.dev/" })
+        .mockResolvedValue(READY);
+      const { w } = await mountChange({ ...base(), reviewPreview });
+      expect(w.get("[data-testid='review-preview-deploying']").text()).toContain("Deploying preview…");
+      // The live site is already there to look at, and the decision stays usable.
+      expect(frame(w, "live").exists()).toBe(true);
       expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
-      // Real time also advances (`shouldAdvanceTime`), so leave room for a slow, busy machine.
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(reviewPreview).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1100);
-      expect(reviewPreview).toHaveBeenCalledWith("site", 7, "abc");
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(reviewPreview).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5500);
       await flushPromises();
-      const frame = w.get("iframe[data-testid='review-preview-frame']");
-      expect(frame.attributes("src")).toBe("http://127.0.0.1:7800/preview/site/reviews/7/abc/");
-      expect(frame.attributes("sandbox")).toBe("allow-same-origin");
-      expect(w.text()).not.toContain("Preparing the preview…");
-      const calls = reviewPreview.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(6000);
-      expect(reviewPreview.mock.calls.length).toBe(calls);
+      expect(reviewPreview).toHaveBeenCalledTimes(2);
+      expect(frame(w, "change").attributes("src")).toBe("https://pr-7.acme.pages.dev/");
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(reviewPreview).toHaveBeenCalledTimes(2);
     });
 
-    it("shows the iframe at once when the first answer is ready", async () => {
+    it("waits for a hidden tab to come back before checking the deploy again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const reviewPreview = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "deploying", headSha: "abc" })
+        .mockResolvedValue(READY);
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      try {
+        await mountChange({ ...base(), reviewPreview });
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(reviewPreview).toHaveBeenCalledTimes(1);
+        visibility.mockReturnValue("visible");
+        document.dispatchEvent(new Event("visibilitychange"));
+        await flushPromises();
+        expect(reviewPreview).toHaveBeenCalledTimes(2);
+      } finally {
+        visibility.mockRestore();
+      }
+    });
+
+    it("links a failed deploy to the change's checks", async () => {
       const { w } = await mountChange({
         ...base(),
-        prepareReviewPreview: vi.fn(async () => ({ state: "ready", url: "/preview/site/reviews/7/abc/" })),
-        reviewPreview: vi.fn(),
+        reviewPreview: vi.fn(async () => ({ state: "failed", headSha: "abc", liveUrl: "https://acme.pages.dev/" })),
       });
-      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
-      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
+      const failed = w.get("[data-testid='review-preview-failed']");
+      expect(failed.text()).toContain("The preview deploy failed.");
+      expect(w.get("[data-testid='review-preview-checks']").attributes("href")).toBe("https://example.test/7/checks");
     });
 
-    it("shows the failure and Try again prepares once more", async () => {
-      const prepareReviewPreview = vi
+    it("explains a site without deploy previews and points at what changed", async () => {
+      const { w } = await mountChange({
+        ...base(),
+        reviewPreview: vi.fn(async () => ({ state: "none", headSha: "abc" })),
+        liveSiteUrl: vi.fn(async () => null),
+      });
+      expect(w.get("[data-testid='review-preview-none']").text()).toContain(
+        "This site doesn't publish previews for changes.",
+      );
+      await w.get("[data-testid='review-preview-to-changes']").trigger("click");
+      await flushPromises();
+      expect((w.get("[data-testid='review-changes']").element as HTMLElement).style.display).not.toBe("none");
+    });
+
+    it("notes a missing live site on its own side", async () => {
+      const { w } = await mountChange({
+        ...base(),
+        reviewPreview: vi.fn(async () => ({ state: "ready", headSha: "abc", url: "https://pr-7.acme.pages.dev/" })),
+        liveSiteUrl: vi.fn(async () => null),
+      });
+      // Without a live site there is nothing to put beside the change.
+      expect(frame(w, "change").exists()).toBe(true);
+      const tabs = w.findAll("[data-testid='review-compare'] [role='tab']");
+      await tabs[2]!.trigger("mousedown", { button: 0 });
+      await flushPromises();
+      expect(w.get("[data-testid='review-live-missing']").text()).toContain("No live site found");
+    });
+
+    it("shows a load error with Try again", async () => {
+      const reviewPreview = vi
         .fn()
-        .mockResolvedValueOnce({ state: "failed", message: "npm ERR! build exploded" })
-        .mockResolvedValueOnce({ state: "ready", url: "/preview/site/reviews/7/abc/" });
-      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview: vi.fn() });
-      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("npm ERR! build exploded");
-      expect(w.find("[data-testid='diff-stub']").exists()).toBe(true);
-      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
+        .mockRejectedValueOnce(new ApiError("UNKNOWN", "GitHub is unreachable", 502))
+        .mockResolvedValue(READY);
+      const { w } = await mountChange({ ...base(), reviewPreview });
+      expect(w.get("[data-testid='review-preview-error']").text()).toContain("GitHub is unreachable");
       await w.get("[data-testid='review-preview-retry']").trigger("click");
       await flushPromises();
-      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
-      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
+      expect(frame(w, "change").exists()).toBe(true);
     });
 
-    it("shows a failure when preparing itself fails", async () => {
-      const { w } = await mountChange({
-        ...base(),
-        prepareReviewPreview: vi.fn(async () => {
-          throw new ApiError("UNKNOWN", "GitHub is unreachable", 502);
-        }),
-        reviewPreview: vi.fn(),
-      });
-      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("GitHub is unreachable");
-    });
-
-    it("prepares again when the poll finds the build gone, once", async () => {
+    it("stops checking on unmount", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
-      const reviewPreview = vi
-        .fn()
-        .mockRejectedValueOnce(new ApiError("UNKNOWN", "not prepared", 404))
-        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
-      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
-      await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
-      expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "abc");
-      expect(w.text()).toContain("Preparing the preview…");
-      await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
-    });
-
-    it("fails when the build keeps vanishing", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
-      const reviewPreview = vi.fn(async () => {
-        throw new ApiError("UNKNOWN", "not prepared", 404);
-      });
-      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
-      await vi.advanceTimersByTimeAsync(2100);
-      await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
-      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("not prepared");
-    });
-
-    it("keeps polling after one network error", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      const reviewPreview = vi
-        .fn()
-        .mockRejectedValueOnce(new Error("offline"))
-        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
-      const { w } = await mountChange({
-        ...base(),
-        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
-        reviewPreview,
-      });
-      await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(w.find("[data-testid='review-preview-failed']").exists()).toBe(false);
-      await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
-    });
-
-    it("fails after three errors in a row", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      const reviewPreview = vi.fn(async () => {
-        throw new Error("offline");
-      });
-      const { w } = await mountChange({
-        ...base(),
-        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
-        reviewPreview,
-      });
-      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(2100);
-      await flushPromises();
-      expect(reviewPreview).toHaveBeenCalledTimes(3);
-      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("offline");
-    });
-
-    it("reloads the change when preparing finds the head moved", async () => {
-      const review = vi
-        .fn()
-        .mockResolvedValueOnce({ ...DETAIL })
-        .mockResolvedValue({ ...DETAIL, headSha: "def" });
-      const prepareReviewPreview = vi
-        .fn()
-        .mockRejectedValueOnce(new ApiError("CONFLICT", "This change was updated since you opened it", 409, { reason: "head_moved" }))
-        .mockResolvedValue({ state: "building" });
-      const { w } = await mountChange({
-        review,
-        reviewDiff: vi.fn(async () => diffOf(DIFF)),
-        prepareReviewPreview,
-        reviewPreview: vi.fn(async () => ({ state: "building" })),
-      });
-      await vi.waitFor(() => expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "def"));
-      expect(review).toHaveBeenCalledTimes(2);
-      expect(w.find("[data-testid='review-preview-failed']").exists()).toBe(false);
-    });
-
-    it("stops polling on unmount", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      const reviewPreview = vi.fn(async () => ({ state: "building" }));
-      const { w } = await mountChange({
-        ...base(),
-        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
-        reviewPreview,
-      });
-      await vi.advanceTimersByTimeAsync(2100);
-      expect(reviewPreview).toHaveBeenCalledTimes(1);
+      const reviewPreview = vi.fn(async () => ({ state: "deploying", headSha: "abc" }));
+      const { w } = await mountChange({ ...base(), reviewPreview });
       w.unmount();
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(30_000);
       expect(reviewPreview).toHaveBeenCalledTimes(1);
-    });
-
-    it("restarts for the new head after the change moved", async () => {
-      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
-      const review = vi
-        .fn()
-        .mockResolvedValueOnce({ ...DETAIL })
-        .mockResolvedValue({ ...DETAIL, headSha: "def" });
-      const decideReview = vi.fn(async () => {
-        throw new ApiError("CONFLICT", "This change was updated since you opened it", 409, { reason: "head_moved" });
-      });
-      const { w } = await mountChange({
-        review,
-        reviewDiff: vi.fn(async () => diffOf(DIFF)),
-        decideReview,
-        prepareReviewPreview,
-        reviewPreview: vi.fn(async () => ({ state: "building" })),
-      });
-      expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "abc");
-      await w.get("[data-testid='review-greenlight']").trigger("click");
-      await flushPromises();
-      await vi.waitFor(() => expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "def"));
     });
   });
 
@@ -407,7 +360,7 @@ describe("ReviewChange", () => {
         return m;
       }
       async function submit() {
-        await dialog().get("form").trigger("submit");
+        await dialog().get("[role='dialog'] form").trigger("submit");
         await flushPromises();
       }
       afterEach(() => {
