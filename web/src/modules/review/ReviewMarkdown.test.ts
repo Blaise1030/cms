@@ -34,7 +34,27 @@ describe("ReviewMarkdown image grid", () => {
     await flushPromises();
     const grid = w.get("[data-testid='review-image-grid']");
     expect(grid.findAll("img").map((i) => i.attributes("src"))).toEqual(["https://x.test/a.png", "/api/b.png"]);
-    expect(grid.findAll("a").every((a) => a.attributes("target") === "_blank")).toBe(true);
     expect(w.text()).toContain("Test images");
+  });
+});
+
+describe("ReviewMarkdown spotlight", () => {
+  it("opens a thumbnail large and steps through the grid with the arrow keys", async () => {
+    const w = mount(ReviewMarkdown, {
+      props: { content: "![one](https://x.test/1.png)\n![two](https://x.test/2.png)" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await w.findAll("[data-testid='review-image-thumb']")[1]!.trigger("click");
+    await flushPromises();
+    const big = () => document.querySelector("[data-testid='review-spotlight-image']")?.getAttribute("src");
+    expect(big()).toBe("https://x.test/2.png");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+    await flushPromises();
+    expect(big()).toBe("https://x.test/1.png");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+    await flushPromises();
+    expect(big()).toBe("https://x.test/2.png");
+    w.unmount();
   });
 });
