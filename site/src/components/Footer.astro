@@ -44,8 +44,8 @@ const legal = [...site.footer.links, site.footer.license];
           class="mt-8"
           label="Get Orso"
           trailing-icon="i-hugeicons-arrow-up-right-01"
-          to={site.cta.href}
-          rel="noopener noreferrer"
+          to={href(site.cta.href)}
+          rel={/^https?:\/\//.test(site.cta.href) ? "noopener noreferrer" : undefined}
         />
       </div>
 
