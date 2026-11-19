@@ -1,6 +1,7 @@
 ---
 import { buttonVariants } from "../ui/button";
 import Icon from "../Icon.astro";
+import { DownloadButton } from "../react/DownloadButton";
 
 const facts = [
   { title: "Free and open source", detail: "MIT licence, no paid tier.", icon: "scale" as const },
@@ -21,23 +22,15 @@ const installCommand = "brew install blaise1030/tap/orso && orso serve --open";
         <p class="max-w-measure text-muted">
           You install Orso and connect the repo once. After that, your team edits with drafts, previews and Publish.
         </p>
-        <div class="mt-6 flex items-center gap-2 rounded-md border border-line bg-surface-raised py-1 pr-1 pl-3">
-          <code class="min-w-0 flex-1 overflow-x-auto text-small whitespace-nowrap text-ink" data-install-command
-            >{installCommand}</code
-          >
-          <button
-            class={buttonVariants({ variant: "outline", size: "sm" })}
-            type="button"
-            data-copy-install
-            aria-label="Copy install command">Copy</button
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+          <DownloadButton client:visible />
+          <a
+            class={buttonVariants({ variant: "outline", size: "lg" })}
+            href="https://github.com/Blaise1030/cms"
+            rel="noopener noreferrer">View on GitHub</a
           >
         </div>
-        <p class="mt-2 text-small text-muted">macOS via Homebrew. Linux installer script on GitHub.</p>
-        <a
-          class={`${buttonVariants({ size: "lg" })} mt-8`}
-          href="https://github.com/Blaise1030/cms"
-          rel="noopener noreferrer">Get Orso on GitHub</a
-        >
+        <p class="mt-2 text-small text-muted">macOS and Linux. Prefer Homebrew? <code class="text-ink">{installCommand}</code></p>
       </div>
     </div>
 
@@ -55,17 +48,3 @@ const installCommand = "brew install blaise1030/tap/orso && orso serve --open";
   </div>
 </section>
 
-<script>
-  document.querySelectorAll<HTMLButtonElement>("[data-copy-install]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const command = button.parentElement?.querySelector("[data-install-command]")?.textContent ?? "";
-      try {
-        await navigator.clipboard.writeText(command.trim());
-        button.textContent = "Copied";
-        setTimeout(() => (button.textContent = "Copy"), 1500);
-      } catch {
-        button.textContent = "Copy failed";
-      }
-    });
-  });
-</script>
