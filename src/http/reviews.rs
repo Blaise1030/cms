@@ -178,6 +178,44 @@ pub async fn diff(
         .into_response())
 }
 
+/// Query of `GET /api/projects/{id}/reviews/assets`.
+#[derive(Deserialize)]
+pub struct AssetQuery {
+    path: String,
+    sha: String,
+}
+
+/// `GET /api/projects/{id}/reviews/assets?path=…&sha=…` → an image orso put on the project's
+/// `orso-review-assets` branch, read with the signed-in account (so private repositories
+/// work) and served only as the image type its bytes are. Never anything else in the repo.
+pub async fn asset(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<AssetQuery>,
+) -> Result<Response, ApiError> {
+    if !crate::review_shots::is_asset_path(&q.path) || !crate::review_shots::is_sha(&q.sha) {
+        return Err(ApiError::badreq("Not a review image"));
+    }
+    let (_, repo) = project_repo(&state, &id).await?;
+    let bytes = state.github.raw_file(&repo, &q.sha, &q.path).await?;
+    let Some(mime) = crate::review_shots::image_mime(&bytes) else {
+        return Err(ApiError::badreq("Not a review image"));
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            // Named by commit: it never changes.
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 /// Whether change `number` carries one of the project's review labels (and so may be read
 /// here), with its detail.
 async fn labelled_detail(
@@ -384,6 +422,17 @@ mod tests {
     async fn setup(root: &FsPath, push: bool, repo: Option<&str>) -> (AppState, String) {
         let routes = Router::new()
             .route(
+                "/repos/acme/site/contents/{*path}",
+                get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
+                    // One real PNG and one file whose bytes are not an image.
+                    if path.contains("0f8fad5b") {
+                        b"\x89PNG\r\n\x1a\nIHDR".to_vec()
+                    } else {
+                        b"<svg onload=alert(1)>".to_vec()
+                    }
+                }),
+            )
+            .route(
                 "/repos/acme/site/pulls",
                 get(
                     |Query(q): Query<std::collections::HashMap<String, String>>| async move {
@@ -551,6 +600,52 @@ mod tests {
 
     async fn body_json(r: Result<Json<Value>, ApiError>) -> Value {
         r.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn assets_serve_only_orso_images_with_their_real_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let q = |path: &str, sha: &str| {
+            Query(AssetQuery {
+                path: path.into(),
+                sha: sha.into(),
+            })
+        };
+        let ok = asset(
+            State(state.clone()),
+            Path(id.clone()),
+            q(
+                "shots/7/2026-11-19/0f8fad5b-d9cb-469f-a165-70867728950e.png",
+                "abc1234",
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(ok.headers()[header::CONTENT_TYPE], "image/png");
+        assert_eq!(ok.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        // An image path whose bytes aren't an image is refused.
+        let svg = asset(
+            State(state.clone()),
+            Path(id.clone()),
+            q(
+                "uploads/7/2026-11-19/11111111-d9cb-469f-a165-70867728950e.png",
+                "abc1234",
+            ),
+        )
+        .await;
+        assert_eq!(svg.unwrap_err().code.status(), 400);
+        // Nothing outside the assets folders, and only by commit.
+        for (path, sha) in [
+            (".github/workflows/deploy.yml", "abc1234"),
+            (
+                "shots/7/2026-11-19/0f8fad5b-d9cb-469f-a165-70867728950e.png",
+                "main",
+            ),
+        ] {
+            let err = asset(State(state.clone()), Path(id.clone()), q(path, sha)).await;
+            assert_eq!(err.unwrap_err().code.status(), 400, "{path}");
+        }
     }
 
     #[tokio::test]

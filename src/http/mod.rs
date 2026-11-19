@@ -91,6 +91,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/projects/{id}/deploy", get(changes::deploy))
         .route("/api/projects/{id}/reviews", get(reviews::list))
+        .route("/api/projects/{id}/reviews/assets", get(reviews::asset))
         .route("/api/projects/{id}/reviews/{n}", get(reviews::detail))
         .route("/api/projects/{id}/reviews/{n}/diff", get(reviews::diff))
         .route(

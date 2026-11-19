@@ -176,6 +176,53 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// A file orso put on the assets branch: `shots/` or `uploads/`, then `{pr}/{date}/{uuid}.{ext}`
+/// with an image extension. Anything else (and anything with `..`) is refused.
+pub fn is_asset_path(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let [kind, pr, date, file] = parts.as_slice() else {
+        return false;
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let date_ok = date.len() == 10
+        && date.bytes().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        });
+    let Some((stem, ext)) = file.rsplit_once('.') else {
+        return false;
+    };
+    matches!(*kind, "shots" | "uploads")
+        && digits(pr)
+        && date_ok
+        && stem.len() == 36
+        && stem.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+        && matches!(ext, "png" | "jpg" | "gif" | "webp")
+}
+
+/// A commit sha (7 to 40 hex digits).
+pub fn is_sha(s: &str) -> bool {
+    (7..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The image type of `bytes` by their first bytes; None for anything else.
+pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(PNG_MAGIC) {
+        Some("image/png")
+    } else if bytes.starts_with(JPEG_MAGIC) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
 /// `shots/{pr}/{yyyy-mm-dd}/{uuid}.{ext}` for an image saved `unix_secs` after the epoch.
 pub fn asset_path(pr: u64, unix_secs: u64, id: &str, ext: &str) -> String {
     let (y, m, d) = civil_date(unix_secs / 86_400);
@@ -379,6 +426,36 @@ mod tests {
              ![screenshot](https://github.com/o/r/blob/c1/shots/a.png?raw=true)\n\n\
              ### 2. Old copy here\n\nOld copy here\n\nPage: `/` (live, desktop)"
         );
+    }
+
+    #[test]
+    fn only_orso_asset_paths_and_shas_are_served() {
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        assert!(is_asset_path(&format!("shots/83/2026-11-19/{id}.png")));
+        assert!(is_asset_path(&format!("uploads/7/2026-01-02/{id}.webp")));
+        for bad in [
+            format!("site/83/2026-11-19/{id}.png"),
+            format!("shots/../2026-11-19/{id}.png"),
+            format!("shots/83/2026-11-19/{id}.svg"),
+            format!("shots/83/26-11-19/{id}.png"),
+            "shots/83/2026-11-19/x.png".to_string(),
+            format!("shots/83/2026-11-19/{id}.png/extra"),
+            ".github/workflows/x.yml".to_string(),
+        ] {
+            assert!(!is_asset_path(&bad), "{bad}");
+        }
+        assert!(is_sha("abc1234"));
+        assert!(!is_sha("main"));
+        assert!(!is_sha("abc"));
+    }
+
+    #[test]
+    fn image_types_come_from_the_bytes() {
+        assert_eq!(image_mime(&png()), Some("image/png"));
+        assert_eq!(image_mime(&[0xFF, 0xD8, 0xFF, 0]), Some("image/jpeg"));
+        assert_eq!(image_mime(b"GIF89a.."), Some("image/gif"));
+        assert_eq!(image_mime(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(image_mime(b"<svg onload=alert(1)>"), None);
     }
 
     #[test]

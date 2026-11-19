@@ -1138,6 +1138,8 @@ pub struct GithubAuth {
     applied: Mutex<Option<Identity>>,
     /// Token-made REST GETs, reused briefly and revalidated with ETags (see `github_cache`).
     get_cache: crate::github_cache::GetCache,
+    /// Review images by `repo@sha:path`: a commit's file never changes, so they're kept as is.
+    raw_files: std::sync::Mutex<std::collections::VecDeque<(String, bytes::Bytes)>>,
 }
 
 impl GithubAuth {
@@ -1164,6 +1166,7 @@ impl GithubAuth {
             cli: Mutex::new(None),
             applied: Mutex::new(None),
             get_cache: crate::github_cache::GetCache::new(cfg_ttl),
+            raw_files: std::sync::Mutex::default(),
         }
     }
 
@@ -2330,6 +2333,64 @@ impl GithubAuth {
             Some(&body),
         )
         .await
+    }
+
+    /// The bytes of `path` at commit `sha` in `repo`, kept in memory once read (a commit's file
+    /// never changes; the most recent 64 are kept).
+    pub async fn raw_file(
+        &self,
+        repo: &str,
+        sha: &str,
+        path: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        const KEEP: usize = 64;
+        let key = format!("{repo}@{sha}:{path}");
+        if let Some((_, b)) = self
+            .raw_files
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| *k == key)
+        {
+            return Ok(b.clone());
+        }
+        let api_path = format!("/repos/{repo}/contents/{path}?ref={}", urlencode(sha));
+        const RAW: &str = "application/vnd.github.raw+json";
+        let bytes = if let Some(token) = self.token().await {
+            let res = self
+                .http
+                .get(format!("{}{api_path}", self.api()))
+                .bearer_auth(&token)
+                .header(ACCEPT, RAW)
+                .send()
+                .await
+                .map_err(unreachable)?;
+            let status = res.status();
+            let body = res.bytes().await.map_err(unreachable)?;
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(ApiError::enoent("That image isn't there any more"));
+            }
+            if !status.is_success() {
+                return Err(github_error(status, &body));
+            }
+            body
+        } else {
+            let accept = format!("Accept: {RAW}");
+            let out = self
+                .run_gh_input(&["api", "-H", &accept, &api_path], 30, None)
+                .await
+                .map_err(|f| f.err.with_status(502))?;
+            if out.code != Some(0) {
+                return Err(self.gh_api_error(out).await);
+            }
+            bytes::Bytes::from(out.stdout)
+        };
+        let mut kept = self.raw_files.lock().unwrap();
+        kept.push_back((key, bytes.clone()));
+        while kept.len() > KEEP {
+            kept.pop_front();
+        }
+        Ok(bytes)
     }
 
     /// A link that shows `path` at `commit` in `repo` as an image in GitHub markdown.

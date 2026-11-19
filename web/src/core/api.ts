@@ -311,6 +311,9 @@ export function createApi(
     attachChatFile: async (project: string, file: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/chat/${enc(project)}/attachments`, { blob: file })).path,
     /** A saved attachment by file name, for `<img>` (authenticated by the session cookie). */
+    /** A review image on the project's `orso-review-assets` branch, through the daemon. */
+    reviewAssetUrl: (project: string, sha: string, path: string) =>
+      `${cfg().origin}/api/projects/${enc(project)}/reviews/assets?path=${encodeURIComponent(path)}&sha=${encodeURIComponent(sha)}`,
     attachmentUrl: (project: string, name: string) =>
       `${cfg().origin}/api/chat/${enc(project)}/attachments/${enc(name)}`,
     listChats: (project: string) =>

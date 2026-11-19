@@ -380,6 +380,28 @@ describe("ReviewChange", () => {
       expect(messages[2]!.find("[data-testid='review-message-header']").exists()).toBe(true);
     });
 
+    it("loads the repo's review images through the daemon", async () => {
+      const shot = "https://github.com/acme/site/blob/abc1234/shots/7/2026-11-19/0f8fad5b-d9cb-469f-a165-70867728950e.png?raw=true";
+      const talk = {
+        ...TALK,
+        items: [{ kind: "comment", id: 3, author: "cy", at: "2026-01-02T12:00:00Z", body: `![screenshot](${shot})`, url: "u" }],
+      };
+      const { w } = await mountChange(
+        {
+          ...base(),
+          review: vi.fn(async () => ({ ...DETAIL, url: "https://github.com/acme/site/pull/7" })),
+          reviewConversation: vi.fn(async () => talk),
+          reviewAssetUrl: (p: string, sha: string, path: string) => `/api/projects/${p}/reviews/assets?path=${path}&sha=${sha}`,
+        },
+        "conversation",
+      );
+      const msg = w.get("[data-testid='review-timeline-comment']");
+      await vi.waitFor(() => expect(msg.find("[data-testid='review-markdown'] img").exists()).toBe(true));
+      expect(msg.get("[data-testid='review-markdown'] img").attributes("src")).toBe(
+        "/api/projects/site/reviews/assets?path=shots/7/2026-11-19/0f8fad5b-d9cb-469f-a165-70867728950e.png&sha=abc1234",
+      );
+    });
+
     it("renders the description as markdown with raw HTML left inert", async () => {
       const description = "Hello **there**\n\n<script>window.__pwned = 1</script><img src=x onerror=\"window.__pwned=1\">";
       const { w } = await mountChange(

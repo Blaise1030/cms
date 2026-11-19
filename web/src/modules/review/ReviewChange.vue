@@ -356,7 +356,13 @@ function reveal(path: string) {
             />
           </UTooltip>
         </nav>
-        <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
+        <ReviewConversation
+          v-if="page === 'conversation'"
+          :project-id="projectId"
+          :change="change"
+          :talk="talk"
+          :preview="preview"
+        />
         <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
           <div
             v-show="view === 'preview'"

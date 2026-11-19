@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, provide, ref, watch } from "vue";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UBadge from "@nuxt/ui/components/Badge.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
@@ -14,6 +14,8 @@ import type { UIMessage } from "ai";
 import type { ButtonProps } from "@nuxt/ui";
 import type { ReviewDetail, ReviewPreview, ReviewReviewer, TimelineItem } from "@/core/types";
 import { checkState, checkSummary } from "./checks";
+import { useDaemon } from "@/core/daemon";
+import { ASSET_IMAGES, repoOfPullUrl, rewriteAssetImages } from "./assetImages";
 import { buildFeed, clockTime, exactTime } from "./feed";
 import { labelStyle } from "./labels";
 import type { useConversation } from "./queries";
@@ -26,12 +28,22 @@ const ReviewMarkdown = defineAsyncComponent(() => import("./ReviewMarkdown.vue")
  * oldest first (opening on the latest), a composer pinned at the bottom, and a sidebar of facts.
  */
 const props = defineProps<{
+  projectId: string;
   change: ReviewDetail;
   talk: ReturnType<typeof useConversation>;
   preview: ReviewPreview | null;
 }>();
 
 const conversation = computed(() => props.talk.conversation.value);
+
+// Images orso stored on the repo's assets branch load through the daemon, private repos too.
+const daemon = useDaemon();
+provide(ASSET_IMAGES, (markdown: string) => {
+  const repo = repoOfPullUrl(props.change.url);
+  return repo
+    ? rewriteAssetImages(markdown, repo, (sha, path) => daemon.api.reviewAssetUrl(props.projectId, sha, path))
+    : markdown;
+});
 const rows = computed(() => buildFeed(conversation.value?.items ?? []));
 const checks = computed(() => conversation.value?.checks ?? []);
 const summary = computed(() => checkSummary(checks.value));
@@ -211,12 +223,10 @@ function submit() {
                 role="separator"
                 :aria-label="row.label"
                 data-kind="day"
-                class="flex items-center gap-3 px-1 py-3"
+                class="flex items-center justify-center px-1 py-3"
                 data-testid="review-day"
               >
-                <span class="bg-accented h-px flex-1" />
-                <span class="text-muted text-xs font-medium">{{ row.label }}</span>
-                <span class="bg-accented h-px flex-1" />
+                <UBadge color="neutral" variant="soft" size="sm" :label="row.label" />
               </div>
 
               <UChatMessage
