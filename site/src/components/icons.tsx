@@ -8,6 +8,7 @@ import {
   ArrowLeft01Icon,
   ArrowLeft02Icon,
   ArrowRight01Icon,
+  ArrowRight02Icon,
   ArrowUp01Icon,
   ArrowUpRight01Icon,
   Cancel01Icon,
@@ -31,6 +32,7 @@ const make = (icon: IconSvgElement, name: string) => {
 };
 
 export const ArrowLeftIcon = make(ArrowLeft02Icon, "ArrowLeftIcon");
+export const ArrowRightIcon = make(ArrowRight02Icon, "ArrowRightIcon");
 export const ArrowUpRightIcon = make(ArrowUpRight01Icon, "ArrowUpRightIcon");
 export const CheckIcon = make(Tick02Icon, "CheckIcon");
 export const ChevronDownIcon = make(ArrowDown01Icon, "ChevronDownIcon");
