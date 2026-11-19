@@ -131,6 +131,14 @@ watch(
                 />
               </div>
             </header>
+            <!-- macOS desktop with no top bar: an empty strip keeps the page clear of the traffic
+                 lights, level with the rail, and is still where the window is dragged from. -->
+            <div
+              v-else-if="macDesktop"
+              class="bg-background h-11 shrink-0 fullscreen:h-0"
+              data-tauri-drag-region
+              data-testid="top-bar-spacer"
+            />
             <div class="min-h-0 flex-1 overflow-hidden">
               <slot name="workspace" />
             </div>

@@ -74,6 +74,22 @@ describe("Shell", () => {
 
     const topBar = (w: ReturnType<typeof mountShell>) => w.find("[data-testid='top-bar']");
 
+    it("keeps a draggable strip clear of the traffic lights when the top bar is hidden", async () => {
+      const hidden = () => mount(Shell, { props: { hideTopBar: true }, attachTo: document.body });
+      const browser = hidden();
+      expect(browser.find("[data-testid='top-bar-spacer']").exists()).toBe(false);
+      browser.unmount();
+
+      document.documentElement.dataset.desktop = "macos";
+      const w = hidden();
+      await flushPromises();
+      expect(topBar(w).exists()).toBe(false);
+      const spacer = w.get("[data-testid='top-bar-spacer']");
+      expect(spacer.attributes()).toHaveProperty("data-tauri-drag-region");
+      expect(spacer.classes()).toContain("h-11");
+      w.unmount();
+    });
+
     it("is a plain header in the browser", () => {
       const w = mountShell(false);
       expect(topBar(w).attributes("data-tauri-drag-region")).toBeUndefined();
