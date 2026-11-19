@@ -15,6 +15,8 @@ export interface BrowserFrameSide {
   key: string;
   label: string;
   url: string | null;
+  /** A short state shown on the side's strip while it is collapsed (e.g. "Deploying…"). */
+  status?: string;
 }
 
 /**
@@ -26,6 +28,14 @@ export interface BrowserFrameSide {
 const props = defineProps<{ frames: BrowserFrameSide[] }>();
 defineSlots<{ placeholder(props: { frame: BrowserFrameSide }): unknown }>();
 const device = defineModel<Device>("device", { default: "desktop" });
+/**
+ * With several sides, the key of the one folded to a narrow strip (at most one: folding a side
+ * unfolds the other), so the rest fill the width.
+ */
+const collapsed = defineModel<string | null>("collapsed", { default: null });
+const isCollapsed = (frame: BrowserFrameSide) => props.frames.length > 1 && collapsed.value === frame.key;
+/** "This change" → "this change", for "Hide this change". */
+const lower = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
 
 /** Paths opened from the address bar, with the one shown at `at`. */
 const history = ref<string[]>(["/"]);
@@ -51,7 +61,8 @@ const srcs = computed(() => props.frames.map((f) => frameUrl(f.url, path.value))
 
 /** Each side fits its own width; the toolbar shows the first side's zoom (side by side, they match). */
 const scales = ref<Record<string, number>>({});
-const scale = computed(() => scales.value[props.frames[0]?.key ?? ""] ?? 1);
+const shown = computed(() => props.frames.find((f) => !isCollapsed(f)) ?? props.frames[0]);
+const scale = computed(() => scales.value[shown.value?.key ?? ""] ?? 1);
 const zoomed = computed(() => scale.value < 1);
 const zoomPercent = computed(() => Math.round(scale.value * 100));
 
@@ -165,9 +176,34 @@ function openExternal(src: string | null) {
     </div>
 
     <div class="divide-default flex min-h-0 flex-1 divide-x">
+      <template v-for="(frame, i) in frames" :key="frame.key">
+      <!-- A folded side: a narrow strip with its label, state and a way back. -->
+      <div
+        v-if="isCollapsed(frame)"
+        class="bg-background flex w-9 shrink-0 flex-col items-center gap-2 py-1"
+        :data-testid="`browser-frame-strip-${frame.key}`"
+      >
+        <UTooltip :text="`Show ${lower(frame.label)}`">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-hugeicons-sidebar-left-01"
+            :aria-label="`Show ${lower(frame.label)}`"
+            :data-testid="`browser-frame-expand-${frame.key}`"
+            @click="collapsed = null"
+          />
+        </UTooltip>
+        <span class="text-muted text-xs font-medium [writing-mode:vertical-rl]">{{ frame.label }}</span>
+        <span
+          v-if="frame.status"
+          class="text-dimmed text-xs [writing-mode:vertical-rl]"
+          :data-testid="`browser-frame-status-${frame.key}`"
+        >{{ frame.status }}</span>
+      </div>
+      <!-- Kept mounted while folded, so unfolding doesn't reload the site. -->
       <section
-        v-for="(frame, i) in frames"
-        :key="frame.key"
+        v-show="!isCollapsed(frame)"
         class="flex min-h-0 min-w-0 flex-1 flex-col"
         :data-testid="`browser-frame-side-${frame.key}`"
       >
@@ -176,6 +212,17 @@ function openExternal(src: string | null) {
           class="bg-background border-default flex h-8 shrink-0 items-center gap-1 border-b pr-1 pl-3"
         >
           <span class="text-muted min-w-0 flex-1 truncate text-xs font-medium">{{ frame.label }}</span>
+          <UTooltip :text="`Hide ${lower(frame.label)}`">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-sidebar-right-01"
+              :aria-label="`Hide ${lower(frame.label)}`"
+              :data-testid="`browser-frame-collapse-${frame.key}`"
+              @click="collapsed = frame.key"
+            />
+          </UTooltip>
           <UTooltip text="Open in new tab">
             <UButton
               color="neutral"
@@ -200,6 +247,7 @@ function openExternal(src: string | null) {
           <slot name="placeholder" :frame="frame" />
         </BrowserFramePane>
       </section>
+      </template>
     </div>
   </div>
 </template>

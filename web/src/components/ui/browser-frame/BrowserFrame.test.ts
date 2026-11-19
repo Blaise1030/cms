@@ -133,6 +133,38 @@ describe("BrowserFrame", () => {
     expect(src(w as unknown as ReturnType<typeof mountFrame>, "live")).toBe("https://site.test/docs/pricing");
   });
 
+  it("folds a side to a strip with its state and lets the other fill the width", async () => {
+    const collapsed = ref<string | null>("live");
+    const frames = [CHANGE, { ...LIVE, status: "Not found" }];
+    const Host = defineComponent({
+      setup: () => () =>
+        h(TooltipProvider, null, {
+          default: () =>
+            h(BrowserFrame, {
+              frames,
+              collapsed: collapsed.value,
+              "onUpdate:collapsed": (v: string | null) => (collapsed.value = v),
+            }),
+        }),
+    });
+    const w = mount(Host, { attachTo: document.body });
+    const sideShown = (key: string) =>
+      (w.get(`[data-testid='browser-frame-side-${key}']`).element as HTMLElement).style.display !== "none";
+    expect(sideShown("live")).toBe(false);
+    expect(sideShown("change")).toBe(true);
+    expect(w.get("[data-testid='browser-frame-strip-live']").text()).toContain("Live site");
+    expect(w.get("[data-testid='browser-frame-status-live']").text()).toBe("Not found");
+    await w.get("[data-testid='browser-frame-collapse-change']").trigger("click");
+    await flushPromises();
+    expect(collapsed.value).toBe("change");
+    expect(sideShown("live")).toBe(true);
+    expect(sideShown("change")).toBe(false);
+    await w.get("[data-testid='browser-frame-expand-change']").trigger("click");
+    await flushPromises();
+    expect(collapsed.value).toBeNull();
+    expect(w.find("[data-testid^='browser-frame-strip-']").exists()).toBe(false);
+  });
+
   it("reloads every side", async () => {
     const w = mountFrame([CHANGE, LIVE]);
     const before = [

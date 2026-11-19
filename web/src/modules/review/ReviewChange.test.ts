@@ -349,34 +349,49 @@ describe("ReviewChange", () => {
     const frame = (w: Awaited<ReturnType<typeof mountChange>>["w"], key: string) =>
       w.find(`iframe[data-testid='browser-frame-iframe-${key}']`);
 
-    it("shows the change and the live site side by side once deployed", async () => {
+    const shown = (w: Awaited<ReturnType<typeof mountChange>>["w"], key: string) =>
+      (w.get(`[data-testid='browser-frame-side-${key}']`).element as HTMLElement).style.display !== "none";
+    const strip = (w: Awaited<ReturnType<typeof mountChange>>["w"], key: string) =>
+      w.find(`[data-testid='browser-frame-strip-${key}']`);
+
+    it("always shows the change and the live site side by side once deployed", async () => {
       const reviewPreview = vi.fn(async () => READY);
       const { w } = await mountChange({ ...base(), reviewPreview });
       expect(reviewPreview).toHaveBeenCalledWith("site", 7);
       expect(frame(w, "change").attributes("src")).toBe("https://pr-7.acme.pages.dev/");
       expect(frame(w, "live").attributes("src")).toBe("https://acme.pages.dev/");
+      expect(shown(w, "change") && shown(w, "live")).toBe(true);
       // Another origin: its own scripts may run, never with orso's.
       expect(frame(w, "change").attributes("sandbox")).toBe("allow-scripts allow-same-origin allow-forms allow-popups");
-      const tabs = w.findAll("[data-testid='review-compare'] [role='tab']");
-      expect(tabs.map((t) => t.text())).toEqual(["This change", "Live site", "Side by side"]);
-      expect(tabs[2]!.attributes("aria-selected")).toBe("true");
+      expect(w.find("[data-testid='review-compare']").exists()).toBe(false);
     });
 
-    it("switches between the change, the live site and both", async () => {
+    it("folds one side at a time and remembers it in this browser", async () => {
       const { w } = await mountChange({ ...base(), reviewPreview: vi.fn(async () => READY) });
-      const tab = (i: number) => w.findAll("[data-testid='review-compare'] [role='tab']")[i]!;
-      await tab(0).trigger("mousedown", { button: 0 });
+      const hideChange = w.get("[data-testid='browser-frame-collapse-change']");
+      expect(hideChange.attributes("aria-label")).toBe("Hide this change");
+      expect(w.get("[data-testid='browser-frame-collapse-live']").attributes("aria-label")).toBe("Hide live site");
+      await hideChange.trigger("click");
       await flushPromises();
-      expect(frame(w, "change").exists()).toBe(true);
-      expect(frame(w, "live").exists()).toBe(false);
-      await tab(1).trigger("mousedown", { button: 0 });
+      expect(shown(w, "change")).toBe(false);
+      expect(strip(w, "change").text()).toContain("This change");
+      expect(shown(w, "live")).toBe(true);
+      expect(localStorage.getItem("orso.review.collapsed")).toBe("change");
+      // Folding the other side unfolds this one.
+      await w.get("[data-testid='browser-frame-collapse-live']").trigger("click");
       await flushPromises();
-      expect(frame(w, "change").exists()).toBe(false);
-      expect(frame(w, "live").attributes("src")).toBe("https://acme.pages.dev/");
-      await tab(2).trigger("mousedown", { button: 0 });
+      expect(shown(w, "change")).toBe(true);
+      expect(shown(w, "live")).toBe(false);
+      expect(strip(w, "change").exists()).toBe(false);
+      await w.get("[data-testid='browser-frame-expand-live']").trigger("click");
       await flushPromises();
-      expect(frame(w, "change").exists()).toBe(true);
-      expect(frame(w, "live").exists()).toBe(true);
+      expect(shown(w, "live")).toBe(true);
+      expect(localStorage.getItem("orso.review.collapsed")).toBeNull();
+      w.unmount();
+      localStorage.setItem("orso.review.collapsed", "live");
+      const again = await mountChange({ ...base(), reviewPreview: vi.fn(async () => READY) });
+      expect(shown(again.w, "live")).toBe(false);
+      expect(shown(again.w, "change")).toBe(true);
     });
 
     it("says the deploy is running and checks again every 10 s until it is ready", async () => {
@@ -387,7 +402,9 @@ describe("ReviewChange", () => {
         .mockResolvedValue(READY);
       const { w } = await mountChange({ ...base(), reviewPreview });
       expect(w.get("[data-testid='review-preview-deploying']").text()).toContain("Deploying preview…");
-      // The live site is already there to look at, and the decision stays usable.
+      // Nothing to show yet: the change starts folded with its state; the live site is there.
+      expect(strip(w, "change").text()).toContain("Deploying…");
+      expect(shown(w, "live")).toBe(true);
       expect(frame(w, "live").exists()).toBe(true);
       expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
       await vi.advanceTimersByTimeAsync(5000);
@@ -396,6 +413,8 @@ describe("ReviewChange", () => {
       await flushPromises();
       expect(reviewPreview).toHaveBeenCalledTimes(2);
       expect(frame(w, "change").attributes("src")).toBe("https://pr-7.acme.pages.dev/");
+      // Once deployed it unfolds on its own.
+      expect(shown(w, "change")).toBe(true);
       await vi.advanceTimersByTimeAsync(20_000);
       expect(reviewPreview).toHaveBeenCalledTimes(2);
     });
@@ -450,11 +469,13 @@ describe("ReviewChange", () => {
         reviewPreview: vi.fn(async () => ({ state: "ready", headSha: "abc", url: "https://pr-7.acme.pages.dev/" })),
         liveSiteUrl: vi.fn(async () => null),
       });
-      // Without a live site there is nothing to put beside the change.
+      // Without a live site it starts folded, saying so; unfolded, it explains.
       expect(frame(w, "change").exists()).toBe(true);
-      const tabs = w.findAll("[data-testid='review-compare'] [role='tab']");
-      await tabs[2]!.trigger("mousedown", { button: 0 });
+      expect(shown(w, "live")).toBe(false);
+      expect(strip(w, "live").text()).toContain("Not found");
+      await w.get("[data-testid='browser-frame-expand-live']").trigger("click");
       await flushPromises();
+      expect(shown(w, "live")).toBe(true);
       expect(w.get("[data-testid='review-live-missing']").text()).toContain("No live site found");
     });
 

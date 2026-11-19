@@ -12,6 +12,7 @@ import UTabs from "@nuxt/ui/components/Tabs.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
 import { BrowserFrame, isHttpUrl, type BrowserFrameSide } from "@/components/ui/browser-frame";
+import type { ReviewPreview } from "@/core/types";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath, type ReviewPage } from "@/router";
 import { RouterLink } from "vue-router";
@@ -101,32 +102,62 @@ const { preview, error: previewError, loading: previewLoading, reload: reloadPre
 );
 const previewLive = computed(() => preview.value?.liveUrl ?? liveUrl.value);
 
-type Compare = "change" | "live" | "side";
-const COMPARE: TabsItem[] = [
-  { label: "This change", value: "change" },
-  { label: "Live site", value: "live" },
-  { label: "Side by side", value: "side" },
-];
-/** `null` until the reviewer picks: side by side when the live site is there to compare with. */
-const picked = ref<Compare | null>(null);
-const compare = computed<Compare>(() => {
-  if (picked.value) return picked.value;
-  const coming = preview.value?.state === "ready" || preview.value?.state === "deploying";
-  return coming && isHttpUrl(previewLive.value) ? "side" : "change";
-});
-watch(
-  () => [props.projectId, props.number] as const,
-  () => (picked.value = null),
-);
 const CHANGE_LABEL = "This change";
 const LIVE_LABEL = "Live site";
-const frames = computed<BrowserFrameSide[]>(() => {
-  const mine = { key: "change", label: CHANGE_LABEL, url: preview.value?.url ?? null };
-  const live = { key: "live", label: LIVE_LABEL, url: previewLive.value ?? null };
-  if (compare.value === "change") return [mine];
-  if (compare.value === "live") return [live];
-  return [mine, live];
+const COLLAPSED_KEY = "orso.review.collapsed";
+/** The side this browser last folded ("change" / "live" / none). Storage may be unavailable. */
+function storedCollapsed(): string | null {
+  try {
+    const v = localStorage.getItem(COLLAPSED_KEY);
+    return v === "change" || v === "live" ? v : null;
+  } catch {
+    return null;
+  }
+}
+/** `undefined` until the reviewer folds or unfolds a side while this change is open. */
+const picked = ref<string | null | undefined>(undefined);
+watch(
+  () => [props.projectId, props.number] as const,
+  () => (picked.value = undefined),
+);
+/** Both sides show side by side; a side with nothing to show starts folded, else the remembered one. */
+const collapsed = computed<string | null>({
+  get: () => {
+    if (picked.value !== undefined) return picked.value;
+    if (!isHttpUrl(previewLive.value)) return "live";
+    if (preview.value && preview.value.state !== "ready") return "change";
+    return storedCollapsed();
+  },
+  set: (value) => {
+    picked.value = value;
+    try {
+      if (value) localStorage.setItem(COLLAPSED_KEY, value);
+      else localStorage.removeItem(COLLAPSED_KEY);
+    } catch {
+      // Remembering is a convenience.
+    }
+  },
 });
+const CHANGE_STATUS: Record<ReviewPreview["state"], string> = {
+  deploying: "Deploying…",
+  failed: "Deploy failed",
+  none: "No preview",
+  ready: "",
+};
+const frames = computed<BrowserFrameSide[]>(() => [
+  {
+    key: "change",
+    label: CHANGE_LABEL,
+    url: preview.value?.url ?? null,
+    status: preview.value ? CHANGE_STATUS[preview.value.state] || undefined : "Loading…",
+  },
+  {
+    key: "live",
+    label: LIVE_LABEL,
+    url: previewLive.value ?? null,
+    status: isHttpUrl(previewLive.value) ? undefined : "Not found",
+  },
+]);
 const checksUrl = computed(() => (change.value?.url ? `${change.value.url.replace(/\/+$/, "")}/checks` : null));
 
 /** The rendered change fills the view by default; What changed is one click away. */
@@ -157,7 +188,7 @@ function reveal(path: string) {
 
 <template>
   <div class="relative flex h-full min-h-0 flex-col" data-testid="review-change">
-    <div class="flex min-h-10 shrink-0 items-center gap-3 px-2 py-1.5">
+    <div class="flex min-h-10 shrink-0 items-center gap-3 px-3 pt-2 pb-3">
       <UTooltip text="Back to inbox">
         <UButton
           color="neutral"
@@ -292,19 +323,12 @@ function reveal(path: string) {
             class="flex min-h-0 flex-1 flex-col"
             data-testid="review-preview"
           >
-            <div class="border-default flex shrink-0 items-center border-b px-3 py-1.5">
-              <UTabs
-                :model-value="compare"
-                :items="COMPARE"
-                :content="false"
-                size="xs"
-                variant="pill"
-                color="neutral"
-                data-testid="review-compare"
-                @update:model-value="picked = $event as Compare"
-              />
-            </div>
-            <BrowserFrame :key="`${projectId}:${number}`" :frames="frames" class="min-h-0 flex-1">
+            <BrowserFrame
+              :key="`${projectId}:${number}`"
+              v-model:collapsed="collapsed"
+              :frames="frames"
+              class="min-h-0 flex-1"
+            >
               <template #placeholder="{ frame }">
                 <UEmpty
                   v-if="frame.key === 'live'"
