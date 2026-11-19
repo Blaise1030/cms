@@ -269,103 +269,108 @@ function reveal(path: string) {
       >
         {{ change.description }}
       </p>
-      <UTabs
-        v-model="view"
-        :items="VIEWS"
-        :content="false"
-        size="sm"
-        variant="link"
-        color="neutral"
-        class="shrink-0 px-3"
-        data-testid="review-view-tabs"
-      />
       <div
-        v-show="view === 'preview'"
-        class="bg-muted mx-3 my-2 min-h-0 flex-1 overflow-hidden rounded-md"
-        data-testid="review-preview"
+        class="border-default bg-default mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
+        data-testid="review-card"
       >
-        <p
-          v-if="preview?.state === 'building'"
-          class="text-muted flex h-full items-center justify-center gap-2 text-sm"
-          data-testid="review-preview-building"
-        >
-          <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
-          Preparing the preview…
-        </p>
-        <iframe
-          v-else-if="preview?.state === 'ready'"
-          :key="previewSrc"
-          :src="previewSrc"
-          title="Preview of the change"
-          class="bg-default h-full w-full border-0"
-          sandbox="allow-same-origin"
-          referrerpolicy="no-referrer"
-          data-testid="review-preview-frame"
+        <UTabs
+          v-model="view"
+          :items="VIEWS"
+          :content="false"
+          size="sm"
+          variant="link"
+          color="neutral"
+          class="border-default shrink-0 border-b px-3"
+          data-testid="review-view-tabs"
         />
         <div
-          v-else-if="preview?.state === 'failed'"
-          class="flex h-full flex-col items-start gap-2 overflow-hidden p-3"
-          data-testid="review-preview-failed"
+          v-show="view === 'preview'"
+          class="bg-muted min-h-0 flex-1 overflow-hidden"
+          data-testid="review-preview"
         >
-          <p class="text-default shrink-0 text-sm">The preview could not be prepared.</p>
-          <pre class="text-muted min-h-0 w-full flex-1 overflow-auto font-mono text-xs whitespace-pre-wrap">{{ preview.message }}</pre>
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="sm"
-            label="Try again"
-            class="shrink-0"
-            data-testid="review-preview-retry"
-            @click="preparePreview()"
+          <p
+            v-if="preview?.state === 'building'"
+            class="text-muted flex h-full items-center justify-center gap-2 text-sm"
+            data-testid="review-preview-building"
+          >
+            <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
+            Preparing the preview…
+          </p>
+          <iframe
+            v-else-if="preview?.state === 'ready'"
+            :key="previewSrc"
+            :src="previewSrc"
+            title="Preview of the change"
+            class="bg-default h-full w-full border-0"
+            sandbox="allow-same-origin"
+            referrerpolicy="no-referrer"
+            data-testid="review-preview-frame"
           />
-        </div>
-      </div>
-      <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
-        <UEmpty
-          v-if="store.diff && store.diff.files.length === 0"
-          variant="naked"
-          icon="i-hugeicons-file-validation"
-          title="No file changes in this change."
-        />
-        <USplitter
-          v-else-if="store.diff"
-          :items="SPLIT"
-          auto-save-id="review-files-sidebar"
-          class="min-h-0 flex-1"
-          :ui="{ handle: 'flex items-center justify-center' }"
-        >
-          <template #resize-handle>
-            <div
-              class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
-              aria-hidden="true"
+          <div
+            v-else-if="preview?.state === 'failed'"
+            class="flex h-full flex-col items-start gap-2 overflow-hidden p-3"
+            data-testid="review-preview-failed"
+          >
+            <p class="text-default shrink-0 text-sm">The preview could not be prepared.</p>
+            <pre class="text-muted min-h-0 w-full flex-1 overflow-auto font-mono text-xs whitespace-pre-wrap">{{ preview.message }}</pre>
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="sm"
+              label="Try again"
+              class="shrink-0"
+              data-testid="review-preview-retry"
+              @click="preparePreview()"
             />
-          </template>
-          <template #tree>
-            <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
-              <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
-            </aside>
-          </template>
-          <template #diffs>
-            <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
-              <div ref="diffs" class="flex flex-col gap-3 p-3">
-                <section
-                  v-for="file in store.diff.files"
-                  :key="file.path"
-                  :data-path="file.path"
-                  class="flex scroll-mt-3 flex-col gap-1.5"
-                >
-                  <template v-if="file.binary">
-                    <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
-                      <span class="truncate">{{ file.path }}</span>
-                    </div>
-                    <p class="text-muted text-xs">Binary file changed.</p>
-                  </template>
-                  <DiffView v-else :diff="file.meta" />
-                </section>
+          </div>
+        </div>
+        <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
+          <UEmpty
+            v-if="store.diff && store.diff.files.length === 0"
+            variant="naked"
+            icon="i-hugeicons-file-validation"
+            title="No file changes in this change."
+          />
+          <USplitter
+            v-else-if="store.diff"
+            :items="SPLIT"
+            auto-save-id="review-files-sidebar"
+            class="min-h-0 flex-1"
+            :ui="{ handle: 'flex items-center justify-center' }"
+          >
+            <template #resize-handle>
+              <div
+                class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+                aria-hidden="true"
+              />
+            </template>
+            <template #tree>
+              <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
+                <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+              </aside>
+            </template>
+            <template #diffs>
+              <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
+                <div ref="diffs" class="flex flex-col gap-3 p-3">
+                  <section
+                    v-for="file in store.diff.files"
+                    :key="file.path"
+                    :data-path="file.path"
+                    class="flex scroll-mt-3 flex-col gap-1.5"
+                  >
+                    <template v-if="file.binary">
+                      <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
+                        <span class="truncate">{{ file.path }}</span>
+                      </div>
+                      <p class="text-muted text-xs">Binary file changed.</p>
+                    </template>
+                    <DiffView v-else :diff="file.meta" />
+                  </section>
+                </div>
               </div>
-            </div>
-          </template>
-        </USplitter>
+            </template>
+          </USplitter>
+        </div>
       </div>
     </template>
   </div>
