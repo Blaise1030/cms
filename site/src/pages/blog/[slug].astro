@@ -6,6 +6,7 @@ import Painting from "../../components/Painting.astro";
 import { paintingFor } from "../../lib/paintings";
 import BlogCard from "../../components/BlogCard.astro";
 import BlogToc from "../../components/BlogToc.astro";
+import CtaBand from "../../components/sections/CtaBand.astro";
 import { href } from "../../lib/href";
 import { backButton, categoryBadge } from "../../lib/pill";
 import { categoriesOf, formatDate, loadBlog, morePosts } from "../../lib/blog";
@@ -44,7 +45,7 @@ const jsonLd = [
 ];
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" published={entry.data.pubDate} image={cover} imageAlt={entry.data.coverAlt} jsonLd={jsonLd}>
-  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line">
     <article class="page pt-10 md:pt-16" data-pagefind-body>
       <!-- Three columns on desktop: back link | centred article | "On this page". -->
       <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,42rem)_minmax(0,1fr)] lg:gap-12">
@@ -92,6 +93,8 @@ const jsonLd = [
         <div class="mt-12 grid border-t border-line sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} class="border-b border-line sm:border-r" />)}</div>
       </section>
     )}
+    <!-- The card grid's bottom borders already draw the line above the band. -->
+    <CtaBand class={more.length > 0 ? undefined : "mt-section border-t border-line"} />
   </div>
 </Base>
 
