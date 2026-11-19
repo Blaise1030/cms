@@ -49,3 +49,14 @@ e2e:
     pnpm -C e2e exec playwright install chromium
     pnpm -C e2e test
     pnpm -C e2e e2e
+
+
+# Desktop app (Tauri): a window that runs the daemon and loads its UI; quitting stops the daemon.
+desktop-dev:
+    pnpm -C src-tauri install --frozen-lockfile
+    pnpm -C src-tauri tauri dev
+
+# Bundle orso.app + .dmg (builds the release daemon as the sidecar first)
+desktop-build:
+    pnpm -C src-tauri install --frozen-lockfile
+    pnpm -C src-tauri tauri build

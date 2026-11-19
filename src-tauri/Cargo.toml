@@ -1,0 +1,17 @@
+[package]
+name = "orso-desktop"
+version = "0.1.9"
+edition = "2021"
+description = "Desktop wrapper: runs the orso daemon and shows its web UI in a webview"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+libc = "0.2"
+
+[profile.release]
+strip = true
