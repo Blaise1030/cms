@@ -48,6 +48,11 @@ const diffOf = (text: string, headSha: string | null = null) => ({ text, headSha
 
 const emptyTalk = () => ({ items: [], checks: [], reviewers: [] });
 
+async function openChanges(w: { findAll: (s: string) => { trigger: (e: string, o?: object) => Promise<void> }[] }) {
+  await w.findAll("[data-testid='review-view-tabs'] [role='tab']")[1]!.trigger("mousedown", { button: 0 });
+  await flushPromises();
+}
+
 async function mountChange(api: Record<string, unknown>, page: "conversation" | "files" = "files") {
   h.daemon = createFakeDaemon({
     liveSiteUrl: vi.fn(async () => "https://acme.pages.dev"),
@@ -95,6 +100,9 @@ describe("ReviewChange", () => {
     // Live site lives on the Review page's frame, not in the header.
     expect(w.find("[data-testid='review-live-site']").exists()).toBe(false);
     expect(w.text()).toContain("What changed");
+    // Nothing is built until What changed is opened, so the Review page opens quickly.
+    expect(w.find("[data-testid='diff-stub']").exists()).toBe(false);
+    await openChanges(w);
     expect(w.get("[data-testid='tree-stub']").text()).toContain("a.txt");
     expect(w.get("[data-testid='diff-stub']").text()).toBe("a.txt");
   });
@@ -185,6 +193,7 @@ describe("ReviewChange", () => {
       review: vi.fn(async () => DETAIL),
       reviewDiff: vi.fn(async () => diffOf(BINARY)),
     });
+    await openChanges(w);
     expect(w.get("[data-testid='tree-stub']").text()).toContain("site/logo.png");
     expect(w.text()).toContain("Binary file changed.");
   });

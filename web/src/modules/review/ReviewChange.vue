@@ -238,9 +238,16 @@ const VIEWS: TabsItem[] = [
   { label: "What changed", value: "changes", icon: "i-hugeicons-file-validation" },
 ];
 const view = ref<View>("preview");
+/** What changed is built the first time it's opened: highlighting every file's diff up front
+ *  (66 on a big change) held up the switch to the Review page by seconds. */
+const changesOpened = ref(false);
+watch(view, (v) => v === "changes" && (changesOpened.value = true), { immediate: true });
 watch(
   () => [props.projectId, props.number] as const,
-  () => (view.value = "preview"),
+  () => {
+    view.value = "preview";
+    changesOpened.value = false;
+  },
 );
 
 const SPLIT: SplitterItem[] = [
@@ -588,13 +595,13 @@ const macDesktop = isMacDesktop();
           </div>
           <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
             <UEmpty
-              v-if="store.diff && store.diff.files.length === 0"
+              v-if="changesOpened && store.diff && store.diff.files.length === 0"
               variant="naked"
               icon="i-hugeicons-file-validation"
               title="No file changes in this change."
             />
             <USplitter
-              v-else-if="store.diff"
+              v-else-if="changesOpened && store.diff"
               :items="SPLIT"
               auto-save-id="review-files-sidebar"
               class="min-h-0 flex-1"
