@@ -6,10 +6,12 @@ import UModal from "@nuxt/ui/components/Modal.vue";
 import {
   applySessionOrder,
   moveSessionId,
+  moveSessionToIndex,
   readSessionOrder,
   writeSessionOrder,
 } from "@/lib/sessionOrder";
 import { cn } from "@/lib/utils";
+import { titleParts } from "./references";
 import AgentPanel from "./AgentPanel.vue";
 import { useChatStore } from "./store";
 
@@ -63,9 +65,11 @@ const tabs = computed(() =>
   tabIds.value.map((id) => {
     const summary = chats.value.find((c) => c.id === id);
     const status = statusOf(id);
+    const title = summary?.title?.trim() || "New chat";
     return {
       id,
-      title: summary?.title?.trim() || "New chat",
+      title,
+      parts: titleParts(title),
       status,
       running: status === "running",
       active: activeId.value === id,
@@ -136,27 +140,48 @@ async function confirmDelete() {
   if (tabIds.value.filter((id) => id !== target.id).length === 0) expanded.value = false;
 }
 
+/** The order before a drag, restored when the drag ends anywhere but on a tab. */
+let beforeDrag: string[] = [];
+let dropped = false;
+
 function onDragStart(event: DragEvent, id: string) {
   dragId.value = id;
+  beforeDrag = tabIds.value;
+  dropped = false;
   event.dataTransfer?.setData("text/plain", id);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
 }
 
-function onDragOver(event: DragEvent) {
+/** Reorder live as the dragged tab passes over another, so the landing spot is always visible. */
+function onDragOver(event: DragEvent, overId: string) {
+  if (!dragId.value) return;
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  if (overId !== dragId.value) order.value = moveSessionId(tabIds.value, dragId.value, overId);
 }
 
-function onDrop(event: DragEvent, toId: string) {
+function onDrop(event: DragEvent) {
   event.preventDefault();
-  const fromId = dragId.value ?? event.dataTransfer?.getData("text/plain");
-  dragId.value = null;
-  if (!fromId) return;
-  persistOrder(moveSessionId(tabIds.value, fromId, toId));
+  dropped = true;
+  persistOrder(tabIds.value);
 }
 
 function onDragEnd() {
+  if (dragId.value && !dropped) order.value = beforeDrag;
   dragId.value = null;
+}
+
+/** Alt+Left / Alt+Right move the focused tab, for keyboard users. */
+function onTabKeydown(event: KeyboardEvent, id: string) {
+  if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+  event.preventDefault();
+  const ids = tabIds.value;
+  const to = ids.indexOf(id) + (event.key === "ArrowLeft" ? -1 : 1);
+  if (to < 0 || to >= ids.length) return;
+  persistOrder(moveSessionToIndex(ids, id, to));
+  requestAnimationFrame(() =>
+    (document.querySelector(`[data-testid="agent-session-tab"][data-id="${CSS.escape(id)}"]`) as HTMLElement | null)?.focus(),
+  );
 }
 
 defineExpose({ expand, minimize, close: closePanel });
@@ -194,11 +219,12 @@ defineExpose({ expand, minimize, close: closePanel });
           role="tab"
           draggable="true"
           data-testid="agent-session-tab"
+          :data-id="tab.id"
           :data-status="tab.status"
           :aria-selected="tab.active"
           :aria-current="tab.active ? 'page' : undefined"
           :aria-label="`${tab.title}, ${STATUS[tab.status].label}`"
-          :title="`${tab.title}: ${STATUS[tab.status].label}`"
+          :title="`${tab.title}: ${STATUS[tab.status].label}. Drag, or Alt+←/→, to reorder`"
           :class="
             cn(
               'group relative flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full py-0 pl-3 pr-3 text-left text-xs font-normal transition-all active:translate-y-px',
@@ -212,9 +238,10 @@ defineExpose({ expand, minimize, close: closePanel });
           "
           @click="openTab(tab.id)"
           @dragstart="onDragStart($event, tab.id)"
-          @dragover="onDragOver"
-          @drop="onDrop($event, tab.id)"
+          @dragover="onDragOver($event, tab.id)"
+          @drop="onDrop"
           @dragend="onDragEnd"
+          @keydown="onTabKeydown($event, tab.id)"
         >
           <UIcon
             v-if="STATUS[tab.status].icon"
@@ -231,7 +258,19 @@ defineExpose({ expand, minimize, close: closePanel });
             :class="cn('size-1.5 shrink-0 rounded-full', STATUS[tab.status].class)"
             aria-hidden="true"
           />
-          <span class="min-w-0 flex-1 truncate">{{ tab.title }}</span>
+          <!-- A picked element shows as its tag (div.page), like in the chat, not raw markup. -->
+          <span
+            v-for="(el, k) in tab.parts.elements.slice(0, 1)"
+            :key="k"
+            class="border-default bg-default/60 inline-flex shrink-0 items-center gap-1 rounded-sm border px-1 font-mono text-[11px]"
+            data-testid="agent-tab-element"
+          >
+            <UIcon name="i-hugeicons-cursor-pointer-01" class="size-3" aria-hidden="true" />
+            {{ el }}
+          </span>
+          <span v-if="tab.parts.text || !tab.parts.elements.length" class="min-w-0 flex-1 truncate">{{
+            tab.parts.text || tab.title
+          }}</span>
           <UButton
             v-if="!tab.running"
             type="button"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { referenceLabel, segmentReferences } from "./references";
+import { referenceLabel, segmentReferences, titleParts } from "./references";
 
 const hero =
   '[element <section class="mx-auto max-w-5xl px-8 py-24 text-center" id="hero"> "Stop building. Start launching." in src/components/sections/Hero.astro:5:69]';
@@ -45,5 +45,21 @@ describe("segmentReferences", () => {
     expect(segmentReferences("Just words [not an element]")).toEqual([
       { kind: "text", text: "Just words [not an element]" },
     ]);
+  });
+});
+
+describe("titleParts", () => {
+  it("turns complete and cut-off element references into labels", () => {
+    expect(titleParts('[element <div class="page hero">] Please move the menu')).toEqual({
+      elements: ["div.page"],
+      text: "Please move the menu",
+    });
+    expect(titleParts('[element <div class="rel…')).toEqual({ elements: ["div"], text: "" });
+    expect(titleParts('[element <img src="/preview/x.png" class="logo"')).toEqual({ elements: ["img.logo"], text: "" });
+    expect(titleParts('[element <section id="hero" class="x"')).toEqual({ elements: ["section#hero"], text: "" });
+    expect(titleParts("We would need a download button")).toEqual({
+      elements: [],
+      text: "We would need a download button",
+    });
   });
 });
