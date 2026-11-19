@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { useRouter } from "vue-router";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UBadge from "@nuxt/ui/components/Badge.vue";
@@ -9,14 +10,20 @@ import type { ChecksState, MyReviewState } from "@/core/types";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
 import { useReviewStore } from "./store";
-import { useReviewRefresh } from "./useReviewRefresh";
 
 const props = defineProps<{ projectId: string }>();
 const store = useReviewStore();
 const router = useRouter();
 
-// The rail polls too; this refreshes on focus and while the inbox is on screen.
-useReviewRefresh(() => void store.load(props.projectId), () => props.projectId);
+// The rail owns polling (on focus and every minute); the inbox only loads when the store holds
+// nothing for this project yet, e.g. when opened before the rail's first load.
+watch(
+  () => props.projectId,
+  (id) => {
+    if (store.projectId !== id) void store.load(id);
+  },
+  { immediate: true },
+);
 
 const STATE: Record<MyReviewState, { label: string; color: "primary" | "warning" | "success" }> = {
   new: { label: "New", color: "primary" },

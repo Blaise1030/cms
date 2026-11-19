@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -41,6 +41,7 @@ async function mountInbox(reviews: ReviewItem[]) {
 }
 
 beforeEach(() => localStorage.clear());
+afterEach(() => vi.useRealTimers());
 
 describe("ReviewInbox", () => {
   it("renders title, author, relative time, checks and the state badge", async () => {
@@ -77,5 +78,33 @@ describe("ReviewInbox", () => {
   it("counts only new items as waiting", async () => {
     await mountInbox([item({ number: 1 }), item({ number: 2, myState: "greenlit" })]);
     expect(useReviewStore().waitingCount).toBe(1);
+  });
+
+  it("loads once on mount and leaves polling to the rail", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { api, w } = await mountInbox([item({ number: 1 })]);
+    expect(api.reviews).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(180_000);
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushPromises();
+    expect(api.reviews).toHaveBeenCalledTimes(1);
+    w.unmount();
+  });
+
+  it("does not load when the store already holds this project", async () => {
+    const api = { reviews: vi.fn(async () => [item({ number: 1 })]) };
+    h.daemon = createFakeDaemon(api);
+    setActivePinia(createPinia());
+    await useReviewStore().load("site");
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/p/:id/review/:number?", name: "project-review", component: { render: () => null } }],
+    });
+    await router.push("/p/site/review");
+    const w = mount(ReviewInbox, { props: { projectId: "site" }, global: { plugins: [router] } });
+    await flushPromises();
+    expect(api.reviews).toHaveBeenCalledTimes(1);
+    expect(w.findAll("[data-testid='review-item']")).toHaveLength(1);
   });
 });

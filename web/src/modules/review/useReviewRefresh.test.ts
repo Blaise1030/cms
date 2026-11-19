@@ -55,3 +55,28 @@ it("clears its timer and listeners on unmount", () => {
   document.dispatchEvent(new Event("visibilitychange"));
   expect(refresh).not.toHaveBeenCalled();
 });
+
+it("collapses a focus and visibilitychange pair into one refresh", () => {
+  const w = mount(Host);
+  vi.advanceTimersByTime(30_000);
+  refresh.mockClear();
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(refresh).toHaveBeenCalledTimes(1);
+  // Another wake inside 10 s is ignored; one after it refreshes again.
+  vi.advanceTimersByTime(5_000);
+  window.dispatchEvent(new Event("focus"));
+  expect(refresh).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(6_000);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(refresh).toHaveBeenCalledTimes(2);
+  w.unmount();
+});
+
+it("ignores a wake right after mount", () => {
+  const w = mount(Host);
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(refresh).toHaveBeenCalledTimes(1);
+  w.unmount();
+});
