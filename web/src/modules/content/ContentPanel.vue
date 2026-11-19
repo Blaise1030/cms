@@ -34,6 +34,7 @@ import { entryAssetPath } from "./markdown";
 import { useContentStore } from "./store";
 import { IMAGE_REGISTRY } from "./ImageDialog.vue";
 import { REFERENCE_ENTRIES } from "./references";
+import { useAgentOutboxStore } from "@/modules/chat/outbox";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string; collection?: string; entry?: string}>();
@@ -310,6 +311,13 @@ onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 // File events stop refreshing Content while the tab is closed; reopening it refreshes once.
 onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload); store.suspend(); });
 
+
+/** "Ask AI" in the body editor: the selection goes to the assistant as a badge naming this file. */
+const outbox = useAgentOutboxStore();
+function askAI(text: string) {
+  const path = store.entry?.path;
+  if (path) outbox.send({ kind: "selection", path, text });
+}
 </script>
 <template>
   <div class="h-full min-h-0" data-testid="content-panel">
@@ -498,7 +506,7 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
           <div class="min-w-0 flex-1 px-4 pt-4 pb-8 @3xl:order-1 @3xl:px-6">
           <div class="mx-auto w-full" :class="{ 'max-w-3xl': !history.version }">
           <VersionDiff v-if="history.version" :path="history.version.path" :old-source="history.version.source" :new-source="store.entry.source" :dirty="versionDirty" :can-restore="!restoreReason" :restore-reason="restoreReason" @back="history.select(null)" @restore="restore" />
-          <MarkdownBodyEditor v-else-if="hasFieldsPanel" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" />
+          <MarkdownBodyEditor v-else-if="hasFieldsPanel" :key="`${store.entry.collection}/${store.entry.id}`" :body="store.draftBody" :original="store.entry.body ?? ''" :kind="store.entry.kind as 'markdown' | 'mdx'" :rich="store.richBody" :resolve-image="resolveImage" @change="store.setBody($event.body)" @ask="askAI" />
           <FrontmatterForm v-else data-testid="content-fields" :descriptor="store.descriptor" :model-value="store.draftFields" :errors="store.fieldErrors" @update:model-value="store.draftFields = $event as Record<string, unknown>" />
           </div>
           </div>

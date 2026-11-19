@@ -15,9 +15,9 @@ just e2e
 
 | File | Role |
 |------|------|
-| `fixtures/githubStub.ts` | HTTP stub for device flow, `/user`, `/user/repos`, pulls / PR status, GraphQL `markPullRequestReadyForReview` |
+| `fixtures/githubStub.ts` | HTTP stub for device flow, `/user`, `/user/repos`, pulls / PR status, GraphQL `markPullRequestReadyForReview`, labelled review PRs (`addReviewPr`), repo permissions, review POSTs (`reviewPosts()`) |
 | `fixtures/bareRemote.ts` | Seeds `acme/site.git` with a `main` branch |
-| `fixtures/daemon.ts` | Starts stub + bare remote + release `orso serve` (+ fake ACP agent), clones via API |
+| `fixtures/daemon.ts` | Starts stub + bare remote + release `orso serve` (+ fake ACP agent), clones via API; `pushPullHead` pushes a teammate's commit to `refs/pull/<n>/head` |
 | `fixtures/orso.ts` | Playwright fixture wiring cleanup |
 
 Fixture helpers create temp dirs under the OS temp directory and remove them in `stop()`.

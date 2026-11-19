@@ -22,6 +22,8 @@ pub const HOST: &str = "127.0.0.1";
 
 const DEFAULT_INSTALL: &str = "npm install --no-audit --no-fund --no-progress";
 const DEFAULT_DEV: &str = "npm run dev -- --port {port} --host {host} --ignore-lock";
+/// Labels on orso's pull requests when `orso.json` sets no `prLabels`.
+pub const DEFAULT_PR_LABELS: &[&str] = &["orso"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -436,6 +438,33 @@ pub fn install_dir_lenient(project: &Path) -> PathBuf {
     }
 }
 
+/// Labels put on the pull requests orso opens: `orso.json` `prLabels` (an array of label
+/// names; `[]` turns labelling off), else [`DEFAULT_PR_LABELS`]. Read leniently so a bad value
+/// never blocks sharing: a missing or unreadable file or a non-array value gives the default,
+/// and entries GitHub would refuse (non-strings, blank, over 50 characters) are skipped.
+pub fn pr_labels(project: &Path) -> Vec<String> {
+    let default = || DEFAULT_PR_LABELS.iter().map(|l| l.to_string()).collect();
+    let Ok(content) = std::fs::read_to_string(project.join(SETTINGS_FILE)) else {
+        return default();
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&content) else {
+        return default();
+    };
+    let Some(Value::Array(items)) = map.get("prLabels") else {
+        return default();
+    };
+    let mut labels: Vec<String> = Vec::new();
+    for item in items {
+        let Value::String(s) = item else { continue };
+        let label = s.trim();
+        if label.is_empty() || label.chars().count() > 50 || labels.iter().any(|l| l == label) {
+            continue;
+        }
+        labels.push(label.to_string());
+    }
+    labels
+}
+
 pub fn site_prefix(project: &Path) -> String {
     load(project).map(|s| s.site_prefix()).unwrap_or_default()
 }
@@ -453,6 +482,46 @@ mod tests {
     fn write_astro(dir: &Path, name: &str) {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join(name), "export default {};\n").unwrap();
+    }
+
+    #[test]
+    fn pr_labels_default_to_orso() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(pr_labels(tmp.path()), vec!["orso"]);
+        write_settings(tmp.path(), r#"{"root": "."}"#);
+        assert_eq!(pr_labels(tmp.path()), vec!["orso"]);
+        write_settings(tmp.path(), r#"{"prLabels": "orso-review"}"#);
+        assert_eq!(pr_labels(tmp.path()), vec!["orso"]);
+        write_settings(tmp.path(), "not json");
+        assert_eq!(pr_labels(tmp.path()), vec!["orso"]);
+    }
+
+    #[test]
+    fn pr_labels_come_from_orso_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let long = "x".repeat(51);
+        write_settings(
+            tmp.path(),
+            &format!(
+                r#"{{"prLabels": [" content ", "needs-review", "", 3, "{long}", "content"]}}"#
+            ),
+        );
+        assert_eq!(pr_labels(tmp.path()), vec!["content", "needs-review"]);
+    }
+
+    #[test]
+    fn empty_pr_labels_turn_labelling_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_settings(tmp.path(), r#"{"prLabels": []}"#);
+        assert!(pr_labels(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn pr_labels_do_not_affect_validation() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_astro(tmp.path(), "astro.config.mjs");
+        write_settings(tmp.path(), r#"{"prLabels": "oops"}"#);
+        assert!(load(tmp.path()).is_ok());
     }
 
     #[test]

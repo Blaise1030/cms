@@ -22,7 +22,7 @@ const label = computed(() => {
 });
 
 /** Share starts the PR (solid primary); once it exists, sharing again is the quieter action. */
-const shareIcon = computed(() => (changes.prUrl ? "i-hugeicons-refresh" : "i-hugeicons-share-08"));
+const shareIcon = computed(() => (changes.prUrl ? "i-hugeicons-cloud-upload" : "i-hugeicons-share-08"));
 
 /** Nothing to push once the branch tip is the PR head; hide rather than offer a no-op. */
 const showShare = computed(() => changes.active !== null && !changes.status?.upToDate);

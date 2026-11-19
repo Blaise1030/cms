@@ -73,6 +73,14 @@ export function orsoGlob({ base, pattern, kind, singleton = null, ...options } =
  * Injected inline during `astro dev`; never part of a build.
  */
 const PREVIEW_BRIDGE = readFileSync(new URL("./bridge.js", import.meta.url), "utf8");
+/** Self-capture for review screenshots; only in pull request preview builds. */
+const PREVIEW_CAPTURE = readFileSync(new URL("./capture.js", import.meta.url), "utf8");
+
+/**
+ * The bridge for a `ORSO_PREVIEW=1` build: with self-capture, in one function so neither adds
+ * globals to the page.
+ */
+export const PREVIEW_BUILD_BRIDGE = `(() => {\n${PREVIEW_CAPTURE}\n${PREVIEW_BRIDGE}\n})();`;
 
 const CONTENT_CONFIG_NAMES = ["content.config.ts", "content.config.js", "content.config.mjs", "content.config.mts"];
 
@@ -152,7 +160,8 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
  * `astro dev` and `astro sync` write `.astro/orso-content.json`. The dev server
  * also reloads it when the content config changes and mounts `POST /__orso`
  * when `ORSO_CONTENT_TOKEN` is set. On `astro build`, runs preview checks over the
- * output directory (no script inject).
+ * output directory, and injects the preview bridge only when `ORSO_PREVIEW=1` (a pull
+ * request's preview deploy).
  */
 export function orso(options = {}) {
   let config;
@@ -177,6 +186,10 @@ export function orso(options = {}) {
         if (command === "dev") {
           // Pick / appearance / path / Page-details snapshot for the CMS preview frame.
           injectScript("head-inline", PREVIEW_BRIDGE);
+        } else if (command === "build" && process.env.ORSO_PREVIEW === "1") {
+          // A pull request's preview deploy: orso frames it in reviews and screenshots areas
+          // of it without asking to share the screen. Never in production builds.
+          injectScript("head-inline", PREVIEW_BUILD_BRIDGE);
         }
 
         const vitePlugins = [];

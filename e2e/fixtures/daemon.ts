@@ -6,7 +6,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { createBareRemote, DEFAULT_REPO, fileGitUrl } from "./bareRemote";
-import { startGithubStub } from "./githubStub";
+import { startGithubStub, type GitCommit } from "./githubStub";
 
 export const E2E_TOKEN = "a".repeat(64);
 /** The stream-json turn the e2e `cursor` agent replays (after appending to `notes.md`). */
@@ -31,6 +31,14 @@ export type orsoEnv = {
     setMainRulesetRequiresPr: (requiresPr: boolean) => void;
     readyForReviewCalls: () => string[];
     setGraphqlStatus: (status: number | null) => void;
+    addReviewPr: (seed: import("./githubStub").ReviewPrSeed) => void;
+    reviewPosts: () => import("./githubStub").ReviewPost[];
+    commentPosts: () => { path: string; body: { body?: string } }[];
+    /** Commits made through the stub's Git Data API (e.g. on `orso-review-assets`). */
+    gitCommits: () => GitCommit[];
+    branchTip: (branch: string) => string | null;
+    /** Serve a deployed site's page from the stub, at `${baseUrl}/sites{path}`. */
+    addSitePage: (path: string, html: string) => void;
   };
   stop: () => Promise<void>;
 };
@@ -147,6 +155,34 @@ export async function chatCheckpoint(
   throw new Error("timed out waiting for a checkpoint after the chat turn");
 }
 
+/**
+ * Push a teammate's change to the bare remote as `refs/pull/<number>/head` (what GitHub keeps for
+ * every PR): one commit on `main` that appends to `file`. Returns the commit's SHA.
+ */
+export function pushPullHead(
+  env: Pick<orsoEnv, "bareRemote" | "tmp">,
+  number: number,
+  file: string,
+  text: string,
+): string {
+  const work = fs.mkdtempSync(path.join(env.tmp, "pr-work-"));
+  // Never signs or runs hooks, whatever the machine's git config says.
+  const safe = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [...safe, "-c", "user.name=Bob", "-c", "user.email=bob@example.com", ...args],
+      { cwd: work, encoding: "utf8" },
+    ).trim();
+  execFileSync("git", [...safe, "clone", "-q", "--branch", "main", env.bareRemote, work]);
+  fs.appendFileSync(path.join(work, file), text);
+  git("add", "-A");
+  git("commit", "-q", "-m", `Edit ${file}`);
+  const sha = git("rev-parse", "HEAD");
+  git("push", "-q", "origin", `HEAD:refs/pull/${number}/head`);
+  return sha;
+}
+
 async function signInAndClone(origin: string, token: string): Promise<string> {
   const device = await api(origin, token, "POST", "/api/github/device");
   if (!device.ok) throw new Error(`device start failed: ${await device.text()}`);
@@ -234,6 +270,8 @@ export async function startorso(): Promise<orsoEnv> {
         ...process.env,
         ORSO_GITHUB_CLIENT_ID: "cid",
         ORSO_GITHUB_API_URL: stub.baseUrl,
+        // The stub changes state behind the daemon's back; skip the 15 s reuse.
+        ORSO_GITHUB_CACHE_TTL_MS: "0",
         ORSO_GITHUB_WEB_URL: stub.baseUrl,
         ORSO_GITHUB_GIT_URL: gitUrl,
       },
@@ -285,6 +323,12 @@ export async function startorso(): Promise<orsoEnv> {
       setMainRulesetRequiresPr: (requiresPr) => stub.setMainRulesetRequiresPr(requiresPr),
       readyForReviewCalls: () => stub.readyForReviewCalls(),
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
+      addReviewPr: (seed) => stub.addReviewPr(seed),
+      reviewPosts: () => stub.reviewPosts(),
+      addSitePage: (path, html) => stub.addSitePage(path, html),
+      commentPosts: () => stub.commentPosts(),
+      gitCommits: () => stub.gitCommits(),
+      branchTip: (branch) => stub.branchTip(branch),
     },
     stop: async () => {
       const exitedWithin = (ms: number) =>

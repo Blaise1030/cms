@@ -42,10 +42,16 @@ import {
   type Project,
   type ProviderSignInState,
   type ProviderVerifyResult,
+  type ReviewDetail,
+  type ReviewItem,
+  type ReviewConversation,
+  type ReviewPreview,
+  type TimelineItem,
   type RuntimeStatus,
   type SetupSnapshot,
   type SetupStatus,
   type Tree,
+  type ReviewWithShots,
 } from "./types";
 
 export interface ApiErrorDetail { path: (string | number)[]; message: string }
@@ -306,6 +312,12 @@ export function createApi(
     attachChatFile: async (project: string, file: Blob): Promise<string> =>
       (await json<{ path: string }>("POST", `/api/chat/${enc(project)}/attachments`, { blob: file })).path,
     /** A saved attachment by file name, for `<img>` (authenticated by the session cookie). */
+    /** One review (comment, greenlight or send back) carrying queued screenshot comments. */
+    reviewWithShots: (project: string, number: number, body: ReviewWithShots) =>
+      send("POST", `/api/projects/${enc(project)}/reviews/${number}/review-with-shots`, { body }).then(() => undefined),
+    /** A review image on the project's `orso-review-assets` branch, through the daemon. */
+    reviewAssetUrl: (project: string, sha: string, path: string) =>
+      `${cfg().origin}/api/projects/${enc(project)}/reviews/assets?path=${encodeURIComponent(path)}&sha=${encodeURIComponent(sha)}`,
     attachmentUrl: (project: string, name: string) =>
       `${cfg().origin}/api/chat/${enc(project)}/attachments/${enc(name)}`,
     listChats: (project: string) =>
@@ -411,6 +423,45 @@ export function createApi(
     listCheckpoints: (project: string) => json<CheckpointLog>("GET", "/api/checkpoints", { query: { project } }),
     checkpointDiff: async (project: string, sha: string): Promise<string> =>
       (await send("GET", `/api/checkpoints/${enc(sha)}/diff`, { query: { project } })).text(),
+    /** Labelled changes waiting on the signed-in reviewer. */
+    reviews: async (project: string): Promise<ReviewItem[]> =>
+      (await json<{ reviews: ReviewItem[] }>("GET", `/api/projects/${enc(project)}/reviews`)).reviews,
+    /** The most recently updated labelled closed or merged changes; `more` when the page was full. */
+    closedReviews: (project: string) =>
+      json<{ reviews: ReviewItem[]; more: boolean; labels?: string[] }>("GET", `/api/projects/${enc(project)}/reviews`, {
+        query: { state: "closed" },
+      }),
+    review: (project: string, number: number) =>
+      json<ReviewDetail>("GET", `/api/projects/${enc(project)}/reviews/${number}`),
+    /** Unified diff of a teammate's change, fetched without a checkout. */
+    /** The change's unified diff and the head it diffed (`X-Head-Sha`; null when absent). */
+    reviewDiff: async (project: string, number: number): Promise<{ text: string; headSha: string | null }> => {
+      const res = await send("GET", `/api/projects/${enc(project)}/reviews/${number}/diff`);
+      return { text: await res.text(), headSha: res.headers.get("x-head-sha") };
+    },
+    /** Greenlight or send back; 409 `head_moved` when the change was updated since `headSha`. */
+    decideReview: (
+      project: string,
+      number: number,
+      body: { decision: "greenlight" | "send_back"; comment?: string; headSha: string },
+    ) => send("POST", `/api/projects/${enc(project)}/reviews/${number}/decision`, { body }).then(() => undefined),
+    /** Comments, reviews, pushes, checks and reviewers of a labelled change. */
+    reviewConversation: (project: string, number: number) =>
+      json<ReviewConversation>("GET", `/api/projects/${enc(project)}/reviews/${number}/conversation`),
+    /** Comment on an open change as the signed-in user; the new timeline entry. */
+    /** Posts a comment; `images` (base64, no `data:` prefix) are stored on the assets branch. */
+    commentOnReview: (
+      project: string,
+      number: number,
+      body: string,
+      images: { base64: string; mime: string; name: string }[] = [],
+    ) =>
+      json<TimelineItem>("POST", `/api/projects/${enc(project)}/reviews/${number}/comments`, {
+        body: images.length ? { body, images } : { body },
+      }),
+    /** The change's deploy preview and the live site; 404 when it is no longer waiting. */
+    reviewPreview: (project: string, number: number) =>
+      json<ReviewPreview>("GET", `/api/projects/${enc(project)}/reviews/${number}/preview`),
     restoreCheckpoint: (project: string, sha: string) =>
       json<{ restored: string }>("POST", `/api/checkpoints/${enc(sha)}/restore`, {
         body: { project },

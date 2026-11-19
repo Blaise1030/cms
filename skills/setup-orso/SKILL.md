@@ -40,6 +40,7 @@ Read `package.json`, `astro.config.*`, `src/content.config.*` (or `src/content/c
 | 10 | Deploy workflow records GitHub Deployments with `environment_url` | orso's Preview and Open live site links | Phase 3. |
 | 11 | `.gitignore` covers `node_modules/`, `dist/`, `.astro/`, `.env` | orso writes `.astro/orso-content.json` and `node_modules/.orso-deps` | Add the missing lines. |
 | 12 | `npm run build` at the repo root produces `dist/index.html` in under 90 s | Side-by-side previews when two people change the same thing | Tell the user; previews show "Unavailable" otherwise. |
+| 13 | Pull request preview builds set `ORSO_PREVIEW=1` (production builds don't) | Review screenshots without a screen-sharing prompt | Phase 3. |
 
 ## Phase 2 — Wire it in
 
@@ -206,6 +207,11 @@ for the PR head commit (preview) and for `main` (live).
   `.github/scripts/preview-alias.sh` in Blaise1030/cms, plus a `wrangler.toml`). The user
   sets secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit) and `CLOUDFLARE_ACCOUNT_ID`,
   and optionally the variable `CLOUDFLARE_WORKER_NAME`.
+
+For **pull request preview builds only**, set `ORSO_PREVIEW=1` in the build step's env (e.g.
+`ORSO_PREVIEW: ${{ github.event_name == 'pull_request' && '1' || '' }}`). `orso()` then adds
+its preview bridge to the preview, so reviewers in orso can screenshot areas of it without a
+screen-sharing prompt. Never set it for production builds.
 
 Recommend protecting `main` so publishing needs a review (orso shows a hint until it is).
 

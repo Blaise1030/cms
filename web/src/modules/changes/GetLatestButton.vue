@@ -25,8 +25,8 @@ const disabled = computed(
         variant="outline"
         size="sm"
         square
-        icon="i-hugeicons-refresh"
-        :ui="{ leadingIcon: store.updating ? 'animate-spin' : undefined }"
+        icon="i-hugeicons-cloud-download"
+        :loading="store.updating"
         data-testid="get-latest"
         :aria-label="title"
         :disabled="disabled"

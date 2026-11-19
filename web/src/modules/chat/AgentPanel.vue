@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, ref, watch } from "vue";
-import { agentPrompt, isRequest, useAgentOutboxStore } from "./outbox";
+import { agentPrompt, isReference, isRequest, useAgentOutboxStore } from "./outbox";
 import type ChatPanelComponent from "./ChatPanel.vue";
 
 /** Its AI SDK, markdown and highlighter would push the app shell past the PWA precache limit. */
@@ -26,7 +26,7 @@ function deliverToChat() {
   const panel = chat.value;
   if (!panel || outbox.messages.length === 0) return;
   for (const message of outbox.drain()) {
-    if (message.kind === "element") panel.insertReference(agentPrompt(message));
+    if (isReference(message)) panel.insertReference(agentPrompt(message));
     else if (!isRequest(message)) panel.insert(agentPrompt(message));
     else void panel.send(agentPrompt(message));
   }

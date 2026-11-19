@@ -151,6 +151,14 @@ describe("MarkdownBodyEditor", () => {
     expect(last(w)).toEqual({ body: "Hello", dirty: true });
   });
 
+  it("Ask AI sends the selected text up without changing the body", async () => {
+    const w = await render("The designer shares the work");
+    await selectAll(w);
+    await w.get('[data-testid="body-tool-ask-ai"]').trigger("click"); await flushPromises();
+    expect(w.emitted("ask")).toEqual([["The designer shares the work"]]);
+    expect(w.emitted("change")).toBeUndefined();
+  });
+
   /** Type into a field of the open link dialog. */
   async function fillLink(field: "url" | "text", value: string) {
     const input = document.body.querySelector(`[data-testid="link-${field}"]`) as HTMLInputElement;
@@ -274,6 +282,50 @@ describe("MarkdownBodyEditor", () => {
     await item!.trigger("mousedown"); await flushPromises();
     editorOf(w).commands.insertContent("Title"); await flushPromises();
     expect(last(w)?.body).toBe(expected);
+  });
+
+  describe("tables", () => {
+    it("saving next to a table adds no blank lines around it", async () => {
+      const w = await render("Intro\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter\n");
+      editorOf(w).chain().focus("end").insertContent("!").run(); await flushPromises();
+      expect(last(w)!.body).toBe("Intro\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n\nAfter!\n");
+    });
+
+    /** The table bubble's buttons (rendered in a teleported floating element). */
+    const tableTool = (id: string) => document.body.querySelector(`[data-testid="table-tool-${id}"]`) as HTMLButtonElement | null;
+
+    it("slash Table inserts a GFM table with a header row", async () => {
+      const w = await render("");
+      editorOf(w).chain().focus().insertContent("/tab").run(); await flushPromises();
+      expect(slashItems(w).map(i => i.text())).toEqual([expect.stringContaining("Table")]);
+      await slashItems(w)[0]!.trigger("mousedown"); await flushPromises();
+      editorOf(w).commands.insertContent("Name"); await flushPromises();
+      const body = last(w)!.body;
+      expect(body.split("\n")[0]).toMatch(/^\|\s*Name\s*\|.*\|.*\|$/);
+      expect(body.split("\n")[1]).toMatch(/^\|\s*-+\s*\|/);
+      expect(body.split("\n")).toHaveLength(4);
+      expect(canRoundTrip(body)).toBe(true);
+    });
+
+    it("the table toolbar adds and removes rows and columns", async () => {
+      const w = await render("| a | b |\n| - | - |\n| 1 | 2 |\n");
+      const editor = editorOf(w);
+      // Cursor in the "1" cell.
+      let pos = 0;
+      editor.state.doc.descendants((node: any, at: number) => { if (node.isText && node.text === "1") pos = at; });
+      editor.chain().focus().setTextSelection(pos).run(); await flushPromises();
+      expect(tableTool("row-below"), "table toolbar shown in a table").toBeTruthy();
+
+      tableTool("row-below")!.click(); await flushPromises();
+      expect(last(w)!.body.trim().split("\n")).toHaveLength(4);
+      tableTool("column-right")!.click(); await flushPromises();
+      expect(last(w)!.body.split("\n")[0]!.split("|").filter(c => c !== "")).toHaveLength(3);
+      tableTool("delete-column")!.click(); await flushPromises();
+      tableTool("delete-row")!.click(); await flushPromises();
+      expect(last(w)!.body.trim().split("\n")).toHaveLength(3);
+      tableTool("delete-table")!.click(); await flushPromises();
+      expect(last(w)!.body).not.toContain("|");
+    });
   });
 
   it("cancelling a slash image leaves the body as it was", async () => {

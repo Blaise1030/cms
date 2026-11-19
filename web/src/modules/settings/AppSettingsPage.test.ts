@@ -12,6 +12,7 @@ vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { SelectRoot } from "reka-ui";
 import { useTypingSound } from "@/lib/typingSound";
 import AppSettingsPage from "./AppSettingsPage.vue";
+import { queryPlugin } from "@/test/queryClient";
 
 const runtime = (over: Partial<RuntimeStatus> = {}): RuntimeStatus => ({
   phase: "ready",
@@ -75,6 +76,7 @@ function mountAt(path = "/settings", api: Record<string, unknown> = {}) {
     routes: [
       { path: "/", component: empty },
       { path: "/settings", component: empty },
+      { path: "/p/:id", component: empty, children: [{ path: ":rest(.*)*", component: empty }] },
     ],
   });
   void router.push(path);
@@ -86,7 +88,7 @@ async function mountPage(path = "/settings", api: Record<string, unknown> = {}) 
   await router.isReady();
   const w = mount(AppSettingsPage, {
     attachTo: document.body,
-    global: { plugins: [pinia, router] },
+    global: { plugins: [pinia, router, queryPlugin().plugin] },
   });
   await flushPromises();
   return { w, router };
@@ -178,6 +180,23 @@ describe("AppSettingsPage", () => {
     expect(w.find("[data-testid='assistant-settings']").exists()).toBe(true);
   });
 
+  it("renders every section in one list and scrolls to one from the sidebar", async () => {
+    const scrolled: string[] = [];
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset.testid ?? "");
+    };
+    const { w } = await mountPage();
+    for (const id of ["assistant", "builder", "github", "appearance", "about"]) {
+      expect(w.find(`[data-testid='app-settings-section-${id}']`).exists()).toBe(true);
+    }
+
+    await openTab(w, "appearance");
+    expect(scrolled.at(-1)).toBe("app-settings-section-appearance");
+    expect(w.get("[data-testid='app-settings-tab-appearance']").attributes("data-active")).toBe(
+      "true",
+    );
+  });
+
   it("falls back to Assistant for an unknown tab and deep links to a known one", async () => {
     const { w } = await mountPage("/settings?tab=builder");
     expect(w.find("[data-testid='site-builder-settings']").exists()).toBe(true);
@@ -228,11 +247,34 @@ describe("AppSettingsPage", () => {
     await router.isReady();
     await router.push("/");
     await router.push({ path: "/settings", state: { back: "/" } });
-    const w = mount(AppSettingsPage, { global: { plugins: [pinia, router] } });
+    const w = mount(AppSettingsPage, { global: { plugins: [pinia, router, queryPlugin().plugin] } });
     await flushPromises();
     await w.get("[data-testid='app-settings-back']").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/");
+  });
+});
+
+describe("Project rail", () => {
+  async function openFrom(back: string) {
+    const { router, pinia } = mountAt();
+    await router.isReady();
+    await router.push(back);
+    await router.push({ path: "/settings", state: { back } });
+    const w = mount(AppSettingsPage, { global: { plugins: [pinia, router, queryPlugin().plugin] } });
+    await flushPromises();
+    return w;
+  }
+
+  it("shows the rail of the project Settings was opened from, with App settings current", async () => {
+    const w = await openFrom("/p/my%20site/content/blog");
+    expect(w.get("[data-testid='workspace-tab-code']").attributes("href")).toBe("/p/my%20site/code");
+    expect(w.get("[data-testid='project-rail-app-settings']").attributes("aria-current")).toBe("page");
+  });
+
+  it("has no rail when opened from the projects list", async () => {
+    const w = await openFrom("/");
+    expect(w.find("[data-testid='project-rail']").exists()).toBe(false);
   });
 });
 
@@ -241,9 +283,6 @@ describe("Assistant settings", () => {
     const download = vi.fn(async () => runtime());
     const { w } = await mountPage("/settings", { downloadRuntime: download });
     expect(w.get("[data-testid='assistant-settings']").text()).toContain("Assistants");
-    expect(w.get("[data-testid='app-settings-page']").text()).toContain(
-      "The assistant makes the changes you ask for.",
-    );
     expect(w.find("[data-testid='assistant-row-opencode']").exists()).toBe(true);
     expect(w.get("[data-testid='assistant-row-codex']").attributes("data-action")).toBe(
       "download",

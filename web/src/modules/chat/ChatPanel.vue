@@ -40,6 +40,7 @@ import {
 } from "./pageContext";
 import { PHASE_LABEL, SYNC_ACTIONS, syncIsTerminal, syncPhaseBadge } from "./parts";
 import { referenceLabel } from "./references";
+import ChatTitle from "./ChatTitle.vue";
 import { spawnRecovery, type RecoveryAction } from "./recovery";
 import { buildChatStreamUrl, createChatStream, type ChatStream } from "./stream";
 import { useChatStore } from "./store";
@@ -830,9 +831,7 @@ defineExpose({ insert, insertReference, send: sendWithPageContext, busy });
         @pick="store.setActive(projectId, $event)"
         @remove="removeChat"
       />
-      <span class="min-w-0 flex-1 truncate px-1 text-sm">
-        {{ activeSummary?.title || "New chat" }}
-      </span>
+      <ChatTitle class="flex-1 px-1 text-sm" :title="activeSummary?.title || 'New chat'" data-testid="chat-title" />
       <UBadge
         v-if="syncPhase"
         color="neutral"

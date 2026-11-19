@@ -597,6 +597,7 @@ async fn github_project() -> GithubProject {
             git_url: format!("file://{}", git_root.display()),
             gh_path: tmp.path().join("no-gh"),
             git_global_config: None,
+            get_cache_ttl: std::time::Duration::ZERO,
         },
         ..Default::default()
     };
