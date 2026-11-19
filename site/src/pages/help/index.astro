@@ -20,7 +20,7 @@ const count = (n: number) => `${n} ${n === 1 ? "article" : "articles"}`;
 >
   <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
     <PageHeader title="Help" description="Guides and answers for every step, from your first sign-in to your next invoice.">
-      {docs.length > 0 && <PagefindSearch bundle="help" variant="inline" placeholder="Search help, for example “invite”" class="rise-3 mt-10 max-w-2xl" />}
+      {docs.length > 0 && <PagefindSearch bundle="help" placeholder="Search help, for example “invite”" class="rise-3 mt-10 max-w-2xl" />}
     </PageHeader>
     <div>
       {docs.length === 0 ? <p class="page mt-12 text-muted">No help docs yet. Check back soon for guides and answers.</p> : (
