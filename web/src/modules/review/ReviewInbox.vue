@@ -161,9 +161,9 @@ const macDesktop = isMacDesktop();
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-inbox">
     <div class="flex min-h-full flex-col gap-3 p-3">
       <!-- No project top bar here: on the macOS desktop app the header clears the traffic lights
-           and is where the window is dragged from. -->
+           and is where the window is dragged from; its title centres on them (22px down). -->
       <header
-        :class="['flex shrink-0 flex-col gap-0.5', macDesktop ? 'pt-4 pl-7 fullscreen:pt-1 fullscreen:pl-0' : 'pt-1']"
+        :class="['flex shrink-0 flex-col gap-0.5', macDesktop ? '-mt-1 pl-7 fullscreen:mt-0 fullscreen:pt-1 fullscreen:pl-0' : 'pt-1']"
         :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
         data-testid="review-inbox-header"
       >

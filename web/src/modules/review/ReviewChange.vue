@@ -262,11 +262,11 @@ const macDesktop = isMacDesktop();
 <template>
   <div class="relative flex h-full min-h-0 flex-col" data-testid="review-change">
     <!-- No project top bar here: on the macOS desktop app this row clears the traffic lights and
-         is where the window is dragged from. -->
+         is where the window is dragged from; its back button and title centre on them (22px down). -->
     <div
       :class="[
         'flex min-h-10 shrink-0 items-center gap-3 px-3 pb-3',
-        macDesktop ? 'pt-4 pl-10 fullscreen:pt-2 fullscreen:pl-3' : 'pt-2',
+        macDesktop ? 'pt-2 pl-10 fullscreen:pl-3' : 'pt-2',
       ]"
       :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
       data-testid="review-change-header"
