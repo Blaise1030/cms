@@ -13,4 +13,15 @@ describe("ReviewMarkdown", () => {
     await flushPromises();
     expect(w.find(`img[src="${IMAGE}"]`).exists()).toBe(true);
   });
+
+  it("hides HTML comments but keeps them inside code", async () => {
+    const w = mount(ReviewMarkdown, {
+      props: { content: "<!-- orso-site-preview-deploy -->\nPreview is ready. Tag with `<!-- x -->`." },
+    });
+    await flushPromises();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.text()).not.toContain("orso-site-preview-deploy");
+    expect(w.text()).toContain("Preview is ready.");
+    expect(w.get("code").text()).toBe("<!-- x -->");
+  });
 });
