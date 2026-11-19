@@ -17,7 +17,7 @@ export default defineConfig({
     ui({
       // The app owns light/dark (`lib/theme.ts` + the inline script in index.html).
       colorMode: false,
-      // Components are imported explicitly, like the shadcn ones; nothing is auto-imported.
+      // Components are imported explicitly; nothing is auto-imported.
       autoImport: false,
       components: false,
       ui: {

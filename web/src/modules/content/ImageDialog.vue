@@ -35,10 +35,10 @@ function newClientId(): string {
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
-import type { ModalProps } from "@nuxt/ui";
+import type { AvatarProps, ModalProps } from "@nuxt/ui";
 import UButton from "@nuxt/ui/components/Button.vue";
+import UFileUpload from "@nuxt/ui/components/FileUpload.vue";
 import UFormField from "@nuxt/ui/components/FormField.vue";
-import UIcon from "@nuxt/ui/components/Icon.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 
@@ -67,16 +67,16 @@ function choose(file: File | null) {
   chosen.value = file;
   preview.value = file && !problem(file) ? URL.createObjectURL(file) : null;
 }
-function onPick(event: Event) { choose((event.target as HTMLInputElement).files?.[0] ?? null); }
-const dragging = ref(false);
-function onDrop(event: DragEvent) {
-  dragging.value = false;
-  const file = event.dataTransfer?.files?.[0];
-  if (file) choose(file);
-}
-function fileSize(bytes: number) {
-  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
+function onChosen(value: unknown) { choose(value instanceof File ? value : null); }
+/**
+ * The chosen file as a UFileUpload item, previewed from our own object URL so the dialog owns
+ * (and revokes) the only one. A refused file shows the file icon instead of a preview.
+ */
+const chosenItem = computed(() => chosen.value && {
+  name: chosen.value.name,
+  size: chosen.value.size,
+  avatar: preview.value ? { src: preview.value, alt: "", "data-testid": "image-preview" } as AvatarProps : undefined,
+});
 watch([open, () => props.file], ([isOpen]) => {
   if (isOpen) { alt.value = ""; choose(props.file ?? null); } else release();
 }, { immediate: true });
@@ -101,31 +101,17 @@ function insert() {
   >
     <template #body>
       <form :id="formId" class="grid gap-4" @submit.prevent="insert">
-        <label
-          class="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-default transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary"
-          :class="[preview ? 'bg-muted/40' : 'border-dashed hover:bg-muted/40', dragging && 'border-primary bg-muted/60']"
-          @dragover.prevent="dragging = true"
-          @dragleave="dragging = false"
-          @drop.prevent="onDrop"
-        >
-          <input type="file" :accept="ACCEPTED_IMAGES" data-testid="image-file" class="sr-only" @change="onPick" />
-          <template v-if="preview">
-            <div class="flex h-56 items-center justify-center p-4">
-              <img :src="preview" alt="" data-testid="image-preview" class="max-h-full max-w-full rounded object-contain shadow-sm" />
-            </div>
-            <div class="flex items-center gap-2 border-t border-default bg-default/60 px-3 py-2 text-xs">
-              <UIcon name="i-hugeicons-image-01" class="text-muted size-3.5 shrink-0" />
-              <span class="text-highlighted min-w-0 flex-1 truncate font-medium">{{ chosen?.name }}</span>
-              <span class="text-muted shrink-0">{{ chosen ? fileSize(chosen.size) : "" }}</span>
-              <span class="text-muted shrink-0 underline-offset-2 group-hover:text-highlighted group-hover:underline">Replace</span>
-            </div>
-          </template>
-          <div v-else class="text-muted flex h-40 flex-col items-center justify-center gap-2 text-sm">
-            <span class="bg-elevated flex size-10 items-center justify-center rounded-full"><UIcon name="i-hugeicons-image-add-01" class="size-5" /></span>
-            <span><span class="text-highlighted font-medium">Choose an image</span> or drop it here</span>
-            <span v-if="chosen" class="max-w-full truncate px-4 text-xs">{{ chosen.name }}</span>
-          </div>
-        </label>
+        <UFileUpload
+          reset
+          layout="grid"
+          icon="i-hugeicons-image-add-01"
+          label="Choose an image or drop it here"
+          :accept="ACCEPTED_IMAGES"
+          :model-value="chosenItem"
+          :ui="{ base: 'h-56', files: 'size-full', file: 'size-full', fileLeadingAvatar: 'rounded-md bg-muted/40 [&>img]:object-contain' }"
+          data-testid="image-file"
+          @update:model-value="onChosen"
+        />
         <p v-if="error" role="alert" class="text-error text-sm" data-testid="image-error">{{ error }}</p>
         <UFormField label="Alt text" required>
           <UInput v-model="alt" class="w-full" data-testid="image-alt" placeholder="Describe the image" />

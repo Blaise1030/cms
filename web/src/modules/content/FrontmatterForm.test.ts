@@ -100,7 +100,7 @@ it("emits typed values for edits, array changes, variant switches, and cleared o
   await tagsOf(w).findAll('[data-slot="item"]').find(t => t.text() === "a")!.get('[data-slot="itemDelete"]').trigger("click");
   await select(w, "field-section").choose("cta");
   await w.get('[data-testid="field-section.label"]').setValue("Go");
-  await w.get('[data-testid="field-coverImage-uploader"] [data-slot="image-uploader-remove"]').trigger("click");
+  await w.get('[data-testid="field-coverImage-uploader"] [data-slot="fileTrailingButton"]').trigger("click");
   w.findComponent(DatePicker).vm.$emit("update:modelValue", "2026-03-04");
   await nextTick();
   const out = w.props("modelValue") as Record<string, unknown>;

@@ -199,12 +199,13 @@ async function abandon() {
       <template #list>
       <aside class="flex h-full w-full flex-col gap-1 overflow-auto p-3">
         <p class="text-muted mb-1 px-2 text-xs" data-testid="conflict-progress">{{ decided }} of {{ session.files.length }} decided</p>
-        <button
+        <UButton
           v-for="item in session.files"
           :key="item.path"
-          type="button"
-          class="hover:bg-elevated flex items-start gap-2 rounded-md px-2 py-1.5 text-left"
-          :class="item.path === file?.path && 'bg-elevated'"
+          color="neutral"
+          :variant="item.path === file?.path ? 'soft' : 'ghost'"
+          block
+          class="items-start justify-start text-left font-normal"
           :aria-current="item.path === file?.path ? 'true' : undefined"
           data-testid="conflict-item"
           @click="selectedPath = item.path"
@@ -218,7 +219,7 @@ async function abandon() {
             <span class="text-default truncate text-sm">{{ conflictLabel(item.path) }}</span>
             <span class="text-muted truncate text-xs">{{ session.choices[item.path] ? CHOICE_LABEL[session.choices[item.path]!] : "Needs a decision" }}</span>
           </span>
-        </button>
+        </UButton>
       </aside>
       </template>
 
@@ -234,19 +235,21 @@ async function abandon() {
         <p v-if="previewError" class="text-warning text-sm" role="status">Previews aren't available right now. You can still choose a version, or check the code below.</p>
         <p v-else-if="!sectionIdForFile(file.path)" class="text-muted text-xs">This may change more than one part of the page. Switch pages above to check.</p>
 
-        <button
-          type="button"
-          class="hover:bg-elevated/60 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
-          :class="choice === 'both' ? 'bg-primary/10' : 'bg-elevated/50'"
+        <UButton
+          :color="choice === 'both' ? 'primary' : 'neutral'"
+          variant="soft"
+          block
+          class="justify-start text-left"
+          :leading-icon="choice === 'both' ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-circle'"
+          :ui="{ leadingIcon: choice === 'both' ? 'text-primary' : 'text-dimmed' }"
           :aria-pressed="choice === 'both'"
           :disabled="busy || !canKeepBoth"
           data-testid="keep-both"
           @click="choose('both')"
         >
-          <UIcon :name="choice === 'both' ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-circle'" class="size-4 shrink-0" :class="choice === 'both' ? 'text-primary' : 'text-dimmed'" />
           Keep both
           <span class="text-muted font-normal">· your text first, then the live site's</span>
-        </button>
+        </UButton>
 
         <div class="grid gap-3 lg:grid-cols-2" data-testid="conflict-previews">
           <div
@@ -255,14 +258,19 @@ async function abandon() {
             class="flex min-w-0 flex-col overflow-hidden rounded-lg transition-colors"
             :class="choice === card.choice ? 'bg-primary/10' : 'bg-elevated/50'"
           >
-            <button
-              type="button"
-              class="hover:bg-elevated/60 flex items-center gap-2 px-3 py-2 text-left text-sm font-medium"
+            <UButton
+              :color="choice === card.choice ? 'primary' : 'neutral'"
+              variant="ghost"
+              block
+              class="justify-start rounded-none text-left"
+              :leading-icon="choice === card.choice ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-circle'"
+              :ui="{ leadingIcon: choice === card.choice ? 'text-primary' : 'text-dimmed' }"
+              :label="card.label"
               :aria-pressed="choice === card.choice"
               :disabled="busy"
               :data-testid="card.testid"
               @click="choose(card.choice)"
-            ><UIcon :name="choice === card.choice ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-circle'" class="size-4 shrink-0" :class="choice === card.choice ? 'text-primary' : 'text-dimmed'" />{{ card.label }}</button>
+            />
             <div class="bg-muted flex flex-1 justify-center">
               <div v-if="previews?.[card.source].status === 'ready'" class="h-64 max-w-full" :style="{ width: viewport === 'mobile' ? '390px' : '100%' }">
                 <iframe :key="frameUrl(previews[card.source])" :src="frameUrl(previews[card.source])" :title="`${card.source} preview`" class="bg-default h-full w-full border-0" loading="lazy" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded($event, card.source)" />

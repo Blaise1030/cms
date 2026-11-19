@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent, shallowRef, watch } from "vue";
-import UIcon from "@nuxt/ui/components/Icon.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
 import type { ConflictFile } from "@/core/types";
 import type { FileDiff } from "@/modules/checkpoints/diff";
 
@@ -19,19 +20,27 @@ watch(() => props.file.patch, async (patch) => {
 </script>
 
 <template>
-  <details class="group" data-testid="conflict-code">
-    <summary class="text-muted hover:text-default flex cursor-pointer list-none items-center gap-1.5 text-sm select-none">
-      <UIcon name="i-hugeicons-arrow-right-01" class="size-4 transition-transform group-open:rotate-90" />
+  <UCollapsible :unmount-on-hide="false" data-testid="conflict-code">
+    <UButton
+      color="neutral"
+      variant="link"
+      size="sm"
+      leading-icon="i-hugeicons-arrow-right-01"
+      class="text-muted hover:text-default group p-0"
+      :ui="{ leadingIcon: 'transition-transform group-data-[state=open]:rotate-90' }"
+    >
       Show code
       <span class="font-mono text-xs">{{ file.path }}</span>
-    </summary>
-    <div class="mt-3">
-      <p v-if="file.binary" class="text-muted text-sm">This file can't be shown as text.</p>
-      <template v-else-if="parsed">
-        <p class="text-muted mb-2 text-xs">Red lines are your version, green lines are the live site's.</p>
-        <DiffView :diff="parsed.meta" />
-      </template>
-      <p v-else class="text-muted text-sm">No text to compare for this file.</p>
-    </div>
-  </details>
+    </UButton>
+    <template #content>
+      <div class="mt-3">
+        <p v-if="file.binary" class="text-muted text-sm">This file can't be shown as text.</p>
+        <template v-else-if="parsed">
+          <p class="text-muted mb-2 text-xs">Red lines are your version, green lines are the live site's.</p>
+          <DiffView :diff="parsed.meta" />
+        </template>
+        <p v-else class="text-muted text-sm">No text to compare for this file.</p>
+      </div>
+    </template>
+  </UCollapsible>
 </template>
