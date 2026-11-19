@@ -33,6 +33,8 @@ export type orsoEnv = {
     setGraphqlStatus: (status: number | null) => void;
     addReviewPr: (seed: import("./githubStub").ReviewPrSeed) => void;
     reviewPosts: () => import("./githubStub").ReviewPost[];
+    /** Serve a deployed site's page from the stub, at `${baseUrl}/sites{path}`. */
+    addSitePage: (path: string, html: string) => void;
   };
   stop: () => Promise<void>;
 };
@@ -158,8 +160,6 @@ export function pushPullHead(
   number: number,
   file: string,
   text: string,
-  /** Whole files to write too (path relative to the repo root), e.g. a buildable site. */
-  files: Record<string, string> = {},
 ): string {
   const work = fs.mkdtempSync(path.join(env.tmp, "pr-work-"));
   // Never signs or runs hooks, whatever the machine's git config says.
@@ -172,10 +172,6 @@ export function pushPullHead(
     ).trim();
   execFileSync("git", [...safe, "clone", "-q", "--branch", "main", env.bareRemote, work]);
   fs.appendFileSync(path.join(work, file), text);
-  for (const [name, content] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(work, name)), { recursive: true });
-    fs.writeFileSync(path.join(work, name), content);
-  }
   git("add", "-A");
   git("commit", "-q", "-m", `Edit ${file}`);
   const sha = git("rev-parse", "HEAD");
@@ -323,6 +319,7 @@ export async function startorso(): Promise<orsoEnv> {
       setGraphqlStatus: (status) => stub.setGraphqlStatus(status),
       addReviewPr: (seed) => stub.addReviewPr(seed),
       reviewPosts: () => stub.reviewPosts(),
+      addSitePage: (path, html) => stub.addSitePage(path, html),
     },
     stop: async () => {
       const exitedWithin = (ms: number) =>

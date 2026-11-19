@@ -81,6 +81,8 @@ export type GithubStub = {
   addReviewPr: (seed: ReviewPrSeed) => void;
   /** Bodies of every `POST …/pulls/{n}/reviews` the daemon sent. */
   reviewPosts: () => ReviewPost[];
+  /** Serve `html` at `GET /sites{path}`: a deployed site a deployment's URL can point at. */
+  addSitePage: (path: string, html: string) => void;
   close: () => Promise<void>;
 };
 
@@ -159,9 +161,18 @@ export function startGithubStub(
     res.end(JSON.stringify(body));
   };
 
+  const sitePages = new Map<string, string>();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const auth = req.headers.authorization;
+
+    // A deployed site, framed by the review preview.
+    const page = req.method === "GET" && url.pathname.startsWith("/sites/") && sitePages.get(url.pathname.slice(6));
+    if (page) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(page);
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/login/device/code") {
       let body = "";
@@ -504,6 +515,9 @@ export function startGithubStub(
           reviewPrs.push(seed);
         },
         reviewPosts: () => reviewPosts.slice(),
+        addSitePage: (path, html) => {
+          sitePages.set(path, html);
+        },
         setGraphqlStatus: (code) => {
           graphqlStatus = code;
         },

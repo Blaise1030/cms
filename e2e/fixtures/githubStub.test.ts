@@ -220,6 +220,19 @@ describe("githubStub", () => {
     }
   });
 
+  it("serves a deployed site's pages without auth", async () => {
+    const stub = await startGithubStub();
+    try {
+      stub.addSitePage("/pr-3/", "<h1>Fresh</h1>");
+      const res = await fetch(`${stub.baseUrl}/sites/pr-3/`);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(await res.text()).toBe("<h1>Fresh</h1>");
+      expect((await fetch(`${stub.baseUrl}/sites/other/`)).status).toBe(404);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("serves seeded review PRs and records review posts", async () => {
     const stub = await startGithubStub();
     const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };

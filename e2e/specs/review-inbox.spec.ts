@@ -12,15 +12,10 @@ const PR = 3;
 async function openReview(page: import("@playwright/test").Page, orso: import("../fixtures/daemon").orsoEnv) {
   const { origin, token, projectId, bareRemote, github } = orso;
   // A teammate's change, labelled for review, with its head where GitHub keeps it.
-  // The change's head builds a one-page site, which the Preview pane shows.
-  const sha = pushPullHead(orso, PR, "serve.mjs", "// Fix the hero copy\n", {
-    "package.json": JSON.stringify({
-      name: "site",
-      private: true,
-      scripts: { dev: "node serve.mjs", build: "mkdir -p dist && cp page.html dist/index.html" },
-    }),
-    "page.html": "<h1>Fresh hero copy</h1>\n",
-  });
+  const sha = pushPullHead(orso, PR, "serve.mjs", "// Fix the hero copy\n");
+  // Its deploy published a preview, which the Preview pane frames; nothing builds locally.
+  github.addSitePage("/pr-3/", "<h1>Fresh hero copy</h1>\n");
+  github.setPrStatus({ deployment: { environment_url: `${github.baseUrl}/sites/pr-3/` } });
   github.addReviewPr({
     number: PR,
     title: "Fix the hero copy",
@@ -50,11 +45,11 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   return sha;
 }
 
-/** The change's built page shows in the Preview pane. */
+/** The change's deploy preview shows in the Preview pane. */
 async function expectPreview(page: import("@playwright/test").Page) {
   await expect(
-    page.frameLocator('iframe[data-testid="review-preview-frame"]').locator("h1"),
-  ).toHaveText("Fresh hero copy", { timeout: 90_000 });
+    page.frameLocator('iframe[data-testid="browser-frame-iframe-change"]').locator("h1"),
+  ).toHaveText("Fresh hero copy", { timeout: 30_000 });
 }
 
 test("reviewer greenlights a change without touching the checkout", async ({ page, orso }) => {
