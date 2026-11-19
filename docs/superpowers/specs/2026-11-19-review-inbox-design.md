@@ -42,18 +42,30 @@ and checked-out change are untouched throughout.
 
 ## User flow
 
-1. **Inbox.** Project rail shows **Review** with a count of changes whose state for you is
-   *New*. The Review tab (`/p/:id/review`) lists each change: title, creator, last
-   updated, checks, and your state on its *current* version:
-   - *New*: no review from you on the current head commit.
-   - *You sent back*: your latest review on this head requests changes.
-   - *You greenlit*: your latest review on this head approves.
-   A push by the creator returns the row to *New*. Empty state: "Nothing waiting for
-   your greenlight."
+1. **Inbox.** Project rail shows **Review** with a count of other people's open changes
+   whose state for you is *New*. The Review tab (`/p/:id/review`) is a card like GitHub's
+   pull request list (no checkboxes):
+   - **Search** (kept in `?q=`, default `is:open`): free text over title, `#number` and
+     author, plus qualifiers `author:`, `label:`, `review:new|greenlit|sent_back|yours`,
+     `is:open|closed`, `sort:created-desc|created-asc|updated-desc`; anything else is text.
+   - **Header strip**: **Open** *n* / **Closed** *n* (closed is one page of 30, shown as
+     `30+` when full); **Author**, **Label**, **Reviews** and **Sort** (Newest, Oldest,
+     Recently updated) menus that write their qualifier into the search; picking the active
+     one again clears it.
+   - **Rows**: state icon (open, draft, merged, closed), title, label chips in GitHub
+     colours, `#83 · author opened 19 hours ago · ✕ 8/9`, comment count, and the review
+     tag on the change's *current* version: *New*, *You sent back*, *You greenlit*, or
+     *Yours* for your own (view-only). A push by the creator returns the row to *New*.
+   - **Empty**: "No changes match your search." with **Clear filters**, or "No changes
+     waiting for review." / "No closed changes."
+   - A closed or merged change opens read-only: decisions off with "This change is
+     closed"; its preview still shows its deploy if one is left.
 2. **Open a change.** Like GitHub, a change has two pages sharing one header: back,
    title, `#number`, state (Open / Draft / Merged / Closed), creator, labels in their
-   GitHub colours, **View live site**, and **Give greenlight** / **Send back**. Below the
-   header, tabs (router links): **Conversation** *n* | **Review** *files*.
+   GitHub colours, and **Give greenlight** / **Send back**. Below the header, one card
+   holds the page: its top strip has the tabs (router links) **Conversation** *n* |
+   **Review** *files* and, at the end, **Refresh**, which reads the change again in place
+   (detail and diff, plus the conversation or the preview), spinning while it loads.
    - **Conversation** (`/p/:id/review/:number`, where a change opens): the description and
      every comment rendered as markdown (PR text is untrusted: raw HTML stays inert text,
      links open outside the app); then, oldest first, comments, reviews (*greenlit*,
@@ -67,9 +79,12 @@ and checked-out change are untouched throughout.
      comment; no push access needed.
    - **Review** (`/p/:id/review/:number/files`): the change in a card with two panes:
    - **Preview**: a browser frame like the preview page's (back/forward, reload, address
-     bar, viewport size with zoom-to-fit, open in new tab) with **This change · Live site ·
-     Side by side**, side by side by default when the live site is known. One address
-     opens the same page on both sides; each side fits desktop (1440 px) to its own width.
+     bar, viewport size with zoom-to-fit, open in new tab) showing **This change** and the
+     **Live site** side by side. One address opens the same page on both sides; each side
+     fits desktop (1440 px) to its own width. Either side can be folded to a narrow strip
+     (label, state, a button to bring it back) so the other fills the width; one at a time.
+     A side with nothing to show starts folded; otherwise the browser remembers the last
+     fold (`localStorage`).
      - Deploy running: "Deploying preview…", checked again every 10 s while the page is
        visible.
      - Deploy failed: "The preview deploy failed." with a link to the PR's checks.
@@ -137,7 +152,8 @@ only **What changed**.
 
 | Route | Returns / does |
 | --- | --- |
-| `GET /` | Inbox rows: number, title, author, updatedAt, checks, myState |
+| `GET /` | Open inbox rows: number, title, author, createdAt, updatedAt, labels (name, colour), comments, checks + checksPassed/checksTotal, state, draft, myState, mine |
+| `GET /?state=closed` | `{ reviews, more }`: the 30 most recently updated labelled closed or merged changes |
 | `GET /{n}` | Title, author, description, headSha, myState, `canDecide`, `reason` |
 | `GET /{n}/diff` | Changed files + unified diff (checkpoint diff shape) |
 | `GET /{n}/conversation` | `{ items, checks, reviewers }`: timeline oldest first (`comment` / `review` / `push` / `state`), head check runs, reviewers. Any labelled change, open or not |
@@ -146,7 +162,7 @@ only **What changed**.
 | `POST /{n}/decision` | `{ decision: "greenlight" \| "send_back", comment?, headSha }` |
 
 Errors: 403 → "You don't have push access"; 409 `head_moved`; `send_back` without a
-non-blank comment → 400; PR not open → 404 "This change is no longer waiting".
+non-blank comment → 400; deciding or commenting on a PR that is not open, an open draft, or an unlabelled PR → 404 "This change is no longer waiting" (a closed labelled change still reads, decisions off).
 
 ### Web
 
