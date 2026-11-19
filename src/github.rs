@@ -354,12 +354,17 @@ struct PullFacts {
 #[derive(Deserialize)]
 struct ApiLogin {
     login: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ApiReview {
     #[serde(default)]
     user: Option<ApiLogin>,
+    /// The review on GitHub.
+    #[serde(default)]
+    html_url: Option<String>,
     state: String,
     #[serde(default)]
     commit_id: String,
@@ -526,15 +531,23 @@ pub enum TimelineItem {
     Comment {
         id: u64,
         author: String,
+        /// The author's GitHub avatar.
+        #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
         at: String,
         body: String,
         url: String,
     },
     Review {
         author: String,
+        #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
         at: String,
         verdict: ReviewVerdict,
         body: Option<String>,
+        /// The review on GitHub.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
     },
     /// Consecutive commits with nothing else between them.
     Push {
@@ -590,7 +603,7 @@ pub struct Conversation {
     pub reviewers: Vec<Reviewer>,
 }
 
-/// Comments, reviews, pushes and the close/merge, newest first, with consecutive commits
+/// Comments, reviews, pushes and the close/merge, oldest first, with consecutive commits
 /// grouped into one push dated by its latest commit. Pending reviews and empty comment-only
 /// reviews are left out.
 fn timeline(
@@ -600,11 +613,16 @@ fn timeline(
     closed: Option<(String, bool)>,
 ) -> Vec<TimelineItem> {
     let login = |u: Option<&ApiLogin>| u.map_or_else(|| "ghost".to_string(), |u| u.login.clone());
+    let avatar = |u: Option<&ApiLogin>| {
+        u.and_then(|u| u.avatar_url.clone())
+            .filter(|a| is_http_url(a))
+    };
     let mut raw: Vec<TimelineItem> = Vec::new();
     for c in comments {
         raw.push(TimelineItem::Comment {
             id: c.id,
             author: login(c.user.as_ref()),
+            avatar_url: avatar(c.user.as_ref()),
             at: c.created_at,
             body: c.body.unwrap_or_default(),
             url: c.html_url,
@@ -623,9 +641,11 @@ fn timeline(
         };
         raw.push(TimelineItem::Review {
             author: login(r.user.as_ref()),
+            avatar_url: avatar(r.user.as_ref()),
             at,
             verdict,
             body,
+            url: r.html_url.clone().filter(|u| is_http_url(u)),
         });
     }
     for c in commits {
@@ -675,8 +695,6 @@ fn timeline(
             (_, item) => items.push(item),
         }
     }
-    // Newest first; a group's commits stay in the order they were made.
-    items.reverse();
     items
 }
 
@@ -2068,9 +2086,15 @@ impl GithubAuth {
         }
         let c: ApiIssueComment = serde_json::from_slice(&bytes)
             .map_err(|e| ApiError::github(format!("unexpected answer from GitHub: {e}")))?;
+        let avatar_url = c
+            .user
+            .as_ref()
+            .and_then(|u| u.avatar_url.clone())
+            .filter(|a| is_http_url(a));
         Ok(TimelineItem::Comment {
             id: c.id,
             author: c.user.map_or_else(|| "ghost".to_string(), |u| u.login),
+            avatar_url,
             at: c.created_at,
             body: c.body.unwrap_or_default(),
             url: c.html_url,
@@ -3690,8 +3714,10 @@ esac"#,
 
     fn review(login: &str, state: &str) -> ApiReview {
         ApiReview {
+            html_url: None,
             user: Some(ApiLogin {
                 login: login.into(),
+                avatar_url: None,
             }),
             state: state.into(),
             commit_id: String::new(),
@@ -4220,8 +4246,10 @@ esac"#,
 
     fn review_on(user: &str, state: &str, commit: &str) -> ApiReview {
         ApiReview {
+            html_url: None,
             user: Some(ApiLogin {
                 login: user.to_string(),
+                avatar_url: None,
             }),
             state: state.to_string(),
             commit_id: commit.to_string(),
@@ -4258,7 +4286,11 @@ esac"#,
 
     fn submitted(user: &str, state: &str, at: Option<&str>, body: &str) -> ApiReview {
         ApiReview {
-            user: Some(ApiLogin { login: user.into() }),
+            html_url: None,
+            user: Some(ApiLogin {
+                login: user.into(),
+                avatar_url: None,
+            }),
             state: state.into(),
             commit_id: "h".into(),
             body: Some(body.into()),
@@ -4282,16 +4314,18 @@ esac"#,
             },
             author: Some(ApiLogin {
                 login: "bob".into(),
+                avatar_url: None,
             }),
         }
     }
 
     #[test]
-    fn timeline_is_newest_first_and_groups_consecutive_commits() {
+    fn timeline_is_oldest_first_and_groups_consecutive_commits() {
         let comments = vec![ApiIssueComment {
             id: 9,
             user: Some(ApiLogin {
                 login: "ada".into(),
+                avatar_url: None,
             }),
             created_at: "2026-01-02T00:00:00Z".into(),
             body: Some("Looks close".into()),
@@ -4331,11 +4365,11 @@ esac"#,
             .collect();
         assert_eq!(
             kinds,
-            ["state", "review", "push", "review", "review", "comment", "push"]
+            ["push", "comment", "review", "review", "push", "review", "state"]
         );
         // A group is dated by its latest commit; its commits keep their own order.
-        let TimelineItem::Push { commits, at } = &items[6] else {
-            panic!("{:?}", items[6])
+        let TimelineItem::Push { commits, at } = &items[0] else {
+            panic!("{:?}", items[0])
         };
         assert_eq!(at, "2026-01-01T01:00:00Z");
         assert_eq!(
@@ -4354,19 +4388,21 @@ esac"#,
             ]
         );
         assert_eq!(
-            items[4],
+            items[2],
             TimelineItem::Review {
                 author: "ada".into(),
+                avatar_url: None,
                 at: "2026-01-03T00:00:00Z".into(),
                 verdict: ReviewVerdict::SentBack,
                 body: Some("Fix title".into()),
+                url: None,
             }
         );
         assert!(
             matches!(&items[3], TimelineItem::Review { verdict: ReviewVerdict::Commented, author, .. } if author == "cy")
         );
         assert!(matches!(
-            &items[1],
+            &items[5],
             TimelineItem::Review {
                 verdict: ReviewVerdict::Greenlit,
                 body: None,
@@ -4374,13 +4410,13 @@ esac"#,
             }
         ));
         assert_eq!(
-            items[0],
+            items[6],
             TimelineItem::State {
                 at: "2026-01-06T00:00:00Z".into(),
                 state: "merged".into()
             }
         );
-        let json = serde_json::to_value(&items[4]).unwrap();
+        let json = serde_json::to_value(&items[2]).unwrap();
         assert_eq!(json["verdict"], "sent_back");
     }
 
@@ -4397,8 +4433,12 @@ esac"#,
         let requested = vec![
             ApiLogin {
                 login: "dee".into(),
+                avatar_url: None,
             },
-            ApiLogin { login: "CY".into() },
+            ApiLogin {
+                login: "CY".into(),
+                avatar_url: None,
+            },
         ];
         let got = reviewers(&reviews, &requested);
         let pairs: Vec<(&str, ReviewerState)> =
@@ -4466,13 +4506,19 @@ esac"#,
             .route(
                 "/repos/acme/site/issues/3/comments",
                 get(|| async {
-                    Json(serde_json::json!([{ "id": 1, "user": { "login": "ada" },
+                    Json(serde_json::json!([{ "id": 1, "user": { "login": "ada",
+                        "avatar_url": "https://avatars.example/ada" },
                         "created_at": "2026-01-02T00:00:00Z", "body": "hi", "html_url": "c1" }]))
                 }),
             )
             .route(
                 "/repos/acme/site/pulls/3/reviews",
-                get(|| async { Json(serde_json::json!([])) }),
+                get(|| async {
+                    Json(serde_json::json!([{ "user": { "login": "bo",
+                        "avatar_url": "javascript:alert(1)" }, "state": "APPROVED",
+                        "commit_id": "h3", "submitted_at": "2026-01-03T00:00:00Z",
+                        "html_url": "https://gh/pull/3#review-1" }]))
+                }),
             )
             .route(
                 "/repos/acme/site/pulls/3/commits",
@@ -4496,12 +4542,17 @@ esac"#,
         let c = auth.conversation("acme/site", 3).await.unwrap();
         stop();
         let json = serde_json::to_value(&c).unwrap();
-        // Newest first: the comment came after the push.
-        assert_eq!(json["items"][0]["kind"], "comment");
-        assert_eq!(json["items"][0]["body"], "hi");
-        assert_eq!(json["items"][1]["kind"], "push");
-        assert_eq!(json["items"][1]["commits"][0]["sha"], "abcdef1");
-        assert_eq!(json["items"][1]["commits"][0]["author"], "b");
+        // Oldest first: the push came before the comment.
+        assert_eq!(json["items"][0]["kind"], "push");
+        assert_eq!(json["items"][0]["commits"][0]["sha"], "abcdef1");
+        assert_eq!(json["items"][0]["commits"][0]["author"], "b");
+        assert_eq!(json["items"][1]["kind"], "comment");
+        assert_eq!(json["items"][1]["body"], "hi");
+        assert_eq!(json["items"][1]["avatarUrl"], "https://avatars.example/ada");
+        // A review links to itself on GitHub; an avatar that isn't http(s) is dropped.
+        assert_eq!(json["items"][2]["kind"], "review");
+        assert_eq!(json["items"][2]["url"], "https://gh/pull/3#review-1");
+        assert!(json["items"][2].get("avatarUrl").is_none());
         assert_eq!(
             json["checks"],
             serde_json::json!([{ "name": "build", "status": "completed",
@@ -4509,7 +4560,8 @@ esac"#,
         );
         assert_eq!(
             json["reviewers"],
-            serde_json::json!([{ "login": "dee", "state": "requested" }])
+            serde_json::json!([{ "login": "bo", "state": "greenlit" },
+                { "login": "dee", "state": "requested" }])
         );
     }
 
