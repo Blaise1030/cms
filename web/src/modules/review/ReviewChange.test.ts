@@ -99,6 +99,23 @@ describe("ReviewChange", () => {
     expect(w.get("[data-testid='diff-stub']").text()).toBe("a.txt");
   });
 
+  it("puts the Preview / What changed switch in the top strip beside Refresh, on the Review page only", async () => {
+    const files = await mountChange({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) }, "files");
+    const strip = files.w.get("[data-testid='review-pages']");
+    const tabs = strip.get("[data-testid='review-view-tabs']");
+    expect(tabs.text()).toContain("Preview");
+    expect(tabs.text()).toContain("What changed");
+    const refresh = strip.get("[data-testid='review-refresh']").element;
+    expect(!!(tabs.element.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    // No second row under the strip.
+    expect(files.w.get("[data-testid='review-files']").find("[data-testid='review-view-tabs']").exists()).toBe(false);
+    files.w.unmount();
+
+    const talk = await mountChange({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) }, "conversation");
+    expect(talk.w.find("[data-testid='review-view-tabs']").exists()).toBe(false);
+    expect(talk.w.find("[data-testid='review-refresh']").exists()).toBe(true);
+  });
+
   it("fills the view with the preview by default and switches to what changed", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),

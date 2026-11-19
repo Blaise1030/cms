@@ -327,13 +327,26 @@ function reveal(path: string) {
             Review
             <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
           </RouterLink>
+          <!-- Review only: what the card below shows, as a compact switch beside Refresh. -->
+          <UTabs
+            v-if="page === 'files'"
+            v-model="view"
+            :items="VIEWS"
+            :content="false"
+            size="xs"
+            variant="pill"
+            color="neutral"
+            class="ml-auto w-auto self-center"
+            :ui="{ trigger: 'data-[state=active]:text-highlighted' }"
+            data-testid="review-view-tabs"
+          />
           <UTooltip text="Refresh">
             <UButton
               color="neutral"
               variant="ghost"
               size="sm"
               icon="i-hugeicons-refresh"
-              class="ml-auto self-center"
+              :class="['self-center', page !== 'files' && 'ml-auto']"
               aria-label="Refresh"
               :disabled="refreshing"
               :aria-busy="refreshing"
@@ -345,16 +358,6 @@ function reveal(path: string) {
         </nav>
         <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
         <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
-          <UTabs
-            v-model="view"
-            :items="VIEWS"
-            :content="false"
-            size="sm"
-            variant="link"
-            color="neutral"
-            class="border-default shrink-0 border-b px-3"
-            data-testid="review-view-tabs"
-          />
           <div
             v-show="view === 'preview'"
             class="flex min-h-0 flex-1 flex-col"
