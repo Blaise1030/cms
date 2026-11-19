@@ -50,8 +50,22 @@ and checked-out change are untouched throughout.
    - *You greenlit*: your latest review on this head approves.
    A push by the creator returns the row to *New*. Empty state: "Nothing waiting for
    your greenlight."
-2. **Open a change** (`/p/:id/review/:number`). Header: title, creator, description,
-   **View live site**. Two panes:
+2. **Open a change.** Like GitHub, a change has two pages sharing one header: back,
+   title, `#number`, state (Open / Draft / Merged / Closed), creator, labels in their
+   GitHub colours, **View live site**, and **Give greenlight** / **Send back**. Below the
+   header, tabs (router links): **Conversation** *n* | **Review** *files*.
+   - **Conversation** (`/p/:id/review/:number`, where a change opens): the description and
+     every comment rendered as markdown (PR text is untrusted: raw HTML stays inert text,
+     links open outside the app); then, oldest first, comments, reviews (*greenlit*,
+     *sent back*, or a comment-only review with a body; pending and empty ones are left
+     out), pushes ("pushed N commits", short sha + first line of each, consecutive commits
+     grouped) and the merge or close. A sidebar shows labels, checks (✕/✓ passed/total,
+     expandable to each check linked to GitHub), the deploy preview link, and each
+     reviewer's latest standing (or *Awaiting review*). At the bottom, **Add a comment**
+     (markdown, **Comment** disabled while blank) posts a GitHub comment and adds it to
+     the timeline; a failure shows inline and keeps the text. Anyone signed in may
+     comment; no push access needed.
+   - **Review** (`/p/:id/review/:number/files`): the change in a card with two panes:
    - **Preview**: a browser frame like the preview page's (back/forward, reload, address
      bar, viewport size with zoom-to-fit, open in new tab) with **This change · Live site ·
      Side by side**, side by side by default when the live site is known. One address
@@ -126,6 +140,8 @@ only **What changed**.
 | `GET /` | Inbox rows: number, title, author, updatedAt, checks, myState |
 | `GET /{n}` | Title, author, description, headSha, myState, `canDecide`, `reason` |
 | `GET /{n}/diff` | Changed files + unified diff (checkpoint diff shape) |
+| `GET /{n}/conversation` | `{ items, checks, reviewers }`: timeline oldest first (`comment` / `review` / `push` / `state`), head check runs, reviewers. Any labelled change, open or not |
+| `POST /{n}/comments` | `{ body }` → the new `comment` item. 400 when blank, 404 unless open and labelled |
 | `GET /{n}/preview` | `{ state: deploying \| ready \| failed \| none, headSha, url?, liveUrl? }` for the current head |
 | `POST /{n}/decision` | `{ decision: "greenlight" \| "send_back", comment?, headSha }` |
 
@@ -170,7 +186,9 @@ non-blank comment → 400; PR not open → 404 "This change is no longer waiting
 
 ## Out of scope
 
-- Inline or threaded comments, replies, suggestions (stay on GitHub).
+- Inline code comments, replies and threads, suggestions, editing or deleting comments,
+  and reactions (all stay on GitHub). Issue events beyond merge/close (reopened,
+  labelled, assigned…) are not shown: they would need another paginated call.
 - A cross-site inbox; notifications outside orso.
 - Building anything locally for a review, including `main` (the live site is the "before").
 - Merging on the creator's behalf (unchanged: creators publish their own changes).
