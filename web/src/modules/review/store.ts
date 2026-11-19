@@ -20,6 +20,9 @@ export const useReviewStore = defineStore("review", () => {
   const diffText = ref<string | null>(null);
   const diff = ref<ParsedDiff | null>(null);
   const opening = ref(false);
+  /** An in-place reload of the open change, and why it failed. */
+  const refreshing = ref(false);
+  const refreshError = ref<string | null>(null);
   /** The inbox's or the open change's failure; `gone` marks a change that left the inbox (404). */
   const inboxError = ref<string | null>(null);
   const openError = ref<string | null>(null);
@@ -54,6 +57,8 @@ export const useReviewStore = defineStore("review", () => {
     decideError.value = null;
     loading.value = false;
     opening.value = false;
+    refreshing.value = false;
+    refreshError.value = null;
   }
 
   const waitingCount = computed(() => items.value.filter((i) => !i.mine && i.myState === "new").length);
@@ -96,16 +101,29 @@ export const useReviewStore = defineStore("review", () => {
     return openChange(id, number, true);
   }
 
-  async function openChange(id: string, number: number, recheck: boolean): Promise<void> {
+  /**
+   * Read the open change again in place: detail and diff are swapped when both arrive, so the
+   * page stays up; a failure shows in `refreshError` (a change that left becomes `gone`).
+   */
+  function refresh(id: string, number: number) {
+    return openChange(id, number, true, true);
+  }
+
+  async function openChange(id: string, number: number, recheck: boolean, keep = false): Promise<void> {
     scope(id);
     const request = ++openRequest;
-    opening.value = true;
-    current.value = null;
-    diffText.value = null;
-    diff.value = null;
-    openError.value = null;
-    decideError.value = null;
-    gone.value = false;
+    refreshError.value = null;
+    if (keep) {
+      refreshing.value = true;
+    } else {
+      opening.value = true;
+      current.value = null;
+      diffText.value = null;
+      diff.value = null;
+      openError.value = null;
+      decideError.value = null;
+      gone.value = false;
+    }
     try {
       // Lazy: the parser lives in `@pierre/diffs`, kept out of the app shell with the renderer.
       const [{ parseUnifiedDiff }, detail, { text, headSha }] = await Promise.all([
@@ -116,7 +134,7 @@ export const useReviewStore = defineStore("review", () => {
       if (request !== openRequest) return;
       // The change moved between the two requests: the diff and the detail would disagree.
       if (recheck && headSha && headSha.toLowerCase() !== detail.headSha.toLowerCase()) {
-        await openChange(id, number, false);
+        await openChange(id, number, false, keep);
         return;
       }
       current.value = detail;
@@ -125,9 +143,13 @@ export const useReviewStore = defineStore("review", () => {
     } catch (e) {
       if (request !== openRequest) return;
       gone.value = (e as { status?: number }).status === 404;
-      openError.value = errorMessage(e);
+      if (keep && !gone.value) refreshError.value = errorMessage(e);
+      else openError.value = errorMessage(e);
     } finally {
-      if (request === openRequest) opening.value = false;
+      if (request === openRequest) {
+        opening.value = false;
+        refreshing.value = false;
+      }
     }
   }
 
@@ -166,5 +188,5 @@ export const useReviewStore = defineStore("review", () => {
     }
   }
 
-  return { closedItems, closedMore, closedLoading, closedError, loadClosed, deciding, decideError, decide, items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
+  return { refresh, refreshing, refreshError, closedItems, closedMore, closedLoading, closedError, loadClosed, deciding, decideError, decide, items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
 });

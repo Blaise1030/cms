@@ -66,8 +66,9 @@ export function useReviewPreview(
   }
   document.addEventListener("visibilitychange", onVisible);
 
+  // A list of sources compares each value, so a re-read change with the same head doesn't reload.
   watch(
-    () => [projectId(), number(), headSha()] as const,
+    [projectId, number, headSha],
     () => {
       preview.value = null;
       error.value = null;

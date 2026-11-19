@@ -211,6 +211,64 @@ describe("ReviewChange", () => {
     });
   });
 
+  describe("refresh", () => {
+    it("reloads detail, diff and the conversation in place, spinning and disabled meanwhile", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      const review = vi
+        .fn()
+        .mockResolvedValueOnce({ ...DETAIL })
+        .mockImplementationOnce(async () => {
+          await held;
+          return { ...DETAIL, title: "Fresher hero" };
+        });
+      const reviewDiff = vi
+        .fn()
+        .mockResolvedValue(diffOf(DIFF));
+      const reviewConversation = vi.fn(async () => ({ items: [], checks: [], reviewers: [] }));
+      const reviewPreview = vi.fn(async () => ({ state: "none", headSha: "abc" }));
+      const { w } = await mountChange({ review, reviewDiff, reviewConversation, reviewPreview }, "conversation");
+      const button = () => w.get("[data-testid='review-refresh']");
+      expect(button().attributes("aria-label")).toBe("Refresh");
+      const conversations = reviewConversation.mock.calls.length;
+      const previews = reviewPreview.mock.calls.length;
+      await button().trigger("click");
+      await flushPromises();
+      expect(button().attributes("disabled")).toBeDefined();
+      expect(button().attributes("aria-busy")).toBe("true");
+      expect(button().find(".animate-spin").exists()).toBe(true);
+      // The page stays up while it reloads.
+      expect(w.text()).not.toContain("Loading change");
+      expect(w.get("[data-testid='review-title']").text()).toBe("Fresh homepage hero");
+      release();
+      await flushPromises();
+      expect(review).toHaveBeenCalledTimes(2);
+      expect(reviewDiff).toHaveBeenCalledTimes(2);
+      expect(w.get("[data-testid='review-title']").text()).toBe("Fresher hero");
+      expect(reviewConversation.mock.calls.length).toBeGreaterThan(conversations);
+      // On Conversation the preview isn't re-read.
+      expect(reviewPreview.mock.calls.length).toBe(previews);
+      expect(button().attributes("disabled")).toBeUndefined();
+      expect(button().find(".animate-spin").exists()).toBe(false);
+    });
+
+    it("re-reads the preview on the Review page and says when the reload failed", async () => {
+      const review = vi
+        .fn()
+        .mockResolvedValueOnce({ ...DETAIL })
+        .mockRejectedValueOnce(new ApiError("UNKNOWN", "GitHub is unreachable", 502));
+      const reviewPreview = vi.fn(async () => ({ state: "none", headSha: "abc" }));
+      const { w } = await mountChange({ review, reviewDiff: vi.fn(async () => diffOf(DIFF)), reviewPreview }, "files");
+      const previews = reviewPreview.mock.calls.length;
+      await w.get("[data-testid='review-refresh']").trigger("click");
+      await flushPromises();
+      expect(reviewPreview.mock.calls.length).toBe(previews + 1);
+      expect(w.get("[data-testid='review-refresh-error']").text()).toContain("GitHub is unreachable");
+      // What was on screen stays.
+      expect(w.get("[data-testid='review-title']").text()).toBe("Fresh homepage hero");
+    });
+  });
+
   describe("conversation", () => {
     const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
     const TALK = {

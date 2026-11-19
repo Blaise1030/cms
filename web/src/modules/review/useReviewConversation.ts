@@ -60,8 +60,9 @@ export function useReviewConversation(
       null,
   );
 
+  // A list of sources compares each value, so a re-read change with the same head doesn't reload.
   watch(
-    () => [projectId(), number(), headSha()] as const,
+    [projectId, number, headSha],
     ([, , sha], old) => {
       // Opening another change starts empty; a moved head refreshes in place.
       if (!old || old[0] !== projectId() || old[1] !== number()) conversation.value = null;

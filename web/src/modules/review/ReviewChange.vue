@@ -76,6 +76,21 @@ const prState = computed(() => {
   return c.draft ? STATES.draft : STATES.open;
 });
 const filesCount = computed(() => store.diff?.files.length ?? null);
+
+/** Everything about the change, read again: detail and diff, plus this page's conversation or preview. */
+const refreshing = ref(false);
+async function refresh() {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  try {
+    await Promise.all([
+      store.refresh(props.projectId, props.number),
+      props.page === "conversation" ? talk.reload() : reloadPreview(),
+    ]);
+  } finally {
+    refreshing.value = false;
+  }
+}
 const PAGE_TAB =
   "text-muted hover:text-highlighted -mb-px flex items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium";
 const PAGE_TAB_ACTIVE = "text-highlighted border-primary";
@@ -260,6 +275,16 @@ function reveal(path: string) {
       class="mx-3 mb-2 w-auto shrink-0"
       data-testid="review-decide-error"
     />
+    <UAlert
+      v-if="store.refreshError && !store.gone"
+      color="warning"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      :description="store.refreshError"
+      role="alert"
+      class="mx-3 mb-2 w-auto shrink-0"
+      data-testid="review-refresh-error"
+    />
     <SendBackDialog v-model:open="sendingBack" :busy="store.deciding" :error="store.decideError" @submit="sendBack" />
     <p v-if="store.opening" class="text-muted flex items-center gap-2 p-3 text-sm">
       <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
@@ -305,6 +330,21 @@ function reveal(path: string) {
             Review
             <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
           </RouterLink>
+          <UTooltip text="Refresh">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              icon="i-hugeicons-refresh"
+              class="ml-auto self-center"
+              aria-label="Refresh"
+              :disabled="refreshing"
+              :aria-busy="refreshing"
+              :ui="{ leadingIcon: refreshing ? 'animate-spin' : '' }"
+              data-testid="review-refresh"
+              @click="refresh()"
+            />
+          </UTooltip>
         </nav>
         <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
         <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
