@@ -18,12 +18,13 @@ import { reviewPath, type ReviewPage } from "@/router";
 import { RouterLink } from "vue-router";
 import SendBackDialog from "./SendBackDialog.vue";
 import { useChange, useConversation, usePreview } from "./queries";
-import ReviewConversation from "./ReviewConversation.vue";
 import { labelStyle } from "./labels";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/ChangedFilesTree.vue"));
 const DiffView = defineAsyncComponent(() => import("../checkpoints/DiffView.vue"));
+// Lazy too: the chat feed keeps the precached app shell under its 2.5 MiB cap.
+const ReviewConversation = defineAsyncComponent(() => import("./ReviewConversation.vue"));
 
 const props = defineProps<{ projectId: string; number: number; page: ReviewPage }>();
 const store = useChange(

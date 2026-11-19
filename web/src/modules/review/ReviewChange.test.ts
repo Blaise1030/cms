@@ -73,6 +73,8 @@ async function mountChange(api: Record<string, unknown>, page: "conversation" | 
   const w = mount(Host, { global: { plugins: [router, plugin] }, attachTo: document.body });
   // The store loads the diff parser lazily.
   await vi.waitFor(() => expect(w.text()).not.toContain("Loading change"));
+  // The Conversation page loads its component lazily too.
+  if (page === "conversation") await vi.waitFor(() => expect(w.find("[data-testid='review-conversation']").exists()).toBe(true));
   await flushPromises();
   return { w, router, client };
 }
