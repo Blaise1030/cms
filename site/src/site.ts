@@ -25,6 +25,8 @@ export const site = {
   release: {
     version: "v0.1.9",
     repo: "https://github.com/Blaise1030/cms",
+    /** Shown in the thank-you popup after a download. Placeholder: replace with your real page. */
+    coffeeUrl: "https://buymeacoffee.com/blaise1030",
     downloads: [
       { os: "mac", label: "macOS", detail: "Apple Silicon", target: "aarch64-apple-darwin" },
       { os: "mac", label: "macOS", detail: "Intel", target: "x86_64-apple-darwin" },
