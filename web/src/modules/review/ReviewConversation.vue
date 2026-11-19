@@ -1,21 +1,30 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from "vue";
+import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UBadge from "@nuxt/ui/components/Badge.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
+import UChatMessage from "@nuxt/ui/components/ChatMessage.vue";
+import UChatMessages from "@nuxt/ui/components/ChatMessages.vue";
+import UChatPrompt from "@nuxt/ui/components/ChatPrompt.vue";
+import UChatPromptSubmit from "@nuxt/ui/components/ChatPromptSubmit.vue";
 import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
-import UTextarea from "@nuxt/ui/components/Textarea.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
+import type { UIMessage } from "ai";
+import type { ButtonProps } from "@nuxt/ui";
 import type { ReviewDetail, ReviewPreview, ReviewReviewer, TimelineItem } from "@/core/types";
-import { relativeTime } from "@/lib/relativeTime";
 import { checkState, checkSummary } from "./checks";
+import { buildFeed, clockTime, exactTime } from "./feed";
 import { labelStyle } from "./labels";
 import type { useConversation } from "./queries";
 
 // Lazy: the markdown renderer must stay out of the precached app shell.
 const ReviewMarkdown = defineAsyncComponent(() => import("./ReviewMarkdown.vue"));
 
-/** A change's Conversation page: description, timeline, comment box, and a sidebar of facts. */
+/**
+ * A change's Conversation page, laid out like a chat: the description pinned on top, the feed
+ * oldest first (opening on the latest), a composer pinned at the bottom, and a sidebar of facts.
+ */
 const props = defineProps<{
   change: ReviewDetail;
   talk: ReturnType<typeof useConversation>;
@@ -23,6 +32,7 @@ const props = defineProps<{
 }>();
 
 const conversation = computed(() => props.talk.conversation.value);
+const rows = computed(() => buildFeed(conversation.value?.items ?? []));
 const checks = computed(() => conversation.value?.checks ?? []);
 const summary = computed(() => checkSummary(checks.value));
 const checksOpen = ref(false);
@@ -35,8 +45,8 @@ const SUMMARY_ICON = {
 } as const;
 
 const VERDICT = {
-  greenlit: { text: "greenlit these changes", icon: "i-hugeicons-checkmark-circle-02", class: "text-success" },
-  sent_back: { text: "sent this back", icon: "i-hugeicons-alert-circle", class: "text-error" },
+  greenlit: { text: "greenlit this change", icon: "i-hugeicons-checkmark-circle-02", class: "text-success" },
+  sent_back: { text: "sent this back", icon: "i-hugeicons-arrow-turn-backward", class: "text-error" },
   commented: { text: "reviewed", icon: "i-hugeicons-message-01", class: "text-muted" },
 } as const;
 
@@ -51,85 +61,114 @@ const REVIEWER: Record<ReviewReviewer["state"], { label: string; class: string }
 const pushers = (item: Extract<TimelineItem, { kind: "push" }>) =>
   [...new Set(item.commits.map((c) => c.author).filter(Boolean))].join(", ") || "Someone";
 const commitsLabel = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
-
-/** A push of more than this many commits shows only the first ones until opened. */
-const PUSH_PREVIEW = 3;
-/** Opened push groups, by their first commit, so a new comment on top does not shift them. */
-const openPushes = ref(new Set<string>());
-const pushOpen = (key: string) => openPushes.value.has(key);
-function setPushOpen(key: string, open: boolean) {
-  const next = new Set(openPushes.value);
-  if (open) next.add(key);
-  else next.delete(key);
-  openPushes.value = next;
-}
-const togglePush = (key: string) => setPushOpen(key, !pushOpen(key));
 /** orso's checkpoint commits read "checkpoint: …": shown as a badge plus the subject. */
 function commitSubject(message: string): { checkpoint: boolean; text: string } {
   const m = message.match(/^checkpoint:\s*/i);
   return m ? { checkpoint: true, text: message.slice(m[0].length) } : { checkpoint: false, text: message };
 }
 
+/** A description longer than this folds to one line until opened. */
+const LONG_DESCRIPTION = 280;
+const description = computed(() => props.change.description?.trim() ?? "");
+const longDescription = computed(
+  () => description.value.length > LONG_DESCRIPTION || description.value.split("\n").length > 4,
+);
+/** The description's first line without markdown marks, for the folded card. */
+const excerpt = computed(() =>
+  (description.value.split("\n").find((l) => l.trim()) ?? "").replace(/[#>*_`~[\]]/g, "").trim(),
+);
+const descriptionOpen = ref(false);
+
+/**
+ * The feed is the assistant chat's: `UChatMessages` opens on the latest entry and offers a
+ * jump to the bottom whenever you've scrolled away. Outside streaming it doesn't follow new
+ * entries on its own, so (like `ChatTranscript`) a new entry keeps the view at the bottom when
+ * it already was, and sending always lands there.
+ */
+const viewport = ref<HTMLElement | null>(null);
+/** Same distance `UChatMessages` treats as "at the bottom". */
+const BOTTOM_THRESHOLD = 100;
+/** `UChatMessages` keys its scroll state on these; each row is one entry. */
+const feedMessages = computed<UIMessage[]>(() =>
+  rows.value.map((r) => ({ id: r.key, role: r.type === "message" ? "assistant" : "system", parts: [] })),
+);
+/** The hover toolbar's "Open on GitHub" (its label is the tooltip and the aria-label). */
+function openOnGitHub(url: string | undefined): Omit<ButtonProps, "onClick">[] | undefined {
+  if (!url) return undefined;
+  const open = { icon: "i-hugeicons-link-square-02", label: "Open on GitHub", to: url, target: "_blank" };
+  return [{ ...open, rel: "noopener noreferrer", "data-testid": "review-message-open" } as Omit<ButtonProps, "onClick">];
+}
+
+let sent = false;
+watch(
+  () => rows.value.length,
+  (count, before) => {
+    const el = viewport.value;
+    if (!el || !before || count <= before) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD;
+    const follow = atBottom || sent;
+    sent = false;
+    if (follow) void nextTick(() => (el.scrollTop = el.scrollHeight));
+  },
+  { flush: "pre" },
+);
+
 const draft = ref("");
 async function submit() {
+  if (!draft.value.trim() || props.talk.posting.value) return;
+  sent = true;
   if (await props.talk.comment(draft.value)) draft.value = "";
+  else sent = false;
 }
 </script>
 
 <template>
-  <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-conversation">
-    <div class="flex flex-col gap-6 p-4 lg:flex-row">
-      <div class="flex min-w-0 flex-1 flex-col gap-4">
-        <article class="border-default bg-default overflow-hidden rounded-lg border" data-testid="review-description">
-          <header class="bg-muted border-default border-b px-3 py-2 text-sm">
+  <div class="flex min-h-0 flex-1 flex-col lg:flex-row" data-testid="review-conversation">
+    <section class="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Conversation">
+      <article
+        class="border-default bg-default mx-4 mt-4 shrink-0 overflow-hidden rounded-lg border"
+        data-testid="review-description"
+      >
+        <UCollapsible v-if="longDescription" v-model:open="descriptionOpen" :unmount-on-hide="false">
+          <button
+            type="button"
+            class="hover:bg-elevated/50 flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-sm"
+            data-testid="review-description-toggle"
+          >
+            <span class="min-w-0 flex-1 truncate">
+              <span class="text-highlighted font-medium">{{ change.author }}</span>
+              <span class="text-muted"> described this change</span>
+              <span v-if="!descriptionOpen" class="text-muted"> · {{ excerpt }}</span>
+            </span>
+            <UIcon
+              :name="descriptionOpen ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
+              class="text-muted size-4 shrink-0"
+            />
+          </button>
+          <template #content>
+            <div class="border-default max-h-64 overflow-y-auto border-t p-3">
+              <ReviewMarkdown :content="description" />
+            </div>
+          </template>
+        </UCollapsible>
+        <template v-else>
+          <header class="px-3 pt-2 text-sm">
             <span class="text-highlighted font-medium">{{ change.author }}</span>
             <span class="text-muted"> described this change</span>
           </header>
-          <div class="p-3">
-            <ReviewMarkdown v-if="change.description?.trim()" :content="change.description" />
+          <div class="px-3 pt-1 pb-2">
+            <ReviewMarkdown v-if="description" :content="description" />
             <p v-else class="text-muted text-sm italic">No description provided.</p>
           </div>
-        </article>
+        </template>
+      </article>
 
-        <form
-          v-if="change.open"
-          class="border-default bg-default flex flex-col gap-2 rounded-lg border p-3"
-          data-testid="review-comment-form"
-          @submit.prevent="submit"
-        >
-          <label for="review-comment" class="text-highlighted text-sm font-medium">Add a comment</label>
-          <UTextarea
-            id="review-comment"
-            v-model="draft"
-            :rows="4"
-            autoresize
-            placeholder="Add a comment"
-            class="w-full"
-            data-testid="review-comment-input"
-          />
-          <UAlert
-            v-if="talk.postError.value"
-            color="error"
-            variant="subtle"
-            icon="i-hugeicons-alert-circle"
-            :description="talk.postError.value"
-            role="alert"
-            data-testid="review-comment-error"
-          />
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-muted text-xs">Markdown is supported.</span>
-            <UButton
-              type="submit"
-              size="sm"
-              label="Comment"
-              :loading="talk.posting.value"
-              :disabled="!draft.trim() || talk.posting.value"
-              data-testid="review-comment-submit"
-            />
-          </div>
-        </form>
-
-        <p v-if="talk.loading.value && !conversation" class="text-muted flex items-center gap-2 text-sm">
+      <div
+        ref="viewport"
+        class="scroll-fade-y relative min-h-0 flex-1 overflow-y-auto px-2 py-3"
+        data-testid="review-feed"
+      >
+        <p v-if="talk.loading.value && !conversation" class="text-muted flex items-center gap-2 px-2 text-sm">
           <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
           Loading conversation…
         </p>
@@ -140,134 +179,213 @@ async function submit() {
           icon="i-hugeicons-alert-circle"
           :description="talk.error.value"
           role="alert"
+          class="mx-2"
           data-testid="review-conversation-error"
         >
           <template #actions>
             <UButton color="neutral" variant="outline" size="xs" label="Try again" @click="talk.reload()" />
           </template>
         </UAlert>
+        <p v-else-if="conversation && rows.length === 0" class="text-muted py-6 text-center text-sm">
+          No messages yet.
+        </p>
 
-        <ol v-if="conversation" class="m-0 flex list-none flex-col gap-4 p-0" data-testid="review-timeline">
-          <li v-for="(item, i) in conversation.items" :key="i" :data-kind="item.kind">
-            <article
-              v-if="item.kind === 'comment'"
-              class="border-default bg-default overflow-hidden rounded-lg border"
-              data-testid="review-timeline-comment"
-            >
-              <header class="bg-muted border-default flex items-center gap-1 border-b px-3 py-2 text-sm">
-                <span class="text-highlighted font-medium">{{ item.author }}</span>
-                <span class="text-muted">commented {{ relativeTime(item.at) }}</span>
-              </header>
-              <div class="p-3"><ReviewMarkdown :content="item.body" /></div>
-            </article>
-
-            <div v-else-if="item.kind === 'review'" data-testid="review-timeline-review" :data-verdict="item.verdict">
-              <p class="flex items-center gap-2 text-sm">
-                <UIcon :name="VERDICT[item.verdict].icon" :class="['size-4 shrink-0', VERDICT[item.verdict].class]" />
-                <span>
-                  <span class="text-highlighted font-medium">{{ item.author }}</span>
-                  {{ VERDICT[item.verdict].text }}
-                  <span class="text-muted">{{ relativeTime(item.at) }}</span>
-                </span>
-              </p>
-              <div v-if="item.body" class="border-default bg-default mt-2 ml-6 rounded-lg border p-3">
-                <ReviewMarkdown :content="item.body" />
+        <UChatMessages
+          v-if="conversation && rows.length"
+          :messages="feedMessages"
+          status="ready"
+          compact
+          data-testid="review-timeline"
+          :ui="{
+            root: 'gap-0.5',
+            // The jump button sticks to the bottom edge of the scroll container.
+            viewport: 'pointer-events-none sticky bottom-0 z-10 h-0',
+            autoScroll: 'pointer-events-auto bottom-2',
+          }"
+        >
+          <template #default>
+            <template v-for="row in rows" :key="row.key">
+              <div
+                v-if="row.type === 'day'"
+                role="separator"
+                :aria-label="row.label"
+                data-kind="day"
+                class="flex items-center gap-3 px-1 py-3"
+                data-testid="review-day"
+              >
+                <span class="bg-accented h-px flex-1" />
+                <span class="text-muted text-xs font-medium">{{ row.label }}</span>
+                <span class="bg-accented h-px flex-1" />
               </div>
-            </div>
 
-            <div v-else-if="item.kind === 'push'" data-testid="review-timeline-push">
-              <p
-                class="flex items-center gap-2 text-sm"
-                :class="item.commits.length > PUSH_PREVIEW && 'cursor-pointer'"
-                data-testid="review-push-header"
-                @click="item.commits.length > PUSH_PREVIEW && togglePush(item.commits[0]!.sha)"
+              <UChatMessage
+                v-else-if="row.type === 'message'"
+                :id="row.key"
+                role="assistant"
+                :parts="[]"
+                side="left"
+                variant="naked"
+                compact
+                :avatar="{ src: row.avatarUrl, alt: row.author }"
+                :actions="openOnGitHub(row.url)"
+                data-kind="comment"
+                :data-grouped="row.grouped || undefined"
+                data-testid="review-timeline-comment"
+                :class="['hover:bg-elevated/50 rounded-md px-1', row.grouped ? 'py-0.5' : 'mt-1.5 py-1']"
+                :ui="{
+                  container: 'gap-2.5 pb-0',
+                  leading: 'min-h-0 pt-0.5',
+                  leadingAvatarSize: 'sm',
+                  content: 'flex flex-col gap-0.5 space-y-0 text-sm',
+                  actions: 'border-default bg-default top-0 right-1 bottom-auto -translate-y-1/2 rounded-md border shadow-xs',
+                }"
               >
-                <UIcon name="i-hugeicons-git-commit" class="text-muted size-4 shrink-0" />
-                <span class="min-w-0 flex-1">
-                  <span class="text-highlighted font-medium">{{ pushers(item) }}</span>
-                  pushed {{ commitsLabel(item.commits.length) }}
-                  <span class="text-muted">· {{ relativeTime(item.at) }}</span>
-                </span>
-                <UButton
-                  v-if="item.commits.length > PUSH_PREVIEW"
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  :icon="pushOpen(item.commits[0]!.sha) ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
-                  :aria-label="pushOpen(item.commits[0]!.sha) ? 'Show fewer commits' : 'Show all commits'"
-                  :aria-expanded="pushOpen(item.commits[0]!.sha)"
-                  data-testid="review-push-toggle"
-                  @click.stop="togglePush(item.commits[0]!.sha)"
-                />
-              </p>
-              <ul class="m-0 mt-1 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
-                <li v-for="c in item.commits.slice(0, PUSH_PREVIEW)" :key="c.sha" class="flex min-w-0 items-center gap-2" data-testid="review-push-commit">
-                  <code class="text-muted shrink-0 font-mono text-xs leading-5">{{ c.sha }}</code>
-                  <UBadge
-                    v-if="commitSubject(c.message).checkpoint"
-                    color="neutral"
-                    variant="soft"
-                    size="sm"
-                    label="checkpoint"
-                    class="text-muted shrink-0"
-                    data-testid="review-commit-checkpoint"
-                  />
-                  <span class="truncate" data-testid="review-commit-subject">{{ commitSubject(c.message).text }}</span>
-                </li>
-              </ul>
-              <UCollapsible
-                v-if="item.commits.length > PUSH_PREVIEW"
-                :open="pushOpen(item.commits[0]!.sha)"
-                data-testid="review-push-rest"
-                @update:open="setPushOpen(item.commits[0]!.sha, $event)"
-              >
-                <template #content>
-                  <ul class="m-0 mt-0.5 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
-                    <li v-for="c in item.commits.slice(PUSH_PREVIEW)" :key="c.sha" class="flex min-w-0 items-center gap-2" data-testid="review-push-commit">
-                      <code class="text-muted shrink-0 font-mono text-xs leading-5">{{ c.sha }}</code>
-                      <UBadge
-                        v-if="commitSubject(c.message).checkpoint"
-                        color="neutral"
-                        variant="soft"
-                        size="sm"
-                        label="checkpoint"
-                        class="text-muted shrink-0"
-                        data-testid="review-commit-checkpoint"
-                      />
-                      <span class="truncate" data-testid="review-commit-subject">{{ commitSubject(c.message).text }}</span>
-                    </li>
-                  </ul>
+                <!-- Follow-ups keep the avatar's width, showing their time on hover instead. -->
+                <template v-if="row.grouped" #leading>
+                  <UTooltip :text="exactTime(row.at)">
+                    <time
+                      :datetime="row.at"
+                      class="text-dimmed invisible block w-7 text-right text-[10px] leading-5 group-hover/message:visible"
+                    >{{ clockTime(row.at) }}</time>
+                  </UTooltip>
                 </template>
-              </UCollapsible>
-              <UButton
-                v-if="item.commits.length > PUSH_PREVIEW"
-                color="neutral"
-                variant="link"
-                size="xs"
-                class="ml-6"
-                :label="pushOpen(item.commits[0]!.sha) ? 'Show fewer' : `Show all ${item.commits.length} commits`"
-                :aria-expanded="pushOpen(item.commits[0]!.sha)"
-                data-testid="review-push-more"
-                @click="togglePush(item.commits[0]!.sha)"
-              />
+                <template #content>
+                  <p v-if="!row.grouped" class="flex items-baseline gap-2" data-testid="review-message-header">
+                    <span class="text-highlighted font-semibold">{{ row.author }}</span>
+                    <UTooltip :text="exactTime(row.at)">
+                      <time :datetime="row.at" class="text-muted text-xs">{{ clockTime(row.at) }}</time>
+                    </UTooltip>
+                  </p>
+                  <ReviewMarkdown :content="row.body" />
+                </template>
+              </UChatMessage>
+
+            <div v-else :data-kind="row.item.kind" class="px-1 py-1.5" data-testid="review-feed-row">
+              <div
+                v-if="row.item.kind === 'review'"
+                data-testid="review-timeline-review"
+                :data-verdict="row.item.verdict"
+              >
+                <p class="text-muted flex items-center gap-2 text-sm">
+                  <UIcon :name="VERDICT[row.item.verdict].icon" :class="['size-4 shrink-0', VERDICT[row.item.verdict].class]" />
+                  <span>
+                    <span class="text-highlighted font-medium">{{ row.item.author }}</span>
+                    {{ VERDICT[row.item.verdict].text }}
+                  </span>
+                  <UTooltip :text="exactTime(row.item.at)">
+                    <time :datetime="row.item.at" class="text-dimmed text-xs">{{ clockTime(row.item.at) }}</time>
+                  </UTooltip>
+                </p>
+                <blockquote
+                  v-if="row.item.body"
+                  class="border-accented mt-1 ml-6 border-l-2 pl-3 text-sm"
+                  data-testid="review-verdict-comment"
+                >
+                  <ReviewMarkdown :content="row.item.body" />
+                </blockquote>
+              </div>
+
+              <div v-else-if="row.item.kind === 'push'" data-testid="review-timeline-push">
+                <UCollapsible>
+                  <template #default="{ open }">
+                    <UButton
+                      color="neutral"
+                      variant="ghost"
+                      size="xs"
+                      class="text-muted -mx-1.5 max-w-full font-normal"
+                      data-testid="review-push-toggle"
+                    >
+                      <UIcon name="i-hugeicons-git-commit" class="size-4 shrink-0" />
+                      <span class="truncate text-sm">
+                        <span class="text-highlighted font-medium">{{ pushers(row.item) }}</span>
+                        pushed {{ commitsLabel(row.item.commits.length) }}
+                      </span>
+                      <UIcon :name="open ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'" class="size-3.5 shrink-0" />
+                      <time :datetime="row.item.at" class="text-dimmed text-xs">{{ clockTime(row.item.at) }}</time>
+                    </UButton>
+                  </template>
+                  <template #content>
+                    <ul class="m-0 mt-1 ml-6 flex list-none flex-col gap-0.5 p-0 text-sm">
+                      <li
+                        v-for="c in row.item.commits"
+                        :key="c.sha"
+                        class="flex min-w-0 items-center gap-2"
+                        data-testid="review-push-commit"
+                      >
+                        <code class="text-muted shrink-0 font-mono text-xs leading-5">{{ c.sha }}</code>
+                        <UBadge
+                          v-if="commitSubject(c.message).checkpoint"
+                          color="neutral"
+                          variant="soft"
+                          size="sm"
+                          label="checkpoint"
+                          class="text-muted shrink-0"
+                          data-testid="review-commit-checkpoint"
+                        />
+                        <span class="truncate" data-testid="review-commit-subject">{{ commitSubject(c.message).text }}</span>
+                      </li>
+                    </ul>
+                  </template>
+                </UCollapsible>
+              </div>
+
+              <p v-else-if="row.item.kind === 'state'" class="text-muted flex items-center gap-2 text-sm" data-testid="review-timeline-state">
+                <UIcon
+                  :name="row.item.state === 'merged' ? 'i-hugeicons-git-merge' : 'i-hugeicons-cancel-circle'"
+                  :class="['size-4 shrink-0', row.item.state === 'merged' ? 'text-violet-500' : 'text-error']"
+                />
+                <span class="text-highlighted">{{ row.item.state === "merged" ? "Merged" : "Closed" }}</span>
+                <time :datetime="row.item.at" class="text-dimmed text-xs">{{ clockTime(row.item.at) }}</time>
+              </p>
             </div>
-
-            <p v-else-if="item.kind === 'state'" class="flex items-center gap-2 text-sm" data-testid="review-timeline-state">
-              <UIcon
-                :name="item.state === 'merged' ? 'i-hugeicons-git-merge' : 'i-hugeicons-cancel-circle'"
-                :class="['size-4 shrink-0', item.state === 'merged' ? 'text-violet-500' : 'text-error']"
-              />
-              <span>
-                {{ item.state === "merged" ? "Merged" : "Closed" }}
-                <span class="text-muted">{{ relativeTime(item.at) }}</span>
-              </span>
-            </p>
-          </li>
-        </ol>
-
+            </template>
+          </template>
+        </UChatMessages>
       </div>
 
-      <aside class="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-64" data-testid="review-sidebar">
+      <div v-if="change.open" class="shrink-0 px-4 pt-1 pb-4" data-testid="review-comment-form">
+        <UAlert
+          v-if="talk.postError.value"
+          color="error"
+          variant="subtle"
+          icon="i-hugeicons-alert-circle"
+          :description="talk.postError.value"
+          role="alert"
+          class="mb-2"
+          data-testid="review-comment-error"
+        />
+        <!-- ⌘/Ctrl+Enter sends; Enter alone is a new line. -->
+        <UChatPrompt
+          v-model="draft"
+          variant="outline"
+          placeholder="Message…"
+          :submit-on-enter="false"
+          :autofocus="false"
+          :maxrows="8"
+          aria-label="Message"
+          data-testid="review-comment-input"
+          :ui="{ base: 'max-h-48 min-h-10 px-0 py-1' }"
+          @submit="submit"
+        >
+          <template #footer>
+            <span class="text-dimmed text-xs">Markdown · ⌘/Ctrl+Enter to send</span>
+            <UChatPromptSubmit
+              status="ready"
+              size="sm"
+              label="Send"
+              :loading="talk.posting.value"
+              :disabled="!draft.trim() || talk.posting.value"
+              data-testid="review-comment-submit"
+            />
+          </template>
+        </UChatPrompt>
+      </div>
+    </section>
+
+      <aside
+        class="border-default flex w-full shrink-0 flex-col gap-4 overflow-y-auto p-4 text-sm max-lg:max-h-64 max-lg:border-t lg:w-64"
+        data-testid="review-sidebar"
+      >
         <section class="border-default flex flex-col gap-1.5 border-b pb-3">
           <h3 class="text-muted text-xs font-medium">Labels</h3>
           <div v-if="change.labels?.length" class="flex flex-wrap gap-1">
@@ -353,6 +471,5 @@ async function submit() {
           <p v-else class="text-muted">No reviews yet</p>
         </section>
       </aside>
-    </div>
   </div>
 </template>

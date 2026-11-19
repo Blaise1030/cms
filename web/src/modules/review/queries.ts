@@ -189,9 +189,10 @@ export function useConversation(projectId: () => string, number: () => number, h
   const posting = useMutation({
     mutationFn: (body: string) => daemon.api.commentOnReview(projectId(), number(), body),
     onSuccess: (item) => {
-      // GitHub's answer is the comment as stored: shown as is, without reading it all again.
+      // GitHub's answer is the comment as stored: added at the end (the feed is oldest
+      // first), without reading it all again.
       client.setQueryData<ReviewConversation>([...key.value, headSha() ?? ""], (old) =>
-        old ? { ...old, items: [item, ...old.items] } : old,
+        old ? { ...old, items: [...old.items, item] } : old,
       );
       // Its comment count changed.
       void client.invalidateQueries({ queryKey: reviewKeys.inbox(projectId()) });

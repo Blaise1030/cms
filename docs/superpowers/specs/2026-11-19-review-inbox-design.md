@@ -66,19 +66,30 @@ and checked-out change are untouched throughout.
    holds the page: its top strip has the tabs (router links) **Conversation** *n* |
    **Review** *files* and, at the end, **Refresh**, which reads the change again in place
    (detail and diff, plus the conversation or the preview), spinning while it loads.
-   - **Conversation** (`/p/:id/review/:number`, where a change opens): the description and
-     every comment rendered as markdown (PR text is untrusted: raw HTML stays inert text,
-     links open outside the app); under the description, **Add a comment** (markdown,
-     **Comment** disabled while blank) posts a GitHub comment and puts it at the top of
-     the timeline; a failure shows inline and keeps the text. Anyone signed in may
-     comment; no push access needed. Then the timeline, newest first: comments, reviews
-     (*greenlit*, *sent back*, or a comment-only review with a body; pending and empty
-     ones are left out), pushes ("pushed N commits", short sha + first line of each;
-     consecutive commits grouped, in the order they were made, the group dated by its
-     latest commit; more than three fold behind **Show all N commits**, and a
-     `checkpoint:` prefix shows as a badge) and the merge or close. A sidebar shows labels, checks (✕/✓ passed/total,
-     expandable to each check linked to GitHub), the deploy preview link, and each
-     reviewer's latest standing (or *Awaiting review*).
+   - **Conversation** (`/p/:id/review/:number`, where a change opens), laid out like a chat
+     with the assistant chat's Nuxt UI components and spacing. PR text is untrusted
+     markdown: raw HTML stays inert text, links open outside the app.
+     - **Description** pinned at the top; one longer than a few lines folds to its first
+       line until opened.
+     - **Feed** (`UChatMessages`), oldest at the top, opening on the latest; it follows new
+       entries while you're at the bottom and offers a jump down when you've scrolled up.
+       A day divider ("Today", "Yesterday", else the date) starts each day.
+     - **Messages** (`UChatMessage`): comments and comment-only reviews, with the author's
+       GitHub avatar, bold name and time, markdown below. One author's messages within
+       5 minutes share one header (follow-ups show their time on hover). Hovering shows
+       **Open on GitHub** and the exact time.
+     - **Events** as compact single lines: "*Ana* greenlit this change", "*Ana* sent this
+       back" (its comment quoted below), "*Blaise* pushed N commits" (folded; short sha +
+       first line of each, consecutive commits grouped and dated by the latest, a
+       `checkpoint:` prefix as a badge), merged or closed. Pending and empty reviews are
+       left out.
+     - **Composer** (`UChatPrompt`) pinned at the bottom: "Message…", grows to 8 rows,
+       ⌘/Ctrl+Enter sends (Enter is a new line), **Send** disabled while blank; it posts a
+       GitHub comment that lands at the bottom and scrolls into view; a failure shows
+       inline and keeps the text. Anyone signed in may comment; no push access needed.
+     - **Sidebar**: labels, checks (✕/✓ passed/total, expandable to each check linked to
+       GitHub), the deploy preview link, and each reviewer's latest standing (or *Awaiting
+       review*).
    - **Review** (`/p/:id/review/:number/files`): the change in a card with two panes:
    - **Preview**: a browser frame like the preview page's (back/forward, reload, address
      bar, viewport size with zoom-to-fit, open in new tab) showing **This change** and the
@@ -158,7 +169,7 @@ only **What changed**.
 | `GET /?state=closed` | `{ reviews, more }`: the 30 most recently updated labelled closed or merged changes |
 | `GET /{n}` | Title, author, description, headSha, myState, `canDecide`, `reason` |
 | `GET /{n}/diff` | Changed files + unified diff (checkpoint diff shape) |
-| `GET /{n}/conversation` | `{ items, checks, reviewers }`: timeline newest first (`comment` / `review` / `push` / `state`), head check runs, reviewers. Any labelled change, open or not |
+| `GET /{n}/conversation` | `{ items, checks, reviewers }`: timeline oldest first (`comment` / `review` / `push` / `state`; comments and reviews carry `avatarUrl`, reviews their `url`), head check runs, reviewers. Any labelled change, open or not |
 | `POST /{n}/comments` | `{ body }` → the new `comment` item. 400 when blank, 404 unless open and labelled |
 | `GET /{n}/preview` | `{ state: deploying \| ready \| failed \| none, headSha, url?, liveUrl? }` for the current head |
 | `POST /{n}/decision` | `{ decision: "greenlight" \| "send_back", comment?, headSha }` |

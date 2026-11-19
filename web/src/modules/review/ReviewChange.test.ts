@@ -275,17 +275,17 @@ describe("ReviewChange", () => {
   describe("conversation", () => {
     const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
     const TALK = {
-      // Newest first, as the daemon sends it.
+      // Oldest first, as the daemon sends it; one entry a day.
       items: [
-        { kind: "state", at: "2026-01-06T00:00:00Z", state: "merged" },
-        { kind: "review", author: "bo", at: "2026-01-05T00:00:00Z", verdict: "greenlit", body: null },
-        { kind: "review", author: "dee", at: "2026-01-04T00:00:00Z", verdict: "commented", body: "Nit" },
-        { kind: "review", author: "bo", at: "2026-01-03T00:00:00Z", verdict: "sent_back", body: "Fix the title" },
-        { kind: "comment", id: 1, author: "cy", at: "2026-01-02T00:00:00Z", body: "Looks **close**", url: "u" },
-        { kind: "push", at: "2026-01-01T01:00:00Z", commits: [
-          { sha: "aaaaaaa", message: "First edit", author: "Ada" },
+        { kind: "push", at: "2026-01-01T12:00:00Z", commits: [
+          { sha: "aaaaaaa", message: "checkpoint: First edit", author: "Ada" },
           { sha: "bbbbbbb", message: "Second edit", author: "Ada" },
         ] },
+        { kind: "comment", id: 1, author: "cy", avatarUrl: "https://avatars.example/cy", at: "2026-01-02T12:00:00Z", body: "Looks **close**", url: "https://gh/c/1" },
+        { kind: "review", author: "bo", at: "2026-01-03T12:00:00Z", verdict: "sent_back", body: "Fix the title" },
+        { kind: "review", author: "dee", at: "2026-01-04T12:00:00Z", verdict: "commented", body: "Nit", url: "https://gh/r/2" },
+        { kind: "review", author: "bo", at: "2026-01-05T12:00:00Z", verdict: "greenlit", body: null },
+        { kind: "state", at: "2026-01-06T12:00:00Z", state: "merged" },
       ],
       checks: [
         { name: "build", status: "completed", conclusion: "success", url: "https://gh/runs/1" },
@@ -296,66 +296,69 @@ describe("ReviewChange", () => {
         { login: "eve", state: "requested" },
       ],
     };
+    const kindsOf = (w: Awaited<ReturnType<typeof mountChange>>["w"]) =>
+      w.findAll("[data-testid='review-timeline'] [data-kind]").map((row) => row.attributes("data-kind"));
+    const commentReply = (body: string, at = new Date().toISOString()) => ({
+      kind: "comment", id: 9, author: "me", at, body, url: "u9",
+    });
 
-    it("renders each kind of timeline entry, newest first", async () => {
+    it("reads oldest first, with a divider for each day, messages and compact events", async () => {
       const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
-      const kinds = w.findAll("[data-testid='review-timeline'] > li").map((li) => li.attributes("data-kind"));
-      expect(kinds).toEqual(["state", "review", "review", "review", "comment", "push"]);
-      const push = w.get("[data-testid='review-timeline-push']");
-      expect(push.text()).toContain("Ada");
-      expect(push.text()).toContain("pushed 2 commits");
-      expect(push.text()).toContain("aaaaaaa");
-      expect(push.text()).toContain("Second edit");
-      const comment = w.get("[data-testid='review-timeline-comment']");
-      expect(comment.text()).toContain("cy");
-      await vi.waitFor(() => expect(comment.find("strong").exists()).toBe(true));
-      expect(comment.get("strong").text()).toBe("close");
+      expect(kindsOf(w).filter((k) => k !== "day")).toEqual(["push", "comment", "review", "comment", "review", "state"]);
+      expect(w.findAll("[data-testid='review-day']")).toHaveLength(6);
+
+      const messages = w.findAll("[data-testid='review-timeline-comment']");
+      expect(messages.map((m) => m.get("[data-testid='review-message-header']").text())).toEqual([
+        expect.stringContaining("cy"),
+        expect.stringContaining("dee"),
+      ]);
+      expect(messages[0]!.get("img").attributes("src")).toBe("https://avatars.example/cy");
+      await vi.waitFor(() => expect(messages[0]!.find("strong").exists()).toBe(true));
+      expect(messages[0]!.get("strong").text()).toBe("close");
+      expect(messages[1]!.get("[data-testid='review-message-open']").attributes("href")).toBe("https://gh/r/2");
+
       const reviews = w.findAll("[data-testid='review-timeline-review']");
-      expect(reviews.map((r) => r.attributes("data-verdict"))).toEqual(["greenlit", "commented", "sent_back"]);
-      expect(reviews[2]!.text()).toContain("bo sent this back");
-      await vi.waitFor(() => expect(reviews[2]!.text()).toContain("Fix the title"));
-      expect(reviews[0]!.text()).toContain("bo greenlit these changes");
+      expect(reviews.map((r) => r.attributes("data-verdict"))).toEqual(["sent_back", "greenlit"]);
+      expect(reviews[0]!.text()).toContain("bo sent this back");
+      // The send-back's comment is quoted under it.
+      await vi.waitFor(() => expect(reviews[0]!.get("[data-testid='review-verdict-comment']").text()).toContain("Fix the title"));
+      expect(reviews[1]!.text()).toContain("bo greenlit this change");
       expect(w.get("[data-testid='review-timeline-state']").text()).toContain("Merged");
     });
 
-    it("folds a long push to its first three commits and badges checkpoints", async () => {
-      const commits = Array.from({ length: 5 }, (_, n) => ({
-        sha: `c${n}00000`,
-        message: n === 0 ? "checkpoint: Edit the hero" : `Edit ${n}`,
-        author: "Ada",
-      }));
-      const talk = { ...TALK, items: [{ kind: "push", at: "2026-01-01T00:00:00Z", commits }] };
-      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => talk) }, "conversation");
+    it("folds a push to one line until opened, badging checkpoints", async () => {
+      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
       const push = () => w.get("[data-testid='review-timeline-push']");
-      const shown = () => push().findAll("[data-testid='review-push-commit']");
-      expect(push().text()).toContain("pushed 5 commits");
-      expect(shown()).toHaveLength(3);
-      // The checkpoint prefix is a badge, not text.
-      expect(shown()[0]!.get("[data-testid='review-commit-checkpoint']").text()).toBe("checkpoint");
-      expect(shown()[0]!.get("[data-testid='review-commit-subject']").text()).toBe("Edit the hero");
-      expect(shown()[1]!.find("[data-testid='review-commit-checkpoint']").exists()).toBe(false);
-
-      const more = push().get("[data-testid='review-push-more']");
-      expect(more.text()).toBe("Show all 5 commits");
-      expect(more.attributes("aria-expanded")).toBe("false");
-      await more.trigger("click");
+      expect(push().text()).toContain("Ada");
+      expect(push().text()).toContain("pushed 2 commits");
+      expect(push().findAll("[data-testid='review-push-commit']")).toHaveLength(0);
+      const toggle = push().get("[data-testid='review-push-toggle']");
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+      await toggle.trigger("click");
       await flushPromises();
-      expect(shown()).toHaveLength(5);
-      expect(push().get("[data-testid='review-push-more']").text()).toBe("Show fewer");
-      expect(push().get("[data-testid='review-push-toggle']").attributes("aria-expanded")).toBe("true");
-
-      // The header row toggles too.
-      await push().get("[data-testid='review-push-header']").trigger("click");
-      await flushPromises();
-      expect(shown()).toHaveLength(3);
+      const shown = push().findAll("[data-testid='review-push-commit']");
+      expect(shown).toHaveLength(2);
+      expect(shown[0]!.get("[data-testid='review-commit-checkpoint']").text()).toBe("checkpoint");
+      expect(shown[0]!.get("[data-testid='review-commit-subject']").text()).toBe("First edit");
+      expect(shown[1]!.find("[data-testid='review-commit-checkpoint']").exists()).toBe(false);
     });
 
-    it("shows a short push in full with no toggle", async () => {
-      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
-      const push = w.get("[data-testid='review-timeline-push']");
-      expect(push.findAll("[data-testid='review-push-commit']")).toHaveLength(2);
-      expect(push.find("[data-testid='review-push-more']").exists()).toBe(false);
-      expect(push.find("[data-testid='review-push-toggle']").exists()).toBe(false);
+    it("groups one author's messages within five minutes under one header", async () => {
+      const t = Date.parse("2026-01-02T12:00:00Z");
+      const talk = {
+        ...TALK,
+        items: [
+          { kind: "comment", id: 1, author: "cy", at: new Date(t).toISOString(), body: "One", url: "u1" },
+          { kind: "comment", id: 2, author: "cy", at: new Date(t + 60_000).toISOString(), body: "Two", url: "u2" },
+          { kind: "comment", id: 3, author: "cy", at: new Date(t + 10 * 60_000).toISOString(), body: "Three", url: "u3" },
+        ],
+      };
+      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => talk) }, "conversation");
+      const messages = w.findAll("[data-testid='review-timeline-comment']");
+      expect(messages.map((m) => m.attributes("data-grouped") ?? "")).toEqual(["", "true", ""]);
+      expect(messages[1]!.find("img").exists()).toBe(false);
+      expect(messages[1]!.find("[data-testid='review-message-header']").exists()).toBe(false);
+      expect(messages[2]!.find("[data-testid='review-message-header']").exists()).toBe(true);
     });
 
     it("renders the description as markdown with raw HTML left inert", async () => {
@@ -372,6 +375,26 @@ describe("ReviewChange", () => {
       expect(box.findAll("*").some((el) => el.attributes("onerror") !== undefined)).toBe(false);
       expect(box.text()).toContain("<script>");
       expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    });
+
+    it("folds a long description to its first line, pinned above the feed", async () => {
+      const description = `# Hero rewrite\n\n${"Long paragraph. ".repeat(40)}`;
+      const { w } = await mountChange(
+        { ...base(), review: vi.fn(async () => ({ ...DETAIL, description })), reviewConversation: vi.fn(async () => TALK) },
+        "conversation",
+      );
+      const box = w.get("[data-testid='review-description']");
+      const toggle = box.get("[data-testid='review-description-toggle']");
+      expect(toggle.text()).toContain("Hero rewrite");
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+      await toggle.trigger("click");
+      await flushPromises();
+      expect(toggle.attributes("aria-expanded")).toBe("true");
+      await vi.waitFor(() => expect(box.find("h1").exists()).toBe(true));
+      const order = ["review-description", "review-feed", "review-comment-form"].map((id) => w.get(`[data-testid='${id}']`).element);
+      const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(follows(order[0]!, order[1]!)).toBe(true);
+      expect(follows(order[1]!, order[2]!)).toBe(true);
     });
 
     it("shows labels, checks, the deploy preview and reviewers in the sidebar", async () => {
@@ -403,49 +426,80 @@ describe("ReviewChange", () => {
       ]);
     });
 
-    it("posts a comment and adds it to the timeline", async () => {
-      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => ({
-        kind: "comment", id: 9, author: "me", at: new Date().toISOString(), body, url: "u9",
-      }));
-      const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
+    it("sends with the button, puts the message last and scrolls to it", async () => {
+      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => commentReply(body));
+      const { w } = await mountChange(
+        { ...base(), reviewConversation: vi.fn(async () => TALK), commentOnReview },
+        "conversation",
+      );
       const submit = () => w.get("[data-testid='review-comment-submit']");
       const input = w.get("[data-testid='review-comment-input']");
+      expect(input.attributes("placeholder")).toBe("Message…");
       expect(submit().attributes("disabled")).toBeDefined();
       await input.setValue("   ");
       expect(submit().attributes("disabled")).toBeDefined();
       await input.setValue("Ship it");
       expect(submit().attributes("disabled")).toBeUndefined();
-      await w.get("[data-testid='review-comment-form']").trigger("submit");
+      const feed = w.get("[data-testid='review-feed']").element as HTMLElement;
+      Object.defineProperty(feed, "scrollHeight", { configurable: true, value: 900 });
+      await w.get("[data-testid='review-comment-form'] form").trigger("submit");
       await flushPromises();
       expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Ship it");
-      const comments = w.findAll("[data-testid='review-timeline-comment']");
-      expect(comments).toHaveLength(1);
-      expect(comments[0]!.text()).toContain("me");
+      const messages = w.findAll("[data-testid='review-timeline-comment']");
+      expect(messages.at(-1)!.text()).toContain("Ship it");
+      expect(kindsOf(w).at(-1)).toBe("comment");
       expect((input.element as HTMLTextAreaElement).value).toBe("");
-      expect(w.get("[data-testid='review-tab-conversation']").text()).toContain("1");
+      expect(feed.scrollTop).toBe(900);
+      // cy, bo's send-back and dee's review, plus the new one.
+      expect(w.get("[data-testid='review-tab-conversation']").text()).toContain("4");
     });
 
-    it("puts the comment box between the description and the timeline, and a new comment on top", async () => {
-      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => ({
-        kind: "comment", id: 9, author: "me", at: new Date().toISOString(), body, url: "u9",
-      }));
-      const open = { ...DETAIL, open: true };
-      const { w } = await mountChange(
-        { ...base(), review: vi.fn(async () => open), reviewConversation: vi.fn(async () => TALK), commentOnReview },
-        "conversation",
-      );
-      const ids = ["review-description", "review-comment-form", "review-timeline"];
-      const els = ids.map((id) => w.get(`[data-testid='${id}']`).element);
-      const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-      expect(follows(els[0]!, els[1]!)).toBe(true);
-      expect(follows(els[1]!, els[2]!)).toBe(true);
-
-      await w.get("[data-testid='review-comment-input']").setValue("Newest word");
-      await w.get("[data-testid='review-comment-form']").trigger("submit");
+    it("sends on ⌘/Ctrl+Enter and keeps Enter alone for a new line", async () => {
+      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => commentReply(body));
+      const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
+      const input = w.get("[data-testid='review-comment-input']");
+      await input.setValue("Line one");
+      await input.trigger("keydown", { key: "Enter" });
       await flushPromises();
-      const first = w.get("[data-testid='review-timeline'] > li");
-      expect(first.attributes("data-kind")).toBe("comment");
-      expect(first.text()).toContain("Newest word");
+      expect(commentOnReview).not.toHaveBeenCalled();
+      await input.trigger("keydown", { key: "Enter", metaKey: true });
+      await flushPromises();
+      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Line one");
+      await input.setValue("Line two");
+      await input.trigger("keydown", { key: "Enter", ctrlKey: true });
+      await flushPromises();
+      expect(commentOnReview).toHaveBeenLastCalledWith("site", 7, "Line two");
+    });
+
+    it("keeps your place when entries arrive while you read further up, and follows at the bottom", async () => {
+      const more = (n: number) => ({
+        ...TALK,
+        items: [
+          ...TALK.items,
+          ...Array.from({ length: n }, (_, i) => ({
+            kind: "comment", id: 50 + i, author: "eve", at: "2026-01-07T12:00:00Z", body: `Late ${i}`, url: `u${i}`,
+          })),
+        ],
+      });
+      const reviewConversation = vi.fn().mockResolvedValueOnce(TALK).mockResolvedValueOnce(more(1)).mockResolvedValue(more(2));
+      const { w } = await mountChange({ ...base(), reviewConversation }, "conversation");
+      const el = w.get("[data-testid='review-feed']").element as HTMLElement;
+      Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(el, "clientHeight", { configurable: true, value: 200 });
+
+      // Reading further up: a new entry doesn't move the view.
+      el.scrollTop = 100;
+      await w.get("[data-testid='review-refresh']").trigger("click");
+      await vi.waitFor(() => expect(w.findAll("[data-testid='review-timeline-comment']")).toHaveLength(3));
+      await flushPromises();
+      expect(el.scrollTop).toBe(100);
+
+      // At the bottom: it follows.
+      el.scrollTop = 800;
+      await w.get("[data-testid='review-refresh']").trigger("click");
+      await vi.waitFor(() => expect(w.findAll("[data-testid='review-timeline-comment']")).toHaveLength(4));
+      await flushPromises();
+      expect(el.scrollTop).toBe(1000);
     });
 
     it("keeps the comment and says why when posting fails", async () => {
@@ -455,7 +509,7 @@ describe("ReviewChange", () => {
       const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
       const input = w.get("[data-testid='review-comment-input']");
       await input.setValue("Ship it");
-      await w.get("[data-testid='review-comment-form']").trigger("submit");
+      await w.get("[data-testid='review-comment-form'] form").trigger("submit");
       await flushPromises();
       expect(w.get("[data-testid='review-comment-error']").text()).toContain("Couldn't post your comment");
       expect((input.element as HTMLTextAreaElement).value).toBe("Ship it");

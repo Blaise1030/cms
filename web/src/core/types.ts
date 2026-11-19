@@ -142,8 +142,17 @@ export interface ReviewLabel {
 
 /** One entry of a change's conversation (`kind` is the wire tag). */
 export type TimelineItem =
-  | { kind: "comment"; id: number; author: string; at: string; body: string; url: string }
-  | { kind: "review"; author: string; at: string; verdict: "greenlit" | "sent_back" | "commented"; body: string | null }
+  | { kind: "comment"; id: number; author: string; avatarUrl?: string; at: string; body: string; url: string }
+  | {
+      kind: "review";
+      author: string;
+      avatarUrl?: string;
+      at: string;
+      verdict: "greenlit" | "sent_back" | "commented";
+      body: string | null;
+      /** The review on GitHub. */
+      url?: string;
+    }
   | { kind: "push"; at: string; commits: { sha: string; message: string; author: string }[] }
   | { kind: "state"; at: string; state: "closed" | "merged" };
 
