@@ -1,6 +1,6 @@
 ---
 import { href } from "../lib/href";
-import { filterPill } from "../lib/pill";
+import { filterPillLg } from "../lib/pill";
 import type { BlogCategory } from "../lib/blog";
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 }
 const { categories, active } = Astro.props;
 const shown = categories.filter((category) => category.posts.length > 0 || category.id === active);
-const item = filterPill;
+const item = filterPillLg;
 ---
 
 {shown.length > 0 && (

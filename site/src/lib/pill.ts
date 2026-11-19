@@ -9,3 +9,9 @@ export const filterPill = cn(
   buttonVariants({ variant: "outline", size: "sm" }),
   "rounded-full px-3 aria-[current=page]:bg-secondary aria-[current=page]:text-foreground",
 );
+
+/** Larger filter pill, used where the filters sit beside the search bar (blog list). */
+export const filterPillLg = cn(
+  buttonVariants({ variant: "outline", size: "lg" }),
+  "rounded-full px-4 aria-[current=page]:bg-secondary aria-[current=page]:text-foreground",
+);
