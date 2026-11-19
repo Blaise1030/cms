@@ -36,7 +36,8 @@ vi.mock("@nuxt/ui/components/DropdownMenu.vue", async () => {
 });
 
 import ReviewInbox from "./ReviewInbox.vue";
-import { useReviewStore } from "./store";
+import { reviewKeys } from "./queries";
+import { queryPlugin } from "@/test/queryClient";
 
 const item = (over: Partial<ReviewItem>): ReviewItem => ({
   number: 7,
@@ -68,9 +69,10 @@ async function mountInbox(
     ],
   });
   await router.push(opts.q === undefined ? "/p/site/review" : { path: "/p/site/review", query: { q: opts.q } });
-  const w = mount(ReviewInbox, { props: { projectId: "site" }, global: { plugins: [router] } });
+  const { client, plugin } = queryPlugin();
+  const w = mount(ReviewInbox, { props: { projectId: "site" }, global: { plugins: [router, plugin] } });
   await flushPromises();
-  return { w, router, api };
+  return { w, router, api, client };
 }
 
 beforeEach(() => localStorage.clear());
@@ -108,46 +110,32 @@ describe("ReviewInbox", () => {
     expect(router.currentRoute.value.params.number).toBe("7");
   });
 
-  it("counts only new items as waiting", async () => {
-    await mountInbox([item({ number: 1 }), item({ number: 2, myState: "greenlit" })]);
-    expect(useReviewStore().waitingCount).toBe(1);
-  });
-
   it("lists your own changes marked Yours, without counting them as waiting", async () => {
     const { w } = await mountInbox([item({ number: 1 }), item({ number: 2, mine: true, title: "Mine" })]);
     const rows = w.findAll("[data-testid='review-item']");
     expect(rows).toHaveLength(2);
-    expect(rows[1]!.find("[data-testid='review-mine']").text()).toBe("Yours");
-    expect(rows[1]!.text()).not.toContain("New");
-    expect(rows[0]!.find("[data-testid='review-mine']").exists()).toBe(false);
-    expect(useReviewStore().waitingCount).toBe(1);
+    // Found by title: both rows are a few ms apart, so their newest-first order isn't fixed.
+    const mine = rows.find((r) => r.text().includes("Mine"))!;
+    const theirs = rows.find((r) => !r.text().includes("Mine"))!;
+    expect(mine.find("[data-testid='review-mine']").text()).toBe("Yours");
+    expect(mine.text()).not.toContain("New");
+    expect(theirs.find("[data-testid='review-mine']").exists()).toBe(false);
   });
 
-  it("loads once on mount and leaves polling to the rail", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { api, w } = await mountInbox([item({ number: 1 })]);
-    expect(api.reviews).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(180_000);
-    window.dispatchEvent(new Event("focus"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    await flushPromises();
-    expect(api.reviews).toHaveBeenCalledTimes(1);
-    w.unmount();
-  });
-
-  it("does not load when the store already holds this project", async () => {
-    const api = { reviews: vi.fn(async () => [item({ number: 1 })]) };
+  it("reuses the inbox the rail already read instead of asking again", async () => {
+    const api = { reviews: vi.fn(async () => [item({ number: 1 })]), closedReviews: vi.fn(async () => ({ reviews: [], more: false })) };
     h.daemon = createFakeDaemon(api);
     setActivePinia(createPinia());
-    await useReviewStore().load("site");
+    const { client, plugin } = queryPlugin();
+    client.setQueryData(reviewKeys.inbox("site"), [item({ number: 1 })]);
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: "/p/:id/review/:number?", name: "project-review", component: { render: () => null } }],
     });
     await router.push("/p/site/review");
-    const w = mount(ReviewInbox, { props: { projectId: "site" }, global: { plugins: [router] } });
+    const w = mount(ReviewInbox, { props: { projectId: "site" }, global: { plugins: [router, plugin] } });
     await flushPromises();
-    expect(api.reviews).toHaveBeenCalledTimes(1);
+    expect(api.reviews).not.toHaveBeenCalled();
     expect(w.findAll("[data-testid='review-item']")).toHaveLength(1);
   });
 });

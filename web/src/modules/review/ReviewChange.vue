@@ -17,9 +17,7 @@ import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath, type ReviewPage } from "@/router";
 import { RouterLink } from "vue-router";
 import SendBackDialog from "./SendBackDialog.vue";
-import { useReviewStore } from "./store";
-import { useReviewPreview } from "./useReviewPreview";
-import { useReviewConversation } from "./useReviewConversation";
+import { useChange, useConversation, usePreview } from "./queries";
 import ReviewConversation from "./ReviewConversation.vue";
 import { labelStyle } from "./labels";
 
@@ -28,7 +26,10 @@ const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/Chang
 const DiffView = defineAsyncComponent(() => import("../checkpoints/DiffView.vue"));
 
 const props = defineProps<{ projectId: string; number: number; page: ReviewPage }>();
-const store = useReviewStore();
+const store = useChange(
+  () => props.projectId,
+  () => props.number,
+);
 const daemon = useDaemon();
 const router = useRouter();
 
@@ -36,11 +37,6 @@ const diffs = ref<HTMLElement | null>(null);
 const liveUrl = ref<string | null>(null);
 const sendingBack = ref(false);
 
-watch(
-  () => [props.projectId, props.number] as const,
-  ([id, n]) => void store.open(id, n),
-  { immediate: true },
-);
 // The live site link is a convenience; a failed lookup just hides it.
 watch(
   () => props.projectId,
@@ -56,7 +52,7 @@ watch(
 );
 
 const change = computed(() => store.current);
-const talk = useReviewConversation(
+const talk = useConversation(
   () => props.projectId,
   () => props.number,
   () => change.value?.headSha,
@@ -84,7 +80,7 @@ async function refresh() {
   refreshing.value = true;
   try {
     await Promise.all([
-      store.refresh(props.projectId, props.number),
+      store.refresh(),
       props.page === "conversation" ? talk.reload() : reloadPreview(),
     ]);
   } finally {
@@ -110,7 +106,7 @@ async function sendBack(comment: string) {
 }
 
 /** The change's deploy preview next to the live site; nothing is built on this machine. */
-const { preview, error: previewError, loading: previewLoading, reload: reloadPreview } = useReviewPreview(
+const { preview, error: previewError, loading: previewLoading, reload: reloadPreview } = usePreview(
   () => props.projectId,
   () => props.number,
   () => change.value?.headSha,

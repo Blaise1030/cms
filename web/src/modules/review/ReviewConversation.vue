@@ -10,7 +10,7 @@ import type { ReviewDetail, ReviewPreview, ReviewReviewer, TimelineItem } from "
 import { relativeTime } from "@/lib/relativeTime";
 import { checkState, checkSummary } from "./checks";
 import { labelStyle } from "./labels";
-import type { useReviewConversation } from "./useReviewConversation";
+import type { useConversation } from "./queries";
 
 // Lazy: the markdown renderer must stay out of the precached app shell.
 const ReviewMarkdown = defineAsyncComponent(() => import("./ReviewMarkdown.vue"));
@@ -18,7 +18,7 @@ const ReviewMarkdown = defineAsyncComponent(() => import("./ReviewMarkdown.vue")
 /** A change's Conversation page: description, timeline, comment box, and a sidebar of facts. */
 const props = defineProps<{
   change: ReviewDetail;
-  talk: ReturnType<typeof useReviewConversation>;
+  talk: ReturnType<typeof useConversation>;
   preview: ReviewPreview | null;
 }>();
 

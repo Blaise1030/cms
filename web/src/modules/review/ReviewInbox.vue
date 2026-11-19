@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, toRefs } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import type { DropdownMenuItem } from "@nuxt/ui";
 import UAlert from "@nuxt/ui/components/Alert.vue";
@@ -14,24 +14,15 @@ import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
 import { applyQuery, DEFAULT_QUERY, parseQuery, setQualifier, SORT_KEY, type InboxSort, type ReviewFilter } from "./inboxQuery";
 import { labelStyle } from "./labels";
-import { useReviewStore } from "./store";
+import { useClosedInbox, useInbox } from "./queries";
 
 const props = defineProps<{ projectId: string }>();
-const store = useReviewStore();
+const inbox = useInbox(() => props.projectId);
+const closed = useClosedInbox(() => props.projectId);
+/** One object for the template: open changes (shared with the rail) and closed ones. */
+const store = reactive({ ...toRefs(inbox), ...toRefs(closed) });
 const route = useRoute();
 const router = useRouter();
-
-// The rail owns polling (on focus and every minute); the inbox only loads when the store holds
-// nothing for this project yet, e.g. when opened before the rail's first load. Closed changes
-// load once, for their count.
-watch(
-  () => props.projectId,
-  (id) => {
-    if (store.projectId !== id) void store.load(id);
-    if (store.closedItems === null && !store.closedLoading) void store.loadClosed(id);
-  },
-  { immediate: true },
-);
 
 /** The search lives in `?q=`, so it survives a reload and can be shared. */
 const q = computed(() => (typeof route.query.q === "string" ? route.query.q : DEFAULT_QUERY));

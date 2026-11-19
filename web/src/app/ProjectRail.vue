@@ -6,16 +6,14 @@ import UButton from "@nuxt/ui/components/Button.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
-import { useReviewRefresh } from "@/modules/review/useReviewRefresh";
-import { useReviewStore } from "@/modules/review/store";
+import { useInbox } from "@/modules/review/queries";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
 const props = defineProps<{ projectId: string }>();
 
 const route = useRoute();
-const review = useReviewStore();
-// The Review badge counts changes waiting on you, so the rail keeps the inbox fresh.
-useReviewRefresh(() => void review.load(props.projectId), () => props.projectId);
+// The Review badge counts changes waiting on you; the shared inbox query keeps it fresh.
+const review = useInbox(() => props.projectId);
 const active = computed(() => projectTabFromRoute(route.name));
 
 /** `icon` is an Iconify Lucide name. */

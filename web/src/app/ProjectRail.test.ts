@@ -5,7 +5,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { createFakeDaemon } from "@/test/fakeDaemon";
-import { useReviewStore } from "@/modules/review/store";
+import { queryPlugin } from "@/test/queryClient";
 
 const hoisted = vi.hoisted(() => ({ daemon: null as unknown }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => hoisted.daemon }));
@@ -39,7 +39,7 @@ async function setup(start: string, waiting = 0) {
     ],
   });
   await router.push(start);
-  const w = mount(RouterView, { global: { plugins: [router] } });
+  const w = mount(RouterView, { global: { plugins: [router, queryPlugin().plugin] } });
   await flushPromises();
   return { w, router };
 }
@@ -103,7 +103,6 @@ it("shows the Review tab with a badge of changes waiting for you", async () => {
   expect(buttons.slice(0, 3)).toEqual(["workspace-tab-review", "review-badge", "project-rail-app-settings"]);
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("href")).toBe("/p/site/review");
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("aria-label")).toBe("Review");
-  expect(useReviewStore().waitingCount).toBe(2);
   expect(w.get('[data-testid="review-badge"]').text()).toBe("2");
 });
 

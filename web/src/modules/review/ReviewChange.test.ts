@@ -6,8 +6,9 @@ import { defineComponent, h as el } from "vue";
 import { TooltipProvider } from "reka-ui";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { ApiError } from "@/core/api";
-import type { ReviewDetail } from "@/core/types";
+import type { ReviewDetail, ReviewItem } from "@/core/types";
 import { createFakeDaemon } from "@/test/fakeDaemon";
+import { queryPlugin } from "@/test/queryClient";
 
 const h = vi.hoisted(() => ({ daemon: null as unknown }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
@@ -34,6 +35,7 @@ vi.mock("../checkpoints/ChangedFilesTree.vue", async () => {
 });
 
 import ReviewChange from "./ReviewChange.vue";
+import { reviewKeys } from "./queries";
 
 const DETAIL: ReviewDetail = {
   number: 7, title: "Fresh homepage hero", author: "Ada", url: "https://example.test/7",
@@ -67,11 +69,12 @@ async function mountChange(api: Record<string, unknown>, page: "conversation" | 
     setup: () => () =>
       el(TooltipProvider, null, { default: () => el(ReviewChange, { projectId: "site", number: 7, page }) }),
   });
-  const w = mount(Host, { global: { plugins: [router] }, attachTo: document.body });
+  const { client, plugin } = queryPlugin();
+  const w = mount(Host, { global: { plugins: [router, plugin] }, attachTo: document.body });
   // The store loads the diff parser lazily.
   await vi.waitFor(() => expect(w.text()).not.toContain("Loading change"));
   await flushPromises();
-  return { w, router };
+  return { w, router, client };
 }
 
 beforeEach(() => {
@@ -553,7 +556,7 @@ describe("ReviewChange", () => {
         await vi.advanceTimersByTimeAsync(30_000);
         expect(reviewPreview).toHaveBeenCalledTimes(1);
         visibility.mockReturnValue("visible");
-        document.dispatchEvent(new Event("visibilitychange"));
+        document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
         await flushPromises();
         expect(reviewPreview).toHaveBeenCalledTimes(2);
       } finally {
@@ -649,16 +652,16 @@ describe("ReviewChange", () => {
     it("greenlights with the head the reviewer saw and updates the row without reloading", async () => {
       const decideReview = vi.fn(async () => undefined);
       const review = vi.fn(async () => ({ ...DETAIL }));
-      const { w } = await mountChange({ ...base(), review, decideReview });
-      const { useReviewStore } = await import("./store");
-      const store = useReviewStore();
-      store.items = [{ ...DETAIL }];
+      const { w, client } = await mountChange({ ...base(), review, decideReview });
+      client.setQueryData(reviewKeys.inbox("site"), [{ ...DETAIL }]);
+      // The re-read after the decision answers with GitHub's new state.
+      review.mockResolvedValue({ ...DETAIL, myState: "greenlit" });
       await w.get("[data-testid='review-greenlight']").trigger("click");
       await flushPromises();
       expect(decideReview).toHaveBeenCalledWith("site", 7, { decision: "greenlight", comment: undefined, headSha: "abc" });
-      expect(store.items[0]?.myState).toBe("greenlit");
-      expect(store.current?.myState).toBe("greenlit");
-      expect(review).toHaveBeenCalledTimes(1);
+      expect(client.getQueryData<ReviewItem[]>(reviewKeys.inbox("site"))?.[0]?.myState).toBe("greenlit");
+      // The change and the inbox are read again (marked stale) after the decision.
+      await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
     });
 
     it("says the change was updated and reloads detail and diff on head_moved", async () => {
@@ -667,16 +670,14 @@ describe("ReviewChange", () => {
       });
       const review = vi.fn(async () => ({ ...DETAIL }));
       const reviewDiff = vi.fn(async () => diffOf(DIFF));
-      const { w } = await mountChange({ review, reviewDiff, decideReview });
-      const { useReviewStore } = await import("./store");
-      const store = useReviewStore();
-      store.items = [{ ...DETAIL }];
+      const { w, client } = await mountChange({ review, reviewDiff, decideReview });
+      client.setQueryData(reviewKeys.inbox("site"), [{ ...DETAIL }]);
       await w.get("[data-testid='review-greenlight']").trigger("click");
       await flushPromises();
       await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
       expect(reviewDiff).toHaveBeenCalledTimes(2);
       expect(w.text()).toContain("This change was updated since you opened it");
-      expect(store.items[0]?.myState).toBe("new");
+      expect(client.getQueryData<ReviewItem[]>(reviewKeys.inbox("site"))?.[0]?.myState).toBe("new");
     });
 
     describe("send back dialog", () => {

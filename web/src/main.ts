@@ -1,4 +1,5 @@
 import ui from "@nuxt/ui/vue-plugin";
+import { VueQueryPlugin } from "@tanstack/vue-query";
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 import "@fontsource-variable/geist";
@@ -14,4 +15,4 @@ import { createAppRouter } from "./router";
 useDaemon();
 installScrollbarHiding();
 
-createApp(App).use(createPinia()).use(createAppRouter()).use(ui).mount("#app");
+createApp(App).use(createPinia()).use(VueQueryPlugin).use(createAppRouter()).use(ui).mount("#app");
