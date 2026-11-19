@@ -1,6 +1,7 @@
 ---
 import Base from "../../../layouts/Base.astro";
 import DocList from "../../../components/DocList.astro";
+import CtaBand from "../../../components/sections/CtaBand.astro";
 import PageHeader from "../../../components/PageHeader.astro";
 import { loadHelp } from "../../../lib/help";
 import { breadcrumbs } from "../../../lib/seo";
@@ -20,10 +21,11 @@ const description = topic.description ?? `Help articles about ${topic.title.toLo
     breadcrumbs([{ name: "Home", path: "/" }, { name: "Help", path: "/help/" }, { name: "Topics", path: "/help/categories/" }, { name: topic.title, path: `/help/categories/${topic.id}/` }]),
   ]}
 >
-  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line">
     <PageHeader title={topic.title} description={topic.description} back={{ label: "All topics", href: "/help/categories/" }} />
     <div class="page mt-12">
       {topic.docs.length === 0 ? <p class="text-muted">No articles on this topic yet.</p> : <div class="max-w-3xl"><DocList docs={topic.docs} /></div>}
     </div>
+    <CtaBand class="mt-section border-t border-line" />
   </div>
 </Base>

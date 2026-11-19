@@ -6,6 +6,7 @@
 import type { BreadcrumbItem, NavigationMenuItem } from "@nuxt/ui";
 import UBreadcrumb from "@nuxt/ui/components/Breadcrumb.vue";
 import PagefindSearch from "./PagefindSearch.astro";
+import CtaBand from "./sections/CtaBand.astro";
 import HelpNav from "./vue/HelpNav.vue";
 import { href } from "../lib/href";
 import { loadHelp, type Doc } from "../lib/help";
@@ -77,4 +78,9 @@ const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label
       <div class="sticky top-header px-5 py-14"><slot name="rail" /></div>
     </div>
   )}
+</div>
+
+<!-- Closing call to action under every Help page, framed like the docs layout above it. -->
+<div class="mx-auto w-full max-w-7xl border-x border-b border-line">
+  <CtaBand />
 </div>
