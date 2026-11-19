@@ -896,6 +896,9 @@ pub async fn publish(
         .merge_pr(&repo, &branch)
         .await
         .map_err(|e| publish_step_error(e, false))?;
+    // The published change's review images aren't needed any more.
+    let merged = pr.number;
+    super::reviews::clean_assets_soon(&state, &repo, move |n| n != merged, false);
     Ok(Json(json!({ "pr": pr })))
 }
 

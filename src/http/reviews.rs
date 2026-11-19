@@ -62,6 +62,9 @@ pub async fn list(
         ));
     }
     let inbox = state.github.review_inbox(&repo, &labels, &me).await?;
+    // Review images of changes that are no longer open leave the assets branch.
+    let open: std::collections::HashSet<u64> = inbox.open.iter().copied().collect();
+    clean_assets_soon(&state, &repo, move |pr| open.contains(&pr), true);
     // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref until
     // it actually closes.
     review::prune_refs(&project.dir, &inbox.open).await;
@@ -176,6 +179,43 @@ pub async fn diff(
         text,
     )
         .into_response())
+}
+
+/// When each repository's assets branch was last tidied (inbox loads do it at most every
+/// 5 minutes).
+static LAST_CLEANUP: std::sync::Mutex<
+    Option<std::collections::HashMap<String, std::time::Instant>>,
+> = std::sync::Mutex::new(None);
+const CLEANUP_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// In the background, removes review images of pull requests `keep` rejects from the
+/// repository's `orso-review-assets` branch (deleting the branch once no open change has any).
+/// Best effort: a failure is logged and tried again later. `throttle` skips a repository
+/// tidied in the last 5 minutes.
+pub(crate) fn clean_assets_soon(
+    state: &AppState,
+    repo: &str,
+    keep: impl Fn(u64) -> bool + Send + 'static,
+    throttle: bool,
+) {
+    {
+        let mut last = LAST_CLEANUP.lock().unwrap();
+        let last = last.get_or_insert_with(Default::default);
+        if throttle && last.get(repo).is_some_and(|t| t.elapsed() < CLEANUP_EVERY) {
+            return;
+        }
+        last.insert(repo.to_string(), std::time::Instant::now());
+    }
+    let github = state.github.clone();
+    let repo = repo.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = github
+            .clean_review_assets(&repo, crate::review_shots::ASSETS_BRANCH, keep)
+            .await
+        {
+            eprintln!("orso: couldn't tidy {repo}'s review images: {}", e.message);
+        }
+    });
 }
 
 /// Query of `GET /api/projects/{id}/reviews/assets`.

@@ -374,6 +374,29 @@ struct ApiGitCommit {
 }
 
 #[derive(Deserialize)]
+struct ApiTree {
+    #[serde(default)]
+    tree: Vec<ApiTreeEntry>,
+}
+
+#[derive(Deserialize)]
+struct ApiTreeEntry {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// What [`GithubAuth::clean_review_assets`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetsCleanup {
+    Nothing,
+    /// These pull requests' images were removed in one commit.
+    Removed(Vec<u64>),
+    /// No kept pull request had images left: the branch is gone.
+    DeletedBranch,
+}
+
+#[derive(Deserialize)]
 struct ApiReview {
     #[serde(default)]
     user: Option<ApiLogin>,
@@ -2231,6 +2254,127 @@ impl GithubAuth {
             }
         }
         Err(last.unwrap_or_else(|| ApiError::github("Couldn't save the screenshots.")))
+    }
+
+    /// Removes review images of pull requests that `keep` rejects from `branch` (files under
+    /// `shots/{pr}/` and `uploads/{pr}/`) in one commit. When no kept pull request has images
+    /// left, the branch itself is deleted, so its history stops riding along with every clone;
+    /// the next upload starts it again.
+    pub async fn clean_review_assets(
+        &self,
+        repo: &str,
+        branch: &str,
+        keep: impl Fn(u64) -> bool,
+    ) -> Result<AssetsCleanup, ApiError> {
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/ref/heads/{branch}"),
+                None,
+            )
+            .await?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(AssetsCleanup::Nothing);
+        }
+        if !status.is_success() {
+            return Err(github_error(status, &body));
+        }
+        let tip = serde_json::from_slice::<ApiRef>(&body)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))?
+            .object
+            .sha;
+        let commit: ApiGitCommit = self
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/commits/{tip}"),
+                None,
+            )
+            .await?;
+        let tree: ApiTree = self
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/trees/{}?recursive=1", commit.tree.sha),
+                None,
+            )
+            .await?;
+        // The pull request each review image belongs to.
+        let pr_of = |path: &str| -> Option<u64> {
+            let mut parts = path.split('/');
+            matches!(parts.next(), Some("shots" | "uploads"))
+                .then(|| parts.next()?.parse().ok())
+                .flatten()
+        };
+        let files: Vec<(&str, u64)> = tree
+            .tree
+            .iter()
+            .filter(|e| e.kind == "blob")
+            .filter_map(|e| Some((e.path.as_str(), pr_of(&e.path)?)))
+            .collect();
+        if !files.iter().any(|(_, pr)| keep(*pr)) {
+            let (status, body) = self
+                .api_raw(
+                    reqwest::Method::DELETE,
+                    &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                    None,
+                )
+                .await?;
+            return if status.is_success() || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+                Ok(AssetsCleanup::DeletedBranch)
+            } else {
+                Err(github_error(status, &body))
+            };
+        }
+        let mut gone: Vec<u64> = files
+            .iter()
+            .map(|(_, pr)| *pr)
+            .filter(|pr| !keep(*pr))
+            .collect();
+        gone.sort_unstable();
+        gone.dedup();
+        if gone.is_empty() {
+            return Ok(AssetsCleanup::Nothing);
+        }
+        // A tree entry with a null sha removes that file.
+        let removals: Vec<_> = files
+            .iter()
+            .filter(|(_, pr)| gone.contains(pr))
+            .map(|(path, _)| serde_json::json!({ "path": path, "mode": "100644", "type": "blob", "sha": null }))
+            .collect();
+        let new_tree: ApiSha = self
+            .git_post(
+                repo,
+                "trees",
+                serde_json::json!({ "base_tree": commit.tree.sha, "tree": removals }),
+            )
+            .await?;
+        let list = gone
+            .iter()
+            .map(|n| format!("#{n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let new_commit: ApiSha = self
+            .git_post(
+                repo,
+                "commits",
+                serde_json::json!({
+                    "message": format!("Remove review images of closed changes {list}"),
+                    "tree": new_tree.sha,
+                    "parents": [tip],
+                }),
+            )
+            .await?;
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::PATCH,
+                &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                Some(&serde_json::json!({ "sha": new_commit.sha, "force": false })),
+            )
+            .await?;
+        if !status.is_success() {
+            // Someone uploaded meanwhile; the next inbox load tries again.
+            return Err(github_error(status, &body));
+        }
+        Ok(AssetsCleanup::Removed(gone))
     }
 
     /// One attempt: tree and commit on the branch's current tip, then move (or create) the ref.
@@ -4701,6 +4845,139 @@ esac"#,
         assert_eq!(err.reason, Some("assets_refused"));
         assert_eq!(err.code.status(), 403);
         assert_eq!(writes(&log), ["POST blobs"]);
+        stop();
+    }
+
+    /// An assets branch at `tip0` holding `files`, recording writes like `git_data_mock`.
+    async fn assets_tree_mock(
+        files: &'static [&'static str],
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::Mutex<Vec<(String, String, serde_json::Value)>>>,
+    ) {
+        use axum::http::{Method, StatusCode, Uri};
+        use axum::response::IntoResponse;
+        use std::sync::{Arc, Mutex};
+        let log: Arc<Mutex<Vec<(String, String, serde_json::Value)>>> = Arc::default();
+        let l = log.clone();
+        let handler =
+            move |method: Method, uri: Uri, body: Option<axum::Json<serde_json::Value>>| {
+                let log = l.clone();
+                async move {
+                    let path = uri.path().to_string();
+                    if method != Method::GET {
+                        let b = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
+                        log.lock()
+                            .unwrap()
+                            .push((method.to_string(), path.clone(), b));
+                    }
+                    let ok = |v: serde_json::Value| axum::Json(v).into_response();
+                    match (method.as_str(), path.as_str()) {
+                        ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
+                            ok(serde_json::json!({ "object": { "sha": "tip0" } }))
+                        }
+                        ("GET", "/repos/acme/site/git/commits/tip0") => {
+                            ok(serde_json::json!({ "tree": { "sha": "tree0" } }))
+                        }
+                        ("GET", "/repos/acme/site/git/trees/tree0") => {
+                            let mut entries =
+                                vec![serde_json::json!({ "path": "shots", "type": "tree" })];
+                            entries.extend(
+                                files
+                                    .iter()
+                                    .map(|p| serde_json::json!({ "path": p, "type": "blob" })),
+                            );
+                            ok(serde_json::json!({ "tree": entries }))
+                        }
+                        ("POST", _) => ok(serde_json::json!({ "sha": "new1" })),
+                        ("PATCH", _) => ok(serde_json::json!({})),
+                        ("DELETE", _) => StatusCode::NO_CONTENT.into_response(),
+                        _ => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            };
+        let (base, stop) = mock_api(axum::Router::new().fallback(handler)).await;
+        (base, stop, log)
+    }
+
+    const ASSET_FILES: &[&str] = &[
+        "shots/3/2026-11-19/a.png",
+        "uploads/3/2026-11-19/b.png",
+        "shots/5/2026-11-19/c.png",
+        "README.md",
+    ];
+
+    #[tokio::test]
+    async fn cleanup_removes_closed_changes_images_in_one_commit() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-clean");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |pr| pr == 5)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::Removed(vec![3]));
+        let log = log.lock().unwrap();
+        let ops: Vec<_> = log.iter().map(|(m, p, _)| format!("{m} {p}")).collect();
+        assert_eq!(
+            ops,
+            [
+                "POST /repos/acme/site/git/trees",
+                "POST /repos/acme/site/git/commits",
+                "PATCH /repos/acme/site/git/refs/heads/orso-review-assets",
+            ]
+        );
+        assert_eq!(log[0].2["base_tree"], "tree0");
+        let removed: Vec<_> = log[0].2["tree"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (e["path"].as_str().unwrap().to_string(), e["sha"].is_null()))
+            .collect();
+        assert_eq!(
+            removed,
+            [
+                ("shots/3/2026-11-19/a.png".to_string(), true),
+                ("uploads/3/2026-11-19/b.png".to_string(), true),
+            ]
+        );
+        assert_eq!(log[1].2["parents"], serde_json::json!(["tip0"]));
+        assert_eq!(log[2].2["force"], false);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_the_branch_when_no_open_change_has_images() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-drop");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |_| false)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::DeletedBranch);
+        let ops: Vec<_> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(m, p, _)| format!("{m} {p}"))
+            .collect();
+        assert_eq!(
+            ops,
+            ["DELETE /repos/acme/site/git/refs/heads/orso-review-assets"]
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn cleanup_leaves_open_changes_alone() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-keep");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |pr| pr == 3 || pr == 5)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::Nothing);
+        assert!(log.lock().unwrap().is_empty());
         stop();
     }
 
