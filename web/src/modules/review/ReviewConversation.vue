@@ -418,7 +418,7 @@ function submit() {
         class="border-default flex w-full shrink-0 flex-col gap-4 overflow-y-auto p-4 text-sm max-lg:max-h-64 max-lg:border-t lg:w-64"
         data-testid="review-sidebar"
       >
-        <section class="border-default flex flex-col gap-1.5 border-b pb-3">
+        <section class="flex flex-col gap-1.5">
           <h3 class="text-muted text-xs font-medium">Labels</h3>
           <div v-if="change.labels?.length" class="flex flex-wrap gap-1">
             <span
@@ -432,7 +432,7 @@ function submit() {
           <p v-else class="text-muted">None</p>
         </section>
 
-        <section class="border-default flex flex-col gap-1.5 border-b pb-3" data-testid="review-checks-summary">
+        <section class="flex flex-col gap-1.5" data-testid="review-checks-summary">
           <h3 class="text-muted text-xs font-medium">Checks</h3>
           <p v-if="!checks.length" class="text-muted">None</p>
           <template v-else>
@@ -469,7 +469,7 @@ function submit() {
           </template>
         </section>
 
-        <section class="border-default flex flex-col gap-1.5 border-b pb-3">
+        <section class="flex flex-col gap-1.5">
           <h3 class="text-muted text-xs font-medium">Deploy preview</h3>
           <a
             v-if="preview?.url"
