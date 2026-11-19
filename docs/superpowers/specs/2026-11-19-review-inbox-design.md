@@ -215,11 +215,24 @@ Reviewers can point at the page itself, and anyone can attach images to a commen
 
 - **Picking an area** (Review page): each side of the frame (*This change*, *Live site*) has
   **Pick an area to comment on**. The side dims; a drag marks the area (at least 8 px; Esc
-  cancels). The frames are other origins, so the pixels come from sharing this tab
-  (`getDisplayMedia`, *this tab* preferred): the browser asks once, the stream is kept while
-  in use and stopped after 5 idle minutes or on leaving the page. The area is mapped from CSS
-  pixels to the capture's own size (device pixel ratio, a scaled capture), capped at 1600 px
-  on its longest side, and sent as PNG (JPEG at 0.85 above 1 MB). A popover at the selection
+  cancels). The frames are other origins, so the pixels come from, in order:
+  1. **The preview itself**, when its build carries orso's bridge: pull request preview builds
+     with `ORSO_PREVIEW=1` (set by the deploy workflows for pull requests only, never
+     production). The frame says `hello` on each load; the bridge answers `ready` with
+     whether it can capture, and on `capture` draws the area of its own page (computed styles
+     and same-origin images through an SVG `foreignObject`) as a PNG. Web fonts, CSS
+     backgrounds, video, canvas, iframes and cross-origin images don't show; a failure or a
+     blank result falls through to the next way. The bridge only answers loopback parents.
+  2. **The desktop app**: a native snapshot of its own webview (`capture_region`, WKWebView
+     `takeSnapshot`), which needs no Screen Recording permission.
+  3. **Sharing this tab** (`getDisplayMedia`, *this tab* preferred): asked for when picking
+     starts, only when neither of the above can take that side; the stream is kept while in
+     use and stopped after 5 idle minutes or on leaving the page. The area is mapped from CSS
+     pixels to the capture's own size (device pixel ratio, a scaled capture).
+
+  Each screenshot is capped at 1600 px on its longest side and sent as PNG (JPEG at 0.85
+  above 1 MB). The selection box is in screen coordinates: it doesn't follow the page when
+  it scrolls (a possible follow-up). A popover at the selection
   takes a note (**Add to queue**, ⌘/Ctrl+Enter). Without screen sharing (unsupported or
   refused) a note alone can still be queued.
 - **The queue** lives per change in IndexedDB (memory when storage isn't available), so a
