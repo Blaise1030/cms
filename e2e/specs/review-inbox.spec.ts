@@ -35,6 +35,14 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   const item = page.getByTestId("review-item");
   await expect(item).toHaveCount(1);
   await expect(item).toContainText("Fix the hero copy");
+  // The search narrows the list and stays in the URL.
+  const search = page.getByTestId("review-search");
+  await search.fill("is:open pricing");
+  await expect(item).toHaveCount(0);
+  await expect(page.getByTestId("review-empty-search")).toBeVisible();
+  await expect(page).toHaveURL(/[?&]q=is(%3A|:)open(\+|%20)pricing/);
+  await search.fill("is:open hero");
+  await expect(item).toHaveCount(1);
   await item.click();
   // A change opens on its Conversation: description, the teammate's comment, a comment box.
   await expect(page).toHaveURL(new RegExp(`/p/${projectId}/review/${PR}$`));
@@ -62,11 +70,12 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   return sha;
 }
 
-/** The change's deploy preview shows in the Preview pane. */
+/** The change's deploy preview shows in the Preview pane; the stub has no live site, so that side is folded. */
 async function expectPreview(page: import("@playwright/test").Page) {
   await expect(
     page.frameLocator('iframe[data-testid="browser-frame-iframe-change"]').locator("h1"),
   ).toHaveText("Fresh hero copy", { timeout: 30_000 });
+  await expect(page.getByTestId("browser-frame-strip-live")).toContainText("Not found");
 }
 
 test("reviewer greenlights a change without touching the checkout", async ({ page, orso }) => {
