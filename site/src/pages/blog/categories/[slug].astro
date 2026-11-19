@@ -21,7 +21,7 @@ const description = category.description ?? `Blog posts about ${category.title.t
     breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }, { name: category.title, path: `/blog/categories/${category.id}/` }]),
   ]}
 >
-  <div class="mx-auto w-full max-w-7xl border-x border-b border-line pb-section">
+  <div class="mx-auto w-full max-w-7xl flex-1 border-x border-b border-line pb-section" data-fill>
     <PageHeader title={category.title} description={category.description} back={{ label: "All categories", href: "/blog/categories/" }} />
     <div class="mt-12 border-y border-line">
       <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:py-8">

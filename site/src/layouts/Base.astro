@@ -127,7 +127,8 @@ const navItems = site.nav.map((link) => ({
       </div>
     </header>
 
-    <main id="main" class="flex-1"><slot /></main>
+    <!-- A page whose root has data-fill becomes a column, so that root can grow (flex-1) to meet the footer. -->
+    <main id="main" class="flex-1 has-[>[data-fill]]:flex has-[>[data-fill]]:flex-col"><slot /></main>
 
     <Footer />
 
