@@ -220,40 +220,6 @@
   }
 }
 
-/* Pagefind Component UI (PagefindSearch.astro) on the site tokens, light and dark. Not named
-   pf-*: Pagefind resets every element whose class starts with "pf-" (all: revert). */
-.search-theme {
-  --pf-font: var(--font-sans);
-  --pf-text: var(--color-ink);
-  --pf-text-secondary: var(--color-muted);
-  --pf-text-muted: var(--color-muted);
-  --pf-background: var(--color-surface-raised);
-  --pf-border: var(--color-line);
-  --pf-border-focus: var(--color-line-strong);
-  --pf-hover: var(--color-sand);
-  --pf-mark: var(--color-ink);
-  --pf-outline-focus: var(--color-accent);
-  --pf-border-radius: var(--radius-lg);
-}
-
-/* Placeholder bar shown in place of <pagefind-modal-trigger> until its script defines it. */
-.search-fallback {
-  display: none;
-}
-pagefind-modal-trigger:not(:defined) + .search-fallback {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  width: 100%;
-  min-height: 2.5rem;
-  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface-raised);
-  color: var(--color-muted);
-  font-size: var(--text-small);
-}
-
 /* A quiet text link: hairline underline that darkens on hover. */
 @utility link {
   text-decoration-line: underline;
