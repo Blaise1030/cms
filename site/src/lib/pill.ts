@@ -14,6 +14,9 @@ export const filterPill = cn(
 /** Blog category label on cards and posts: the shadcn outline badge, as a link. */
 export const categoryBadge = cn(badgeVariants({ variant: "outline" }), "relative z-10");
 
+/** Rounded outline "Back to …" link with a leading arrow icon. */
+export const backButton = cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full");
+
 /** Larger filter pill, used where the filters sit beside the search bar (blog list). */
 export const filterPillLg = cn(
   buttonVariants({ variant: "outline", size: "lg" }),

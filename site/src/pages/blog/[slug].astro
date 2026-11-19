@@ -7,7 +7,7 @@ import { paintingFor } from "../../lib/paintings";
 import BlogCard from "../../components/BlogCard.astro";
 import BlogToc from "../../components/BlogToc.astro";
 import { href } from "../../lib/href";
-import { categoryBadge } from "../../lib/pill";
+import { backButton, categoryBadge } from "../../lib/pill";
 import { categoriesOf, formatDate, loadBlog, morePosts } from "../../lib/blog";
 import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
 import { site } from "../../site";
@@ -50,7 +50,10 @@ const navLink = "group block border-t border-line pt-6";
       <div class="mx-auto max-w-5xl">
         <div class="grid gap-12 lg:grid-cols-12 lg:gap-10">
           <div class="min-w-0 lg:col-span-8">
-            <a class="link text-small text-muted" href={href("/blog/")}>Back to Blog</a>
+            <a class={backButton} href={href("/blog/")}>
+              <svg data-icon="inline-start" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
+              Back to Blog
+            </a>
             <div class="rise mt-10 flex flex-wrap items-center gap-x-4 gap-y-1">
               <time class="label" datetime={entry.data.pubDate}>{formatDate(entry.data.pubDate)}</time>
               {postCategories.map((category) => (
