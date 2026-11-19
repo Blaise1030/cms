@@ -48,7 +48,7 @@ const jsonLd = [
     { name: entry.data.title, path },
   ]),
 ];
-const navLink = "group flex items-center gap-3 rounded-lg border border-line px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand";
+const navLink = "group flex items-start gap-3 rounded-lg border border-line px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand";
 const crumbs = [
   { label: "Help", href: "/help/" },
   { label: section.title, href: `/help/section/${section.id}/` },
@@ -68,14 +68,14 @@ const crumbs = [
       <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label="More articles" data-pagefind-ignore>
         <div>{previous && (
           <a class={navLink} href={href(`/help/${previous.id}/`)}>
-            <Icon name="arrow-left" class="size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:-translate-x-0.5" />
+            <Icon name="arrow-left" class="mt-0.5 size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:-translate-x-0.5" />
             <span class="min-w-0"><span class="block text-small text-muted">Previous</span><span class="mt-0.5 block font-medium text-ink">{previous.data.title}</span></span>
           </a>
         )}</div>
         <div>{next && (
           <a class:list={[navLink, "justify-end text-right"]} href={href(`/help/${next.id}/`)}>
             <span class="min-w-0"><span class="block text-small text-muted">Next</span><span class="mt-0.5 block font-medium text-ink">{next.data.title}</span></span>
-            <Icon name="arrow-right" class="size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:translate-x-0.5" />
+            <Icon name="arrow-right" class="mt-0.5 size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:translate-x-0.5" />
           </a>
         )}</div>
       </nav>
