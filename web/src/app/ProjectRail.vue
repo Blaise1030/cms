@@ -34,6 +34,7 @@ const macDesktop = isMacDesktop();
 const ui = { base: "size-9 justify-center rounded-lg", leadingIcon: "size-5" };
 /** Selected tab: primary tint. */
 const current = "dark:bg-primary/25 dark:text-highlighted dark:hover:bg-primary/30";
+const onSettings = computed(() => route.path === "/settings");
 const tooltipContent = { side: "right" } as const;
 </script>
 
@@ -111,8 +112,12 @@ const tooltipContent = { side: "right" } as const;
             variant="ghost"
             square
             icon="i-hugeicons-settings-02"
-            :active="false"
+            active-color="primary"
+            active-variant="soft"
+            :active="onSettings"
             :ui="ui"
+            :class="cn(onSettings && current)"
+            :aria-current="onSettings ? 'page' : undefined"
             aria-label="App settings"
             data-testid="project-rail-app-settings"
           />

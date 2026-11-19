@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// App-level settings. A fixed sidebar holds the sections and their search; the
-// content pane scrolls on its own. The open section lives in `?tab=`, so deep
-// links and the command palette can point at one page.
-import { computed, onBeforeUnmount, onMounted, ref, type Component } from "vue";
+// App-level settings. A fixed sidebar holds the sections and their search; every
+// section renders in one scrolling list, and a sidebar click scrolls to it. The
+// last section jumped to lives in `?tab=`, so deep links and the command palette
+// can still point at one section.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import UButton from "@nuxt/ui/components/Button.vue";
-import UAvatar from "@nuxt/ui/components/Avatar.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
 import UKbd from "@nuxt/ui/components/Kbd.vue";
 import GithubAccount from "@/modules/github/GithubAccount.vue";
+import ProjectRail from "@/app/ProjectRail.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { APP_SETTINGS_TABS, type AppSettingsTab } from "@/router";
 import AboutSettings from "./AboutSettings.vue";
@@ -20,8 +21,6 @@ import SiteBuilderSettings from "./SiteBuilderSettings.vue";
 interface SettingsSection {
   id: AppSettingsTab;
   label: string;
-  title: string;
-  description: string;
   /** Iconify name, e.g. `i-hugeicons-information-circle`. */
   icon: string;
   component: Component;
@@ -31,41 +30,30 @@ const SECTIONS: SettingsSection[] = [
   {
     id: "assistant",
     label: "Assistant",
-    title: "Assistant",
-    description: "The assistant makes the changes you ask for. You can add another at any time.",
     icon: "i-hugeicons-chat-bot",
     component: AssistantSettings,
   },
   {
     id: "builder",
     label: "Site builder",
-    title: "Site builder",
-    description: "Lets orso build and preview your site.",
     icon: "i-hugeicons-package",
     component: SiteBuilderSettings,
   },
   {
     id: "github",
     label: "GitHub",
-    title: "GitHub",
-    description:
-      "Git and the GitHub tools are optional for local work. Sign in to share previews and publish.",
     icon: "i-hugeicons-git-branch",
     component: GithubSettings,
   },
   {
     id: "appearance",
     label: "Appearance",
-    title: "Appearance",
-    description: "How orso looks and sounds while you work.",
     icon: "i-hugeicons-paint-board",
     component: AppearanceSettings,
   },
   {
     id: "about",
     label: "About",
-    title: "About",
-    description: "Version, your data, and where to find more.",
     icon: "i-hugeicons-information-circle",
     component: AboutSettings,
   },
@@ -95,14 +83,53 @@ const activeTab = computed<AppSettingsTab>(() => {
   return isTab(value) ? value : "assistant";
 });
 
-const activeSection = computed(
-  () => SECTIONS.find((section) => section.id === activeTab.value) ?? SECTIONS[0]!,
-);
+/** The section in view, kept in step with scrolling; starts at the linked one. */
+const current = ref<AppSettingsTab>(activeTab.value);
+
+const scroller = ref<HTMLElement | null>(null);
+const sectionEls = new Map<AppSettingsTab, HTMLElement>();
+
+function bindSection(id: AppSettingsTab, el: unknown) {
+  if (el instanceof HTMLElement) sectionEls.set(id, el);
+  else sectionEls.delete(id);
+}
+
+/** Ignore scroll-spy while a jump is animating, so the nav doesn't flicker through sections. */
+let spyPausedUntil = 0;
+
+function scrollToSection(id: AppSettingsTab, behavior: ScrollBehavior = "smooth") {
+  const el = sectionEls.get(id);
+  current.value = id;
+  if (!el) return;
+  spyPausedUntil = Date.now() + (behavior === "smooth" ? 700 : 0);
+  el.scrollIntoView?.({ behavior, block: "start" });
+}
 
 function setTab(tab: AppSettingsTab) {
-  if (tab === activeTab.value) return;
-  void router.replace({ query: { ...route.query, tab } });
+  scrollToSection(tab);
+  if (tab !== activeTab.value) void router.replace({ query: { ...route.query, tab } });
 }
+
+function onScroll() {
+  const root = scroller.value;
+  if (!root || Date.now() < spyPausedUntil) return;
+  if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+    current.value = SECTIONS[SECTIONS.length - 1]!.id;
+    return;
+  }
+  const top = root.getBoundingClientRect().top + 48;
+  let next = SECTIONS[0]!.id;
+  for (const section of SECTIONS) {
+    const el = sectionEls.get(section.id);
+    if (el && el.getBoundingClientRect().top <= top) next = section.id;
+  }
+  current.value = next;
+}
+
+// A link to another section while the page is open (e.g. the command palette).
+watch(activeTab, (tab) => {
+  if (tab !== current.value) scrollToSection(tab);
+});
 
 const needle = computed(() => query.value.trim().toLowerCase());
 
@@ -144,8 +171,25 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener("keydown", onKeydown));
+onMounted(async () => {
+  window.addEventListener("keydown", onKeydown);
+  if (route.query.tab != null) {
+    await nextTick();
+    scrollToSection(activeTab.value, "instant");
+  }
+});
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+
+/**
+ * The project Settings was opened from (the page we would go back to), so its rail stays in
+ * reach. None when opened from the projects list or a deep link.
+ */
+const fromProject: string | null = (() => {
+  const back = router.options.history.state.back;
+  if (typeof back !== "string" || back.length === 0) return null;
+  const target = router.resolve(back);
+  return target.matched.some((r) => r.path === "/p/:id") ? String(target.params.id) : null;
+})();
 
 /** Back to the previous page when the browser has one; a deep link falls back home. */
 function goBack() {
@@ -158,6 +202,7 @@ function goBack() {
 
 <template>
   <div class="flex h-full min-h-0 overflow-hidden" data-testid="app-settings-page">
+    <ProjectRail v-if="fromProject" :project-id="fromProject" />
     <aside
       class="bg-background flex h-full min-h-0 w-64 shrink-0 flex-col"
       data-testid="app-settings-sidebar"
@@ -216,9 +261,9 @@ function goBack() {
             class="justify-start"
             :icon="section.icon"
             :label="section.label"
-            :active="activeTab === section.id"
-            :aria-current="activeTab === section.id ? 'page' : undefined"
-            :data-active="activeTab === section.id"
+            :active="current === section.id"
+            :aria-current="current === section.id ? 'page' : undefined"
+            :data-active="current === section.id"
             :data-testid="`app-settings-tab-${section.id}`"
             @click="setTab(section.id)"
           />
@@ -238,9 +283,9 @@ function goBack() {
             class="justify-start"
             :icon="ABOUT.icon"
             :label="ABOUT.label"
-            :active="activeTab === ABOUT.id"
-            :aria-current="activeTab === ABOUT.id ? 'page' : undefined"
-            :data-active="activeTab === ABOUT.id"
+            :active="current === ABOUT.id"
+            :aria-current="current === ABOUT.id ? 'page' : undefined"
+            :data-active="current === ABOUT.id"
             data-testid="app-settings-tab-about"
             @click="setTab(ABOUT.id)"
           />
@@ -248,27 +293,31 @@ function goBack() {
       </nav>
     </aside>
 
-    <main class="bg-background h-full min-h-0 min-w-0 flex-1 overflow-y-auto">
-      <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8 sm:px-8">
-        <header class="flex items-start gap-3">
-          <UAvatar
-            :icon="activeSection.icon"
-            color="neutral"
-            size="2xl"
-            :ui="{ root: 'rounded-lg bg-default ring ring-default', icon: 'text-highlighted size-5' }"
-          />
-          <div class="min-w-0 flex-1">
-            <h2 class="text-highlighted text-2xl font-semibold tracking-tight">{{ activeSection.title }}</h2>
-            <p class="text-muted mt-1 text-sm text-balance">
-              {{ activeSection.description }}
-            </p>
-          </div>
-          <div class="ml-auto shrink-0" data-testid="app-settings-account">
+    <main
+      ref="scroller"
+      class="bg-background h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
+      data-testid="app-settings-content"
+      @scroll.passive="onScroll"
+    >
+      <div class="mx-auto flex w-full max-w-3xl flex-col gap-12 px-6 py-8 sm:px-8">
+        <div class="flex items-center justify-between gap-3">
+          <h1 class="text-highlighted text-2xl font-semibold tracking-tight">Settings</h1>
+          <div class="shrink-0" data-testid="app-settings-account">
             <GithubAccount />
           </div>
-        </header>
+        </div>
 
-        <component :is="activeSection.component" />
+        <section
+          v-for="section in SECTIONS"
+          :id="`settings-${section.id}`"
+          :key="section.id"
+          :ref="(el) => bindSection(section.id, el)"
+          class="flex scroll-mt-6 flex-col gap-6"
+          :aria-label="section.label"
+          :data-testid="`app-settings-section-${section.id}`"
+        >
+          <component :is="section.component" />
+        </section>
       </div>
     </main>
   </div>
