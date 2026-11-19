@@ -59,7 +59,10 @@ const error = computed(() =>
       : null,
 );
 const closedCount = computed(() =>
-  store.closedItems === null ? null : `${closedRows.value.length}${store.closedMore ? "+" : ""}`,
+  // "0+" says nothing: with none found on the first page, leave the count out.
+  store.closedItems === null || (closedRows.value.length === 0 && store.closedMore)
+    ? null
+    : `${closedRows.value.length}${store.closedMore ? "+" : ""}`,
 );
 /** Anything beyond `is:`/`sort:` narrows the list: an empty result means "no match", not "nothing". */
 const searching = computed(
@@ -186,10 +189,10 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
       </form>
 
       <div
-        class="border-default bg-default flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
+        class="flex min-h-0 flex-1 flex-col"
         data-testid="review-list-card"
       >
-        <div class="bg-muted border-default flex shrink-0 flex-wrap items-center gap-1 border-b px-2 py-1.5">
+        <div class="flex shrink-0 flex-wrap items-center gap-1 py-1.5">
           <UButton
             color="neutral"
             :variant="query.state === 'open' ? 'soft' : 'ghost'"
@@ -285,11 +288,11 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
           :title="query.state === 'closed' ? 'No closed changes.' : 'No changes waiting for review.'"
           data-testid="review-empty"
         />
-        <ul v-else class="divide-default m-0 flex list-none flex-col divide-y overflow-y-auto p-0">
+        <ul v-else class="m-0 flex list-none flex-col gap-2 overflow-y-auto p-0 pt-3">
           <li
             v-for="item in rows"
             :key="item.number"
-            class="hover:bg-elevated/50 flex cursor-pointer items-start gap-3 px-4 py-3"
+            class="border-default bg-default hover:bg-elevated/50 flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3"
             data-testid="review-item"
             @click="open(item.number)"
           >

@@ -175,9 +175,9 @@ describe("ReviewInbox like GitHub's list", () => {
 
   it("renders rows with label colours, checks passed/total, comments and the review tag", async () => {
     const { w } = await mountInbox(ITEMS);
-    expect(w.get("[data-testid='review-list-card']").classes()).toEqual(
-      expect.arrayContaining(["border-default", "bg-default", "rounded-lg", "border"]),
-    );
+    // The list sits on the page: no card background or border around it.
+    expect(w.get("[data-testid='review-list-card']").classes()).not.toContain("bg-default");
+    expect(w.get("[data-testid='review-list-card']").classes()).not.toContain("rounded-lg");
     expect(w.find("input[type='checkbox']").exists()).toBe(false);
     // Newest first.
     expect(rows(w)).toEqual(["Blog post", "Landing page update", "Pricing"]);
@@ -247,6 +247,11 @@ describe("ReviewInbox like GitHub's list", () => {
     await w.get("[data-testid='review-sort-newest']").trigger("click");
     await flushPromises();
     expect(q(router)).toBe("is:open");
+  });
+
+  it("leaves the Closed count out when the first page found none", async () => {
+    const { w } = await mountInbox(ITEMS, { closed: [], more: true });
+    expect(w.find("[data-testid='review-closed-count']").exists()).toBe(false);
   });
 
   it("switches between Open and Closed with their counts", async () => {
