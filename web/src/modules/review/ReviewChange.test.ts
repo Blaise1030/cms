@@ -63,7 +63,10 @@ async function mountChange(api: Record<string, unknown>) {
   return { w, router };
 }
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+});
+afterEach(() => vi.useRealTimers());
 
 describe("ReviewChange", () => {
   it("shows the header and what changed", async () => {
@@ -122,6 +125,111 @@ describe("ReviewChange", () => {
     });
     expect(w.get("[role='alert']").text()).toContain("GitHub is unreachable");
     expect(w.text()).not.toContain("no longer waiting");
+  });
+
+  describe("preview", () => {
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF) });
+
+    it("prepares the current head and shows the building copy, polling every 2 s until ready", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const reviewPreview = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "building" })
+        .mockResolvedValue({ state: "ready", url: "/preview/site/reviews/7/abc/" });
+      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
+      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview });
+      expect(prepareReviewPreview).toHaveBeenCalledWith("site", 7, "abc");
+      expect(w.text()).toContain("Preparing the preview…");
+      // The diff and decision stay usable while it builds.
+      expect(w.find("[data-testid='diff-stub']").exists()).toBe(true);
+      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(reviewPreview).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(reviewPreview).toHaveBeenCalledWith("site", 7, "abc");
+      await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+      const frame = w.get("iframe[data-testid='review-preview-frame']");
+      expect(frame.attributes("src")).toBe("http://127.0.0.1:7800/preview/site/reviews/7/abc/");
+      expect(frame.attributes("sandbox")).toBe("allow-same-origin");
+      expect(w.text()).not.toContain("Preparing the preview…");
+      const calls = reviewPreview.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(reviewPreview.mock.calls.length).toBe(calls);
+    });
+
+    it("shows the iframe at once when the first answer is ready", async () => {
+      const { w } = await mountChange({
+        ...base(),
+        prepareReviewPreview: vi.fn(async () => ({ state: "ready", url: "/preview/site/reviews/7/abc/" })),
+        reviewPreview: vi.fn(),
+      });
+      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
+      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
+    });
+
+    it("shows the failure and Try again prepares once more", async () => {
+      const prepareReviewPreview = vi
+        .fn()
+        .mockResolvedValueOnce({ state: "failed", message: "npm ERR! build exploded" })
+        .mockResolvedValueOnce({ state: "ready", url: "/preview/site/reviews/7/abc/" });
+      const { w } = await mountChange({ ...base(), prepareReviewPreview, reviewPreview: vi.fn() });
+      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("npm ERR! build exploded");
+      expect(w.find("[data-testid='diff-stub']").exists()).toBe(true);
+      expect(w.get("[data-testid='review-greenlight']").attributes("disabled")).toBeUndefined();
+      await w.get("[data-testid='review-preview-retry']").trigger("click");
+      await flushPromises();
+      expect(prepareReviewPreview).toHaveBeenCalledTimes(2);
+      expect(w.find("iframe[data-testid='review-preview-frame']").exists()).toBe(true);
+    });
+
+    it("shows a failure when preparing itself fails", async () => {
+      const { w } = await mountChange({
+        ...base(),
+        prepareReviewPreview: vi.fn(async () => {
+          throw new ApiError("UNKNOWN", "GitHub is unreachable", 502);
+        }),
+        reviewPreview: vi.fn(),
+      });
+      expect(w.get("[data-testid='review-preview-failed']").text()).toContain("GitHub is unreachable");
+    });
+
+    it("stops polling on unmount", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const reviewPreview = vi.fn(async () => ({ state: "building" }));
+      const { w } = await mountChange({
+        ...base(),
+        prepareReviewPreview: vi.fn(async () => ({ state: "building" })),
+        reviewPreview,
+      });
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(reviewPreview).toHaveBeenCalledTimes(1);
+      w.unmount();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(reviewPreview).toHaveBeenCalledTimes(1);
+    });
+
+    it("restarts for the new head after the change moved", async () => {
+      const prepareReviewPreview = vi.fn(async () => ({ state: "building" }));
+      const review = vi
+        .fn()
+        .mockResolvedValueOnce({ ...DETAIL })
+        .mockResolvedValue({ ...DETAIL, headSha: "def" });
+      const decideReview = vi.fn(async () => {
+        throw new ApiError("CONFLICT", "This change was updated since you opened it", 409, { reason: "head_moved" });
+      });
+      const { w } = await mountChange({
+        review,
+        reviewDiff: vi.fn(async () => DIFF),
+        decideReview,
+        prepareReviewPreview,
+        reviewPreview: vi.fn(async () => ({ state: "building" })),
+      });
+      expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "abc");
+      await w.get("[data-testid='review-greenlight']").trigger("click");
+      await flushPromises();
+      await vi.waitFor(() => expect(prepareReviewPreview).toHaveBeenLastCalledWith("site", 7, "def"));
+    });
   });
 
   describe("decision", () => {

@@ -158,6 +158,8 @@ export function pushPullHead(
   number: number,
   file: string,
   text: string,
+  /** Whole files to write too (path relative to the repo root), e.g. a buildable site. */
+  files: Record<string, string> = {},
 ): string {
   const work = fs.mkdtempSync(path.join(env.tmp, "pr-work-"));
   const git = (...args: string[]) =>
@@ -168,6 +170,10 @@ export function pushPullHead(
     ).trim();
   execFileSync("git", ["clone", "-q", "--branch", "main", env.bareRemote, work]);
   fs.appendFileSync(path.join(work, file), text);
+  for (const [name, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(work, name)), { recursive: true });
+    fs.writeFileSync(path.join(work, name), content);
+  }
   git("add", "-A");
   git("commit", "-q", "-m", `Edit ${file}`);
   const sha = git("rev-parse", "HEAD");

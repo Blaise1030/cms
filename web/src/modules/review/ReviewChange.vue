@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { SplitterItem } from "@nuxt/ui";
 import UAlert from "@nuxt/ui/components/Alert.vue";
@@ -10,6 +10,8 @@ import UIcon from "@nuxt/ui/components/Icon.vue";
 import USplitter from "@nuxt/ui/components/Splitter.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
+import type { ReviewPreview } from "@/core/types";
+import { errorMessage } from "@orso/utils";
 import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
 import SendBackDialog from "./SendBackDialog.vue";
@@ -62,6 +64,62 @@ async function sendBack(comment: string) {
   // change before choosing again; other failures stay in the dialog with the comment.
   if ((await store.decide("send_back", comment)) || store.gone) sendingBack.value = false;
 }
+
+/** The rendered site of the change's head. A plain frame: the live-preview bridge belongs to the dev server. */
+const POLL_MS = 2000;
+const preview = ref<ReviewPreview | null>(null);
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let previewRun = 0;
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+/** Applies an answer for run `run`; keeps polling while the site is still building. */
+function settle(run: number, headSha: string, next: ReviewPreview) {
+  if (run !== previewRun) return;
+  preview.value = next;
+  if (next.state === "building") pollTimer = setTimeout(() => void poll(run, headSha), POLL_MS);
+}
+
+async function poll(run: number, headSha: string) {
+  try {
+    const next = await daemon.api.reviewPreview(props.projectId, props.number, headSha);
+    settle(run, headSha, next);
+  } catch (e) {
+    if (run === previewRun) preview.value = { state: "failed", message: errorMessage(e) };
+  }
+}
+
+async function preparePreview() {
+  stopPolling();
+  const run = ++previewRun;
+  const headSha = change.value?.headSha;
+  if (!headSha) {
+    preview.value = null;
+    return;
+  }
+  preview.value = { state: "building" };
+  try {
+    settle(run, headSha, await daemon.api.prepareReviewPreview(props.projectId, props.number, headSha));
+  } catch (e) {
+    if (run === previewRun) preview.value = { state: "failed", message: errorMessage(e) };
+  }
+}
+
+// Opening a change, or its head moving, starts the build for that head; leaving stops the polling.
+watch(() => [props.projectId, props.number, change.value?.headSha] as const, () => void preparePreview(), {
+  immediate: true,
+});
+onBeforeUnmount(() => {
+  previewRun++;
+  stopPolling();
+});
+
+const previewSrc = computed(() =>
+  preview.value?.state === "ready" ? new URL(preview.value.url, daemon.config.value.origin).toString() : "",
+);
 
 const SPLIT: SplitterItem[] = [
   { id: "review-files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
@@ -173,7 +231,44 @@ function reveal(path: string) {
       >
         {{ change.description }}
       </p>
-      <!-- Task 10 adds the Preview pane beside What changed. -->
+      <h2 class="text-muted m-0 shrink-0 px-3 pb-1 text-xs font-medium">Preview</h2>
+      <div class="bg-muted mx-3 mb-2 h-64 shrink-0 overflow-hidden rounded-md" data-testid="review-preview">
+        <p
+          v-if="preview?.state === 'building'"
+          class="text-muted flex h-full items-center justify-center gap-2 text-sm"
+          data-testid="review-preview-building"
+        >
+          <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
+          Preparing the preview…
+        </p>
+        <iframe
+          v-else-if="preview?.state === 'ready'"
+          :key="previewSrc"
+          :src="previewSrc"
+          title="Preview of the change"
+          class="bg-default h-full w-full border-0"
+          sandbox="allow-same-origin"
+          referrerpolicy="no-referrer"
+          data-testid="review-preview-frame"
+        />
+        <div
+          v-else-if="preview?.state === 'failed'"
+          class="flex h-full flex-col items-start gap-2 overflow-hidden p-3"
+          data-testid="review-preview-failed"
+        >
+          <p class="text-default shrink-0 text-sm">The preview could not be prepared.</p>
+          <pre class="text-muted min-h-0 w-full flex-1 overflow-auto font-mono text-xs whitespace-pre-wrap">{{ preview.message }}</pre>
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            label="Try again"
+            class="shrink-0"
+            data-testid="review-preview-retry"
+            @click="preparePreview()"
+          />
+        </div>
+      </div>
       <h2 class="text-muted m-0 shrink-0 px-3 pb-1 text-xs font-medium">What changed</h2>
       <UEmpty
         v-if="store.diff && store.diff.files.length === 0"

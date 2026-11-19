@@ -122,6 +122,12 @@ export interface ReviewDetail extends ReviewItem {
   reason: string | null;
 }
 
+/** The rendered preview of a change under review (`state` is the wire tag). */
+export type ReviewPreview =
+  | { state: "building" }
+  | { state: "ready"; url: string }
+  | { state: "failed"; message: string };
+
 /** `pr` of `GET /api/changes/{branch}/status`. */
 export interface PrStatus {
   number: number;

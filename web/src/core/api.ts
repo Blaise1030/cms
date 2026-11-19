@@ -44,6 +44,7 @@ import {
   type ProviderVerifyResult,
   type ReviewDetail,
   type ReviewItem,
+  type ReviewPreview,
   type RuntimeStatus,
   type SetupSnapshot,
   type SetupStatus,
@@ -427,6 +428,12 @@ export function createApi(
       number: number,
       body: { decision: "greenlight" | "send_back"; comment?: string; headSha: string },
     ) => send("POST", `/api/projects/${enc(project)}/reviews/${number}/decision`, { body }).then(() => undefined),
+    /** Start (or join) the build of the change's head; 409 `head_moved` when `headSha` is stale. */
+    prepareReviewPreview: (project: string, number: number, headSha: string) =>
+      json<ReviewPreview>("POST", `/api/projects/${enc(project)}/reviews/${number}/preview`, { body: { headSha } }),
+    /** State of a prepared preview; 404 when it was never prepared. */
+    reviewPreview: (project: string, number: number, headSha: string) =>
+      json<ReviewPreview>("GET", `/api/projects/${enc(project)}/reviews/${number}/preview`, { query: { headSha } }),
     restoreCheckpoint: (project: string, sha: string) =>
       json<{ restored: string }>("POST", `/api/checkpoints/${enc(sha)}/restore`, {
         body: { project },

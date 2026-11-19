@@ -2,7 +2,7 @@
 //! `GET /api/projects/{id}/reviews/{n}/diff`, `POST /api/projects/{id}/reviews/{n}/decision`:
 //! the review inbox over HTTP.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -13,6 +13,7 @@ use crate::github::Decision;
 
 use crate::error::ApiError;
 use crate::projects::Project;
+use crate::review_preview::ReviewPreview;
 use crate::state::AppState;
 use crate::{review, settings};
 
@@ -137,6 +138,61 @@ pub async fn diff(
     let head = review::fetch_head(&project.dir, number, &env).await?;
     let text = review::diff(&project.dir, &head).await?;
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
+}
+
+/// Body of `POST /api/projects/{id}/reviews/{n}/preview`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewBody {
+    /// The head commit the reviewer is looking at.
+    head_sha: String,
+}
+
+/// Query of `GET /api/projects/{id}/reviews/{n}/preview`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewQuery {
+    head_sha: String,
+}
+
+/// `POST /api/projects/{id}/reviews/{n}/preview` → the preview of the change's head. Fetches the
+/// head so the commit exists locally, refuses when it is no longer `headSha`, then starts (or joins)
+/// the build.
+pub async fn prepare_preview(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+    Json(body): Json<PreviewBody>,
+) -> Result<Json<ReviewPreview>, ApiError> {
+    let (project, _) = project_repo(&state, &id).await?;
+    let env = state.github.git_env().await?;
+    let head = review::fetch_head(&project.dir, number, &env).await?;
+    if !head.eq_ignore_ascii_case(&body.head_sha) {
+        return Err(
+            ApiError::conflict("This change was updated since you opened it")
+                .with_reason("head_moved"),
+        );
+    }
+    let preview = state
+        .review_previews
+        .prepare(&project.id, &project.dir, number, &head)
+        .await;
+    Ok(Json(preview))
+}
+
+/// `GET /api/projects/{id}/reviews/{n}/preview?headSha=` → the preview's state; 404 when it was
+/// never prepared.
+pub async fn preview_status(
+    State(state): State<AppState>,
+    Path((id, number)): Path<(String, u64)>,
+    Query(query): Query<PreviewQuery>,
+) -> Result<Json<ReviewPreview>, ApiError> {
+    let (project, _) = project_repo(&state, &id).await?;
+    state
+        .review_previews
+        .status(&project.id, number, &query.head_sha)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::enoent("This preview has not been prepared"))
 }
 
 #[cfg(test)]
@@ -472,5 +528,103 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    /// `state` with a builder that writes a one-page site instead of running npm.
+    fn with_fake_builds(state: &mut AppState, root: &FsPath) {
+        use crate::review_preview::ReviewPreviews;
+        let builder: crate::review_preview::Builder = std::sync::Arc::new(|_, _, _, out| {
+            Box::pin(async move {
+                tokio::fs::create_dir_all(&out).await.unwrap();
+                tokio::fs::write(out.join("index.html"), "<h1>Hero</h1>")
+                    .await
+                    .unwrap();
+                Ok(())
+            })
+        });
+        state.review_previews = std::sync::Arc::new(
+            ReviewPreviews::new(root.join("rp"), std::time::SystemTime::now).with_builder(builder),
+        );
+    }
+
+    fn head_of(root: &FsPath) -> String {
+        let out = Command::new("git")
+            .args(["rev-parse", "refs/pull/7/head"])
+            .current_dir(root.join("o/origin.git"))
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[tokio::test]
+    async fn preview_is_building_then_ready() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        with_fake_builds(&mut state, tmp.path());
+        let sha = head_of(tmp.path());
+        let first = prepare_preview(
+            State(state.clone()),
+            Path((id.clone(), 7)),
+            Json(PreviewBody {
+                head_sha: sha.clone(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(first, ReviewPreview::Building);
+        let want = ReviewPreview::Ready {
+            url: format!("/preview/{id}/reviews/7/{sha}/"),
+        };
+        let mut last = None;
+        for _ in 0..400 {
+            let got = preview_status(
+                State(state.clone()),
+                Path((id.clone(), 7)),
+                Query(PreviewQuery {
+                    head_sha: sha.clone(),
+                }),
+            )
+            .await
+            .unwrap()
+            .0;
+            if got != ReviewPreview::Building {
+                last = Some(got);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(last, Some(want));
+        let page = state.review_previews.serve(&id, 7, &sha, "").await.unwrap();
+        assert_eq!(page.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn preview_of_a_moved_head_is_a_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        with_fake_builds(&mut state, tmp.path());
+        let err = prepare_preview(
+            State(state.clone()),
+            Path((id.clone(), 7)),
+            Json(PreviewBody {
+                head_sha: "abc123".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 409);
+        assert_eq!(err.reason, Some("head_moved"));
+        // Nothing was started.
+        let err = preview_status(
+            State(state),
+            Path((id, 7)),
+            Query(PreviewQuery {
+                head_sha: "abc123".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.http_status(), 404);
     }
 }

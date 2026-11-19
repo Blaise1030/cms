@@ -12,7 +12,15 @@ const PR = 3;
 async function openReview(page: import("@playwright/test").Page, orso: import("../fixtures/daemon").orsoEnv) {
   const { origin, token, projectId, bareRemote, github } = orso;
   // A teammate's change, labelled for review, with its head where GitHub keeps it.
-  const sha = pushPullHead(orso, PR, "serve.mjs", "// Fix the hero copy\n");
+  // The change's head builds a one-page site, which the Preview pane shows.
+  const sha = pushPullHead(orso, PR, "serve.mjs", "// Fix the hero copy\n", {
+    "package.json": JSON.stringify({
+      name: "site",
+      private: true,
+      scripts: { dev: "node serve.mjs", build: "mkdir -p dist && cp page.html dist/index.html" },
+    }),
+    "page.html": "<h1>Fresh hero copy</h1>\n",
+  });
   github.addReviewPr({
     number: PR,
     title: "Fix the hero copy",
@@ -39,12 +47,20 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   return sha;
 }
 
+/** The change's built page shows in the Preview pane. */
+async function expectPreview(page: import("@playwright/test").Page) {
+  await expect(
+    page.frameLocator('iframe[data-testid="review-preview-frame"]').locator("h1"),
+  ).toHaveText("Fresh hero copy", { timeout: 90_000 });
+}
+
 test("reviewer greenlights a change without touching the checkout", async ({ page, orso }) => {
   const { projectDir, github } = orso;
   const branchBefore = git(projectDir, ["branch", "--show-current"]);
   const statusBefore = git(projectDir, ["status", "--porcelain"]);
 
   const sha = await openReview(page, orso);
+  await expectPreview(page);
   await page.getByRole("button", { name: "Give greenlight" }).click();
 
   await expect.poll(() => github.reviewPosts().length).toBe(1);
