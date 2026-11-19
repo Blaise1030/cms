@@ -20,7 +20,7 @@ export const site = {
   /** Header secondary action; set to `null` to hide it. */
   secondaryCta: { label: "GitHub", href: "https://github.com/Blaise1030/cms" },
   /** Header call to action; set to `null` to hide it. */
-  cta: { label: "Get Project Orso", href: "https://github.com/Blaise1030/cms" },
+  cta: { label: "Get Orso", href: "https://github.com/Blaise1030/cms" },
   /** Download button: bump `version` when a new GitHub release ships; asset names must match the release. */
   release: {
     version: "v0.1.9",
