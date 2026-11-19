@@ -162,13 +162,15 @@ export function pushPullHead(
   files: Record<string, string> = {},
 ): string {
   const work = fs.mkdtempSync(path.join(env.tmp, "pr-work-"));
+  // Never signs or runs hooks, whatever the machine's git config says.
+  const safe = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
   const git = (...args: string[]) =>
     execFileSync(
       "git",
-      ["-c", "user.name=Bob", "-c", "user.email=bob@example.com", ...args],
+      [...safe, "-c", "user.name=Bob", "-c", "user.email=bob@example.com", ...args],
       { cwd: work, encoding: "utf8" },
     ).trim();
-  execFileSync("git", ["clone", "-q", "--branch", "main", env.bareRemote, work]);
+  execFileSync("git", [...safe, "clone", "-q", "--branch", "main", env.bareRemote, work]);
   fs.appendFileSync(path.join(work, file), text);
   for (const [name, content] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(work, name)), { recursive: true });
