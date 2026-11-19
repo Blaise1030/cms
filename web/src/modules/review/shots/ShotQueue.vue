@@ -3,7 +3,6 @@ import { ref } from "vue";
 import { useQueryClient } from "@tanstack/vue-query";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
-import USlideover from "@nuxt/ui/components/Slideover.vue";
 import UTextarea from "@nuxt/ui/components/Textarea.vue";
 import { useDaemon } from "@/core/daemon";
 import { errorMessage } from "@orso/utils";
@@ -12,12 +11,12 @@ import { useShotQueue, type ShotItem } from "./queue";
 import { shotItemsForReview } from "./send";
 
 /**
- * The screenshot comments queued on this change: a "Queued (n)" button opening a list to edit,
- * remove, revisit (opens the page it was taken on) and send as one review comment. Give
- * greenlight and Send back also carry the queue.
+ * The screenshot comments queued on this change, as a pane beside the preview: edit, remove,
+ * revisit (opens the page it was taken on) and send as one review comment. Give greenlight and
+ * Send back also carry the queue.
  */
 const props = defineProps<{ projectId: string; number: number; headSha: string; open: boolean }>();
-const emit = defineEmits<{ navigate: [item: ShotItem] }>();
+const emit = defineEmits<{ navigate: [item: ShotItem]; close: [] }>();
 
 const daemon = useDaemon();
 const client = useQueryClient();
@@ -25,7 +24,6 @@ const queue = useShotQueue(
   () => props.projectId,
   () => props.number,
 );
-const shown = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
 
@@ -41,7 +39,7 @@ async function send() {
       items: shotItemsForReview(queue.items.value),
     });
     queue.clear();
-    shown.value = false;
+    emit("close");
     void client.invalidateQueries({ queryKey: reviewKeys.conversation(props.projectId, props.number) });
   } catch (e) {
     // The queue stays, so nothing is lost.
@@ -53,31 +51,27 @@ async function send() {
 
 function revisit(item: ShotItem) {
   emit("navigate", item);
-  shown.value = false;
 }
 </script>
 
 <template>
-  <!-- One root, so the parent's layout classes (ml-auto) land here. -->
-  <div class="flex self-center">
-  <!-- Opened by hand, not as the slideover's trigger slot: the button appears only once the
-       stored queue has loaded, and a trigger that mounts late never gets its click wired. -->
-  <UButton
-    v-if="queue.items.value.length"
-    color="neutral"
-    variant="soft"
-    size="sm"
-    icon="i-hugeicons-crop"
-    class="self-center"
-    :label="`Queued (${queue.items.value.length})`"
-    aria-haspopup="dialog"
-    :aria-expanded="shown"
-    data-testid="shot-queue-open"
-    @click="shown = true"
-  />
-  <USlideover v-model:open="shown" title="Screenshot comments" :ui="{ body: 'flex flex-col gap-3' }">
-    <template #body>
-      <p v-if="!queue.items.value.length" class="text-muted text-sm">Nothing queued.</p>
+  <section class="bg-default flex h-full min-h-0 w-full flex-col" aria-label="Screenshot comments" data-testid="shot-queue-panel">
+    <header class="border-default flex h-9 shrink-0 items-center gap-2 border-b px-3">
+      <span class="text-highlighted min-w-0 flex-1 truncate text-sm font-medium">Screenshot comments</span>
+      <UButton
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        icon="i-hugeicons-cancel-01"
+        aria-label="Hide screenshot comments"
+        data-testid="shot-queue-close"
+        @click="emit('close')"
+      />
+    </header>
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <p v-if="!queue.items.value.length" class="text-muted text-sm">
+        Nothing queued. Use Pick on a preview to comment on part of the page.
+      </p>
       <article
         v-for="(item, i) in queue.items.value"
         :key="item.id"
@@ -124,22 +118,19 @@ function revisit(item: ShotItem) {
           />
         </div>
       </article>
-    </template>
-    <template #footer>
-      <div class="flex w-full flex-col gap-2">
-        <UAlert v-if="error" color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="error" data-testid="shot-queue-error" />
-        <p class="text-muted text-xs">Give greenlight and Send back include these too.</p>
-        <UButton
-          block
-          label="Send comments"
-          icon="i-hugeicons-sent"
-          :loading="sending"
-          :disabled="!open || !queue.items.value.length || sending"
-          data-testid="shot-queue-send"
-          @click="send"
-        />
-      </div>
-    </template>
-  </USlideover>
-  </div>
+    </div>
+    <footer class="border-default flex shrink-0 flex-col gap-2 border-t p-3">
+      <UAlert v-if="error" color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="error" data-testid="shot-queue-error" />
+      <p class="text-muted text-xs">Give greenlight and Send back include these too.</p>
+      <UButton
+        block
+        label="Send comments"
+        icon="i-hugeicons-sent"
+        :loading="sending"
+        :disabled="!open || !queue.items.value.length || sending"
+        data-testid="shot-queue-send"
+        @click="send"
+      />
+    </footer>
+  </section>
 </template>

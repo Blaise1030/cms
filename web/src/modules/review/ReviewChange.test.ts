@@ -136,6 +136,35 @@ describe("ReviewChange", () => {
     expect(w.find("[data-testid='review-send-back']").isVisible()).toBe(true);
   });
 
+  it("shows queued screenshot comments in a pane beside the preview, toggled by Queued", async () => {
+    const { useShotQueue, newShotId, resetShotQueuesForTest } = await import("./shots/queue");
+    resetShotQueuesForTest();
+    const { w } = await mountChange({
+      review: vi.fn(async () => DETAIL),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
+    });
+    expect(w.find("[data-testid='shot-queue-open']").exists()).toBe(false);
+    useShotQueue(() => "site", () => 7).add({
+      id: newShotId(), side: "change", path: "/help/", viewport: "desktop",
+      rect: { x: 0, y: 0, width: 10, height: 10 }, imageDataUrl: null, note: "Please fix", createdAt: "2026-11-19T12:00:00Z",
+    });
+    await flushPromises();
+    // The pane's code loads on demand.
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    // A new comment opens the pane by itself, inside the preview area.
+    expect(w.get("[data-testid='shot-queue-open']").text()).toBe("Queued (1)");
+    expect(w.get("[data-testid='review-preview'] [data-testid='shot-queue-panel']").text()).toContain("Screenshot comments");
+    await w.get("[data-testid='shot-queue-open']").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid='shot-queue-panel']").exists()).toBe(false);
+    await w.get("[data-testid='shot-queue-open']").trigger("click");
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    expect(w.find("[data-testid='shot-queue-panel']").exists()).toBe(true);
+    resetShotQueuesForTest();
+  });
+
   it("lists a binary-only change", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),

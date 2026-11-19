@@ -31,8 +31,6 @@ async function mountQueue(reviewWithShots: ReturnType<typeof vi.fn>) {
     attachTo: document.body,
   });
   await flushPromises();
-  await w.get("[data-testid='shot-queue-open']").trigger("click");
-  await flushPromises();
   return w;
 }
 
@@ -47,13 +45,12 @@ describe("ShotQueue", () => {
     q.add(item("Remove me"));
     const reviewWithShots = vi.fn(async () => undefined);
     const w = await mountQueue(reviewWithShots);
-    expect(w.get("[data-testid='shot-queue-open']").text()).toBe("Queued (3)");
-    expect(body().findAll("[data-testid='shot-queue-item']")).toHaveLength(3);
-    await body().findAll("[data-testid='shot-queue-note']")[0]!.setValue("Hero is cut off on mobile");
-    await body().findAll("[data-testid='shot-queue-remove']")[2]!.trigger("click");
-    expect(body().findAll("[data-testid='shot-queue-item']")).toHaveLength(2);
+    expect(w.findAll("[data-testid='shot-queue-item']")).toHaveLength(3);
+    await w.findAll("[data-testid='shot-queue-note']")[0]!.setValue("Hero is cut off on mobile");
+    await w.findAll("[data-testid='shot-queue-remove']")[2]!.trigger("click");
+    expect(w.findAll("[data-testid='shot-queue-item']")).toHaveLength(2);
 
-    await body().get("[data-testid='shot-queue-send']").trigger("click");
+    await w.get("[data-testid='shot-queue-send']").trigger("click");
     await flushPromises();
     expect(reviewWithShots).toHaveBeenCalledWith("site", 7, {
       event: "COMMENT",
@@ -73,29 +70,11 @@ describe("ShotQueue", () => {
     const reviewWithShots = vi.fn(async () => {
       throw new ApiError("UNKNOWN", "This change was updated since you opened it", 409, { reason: "head_moved" });
     });
-    await mountQueue(reviewWithShots);
-    await body().get("[data-testid='shot-queue-send']").trigger("click");
+    const w = await mountQueue(reviewWithShots);
+    await w.get("[data-testid='shot-queue-send']").trigger("click");
     await flushPromises();
-    expect(body().get("[data-testid='shot-queue-error']").text()).toContain("updated since you opened it");
+    expect(w.get("[data-testid='shot-queue-error']").text()).toContain("updated since you opened it");
     expect(q.items.value).toHaveLength(1);
   });
 });
 
-describe("ShotQueue opening", () => {
-  it("opens from a button that only appeared after the stored queue loaded", async () => {
-    // Start empty, as on a fresh page load before IndexedDB answers.
-    h.daemon = createFakeDaemon({ reviewWithShots: vi.fn() });
-    const w = mount(ShotQueue, {
-      props: { projectId: "p1", number: 7, headSha: "abc", open: true },
-      global: { plugins: [queryPlugin().plugin] },
-      attachTo: document.body,
-    });
-    await flushPromises();
-    expect(w.find("[data-testid='shot-queue-open']").exists()).toBe(false);
-    useShotQueue(() => "p1", () => 7).add(item("Hero is cut off"));
-    await flushPromises();
-    await w.get("[data-testid='shot-queue-open']").trigger("click");
-    await flushPromises();
-    expect(document.body.querySelectorAll("[data-testid='shot-queue-item']")).toHaveLength(1);
-  });
-});

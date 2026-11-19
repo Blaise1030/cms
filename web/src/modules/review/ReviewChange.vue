@@ -123,6 +123,34 @@ const shotQueue = useShotQueue(
   () => props.projectId,
   () => props.number,
 );
+/** The queue pane beside the preview; opens by itself when a new comment is queued. */
+const queueShown = ref(false);
+watch(
+  () => shotQueue.items.value.length,
+  (n, before) => {
+    if (n > (before ?? 0)) queueShown.value = true;
+    if (n === 0) queueShown.value = false;
+  },
+);
+async function toggleQueue() {
+  if (props.page !== "files") {
+    await router.push(reviewPath(props.projectId, props.number, "files"));
+    view.value = "preview";
+    queueShown.value = true;
+    return;
+  }
+  view.value = "preview";
+  queueShown.value = !queueShown.value;
+}
+/** The preview, and the queue beside it when shown. The preview pane keeps its id, so showing the
+ *  queue never remounts (and reloads) the frames. */
+const previewSplit = computed<SplitterItem[]>(() => [
+  { id: "review-preview-frames", slot: "frames", defaultSize: 72, minSize: 40 },
+  ...(queueShown.value
+    ? [{ id: "review-shot-queue", slot: "queue", defaultSize: 28, minSize: 18, maxSize: 50 } as SplitterItem]
+    : []),
+]);
+
 /** Opens a queued comment's page, on the Review page's preview, with its side showing. */
 async function revisitShot(item: ShotItem) {
   if (props.page !== "files") await router.push(reviewPath(props.projectId, props.number, "files"));
@@ -353,15 +381,18 @@ function reveal(path: string) {
             Review
             <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
           </RouterLink>
-          <!-- Queued screenshot comments, when there are any. -->
-          <ShotQueue
-            v-if="change"
-            :project-id="projectId"
-            :number="number"
-            :head-sha="change.headSha"
-            :open="change.open"
-            class="ml-auto"
-            @navigate="revisitShot"
+          <!-- Queued screenshot comments, when there are any: shows or hides their pane. -->
+          <UButton
+            v-if="change && shotQueue.items.value.length"
+            color="neutral"
+            :variant="queueShown && page === 'files' ? 'soft' : 'ghost'"
+            size="sm"
+            icon="i-hugeicons-crop"
+            class="ml-auto self-center"
+            :label="`Queued (${shotQueue.items.value.length})`"
+            :aria-pressed="queueShown && page === 'files'"
+            data-testid="shot-queue-open"
+            @click="toggleQueue"
           />
           <!-- Review only: what the card below shows, as a compact switch beside Refresh. -->
           <UTabs
@@ -405,110 +436,138 @@ function reveal(path: string) {
             class="relative flex min-h-0 flex-1 flex-col"
             data-testid="review-preview"
           >
-            <ShotPicker
-              v-if="change?.open"
-              :project-id="projectId"
-              :number="number"
-              :picking="picking"
-              :picked="pickedArea"
-              @cancel="picking = null"
-              @done="pickedArea = null"
-            />
-            <BrowserFrame
-              :key="`${projectId}:${number}`"
-              ref="frame"
-              v-model:collapsed="collapsed"
-              v-model:picking="picking"
-              :pickable="!!change?.open"
-              :frames="frames"
-              @pick="pickedArea = $event"
+            <USplitter
+              :items="previewSplit"
+              auto-save-id="review-shot-queue"
               class="min-h-0 flex-1"
+              :ui="{ handle: 'flex items-center justify-center' }"
             >
-              <template #placeholder="{ frame }">
-                <UEmpty
-                  v-if="frame.key === 'live'"
-                  variant="naked"
-                  icon="i-hugeicons-globe-02"
-                  title="No live site found for this project."
-                  class="m-auto"
-                  data-testid="review-live-missing"
+              <template #resize-handle>
+                <div
+                  class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+                  aria-hidden="true"
                 />
-                <UEmpty
-                  v-else-if="previewError"
-                  variant="naked"
-                  icon="i-hugeicons-alert-circle"
-                  title="The preview could not be loaded."
-                  :description="previewError"
-                  class="m-auto"
-                  role="alert"
-                  data-testid="review-preview-error"
-                >
-                  <template #actions>
-                    <UButton
-                      color="neutral"
-                      variant="outline"
-                      size="sm"
-                      label="Try again"
-                      data-testid="review-preview-retry"
-                      @click="reloadPreview()"
-                    />
-                  </template>
-                </UEmpty>
-                <UEmpty
-                  v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
-                  variant="naked"
-                  :title="preview ? 'Deploying preview…' : 'Loading preview…'"
-                  class="m-auto"
-                  data-testid="review-preview-deploying"
-                >
-                  <template #leading>
-                    <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
-                  </template>
-                </UEmpty>
-                <UEmpty
-                  v-else-if="preview?.state === 'failed'"
-                  variant="naked"
-                  icon="i-hugeicons-alert-02"
-                  title="The preview deploy failed."
-                  class="m-auto"
-                  data-testid="review-preview-failed"
-                >
-                  <template v-if="checksUrl" #actions>
-                    <UButton
-                      color="neutral"
-                      variant="outline"
-                      size="sm"
-                      label="See the checks on GitHub"
-                      trailing-icon="i-hugeicons-link-square-02"
-                      :to="checksUrl"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid="review-preview-checks"
-                    />
-                  </template>
-                </UEmpty>
-                <UEmpty
-                  v-else-if="preview?.state === 'none'"
-                  variant="naked"
-                  icon="i-hugeicons-computer-video"
-                  title="This site doesn't publish previews for changes."
-                  description="See What changed."
-                  class="m-auto"
-                  data-testid="review-preview-none"
-                >
-                  <template #actions>
-                    <UButton
-                      color="neutral"
-                      variant="outline"
-                      size="sm"
-                      label="What changed"
-                      data-testid="review-preview-to-changes"
-                      @click="view = 'changes'"
-                    />
-                  </template>
-                </UEmpty>
               </template>
-            </BrowserFrame>
+              <template #frames>
+                <div class="relative flex h-full min-h-0 w-full flex-col">
+                <ShotPicker
+                  v-if="change?.open"
+                  :project-id="projectId"
+                  :number="number"
+                  :picking="picking"
+                  :picked="pickedArea"
+                  @cancel="picking = null"
+                  @done="pickedArea = null"
+                />
+                <BrowserFrame
+                  :key="`${projectId}:${number}`"
+                  ref="frame"
+                  v-model:collapsed="collapsed"
+                  v-model:picking="picking"
+                  :pickable="!!change?.open"
+                  :frames="frames"
+                  @pick="pickedArea = $event"
+                  class="min-h-0 flex-1"
+                >
+                  <template #placeholder="{ frame }">
+                    <UEmpty
+                      v-if="frame.key === 'live'"
+                      variant="naked"
+                      icon="i-hugeicons-globe-02"
+                      title="No live site found for this project."
+                      class="m-auto"
+                      data-testid="review-live-missing"
+                    />
+                    <UEmpty
+                      v-else-if="previewError"
+                      variant="naked"
+                      icon="i-hugeicons-alert-circle"
+                      title="The preview could not be loaded."
+                      :description="previewError"
+                      class="m-auto"
+                      role="alert"
+                      data-testid="review-preview-error"
+                    >
+                      <template #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="Try again"
+                          data-testid="review-preview-retry"
+                          @click="reloadPreview()"
+                        />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
+                      variant="naked"
+                      :title="preview ? 'Deploying preview…' : 'Loading preview…'"
+                      class="m-auto"
+                      data-testid="review-preview-deploying"
+                    >
+                      <template #leading>
+                        <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'failed'"
+                      variant="naked"
+                      icon="i-hugeicons-alert-02"
+                      title="The preview deploy failed."
+                      class="m-auto"
+                      data-testid="review-preview-failed"
+                    >
+                      <template v-if="checksUrl" #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="See the checks on GitHub"
+                          trailing-icon="i-hugeicons-link-square-02"
+                          :to="checksUrl"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid="review-preview-checks"
+                        />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'none'"
+                      variant="naked"
+                      icon="i-hugeicons-computer-video"
+                      title="This site doesn't publish previews for changes."
+                      description="See What changed."
+                      class="m-auto"
+                      data-testid="review-preview-none"
+                    >
+                      <template #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="What changed"
+                          data-testid="review-preview-to-changes"
+                          @click="view = 'changes'"
+                        />
+                      </template>
+                    </UEmpty>
+                  </template>
+                </BrowserFrame>
+                </div>
+              </template>
+              <template #queue>
+                <ShotQueue
+                  v-if="change"
+                  :project-id="projectId"
+                  :number="number"
+                  :head-sha="change.headSha"
+                  :open="change.open"
+                  @navigate="revisitShot"
+                  @close="queueShown = false"
+                />
+              </template>
+            </USplitter>
           </div>
           <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
             <UEmpty
