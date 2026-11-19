@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import { chatCheckpoint, pushPullHead, startChange } from "../fixtures/daemon";
 import { expect, openPrMenu, test } from "../fixtures/orso";
@@ -9,12 +10,27 @@ function git(cwd: string, args: string[]): string {
 
 const PR = 3;
 
-async function openReview(page: import("@playwright/test").Page, orso: import("../fixtures/daemon").orsoEnv) {
+/** orso's preview bridge with self-capture, as `astro build` injects it with ORSO_PREVIEW=1. */
+function previewBridge(): string {
+  const src = (f: string) => readFileSync(new URL(`../../packages/astro/src/${f}`, import.meta.url), "utf8");
+  return `(() => {\n${src("capture.js")}\n${src("bridge.js")}\n})();`;
+}
+
+async function openReview(
+  page: import("@playwright/test").Page,
+  orso: import("../fixtures/daemon").orsoEnv,
+  { bridge = false }: { bridge?: boolean } = {},
+) {
   const { origin, token, projectId, bareRemote, github } = orso;
   // A teammate's change, labelled for review, with its head where GitHub keeps it.
   const sha = pushPullHead(orso, PR, "serve.mjs", "// Fix the hero copy\n");
   // Its deploy published a preview, which the Preview pane frames; nothing builds locally.
-  github.addSitePage("/pr-3/", "<h1>Fresh hero copy</h1>\n");
+  github.addSitePage(
+    "/pr-3/",
+    bridge
+      ? `<!doctype html><html><head><script>${previewBridge()}</script></head><body style="margin:0;background:#fff"><h1 style="font:700 48px sans-serif;color:#1d4ed8">Fresh hero copy</h1></body></html>\n`
+      : "<h1>Fresh hero copy</h1>\n",
+  );
   github.setPrStatus({ deployment: { environment_url: `${github.baseUrl}/sites/pr-3/` } });
   github.addReviewPr({
     number: PR,
@@ -188,7 +204,8 @@ test("reviewer queues a screenshot comment and sends it with the image on the as
   await page.getByTestId("shot-note-add").click();
   await expect(page.getByTestId("shot-queue-open")).toHaveText("Queued (1)");
 
-  await page.getByTestId("shot-queue-open").click();
+  // Adding to the queue shows its pane.
+  await expect(page.getByTestId("shot-queue-panel")).toBeVisible();
   await expect(page.getByTestId("shot-queue-item")).toHaveCount(1);
   await page.getByTestId("shot-queue-send").click();
   await expect.poll(() => github.reviewPosts().length).toBe(1);
@@ -205,4 +222,39 @@ test("reviewer queues a screenshot comment and sends it with the image on the as
   expect(review.body).toContain("Page: `/` (change, desktop)");
   expect(review.body).toContain(`![screenshot](`);
   expect(review.body).toContain(`/acme/site/blob/${commit!.sha}/${commit!.files[0]}?raw=true)`);
+});
+
+test("a preview built with orso's bridge screenshots itself, without asking to share the screen", async ({ page, orso }) => {
+  const { github } = orso;
+  // Screen sharing would need a prompt: here it only records that it was asked.
+  await page.addInitScript(() => {
+    (window as unknown as { __shared: number }).__shared = 0;
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      (window as unknown as { __shared: number }).__shared++;
+      throw new DOMException("denied", "NotAllowedError");
+    };
+  });
+  await openReview(page, orso, { bridge: true });
+  await expectPreview(page);
+
+  await page.getByTestId("browser-frame-pick-change").click();
+  const overlay = page.getByTestId("browser-frame-pick-overlay-change");
+  const box = (await overlay.boundingBox())!;
+  await page.mouse.move(box.x + 10, box.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 400, box.y + 120, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(page.getByTestId("shot-note")).toHaveAttribute("data-source", "preview", { timeout: 15_000 });
+  await expect(page.getByTestId("shot-note-image")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __shared: number }).__shared)).toBe(0);
+  await page.getByTestId("shot-note-input").fill("Headline colour");
+  await page.getByTestId("shot-note-add").click();
+  await expect(page.getByTestId("shot-queue-panel")).toBeVisible();
+  await page.getByTestId("shot-queue-send").click();
+  await expect.poll(() => github.reviewPosts().length).toBe(1);
+  const commit = github.gitCommits().find((c) => c.files.some((f) => f.startsWith("shots/")));
+  expect(commit!.files[0]).toMatch(/\.png$/);
+  expect(github.reviewPosts()[0]!.body.body).toContain("### 1. Headline colour");
+  expect(github.reviewPosts()[0]!.body.body).toContain(`![screenshot](`);
 });
