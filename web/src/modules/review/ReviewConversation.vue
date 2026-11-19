@@ -58,7 +58,7 @@ async function submit() {
 
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-conversation">
-    <div class="flex flex-col gap-6 px-3 pb-6 lg:flex-row">
+    <div class="flex flex-col gap-6 p-4 lg:flex-row">
       <div class="flex min-w-0 flex-1 flex-col gap-4">
         <article class="border-default bg-default overflow-hidden rounded-lg border" data-testid="review-description">
           <header class="bg-muted border-default border-b px-3 py-2 text-sm">

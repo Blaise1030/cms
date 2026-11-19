@@ -87,9 +87,8 @@ describe("ReviewChange", () => {
     });
     expect(w.text()).toContain("Fresh homepage hero");
     expect(w.text()).toContain("Ada");
-    const link = w.get("[data-testid='review-live-site']");
-    expect(link.attributes("href")).toBe("https://acme.pages.dev");
-    expect(link.text()).toContain("View live site");
+    // Live site lives on the Review page's frame, not in the header.
+    expect(w.find("[data-testid='review-live-site']").exists()).toBe(false);
     expect(w.text()).toContain("What changed");
     expect(w.get("[data-testid='tree-stub']").text()).toContain("a.txt");
     expect(w.get("[data-testid='diff-stub']").text()).toBe("a.txt");
@@ -113,15 +112,6 @@ describe("ReviewChange", () => {
     // The decision stays in reach whichever view is showing.
     expect(w.find("[data-testid='review-greenlight']").isVisible()).toBe(true);
     expect(w.find("[data-testid='review-send-back']").isVisible()).toBe(true);
-  });
-
-  it("hides the live site link when there is no URL", async () => {
-    const { w } = await mountChange({
-      review: vi.fn(async () => DETAIL),
-      reviewDiff: vi.fn(async () => diffOf(DIFF)),
-      liveSiteUrl: vi.fn(async () => null),
-    });
-    expect(w.find("[data-testid='review-live-site']").exists()).toBe(false);
   });
 
   it("lists a binary-only change", async () => {
@@ -185,7 +175,10 @@ describe("ReviewChange", () => {
       expect(files.text()).toContain("1");
       expect(files.attributes("href")).toBe("/p/site/review/7/files");
       expect(w.find("[data-testid='review-conversation']").exists()).toBe(true);
-      expect(w.find("[data-testid='review-card']").exists()).toBe(false);
+      // One card holds the tabs and the page.
+      expect(w.get("[data-testid='review-card']").find("[data-testid='review-pages']").exists()).toBe(true);
+      expect(w.get("[data-testid='review-card']").find("[data-testid='review-conversation']").exists()).toBe(true);
+      expect(w.find("[data-testid='review-files']").exists()).toBe(false);
       await files.trigger("click");
       await flushPromises();
       expect(router.currentRoute.value.name).toBe("project-review-files");
@@ -203,7 +196,8 @@ describe("ReviewChange", () => {
         expect(w.get("[data-testid='review-header-label']").text()).toBe("orso");
         expect(w.find("[data-testid='review-greenlight']").exists()).toBe(true);
         expect(w.find("[data-testid='review-send-back']").exists()).toBe(true);
-        expect(w.find("[data-testid='review-card']").exists()).toBe(page === "files");
+        expect(w.findAll("[data-testid='review-card']")).toHaveLength(1);
+        expect(w.find("[data-testid='review-files']").exists()).toBe(page === "files");
         w.unmount();
       }
     });

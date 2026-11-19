@@ -217,19 +217,6 @@ function reveal(path: string) {
           @click="greenlight()"
         />
       </div>
-      <UButton
-        v-if="liveUrl"
-        :href="liveUrl"
-        target="_blank"
-        rel="noopener noreferrer"
-        color="neutral"
-        variant="outline"
-        size="sm"
-        trailing-icon="i-hugeicons-link-square-02"
-        label="View live site"
-        class="shrink-0"
-        data-testid="review-live-site"
-      />
     </div>
 
     <UAlert
@@ -261,194 +248,196 @@ function reveal(path: string) {
       <UAlert color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.openError" role="alert" />
     </div>
     <template v-else-if="change">
-      <nav class="border-default mx-3 mb-3 flex shrink-0 gap-1 border-b" aria-label="Change pages" data-testid="review-pages">
-        <RouterLink
-          :to="reviewPath(projectId, number)"
-          :class="[PAGE_TAB, page === 'conversation' && PAGE_TAB_ACTIVE]"
-          :aria-current="page === 'conversation' ? 'page' : undefined"
-          data-testid="review-tab-conversation"
-        >
-          <UIcon name="i-hugeicons-message-multiple-01" class="size-4" />
-          Conversation
-          <UBadge v-if="talk.count.value !== null" color="neutral" variant="soft" size="sm" :label="String(talk.count.value)" />
-        </RouterLink>
-        <RouterLink
-          :to="reviewPath(projectId, number, 'files')"
-          :class="[PAGE_TAB, page === 'files' && PAGE_TAB_ACTIVE]"
-          :aria-current="page === 'files' ? 'page' : undefined"
-          data-testid="review-tab-files"
-        >
-          <UIcon name="i-hugeicons-file-validation" class="size-4" />
-          Review
-          <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
-        </RouterLink>
-      </nav>
-      <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
+      <!-- One card below the header: the page tabs as its top strip, then the page. -->
       <div
-        v-else
         class="border-default bg-default mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
         data-testid="review-card"
       >
-        <UTabs
-          v-model="view"
-          :items="VIEWS"
-          :content="false"
-          size="sm"
-          variant="link"
-          color="neutral"
-          class="border-default shrink-0 border-b px-3"
-          data-testid="review-view-tabs"
-        />
-        <div
-          v-show="view === 'preview'"
-          class="flex min-h-0 flex-1 flex-col"
-          data-testid="review-preview"
-        >
-          <div class="border-default flex shrink-0 items-center border-b px-3 py-1.5">
-            <UTabs
-              :model-value="compare"
-              :items="COMPARE"
-              :content="false"
-              size="xs"
-              variant="pill"
-              color="neutral"
-              data-testid="review-compare"
-              @update:model-value="picked = $event as Compare"
-            />
-          </div>
-          <BrowserFrame :key="`${projectId}:${number}`" :frames="frames" class="min-h-0 flex-1">
-            <template #placeholder="{ frame }">
-              <UEmpty
-                v-if="frame.key === 'live'"
-                variant="naked"
-                icon="i-hugeicons-globe-02"
-                title="No live site found for this project."
-                class="m-auto"
-                data-testid="review-live-missing"
-              />
-              <UEmpty
-                v-else-if="previewError"
-                variant="naked"
-                icon="i-hugeicons-alert-circle"
-                title="The preview could not be loaded."
-                :description="previewError"
-                class="m-auto"
-                role="alert"
-                data-testid="review-preview-error"
-              >
-                <template #actions>
-                  <UButton
-                    color="neutral"
-                    variant="outline"
-                    size="sm"
-                    label="Try again"
-                    data-testid="review-preview-retry"
-                    @click="reloadPreview()"
-                  />
-                </template>
-              </UEmpty>
-              <UEmpty
-                v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
-                variant="naked"
-                :title="preview ? 'Deploying preview…' : 'Loading preview…'"
-                class="m-auto"
-                data-testid="review-preview-deploying"
-              >
-                <template #leading>
-                  <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
-                </template>
-              </UEmpty>
-              <UEmpty
-                v-else-if="preview?.state === 'failed'"
-                variant="naked"
-                icon="i-hugeicons-alert-02"
-                title="The preview deploy failed."
-                class="m-auto"
-                data-testid="review-preview-failed"
-              >
-                <template v-if="checksUrl" #actions>
-                  <UButton
-                    color="neutral"
-                    variant="outline"
-                    size="sm"
-                    label="See the checks on GitHub"
-                    trailing-icon="i-hugeicons-link-square-02"
-                    :to="checksUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-testid="review-preview-checks"
-                  />
-                </template>
-              </UEmpty>
-              <UEmpty
-                v-else-if="preview?.state === 'none'"
-                variant="naked"
-                icon="i-hugeicons-computer-video"
-                title="This site doesn't publish previews for changes."
-                description="See What changed."
-                class="m-auto"
-                data-testid="review-preview-none"
-              >
-                <template #actions>
-                  <UButton
-                    color="neutral"
-                    variant="outline"
-                    size="sm"
-                    label="What changed"
-                    data-testid="review-preview-to-changes"
-                    @click="view = 'changes'"
-                  />
-                </template>
-              </UEmpty>
-            </template>
-          </BrowserFrame>
-        </div>
-        <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
-          <UEmpty
-            v-if="store.diff && store.diff.files.length === 0"
-            variant="naked"
-            icon="i-hugeicons-file-validation"
-            title="No file changes in this change."
-          />
-          <USplitter
-            v-else-if="store.diff"
-            :items="SPLIT"
-            auto-save-id="review-files-sidebar"
-            class="min-h-0 flex-1"
-            :ui="{ handle: 'flex items-center justify-center' }"
+        <nav class="border-default flex shrink-0 gap-1 border-b px-2" aria-label="Change pages" data-testid="review-pages">
+          <RouterLink
+            :to="reviewPath(projectId, number)"
+            :class="[PAGE_TAB, page === 'conversation' && PAGE_TAB_ACTIVE]"
+            :aria-current="page === 'conversation' ? 'page' : undefined"
+            data-testid="review-tab-conversation"
           >
-            <template #resize-handle>
-              <div
-                class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
-                aria-hidden="true"
+            <UIcon name="i-hugeicons-message-multiple-01" class="size-4" />
+            Conversation
+            <UBadge v-if="talk.count.value !== null" color="neutral" variant="soft" size="sm" :label="String(talk.count.value)" />
+          </RouterLink>
+          <RouterLink
+            :to="reviewPath(projectId, number, 'files')"
+            :class="[PAGE_TAB, page === 'files' && PAGE_TAB_ACTIVE]"
+            :aria-current="page === 'files' ? 'page' : undefined"
+            data-testid="review-tab-files"
+          >
+            <UIcon name="i-hugeicons-file-validation" class="size-4" />
+            Review
+            <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
+          </RouterLink>
+        </nav>
+        <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
+        <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
+          <UTabs
+            v-model="view"
+            :items="VIEWS"
+            :content="false"
+            size="sm"
+            variant="link"
+            color="neutral"
+            class="border-default shrink-0 border-b px-3"
+            data-testid="review-view-tabs"
+          />
+          <div
+            v-show="view === 'preview'"
+            class="flex min-h-0 flex-1 flex-col"
+            data-testid="review-preview"
+          >
+            <div class="border-default flex shrink-0 items-center border-b px-3 py-1.5">
+              <UTabs
+                :model-value="compare"
+                :items="COMPARE"
+                :content="false"
+                size="xs"
+                variant="pill"
+                color="neutral"
+                data-testid="review-compare"
+                @update:model-value="picked = $event as Compare"
               />
-            </template>
-            <template #tree>
-              <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
-                <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
-              </aside>
-            </template>
-            <template #diffs>
-              <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
-                <div ref="diffs" class="flex flex-col gap-3 p-3">
-                  <section
-                    v-for="file in store.diff.files"
-                    :key="file.path"
-                    :data-path="file.path"
-                    class="flex scroll-mt-3 flex-col gap-1.5"
-                  >
-                    <template v-if="file.binary">
-                      <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
-                        <span class="truncate">{{ file.path }}</span>
-                      </div>
-                      <p class="text-muted text-xs">Binary file changed.</p>
-                    </template>
-                    <DiffView v-else :diff="file.meta" />
-                  </section>
+            </div>
+            <BrowserFrame :key="`${projectId}:${number}`" :frames="frames" class="min-h-0 flex-1">
+              <template #placeholder="{ frame }">
+                <UEmpty
+                  v-if="frame.key === 'live'"
+                  variant="naked"
+                  icon="i-hugeicons-globe-02"
+                  title="No live site found for this project."
+                  class="m-auto"
+                  data-testid="review-live-missing"
+                />
+                <UEmpty
+                  v-else-if="previewError"
+                  variant="naked"
+                  icon="i-hugeicons-alert-circle"
+                  title="The preview could not be loaded."
+                  :description="previewError"
+                  class="m-auto"
+                  role="alert"
+                  data-testid="review-preview-error"
+                >
+                  <template #actions>
+                    <UButton
+                      color="neutral"
+                      variant="outline"
+                      size="sm"
+                      label="Try again"
+                      data-testid="review-preview-retry"
+                      @click="reloadPreview()"
+                    />
+                  </template>
+                </UEmpty>
+                <UEmpty
+                  v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
+                  variant="naked"
+                  :title="preview ? 'Deploying preview…' : 'Loading preview…'"
+                  class="m-auto"
+                  data-testid="review-preview-deploying"
+                >
+                  <template #leading>
+                    <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
+                  </template>
+                </UEmpty>
+                <UEmpty
+                  v-else-if="preview?.state === 'failed'"
+                  variant="naked"
+                  icon="i-hugeicons-alert-02"
+                  title="The preview deploy failed."
+                  class="m-auto"
+                  data-testid="review-preview-failed"
+                >
+                  <template v-if="checksUrl" #actions>
+                    <UButton
+                      color="neutral"
+                      variant="outline"
+                      size="sm"
+                      label="See the checks on GitHub"
+                      trailing-icon="i-hugeicons-link-square-02"
+                      :to="checksUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="review-preview-checks"
+                    />
+                  </template>
+                </UEmpty>
+                <UEmpty
+                  v-else-if="preview?.state === 'none'"
+                  variant="naked"
+                  icon="i-hugeicons-computer-video"
+                  title="This site doesn't publish previews for changes."
+                  description="See What changed."
+                  class="m-auto"
+                  data-testid="review-preview-none"
+                >
+                  <template #actions>
+                    <UButton
+                      color="neutral"
+                      variant="outline"
+                      size="sm"
+                      label="What changed"
+                      data-testid="review-preview-to-changes"
+                      @click="view = 'changes'"
+                    />
+                  </template>
+                </UEmpty>
+              </template>
+            </BrowserFrame>
+          </div>
+          <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
+            <UEmpty
+              v-if="store.diff && store.diff.files.length === 0"
+              variant="naked"
+              icon="i-hugeicons-file-validation"
+              title="No file changes in this change."
+            />
+            <USplitter
+              v-else-if="store.diff"
+              :items="SPLIT"
+              auto-save-id="review-files-sidebar"
+              class="min-h-0 flex-1"
+              :ui="{ handle: 'flex items-center justify-center' }"
+            >
+              <template #resize-handle>
+                <div
+                  class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+                  aria-hidden="true"
+                />
+              </template>
+              <template #tree>
+                <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
+                  <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+                </aside>
+              </template>
+              <template #diffs>
+                <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
+                  <div ref="diffs" class="flex flex-col gap-3 p-3">
+                    <section
+                      v-for="file in store.diff.files"
+                      :key="file.path"
+                      :data-path="file.path"
+                      class="flex scroll-mt-3 flex-col gap-1.5"
+                    >
+                      <template v-if="file.binary">
+                        <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
+                          <span class="truncate">{{ file.path }}</span>
+                        </div>
+                        <p class="text-muted text-xs">Binary file changed.</p>
+                      </template>
+                      <DiffView v-else :diff="file.meta" />
+                    </section>
+                  </div>
                 </div>
-              </div>
-            </template>
-          </USplitter>
+              </template>
+            </USplitter>
+          </div>
         </div>
       </div>
     </template>
