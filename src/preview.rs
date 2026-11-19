@@ -89,14 +89,10 @@ pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
         };
     }
     if let Some((project, number, sha, rest)) = review_path(req.uri().path()) {
-        return match state
+        return state
             .review_previews
-            .serve(&project, number, &sha, &rest)
-            .await
-        {
-            Ok(res) => res,
-            Err(e) => e.into_response(),
-        };
+            .respond(&project, number, &sha, &rest)
+            .await;
     }
     match forward(&state, req, None).await {
         Ok(res) => res,

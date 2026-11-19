@@ -2,15 +2,19 @@
 //!
 //! Kept small on disk: one build per `(project, PR number)` holding a single head
 //! SHA, at most [`MAX_PER_PROJECT`] per project (least recently viewed evicted),
-//! none older than [`MAX_AGE`], and none for a PR that is no longer open.
+//! none older than [`MAX_AGE`], and none for a PR that is no longer open. A build whose
+//! preview is dropped (new head, eviction, prune, expiry) is aborted, which kills its
+//! process group and removes its worktree; at most [`MAX_CONCURRENT_BUILDS`] run at once.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use axum::response::Response;
+use axum::http::{header, HeaderValue};
+use axum::response::{IntoResponse, Response};
 use futures_util::future::BoxFuture;
 use serde::Serialize;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::conflict_preview;
@@ -23,6 +27,11 @@ pub const MAX_PER_PROJECT: usize = 3;
 /// (the `prepare` that created it), not from its last view, so even a preview
 /// looked at all day is rebuilt at most once a day.
 pub const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+/// Review builds running at once across every project; later ones wait (still `building`).
+pub const MAX_CONCURRENT_BUILDS: usize = 2;
+/// Sent with every review preview response: teammates' pages render, but their scripts never
+/// run with orso's origin, even when the frame's URL is opened in a tab of its own.
+pub const PREVIEW_CSP: &str = "sandbox allow-same-origin";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -53,6 +62,14 @@ struct Entry {
     /// Tick that started this entry's build; a finished build whose entry was
     /// replaced or dropped meanwhile deletes its own output.
     generation: u64,
+    /// The build task; aborted when the entry is dropped.
+    build: Option<JoinHandle<()>>,
+}
+
+/// What dropping an entry leaves to clean up outside the lock.
+struct Doomed {
+    dir: PathBuf,
+    build: Option<JoinHandle<()>>,
 }
 
 #[derive(Default)]
@@ -60,8 +77,16 @@ struct State {
     entries: HashMap<(String, u64), Entry>,
     /// Each project's checkout, for `git worktree prune` at shutdown.
     repos: HashMap<String, PathBuf>,
-    builds: Vec<JoinHandle<()>>,
     tick: u64,
+}
+
+impl Entry {
+    fn doomed(self) -> Doomed {
+        Doomed {
+            dir: self.dir,
+            build: self.build,
+        }
+    }
 }
 
 impl State {
@@ -71,7 +96,7 @@ impl State {
     }
 
     /// Drops every entry older than [`MAX_AGE`], returning their folders.
-    fn expire(&mut self, now: SystemTime) -> Vec<PathBuf> {
+    fn expire(&mut self, now: SystemTime) -> Vec<Doomed> {
         self.remove_where(|_, entry| {
             now.duration_since(entry.created)
                 .is_ok_and(|age| age > MAX_AGE)
@@ -79,7 +104,7 @@ impl State {
     }
 
     /// Drops `project`'s least recently viewed entries beyond [`MAX_PER_PROJECT`].
-    fn evict(&mut self, project: &str) -> Vec<PathBuf> {
+    fn evict(&mut self, project: &str) -> Vec<Doomed> {
         let mut views: Vec<u64> = self
             .entries
             .iter()
@@ -94,7 +119,7 @@ impl State {
         self.remove_where(|(p, _), e| p == project && e.viewed < oldest_kept)
     }
 
-    fn remove_where(&mut self, doomed: impl Fn(&(String, u64), &Entry) -> bool) -> Vec<PathBuf> {
+    fn remove_where(&mut self, doomed: impl Fn(&(String, u64), &Entry) -> bool) -> Vec<Doomed> {
         let keys: Vec<_> = self
             .entries
             .iter()
@@ -103,7 +128,7 @@ impl State {
             .collect();
         keys.into_iter()
             .filter_map(|key| self.entries.remove(&key))
-            .map(|entry| entry.dir)
+            .map(Entry::doomed)
             .collect()
     }
 }
@@ -115,6 +140,8 @@ pub struct ReviewPreviews {
     clock: fn() -> SystemTime,
     builder: Builder,
     state: Arc<Mutex<State>>,
+    /// Build slots shared by every project.
+    slots: Arc<Semaphore>,
 }
 
 impl ReviewPreviews {
@@ -132,6 +159,7 @@ impl ReviewPreviews {
                 })
             }),
             state: Arc::default(),
+            slots: Arc::new(Semaphore::new(MAX_CONCURRENT_BUILDS)),
         }
     }
 
@@ -182,7 +210,7 @@ impl ReviewPreviews {
             if let Some(current) = joined {
                 (doomed, current)
             } else {
-                doomed.extend(state.entries.remove(&key).map(|old| old.dir));
+                doomed.extend(state.entries.remove(&key).map(Entry::doomed));
                 let dir = self.base.join(project).join(format!("{number}-{tick}"));
                 state.entries.insert(
                     key.clone(),
@@ -193,6 +221,7 @@ impl ReviewPreviews {
                         created: now,
                         viewed: tick,
                         generation: tick,
+                        build: None,
                     },
                 );
                 state.repos.insert(project.to_owned(), repo.to_owned());
@@ -201,11 +230,17 @@ impl ReviewPreviews {
                 let build =
                     (self.builder)(repo.to_owned(), sha.to_owned(), url.clone(), dir.clone());
                 let shared = self.state.clone();
+                let slots = self.slots.clone();
+                let task_key = key.clone();
                 let handle = tokio::spawn(async move {
+                    // Waits (still `building`) while every slot is taken.
+                    let Ok(_slot) = slots.acquire_owned().await else {
+                        return;
+                    };
                     let result = build.await;
                     let orphaned = {
                         let mut state = shared.lock().unwrap();
-                        match state.entries.get_mut(&key) {
+                        match state.entries.get_mut(&task_key) {
                             Some(entry) if entry.generation == tick => {
                                 entry.state = match result {
                                     Ok(()) => ReviewPreview::Ready { url },
@@ -223,12 +258,16 @@ impl ReviewPreviews {
                         let _ = tokio::fs::remove_dir_all(&dir).await;
                     }
                 });
-                state.builds.retain(|build| !build.is_finished());
-                state.builds.push(handle);
+                // The evict above may have dropped this very entry (it can never be the
+                // least recent, but stay safe): then the build has nothing to do.
+                match state.entries.get_mut(&key) {
+                    Some(entry) if entry.generation == tick => entry.build = Some(handle),
+                    _ => handle.abort(),
+                }
                 (doomed, ReviewPreview::Building)
             }
         };
-        remove_dirs(doomed).await;
+        discard(doomed).await;
         current
     }
 
@@ -244,7 +283,7 @@ impl ReviewPreviews {
                 .map(|entry| entry.state.clone());
             (doomed, current)
         };
-        remove_dirs(doomed).await;
+        discard(doomed).await;
         current
     }
 
@@ -272,17 +311,25 @@ impl ReviewPreviews {
                 });
             (doomed, dir)
         };
-        remove_dirs(doomed).await;
+        discard(doomed).await;
         let dir = dir.ok_or_else(|| ApiError::enoent("preview not prepared"))?;
         let (file, bytes) = conflict_preview::read_page(&dir, rest).await?;
-        Ok(conflict_preview::page_response(&file, bytes))
+        Ok(with_csp(conflict_preview::page_response(&file, bytes)))
+    }
+
+    /// [`Self::serve`] as a response, errors included, every one carrying [`PREVIEW_CSP`].
+    pub async fn respond(&self, project: &str, number: u64, sha: &str, rest: &str) -> Response {
+        match self.serve(project, number, sha, rest).await {
+            Ok(response) => response,
+            Err(e) => with_csp(e.into_response()),
+        }
     }
 
     /// Drops every preview older than [`MAX_AGE`] in every project. Run
     /// periodically, so an idle daemon does not keep expired builds on disk.
     pub async fn expire_now(&self) {
         let doomed = self.state.lock().unwrap().expire((self.clock)());
-        remove_dirs(doomed).await;
+        discard(doomed).await;
     }
 
     /// Drops `project`'s previews of PRs that are no longer open.
@@ -295,7 +342,7 @@ impl ReviewPreviews {
             );
             doomed
         };
-        remove_dirs(doomed).await;
+        discard(doomed).await;
     }
 
     /// At daemon start, before any build: removes every folder a previous run
@@ -319,33 +366,40 @@ impl ReviewPreviews {
 
     /// Stops running builds and removes every preview and leftover folder.
     pub async fn shutdown(&self) {
-        let (builds, repos, doomed) = {
+        let (repos, doomed) = {
             let mut state = self.state.lock().unwrap();
-            let doomed: Vec<PathBuf> = state.entries.drain().map(|(_, e)| e.dir).collect();
-            (
-                std::mem::take(&mut state.builds),
-                std::mem::take(&mut state.repos),
-                doomed,
-            )
+            let doomed: Vec<Doomed> = state.entries.drain().map(|(_, e)| e.doomed()).collect();
+            (std::mem::take(&mut state.repos), doomed)
         };
         // Cancelling a build removes its worktree; only then is a sweep safe.
-        for build in &builds {
-            build.abort();
-        }
-        for build in builds {
-            let _ = build.await;
-        }
-        remove_dirs(doomed).await;
+        discard(doomed).await;
         for (project, repo) in repos {
             snapshot_build::sweep(&repo, &self.base.join(project), &[]).await;
         }
     }
 }
 
-async fn remove_dirs(dirs: Vec<PathBuf>) {
+/// Aborts dropped entries' builds (killing their process groups and removing their
+/// worktrees), waits for them to stop, then deletes their folders.
+async fn discard(doomed: Vec<Doomed>) {
+    let (dirs, builds): (Vec<_>, Vec<_>) = doomed.into_iter().map(|d| (d.dir, d.build)).unzip();
+    for build in builds.iter().flatten() {
+        build.abort();
+    }
+    for build in builds.into_iter().flatten() {
+        let _ = build.await;
+    }
     for dir in dirs {
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
+}
+
+fn with_csp(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(PREVIEW_CSP),
+    );
+    response
 }
 
 /// One plain path segment: never empty, `.`, `..`, or containing a separator.
@@ -385,6 +439,23 @@ mod tests {
         outs: std::sync::Mutex<Vec<PathBuf>>,
         fail: AtomicBool,
         gate: Option<Arc<Semaphore>>,
+        /// Builds dropped (aborted) before they finished.
+        cancelled: AtomicUsize,
+    }
+
+    /// Counts a build as cancelled when dropped before [`Running::finish`].
+    struct Running(Arc<Fake>, bool);
+    impl Running {
+        fn finish(mut self) {
+            self.1 = true;
+        }
+    }
+    impl Drop for Running {
+        fn drop(&mut self) {
+            if !self.1 {
+                self.0.cancelled.fetch_add(1, Ordering::SeqCst);
+            }
+        }
     }
 
     fn fake(fake: Arc<Fake>) -> Builder {
@@ -393,9 +464,11 @@ mod tests {
             fake.outs.lock().unwrap().push(out.clone());
             Box::pin(async move {
                 fake.calls.fetch_add(1, Ordering::SeqCst);
+                let running = Running(fake.clone(), false);
                 if let Some(gate) = &fake.gate {
                     gate.acquire().await.unwrap().forget();
                 }
+                running.finish();
                 if fake.fail.load(Ordering::SeqCst) {
                     return Err(BuildError::Invalid(format!("broken page in {sha}")));
                 }
@@ -653,60 +726,132 @@ mod tests {
         assert!(built_dirs(&base).is_empty());
     }
 
+    /// Waits until `n` builds have started (taken a slot and called the builder's future).
+    async fn started(f: &Fake, n: usize) {
+        for _ in 0..400 {
+            if f.calls.load(Ordering::SeqCst) >= n {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("only {} builds started", f.calls.load(Ordering::SeqCst));
+    }
+
     #[tokio::test]
-    async fn superseded_running_build_deletes_its_output() {
+    async fn new_head_aborts_the_running_build() {
         let base = tempfile::tempdir().unwrap();
         let (gate, f) = gated();
         let m = manager(&base, &f);
         m.prepare("p", Path::new("/repo"), 7, "aaa").await;
+        started(&f, 1).await;
         m.prepare("p", Path::new("/repo"), 7, "bbb").await;
-        gate.add_permits(1);
-        finished(&f, 1).await;
-        let old = f.outs.lock().unwrap()[0].clone();
-        assert!(gone(&old).await, "superseded output kept");
-        assert_eq!(m.status("p", 7, "bbb").await, Some(ReviewPreview::Building));
-        gate.add_permits(1);
+        // Aborted as part of the replace, before any gate opens.
+        assert_eq!(f.cancelled.load(Ordering::SeqCst), 1);
+        gate.add_permits(2);
         assert!(matches!(
             settle(&m, 7, "bbb").await,
             ReviewPreview::Ready { .. }
         ));
+        assert_eq!(f.done.load(Ordering::SeqCst), 1, "the old build ran on");
+        assert!(!f.outs.lock().unwrap()[0].exists());
         assert_eq!(built_dirs(&base), ["bbb at /preview/p/reviews/7/bbb/"]);
     }
 
     #[tokio::test]
-    async fn evicted_running_build_deletes_its_output() {
+    async fn evicted_running_build_is_aborted() {
         let base = tempfile::tempdir().unwrap();
         let (gate, f) = gated();
         let m = manager(&base, &f);
-        for (n, sha) in [(1, "a1"), (2, "a2"), (3, "a3"), (4, "a4")] {
+        for (n, sha) in [(1, "a1"), (2, "a2")] {
+            m.prepare("p", Path::new("/repo"), n, sha).await;
+        }
+        started(&f, 2).await;
+        for (n, sha) in [(3, "a3"), (4, "a4")] {
             m.prepare("p", Path::new("/repo"), n, sha).await;
         }
         assert_eq!(m.status("p", 1, "a1").await, None);
-        gate.add_permits(4);
-        finished(&f, 4).await;
-        let evicted = f.outs.lock().unwrap()[0].clone();
-        assert!(gone(&evicted).await, "evicted output kept");
+        assert_eq!(f.cancelled.load(Ordering::SeqCst), 1);
+        gate.add_permits(3);
+        finished(&f, 3).await;
         for (n, sha) in [(2, "a2"), (3, "a3"), (4, "a4")] {
             assert!(matches!(
                 settle(&m, n, sha).await,
                 ReviewPreview::Ready { .. }
             ));
         }
+        assert_eq!(f.done.load(Ordering::SeqCst), 3, "the evicted build ran on");
+        assert!(!f.outs.lock().unwrap()[0].exists(), "evicted output kept");
         assert_eq!(built_dirs(&base).len(), MAX_PER_PROJECT);
     }
 
     #[tokio::test]
-    async fn pruned_running_build_deletes_its_output() {
+    async fn pruned_and_expired_running_builds_are_aborted() {
         let base = tempfile::tempdir().unwrap();
         let (gate, f) = gated();
         let m = manager(&base, &f);
         m.prepare("p", Path::new("/repo"), 1, "a1").await;
-        m.prune("p", &[]).await;
+        m.prepare("p", Path::new("/repo"), 2, "a2").await;
+        started(&f, 2).await;
+        m.prune("p", &[2]).await;
         assert_eq!(m.status("p", 1, "a1").await, None);
+        assert_eq!(f.cancelled.load(Ordering::SeqCst), 1);
+        advance(MAX_AGE + Duration::from_secs(60));
+        m.expire_now().await;
+        assert_eq!(f.cancelled.load(Ordering::SeqCst), 2);
+        gate.add_permits(2);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(f.done.load(Ordering::SeqCst), 0, "a dropped build ran on");
+        assert!(built_dirs(&base).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_third_build_waits_for_a_free_slot() {
+        let base = tempfile::tempdir().unwrap();
+        let (gate, f) = gated();
+        let m = manager(&base, &f);
+        for (n, sha) in [(1, "a1"), (2, "a2"), (3, "a3")] {
+            m.prepare("p", Path::new("/repo"), n, sha).await;
+        }
+        started(&f, MAX_CONCURRENT_BUILDS).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(f.calls.load(Ordering::SeqCst), MAX_CONCURRENT_BUILDS);
+        assert_eq!(m.status("p", 3, "a3").await, Some(ReviewPreview::Building));
+        // One build ends, freeing its slot for the third.
         gate.add_permits(1);
-        finished(&f, 1).await;
-        let pruned = f.outs.lock().unwrap()[0].clone();
-        assert!(gone(&pruned).await, "pruned output kept");
+        started(&f, 3).await;
+        gate.add_permits(2);
+        for (n, sha) in [(1, "a1"), (2, "a2"), (3, "a3")] {
+            assert!(matches!(
+                settle(&m, n, sha).await,
+                ReviewPreview::Ready { .. }
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn every_preview_response_carries_a_sandbox_csp() {
+        let base = tempfile::tempdir().unwrap();
+        let f = Arc::new(Fake::default());
+        let m = manager(&base, &f);
+        ready(&m, 7, "abc").await;
+        let page = m.respond("p", 7, "abc", "").await;
+        assert_eq!(page.status(), 200);
+        let missing_asset = m.respond("p", 7, "abc", "assets/missing.js").await;
+        assert_eq!(missing_asset.status(), 404);
+        let unprepared = m.respond("p", 8, "abc", "").await;
+        assert_eq!(unprepared.status(), 404);
+        for response in [page, missing_asset, unprepared] {
+            let csp = response.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap();
+            assert_eq!(csp, "sandbox allow-same-origin");
+            assert!(!csp.contains("allow-scripts"));
+        }
+        let served = m.serve("p", 7, "abc", "").await.unwrap();
+        assert_eq!(
+            served.headers()[header::CONTENT_SECURITY_POLICY],
+            PREVIEW_CSP
+        );
     }
 
     #[tokio::test]
