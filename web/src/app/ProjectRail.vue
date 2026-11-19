@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import { TooltipProvider } from "reka-ui";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
+import { loadTabOrder, saveTabOrder } from "@/lib/tabOrder";
 import { useInbox } from "@/modules/review/queries";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
@@ -17,7 +18,7 @@ const review = useInbox(() => props.projectId);
 const active = computed(() => projectTabFromRoute(route.name));
 
 /** `icon` is an Iconify Lucide name. */
-const tabs: { id: ProjectTab; label: string; icon: string }[] = [
+const defaultTabs: { id: ProjectTab; label: string; icon: string }[] = [
   { id: "preview", label: "Preview", icon: "i-hugeicons-computer-video" },
   { id: "content", label: "Content", icon: "i-hugeicons-file-01" },
   { id: "design", label: "Design", icon: "i-hugeicons-paint-board" },
@@ -25,6 +26,60 @@ const tabs: { id: ProjectTab; label: string; icon: string }[] = [
   { id: "history", label: "History", icon: "i-hugeicons-clock-04" },
   { id: "settings", label: "Settings", icon: "i-hugeicons-settings-01" },
 ];
+
+// Tabs can be dragged (or moved with Alt+Up/Down) into the viewer's own order; see
+// lib/tabOrder.ts, which also makes opening a project land on the first tab.
+const order = ref<ProjectTab[]>(loadTabOrder());
+const byId = new Map(defaultTabs.map((t) => [t.id, t]));
+const tabs = computed(() => order.value.map((id) => byId.get(id)!));
+
+function move(id: ProjectTab, to: number) {
+  const ids = tabs.value.map((t) => t.id);
+  const from = ids.indexOf(id);
+  if (from < 0 || to < 0 || to >= ids.length || from === to) return;
+  ids.splice(to, 0, ...ids.splice(from, 1));
+  order.value = ids;
+}
+
+/** The tab being dragged, and the order to restore if the drag is cancelled. */
+const dragging = ref<ProjectTab | null>(null);
+let before: ProjectTab[] = [];
+const DRAG_TYPE = "application/x-orso-rail-tab";
+
+function onDragStart(event: DragEvent, id: ProjectTab) {
+  dragging.value = id;
+  before = order.value;
+  event.dataTransfer?.setData(DRAG_TYPE, id);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+/** Reorder live as the dragged tab passes over another, so the drop spot is always visible. */
+function onDragOver(event: DragEvent, index: number) {
+  if (!dragging.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  move(dragging.value, index);
+}
+
+function onDragEnd(event: DragEvent) {
+  if (event.dataTransfer?.dropEffect === "none") order.value = before;
+  else saveTabOrder(order.value);
+  dragging.value = null;
+}
+
+function onKeyMove(event: KeyboardEvent, id: ProjectTab, delta: number) {
+  if (!event.altKey) return;
+  event.preventDefault();
+  const index = tabs.value.findIndex((t) => t.id === id);
+  move(id, index + delta);
+  saveTabOrder(order.value);
+  // The tab moved in the DOM; keep focus on it.
+  requestAnimationFrame(() =>
+    (document.querySelector(`[data-testid="workspace-tab-${id}"]`) as HTMLElement | null)?.focus(),
+  );
+}
+
+const onSettings = computed(() => route.path === "/settings");
 
 // On desktop the rail starts at the top bar's height (pt-11), below the traffic lights, except
 // in full screen where they are hidden.
@@ -34,7 +89,6 @@ const macDesktop = isMacDesktop();
 const ui = { base: "size-9 justify-center rounded-lg", leadingIcon: "size-5" };
 /** Selected tab: primary tint. */
 const current = "dark:bg-primary/25 dark:text-highlighted dark:hover:bg-primary/30";
-const onSettings = computed(() => route.path === "/settings");
 const tooltipContent = { side: "right" } as const;
 </script>
 
@@ -62,7 +116,18 @@ const tooltipContent = { side: "right" } as const;
         />
       </UTooltip>
 
-      <UTooltip v-for="tab in tabs" :key="tab.id" :text="tab.label" :content="tooltipContent">
+      <div
+        v-for="(tab, index) in tabs"
+        :key="tab.id"
+        draggable="true"
+        :class="cn('cursor-grab active:cursor-grabbing', dragging === tab.id && 'opacity-40')"
+        :data-testid="`rail-tab-item-${tab.id}`"
+        @dragstart="onDragStart($event, tab.id)"
+        @dragover="onDragOver($event, index)"
+        @drop.prevent
+        @dragend="onDragEnd"
+      >
+      <UTooltip :text="tab.label" :content="tooltipContent" :disabled="dragging !== null">
         <UButton
           :to="projectPath(props.projectId, tab.id)"
           color="neutral"
@@ -77,8 +142,13 @@ const tooltipContent = { side: "right" } as const;
           :aria-current="active === tab.id ? 'page' : undefined"
           :data-testid="`workspace-tab-${tab.id}`"
           :ui="ui"
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          draggable="false"
+          @keydown.up="onKeyMove($event, tab.id, -1)"
+          @keydown.down="onKeyMove($event, tab.id, 1)"
         />
       </UTooltip>
+      </div>
 
       <div class="mt-auto flex flex-col items-center gap-1">
         <!-- Review sits with the app-level buttons, above App settings, keeping its count. -->

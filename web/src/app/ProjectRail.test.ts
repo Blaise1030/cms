@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
@@ -119,4 +119,60 @@ it("reloads the review inbox when the project changes", async () => {
   await router.push("/p/two/preview"); await flushPromises();
   expect(reviews).toHaveBeenLastCalledWith("two");
   w.unmount();
+});
+
+const order = (w: Awaited<ReturnType<typeof setup>>["w"]) =>
+  w
+    .findAll('[data-testid^="workspace-tab-"]')
+    .map((t) => t.attributes("data-testid")!.slice("workspace-tab-".length))
+    // Review sits in the rail's footer, outside the reorderable tabs.
+    .filter((id) => id !== "review");
+
+/** happy-dom has no DataTransfer; the rail only needs these fields. */
+const transfer = (dropEffect = "move") => ({ setData() {}, effectAllowed: "", dropEffect });
+
+afterEach(() => localStorage.clear());
+
+it("reorders tabs by dragging and remembers the order", async () => {
+  const { w } = await setup("/p/site/preview");
+  const item = (id: string) => w.get(`[data-testid="rail-tab-item-${id}"]`);
+  const dataTransfer = transfer();
+
+  await item("history").trigger("dragstart", { dataTransfer });
+  await item("preview").trigger("dragover", { dataTransfer });
+  expect(order(w)).toEqual(["history", "preview", "content", "design", "code", "settings"]);
+  await item("history").trigger("dragend", { dataTransfer });
+
+  expect(JSON.parse(localStorage.getItem("orso.rail.order")!)).toEqual(order(w));
+  const again = await setup("/p/site/preview");
+  expect(order(again.w)[0]).toBe("history");
+});
+
+it("puts the order back when a drag is cancelled", async () => {
+  const { w } = await setup("/p/site/preview");
+  const item = (id: string) => w.get(`[data-testid="rail-tab-item-${id}"]`);
+  await item("code").trigger("dragstart", { dataTransfer: transfer() });
+  await item("preview").trigger("dragover", { dataTransfer: transfer() });
+  // Escape, or a drop outside the rail: the browser reports no drop effect.
+  await item("code").trigger("dragend", { dataTransfer: transfer("none") });
+
+  expect(order(w)).toEqual(["preview", "content", "design", "code", "history", "settings"]);
+  expect(localStorage.getItem("orso.rail.order")).toBeNull();
+});
+
+it("moves a focused tab with Alt+Up and Alt+Down, and ignores plain arrows", async () => {
+  const { w } = await setup("/p/site/preview");
+  await w.get('[data-testid="workspace-tab-content"]').trigger("keydown", { key: "ArrowDown" });
+  expect(order(w)[1]).toBe("content");
+
+  await w.get('[data-testid="workspace-tab-content"]').trigger("keydown", { key: "ArrowDown", altKey: true });
+  expect(order(w).slice(0, 3)).toEqual(["preview", "design", "content"]);
+  await w.get('[data-testid="workspace-tab-preview"]').trigger("keydown", { key: "ArrowUp", altKey: true });
+  expect(order(w)[0]).toBe("preview");
+});
+
+it("keeps tabs missing from a saved order, and drops unknown ones", async () => {
+  localStorage.setItem("orso.rail.order", JSON.stringify(["code", "gone", "preview"]));
+  const { w } = await setup("/p/site/preview");
+  expect(order(w)).toEqual(["code", "preview", "content", "design", "history", "settings"]);
 });

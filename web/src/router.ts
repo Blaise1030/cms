@@ -8,6 +8,7 @@ import FilesPanel from "@/modules/files/FilesPanel.vue";
 import ReviewPanel from "@/modules/review/ReviewPanel.vue";
 import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
+import { firstTab } from "@/lib/tabOrder";
 
 /** URL segment for a project workspace page (matches the tab labels). */
 export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "review" | "settings";
@@ -35,7 +36,8 @@ export const routes: RouteRecordRaw[] = [
     component: ProjectPage,
     props: true,
     children: [
-      { path: "", redirect: { name: "project-preview" } },
+      // A bare project link opens the first tab in the viewer's rail order.
+      { path: "", redirect: () => ({ name: `project-${firstTab()}` }) },
       { path: "preview", name: "project-preview", component: ProjectPreviewPage },
       {
         path: "content/:collection?/:entry(.*)?",
@@ -92,7 +94,8 @@ export const routes: RouteRecordRaw[] = [
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 
-export function projectPath(id: string, tab: ProjectTab = "preview") {
+/** A project tab's path; with no tab, the first one in the viewer's rail order. */
+export function projectPath(id: string, tab: ProjectTab = firstTab()) {
   return `/p/${encodeURIComponent(id)}/${tab}`;
 }
 

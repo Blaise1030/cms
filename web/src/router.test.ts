@@ -17,7 +17,7 @@ describe("router", () => {
     expect(r.params.id).toBe("a b/c");
   });
 
-  it("redirects /p/:id to the preview tab", async () => {
+  it("redirects /p/:id to the first tab (preview by default)", async () => {
     const r = router();
     await r.push("/p/site");
     expect(r.currentRoute.value.name).toBe("project-preview");

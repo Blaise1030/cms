@@ -4,6 +4,7 @@ import { Extension, getMarkRange, type Editor } from "@tiptap/core";
 import { EditorState } from "@codemirror/state";
 import type { ResolvedPos } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
+import { CellSelection } from "@tiptap/pm/tables";
 import { EditorView, placeholder } from "@codemirror/view";
 import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import type { EditorCustomHandlers, EditorSuggestionMenuItem, EditorToolbarItem } from "@nuxt/ui";
@@ -166,6 +167,8 @@ const blockActions: Action[] = [
   { id: "quote", label: "Quote", icon: "i-hugeicons-quote-down", run: block(c => c.toggleBlockquote()) },
   { id: "code-block", label: "Code block", icon: "i-hugeicons-code-square", run: block(c => c.toggleCodeBlock()) },
   { id: "image", label: "Image", icon: "i-hugeicons-image-add-01", run: insertImage },
+  // GFM tables need a header row, so a new table always starts with one.
+  { id: "table", label: "Table", icon: "i-hugeicons-table", run: block(c => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true })) },
 ];
 const inlineActions: (Action & { mark?: string })[] = [
   { id: "bold", label: "Bold", icon: "i-hugeicons-text-bold", mark: "bold", run: block(c => c.toggleBold()) },
@@ -264,9 +267,43 @@ function askAI() {
   const text = e.state.doc.textBetween(from, to, "\n").trim();
   if (text) emit("ask", text);
 }
-/** Over a non-empty text selection, except while a link is being edited. */
+/** Over a non-empty text selection, except while a link is being edited (cell selections get the table toolbar). */
 function showToolbar({ state }: { state: Editor["state"] }) {
-  return !state.selection.empty && !(state.selection instanceof NodeSelection) && !link.value?.editing;
+  const { selection } = state;
+  return !selection.empty && !(selection instanceof NodeSelection) && !(selection instanceof CellSelection) && !link.value?.editing;
+}
+
+// ---- Table toolbar -------------------------------------------------------------------------
+const TABLE_BUBBLE_KEY = "tableBubble";
+/**
+ * Rows and columns only: merged cells and cell attributes have no GFM Markdown form, so the
+ * toolbar does not offer them.
+ */
+const tableActions: Action[] = [
+  { id: "row-above", label: "Insert row above", icon: "i-hugeicons-insert-row-up", run: block(c => c.addRowBefore()) },
+  { id: "row-below", label: "Insert row below", icon: "i-hugeicons-insert-row-down", run: block(c => c.addRowAfter()) },
+  { id: "column-left", label: "Insert column left", icon: "i-hugeicons-insert-column-left", run: block(c => c.addColumnBefore()) },
+  { id: "column-right", label: "Insert column right", icon: "i-hugeicons-insert-column-right", run: block(c => c.addColumnAfter()) },
+  { id: "delete-row", label: "Delete row", icon: "i-hugeicons-delete-row", run: block(c => c.deleteRow()) },
+  { id: "delete-column", label: "Delete column", icon: "i-hugeicons-delete-column", run: block(c => c.deleteColumn()) },
+  { id: "delete-table", label: "Delete table", icon: "i-hugeicons-delete-02", run: block(c => c.deleteTable()) },
+];
+const tableToolbarItems = computed<EditorToolbarItem[][]>(() => {
+  const item = (action: Action) => ({
+    "icon": action.icon,
+    "square": true,
+    "title": action.label,
+    "aria-label": action.label,
+    "data-testid": `table-tool-${action.id}`,
+    "onMousedown": keepFocus,
+    "onClick": () => runTool(action),
+  }) as EditorToolbarItem;
+  return [tableActions.slice(0, 4).map(item), tableActions.slice(4, 6).map(item), [item(tableActions[6]!)]];
+});
+/** With the cursor (or a cell selection) in a table; a text selection gets the formatting toolbar. */
+function showTableToolbar({ editor, state }: { editor: Editor; state: Editor["state"] }) {
+  const { selection } = state;
+  return editor.isActive("table") && (selection.empty || selection instanceof CellSelection) && !link.value?.editing;
 }
 function editorBlurred(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
@@ -474,6 +511,20 @@ defineExpose({ richEditor: () => richEditor.value, mode, setMode });
             />
           </template>
         </UEditorToolbar>
+        <UEditorToolbar
+          :editor="editor"
+          layout="bubble"
+          :plugin-key="TABLE_BUBBLE_KEY"
+          :update-delay="0"
+          :should-show="showTableToolbar"
+          :items="tableToolbarItems"
+          active-color="neutral"
+          aria-label="Table"
+          data-testid="table-bubble"
+          role="group"
+          class="text-default shadow-lg"
+          :ui="{ root: 'z-20' }"
+        />
         <UEditorSuggestionMenu
           :editor="editor"
           :items="slashItems"
