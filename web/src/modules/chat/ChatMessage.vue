@@ -193,7 +193,7 @@ function act(action: "setup" | "signIn" | "retry", data: unknown) {
               color="neutral"
               variant="outline"
               size="sm"
-              icon="i-hugeicons-cursor-pointer-01"
+              :icon="seg.icon"
               :label="seg.label"
               data-testid="element-tag"
               :title="seg.full"

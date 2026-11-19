@@ -88,6 +88,14 @@ describe("AgentPanel", () => {
     expect(useAgentOutboxStore().messages).toEqual([]);
   });
 
+  it("puts a content-editor selection in the chat input as a badge, naming its file", async () => {
+    await mountPanel();
+    useAgentOutboxStore().send({ kind: "selection", path: "site/src/content/blog/a.md", text: "The designer shares" });
+    await flushPromises();
+    expect(h.insertReference).toHaveBeenCalledWith('[selection in site/src/content/blog/a.md: "The designer shares"]');
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
   it("sends a request in Chat", async () => {
     await mountPanel();
     useAgentOutboxStore().send({ kind: "text", text: "Sync please", submit: true });

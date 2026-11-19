@@ -151,6 +151,14 @@ describe("MarkdownBodyEditor", () => {
     expect(last(w)).toEqual({ body: "Hello", dirty: true });
   });
 
+  it("Ask AI sends the selected text up without changing the body", async () => {
+    const w = await render("The designer shares the work");
+    await selectAll(w);
+    await w.get('[data-testid="body-tool-ask-ai"]').trigger("click"); await flushPromises();
+    expect(w.emitted("ask")).toEqual([["The designer shares the work"]]);
+    expect(w.emitted("change")).toBeUndefined();
+  });
+
   /** Type into a field of the open link dialog. */
   async function fillLink(field: "url" | "text", value: string) {
     const input = document.body.querySelector(`[data-testid="link-${field}"]`) as HTMLInputElement;

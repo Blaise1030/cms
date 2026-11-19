@@ -26,7 +26,11 @@ import { keySound, loadPack, playSample, typesText, useTypingSound } from "@/lib
  */
 /** `resolveImage` maps an image link to the URL the rich editor displays; the text keeps the link. */
 const props = defineProps<{ body: string; original: string; kind: "markdown" | "mdx"; rich: boolean; resolveImage?: (src: string) => string }>();
-const emit = defineEmits<{ change: [value: { body: string; dirty: boolean }] }>();
+const emit = defineEmits<{
+  change: [value: { body: string; dirty: boolean }];
+  /** "Ask AI" over a selection: the selected text, for the parent to hand to the agent. */
+  ask: [text: string];
+}>();
 
 const richCapable = computed(() => props.rich && props.kind === "markdown");
 /** The current body text; only replaced by a real edit or an external reset. */
@@ -243,7 +247,23 @@ const toolbarItems = computed<EditorToolbarItem[][]>(() => [
     "onMousedown": keepFocus,
     "onClick": () => runTool(action),
   }) as EditorToolbarItem),
+  [{
+    "icon": "i-hugeicons-ai-magic",
+    "label": "Ask AI",
+    "title": "Ask the assistant about this selection",
+    "data-testid": "body-tool-ask-ai",
+    "onMousedown": keepFocus,
+    "onClick": askAI,
+  } as EditorToolbarItem],
 ]);
+/** Send the selected text to the assistant; the parent adds which file it is in. */
+function askAI() {
+  const e = richEditor.value;
+  if (!e) return;
+  const { from, to } = e.state.selection;
+  const text = e.state.doc.textBetween(from, to, "\n").trim();
+  if (text) emit("ask", text);
+}
 /** Over a non-empty text selection, except while a link is being edited. */
 function showToolbar({ state }: { state: Editor["state"] }) {
   return !state.selection.empty && !(state.selection instanceof NodeSelection) && !link.value?.editing;
