@@ -44,22 +44,28 @@ const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1
 const BINARY = "Binary files a/site/logo.png and b/site/logo.png differ\n";
 const diffOf = (text: string, headSha: string | null = null) => ({ text, headSha });
 
-async function mountChange(api: Record<string, unknown>) {
+const emptyTalk = () => ({ items: [], checks: [], reviewers: [] });
+
+async function mountChange(api: Record<string, unknown>, page: "conversation" | "files" = "files") {
   h.daemon = createFakeDaemon({
     liveSiteUrl: vi.fn(async () => "https://acme.pages.dev"),
     reviewPreview: vi.fn(async () => ({ state: "none", headSha: "abc" })),
+    reviewConversation: vi.fn(async () => emptyTalk()),
     ...api,
   });
   setActivePinia(createPinia());
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: "/p/:id/review/:number?", name: "project-review", component: { render: () => null } }],
+    routes: [
+      { path: "/p/:id/review/:number?", name: "project-review", component: { render: () => null } },
+      { path: "/p/:id/review/:number/files", name: "project-review-files", component: { render: () => null } },
+    ],
   });
-  await router.push("/p/site/review/7");
+  await router.push(page === "files" ? "/p/site/review/7/files" : "/p/site/review/7");
   // Tooltips need the provider `UApp` gives the real app.
   const Host = defineComponent({
     setup: () => () =>
-      el(TooltipProvider, null, { default: () => el(ReviewChange, { projectId: "site", number: 7 }) }),
+      el(TooltipProvider, null, { default: () => el(ReviewChange, { projectId: "site", number: 7, page }) }),
   });
   const w = mount(Host, { global: { plugins: [router] }, attachTo: document.body });
   // The store loads the diff parser lazily.
@@ -81,7 +87,6 @@ describe("ReviewChange", () => {
     });
     expect(w.text()).toContain("Fresh homepage hero");
     expect(w.text()).toContain("Ada");
-    expect(w.text()).toContain("Rewrote the hero copy.");
     const link = w.get("[data-testid='review-live-site']");
     expect(link.attributes("href")).toBe("https://acme.pages.dev");
     expect(link.text()).toContain("View live site");
@@ -150,6 +155,193 @@ describe("ReviewChange", () => {
     });
     expect(w.get("[role='alert']").text()).toContain("GitHub is unreachable");
     expect(w.text()).not.toContain("no longer waiting");
+  });
+
+  describe("pages", () => {
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
+
+    it("opens on Conversation and links to Review, with counts", async () => {
+      const { w, router } = await mountChange(
+        {
+          ...base(),
+          reviewConversation: vi.fn(async () => ({
+            items: [
+              { kind: "comment", id: 1, author: "cy", at: "2026-01-01T00:00:00Z", body: "hi", url: "u" },
+              { kind: "push", at: "2026-01-02T00:00:00Z", commits: [{ sha: "abc1234", message: "Edit", author: "Ada" }] },
+            ],
+            checks: [],
+            reviewers: [],
+          })),
+        },
+        "conversation",
+      );
+      const conv = w.get("[data-testid='review-tab-conversation']");
+      const files = w.get("[data-testid='review-tab-files']");
+      expect(conv.attributes("aria-current")).toBe("page");
+      expect(files.attributes("aria-current")).toBeUndefined();
+      expect(conv.text()).toContain("Conversation");
+      expect(conv.text()).toContain("1");
+      expect(files.text()).toContain("Review");
+      expect(files.text()).toContain("1");
+      expect(files.attributes("href")).toBe("/p/site/review/7/files");
+      expect(w.find("[data-testid='review-conversation']").exists()).toBe(true);
+      expect(w.find("[data-testid='review-card']").exists()).toBe(false);
+      await files.trigger("click");
+      await flushPromises();
+      expect(router.currentRoute.value.name).toBe("project-review-files");
+    });
+
+    it("shows the header and its decisions on both pages", async () => {
+      for (const page of ["conversation", "files"] as const) {
+        const { w } = await mountChange(
+          { ...base(), review: vi.fn(async () => ({ ...DETAIL, labels: [{ name: "orso", color: "0e8a16" }] })) },
+          page,
+        );
+        expect(w.get("[data-testid='review-title']").text()).toBe("Fresh homepage hero");
+        expect(w.get("[data-testid='review-number']").text()).toBe("#7");
+        expect(w.get("[data-testid='review-state']").text()).toBe("Open");
+        expect(w.get("[data-testid='review-header-label']").text()).toBe("orso");
+        expect(w.find("[data-testid='review-greenlight']").exists()).toBe(true);
+        expect(w.find("[data-testid='review-send-back']").exists()).toBe(true);
+        expect(w.find("[data-testid='review-card']").exists()).toBe(page === "files");
+        w.unmount();
+      }
+    });
+
+    it("labels a merged or draft change", async () => {
+      const { w } = await mountChange({ ...base(), review: vi.fn(async () => ({ ...DETAIL, merged: true, open: false })) }, "conversation");
+      expect(w.get("[data-testid='review-state']").text()).toBe("Merged");
+      w.unmount();
+      const d = await mountChange({ ...base(), review: vi.fn(async () => ({ ...DETAIL, draft: true })) }, "conversation");
+      expect(d.w.get("[data-testid='review-state']").text()).toBe("Draft");
+    });
+  });
+
+  describe("conversation", () => {
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
+    const TALK = {
+      items: [
+        { kind: "push", at: "2026-01-01T00:00:00Z", commits: [
+          { sha: "aaaaaaa", message: "First edit", author: "Ada" },
+          { sha: "bbbbbbb", message: "Second edit", author: "Ada" },
+        ] },
+        { kind: "comment", id: 1, author: "cy", at: "2026-01-02T00:00:00Z", body: "Looks **close**", url: "u" },
+        { kind: "review", author: "bo", at: "2026-01-03T00:00:00Z", verdict: "sent_back", body: "Fix the title" },
+        { kind: "review", author: "dee", at: "2026-01-04T00:00:00Z", verdict: "commented", body: "Nit" },
+        { kind: "review", author: "bo", at: "2026-01-05T00:00:00Z", verdict: "greenlit", body: null },
+        { kind: "state", at: "2026-01-06T00:00:00Z", state: "merged" },
+      ],
+      checks: [
+        { name: "build", status: "completed", conclusion: "success", url: "https://gh/runs/1" },
+        { name: "deploy", status: "completed", conclusion: "failure", url: "https://gh/runs/2" },
+      ],
+      reviewers: [
+        { login: "bo", state: "greenlit" },
+        { login: "eve", state: "requested" },
+      ],
+    };
+
+    it("renders each kind of timeline entry, oldest first", async () => {
+      const { w } = await mountChange({ ...base(), reviewConversation: vi.fn(async () => TALK) }, "conversation");
+      const kinds = w.findAll("[data-testid='review-timeline'] > li").map((li) => li.attributes("data-kind"));
+      expect(kinds).toEqual(["push", "comment", "review", "review", "review", "state"]);
+      const push = w.get("[data-testid='review-timeline-push']");
+      expect(push.text()).toContain("Ada");
+      expect(push.text()).toContain("pushed 2 commits");
+      expect(push.text()).toContain("aaaaaaa");
+      expect(push.text()).toContain("Second edit");
+      const comment = w.get("[data-testid='review-timeline-comment']");
+      expect(comment.text()).toContain("cy");
+      await vi.waitFor(() => expect(comment.find("strong").exists()).toBe(true));
+      expect(comment.get("strong").text()).toBe("close");
+      const reviews = w.findAll("[data-testid='review-timeline-review']");
+      expect(reviews.map((r) => r.attributes("data-verdict"))).toEqual(["sent_back", "commented", "greenlit"]);
+      expect(reviews[0]!.text()).toContain("bo sent this back");
+      await vi.waitFor(() => expect(reviews[0]!.text()).toContain("Fix the title"));
+      expect(reviews[2]!.text()).toContain("bo greenlit these changes");
+      expect(w.get("[data-testid='review-timeline-state']").text()).toContain("Merged");
+    });
+
+    it("renders the description as markdown with raw HTML left inert", async () => {
+      const description = "Hello **there**\n\n<script>window.__pwned = 1</script><img src=x onerror=\"window.__pwned=1\">";
+      const { w } = await mountChange(
+        { ...base(), review: vi.fn(async () => ({ ...DETAIL, description })) },
+        "conversation",
+      );
+      const box = w.get("[data-testid='review-description']");
+      await vi.waitFor(() => expect(box.find("strong").exists()).toBe(true));
+      expect(box.find("script").exists()).toBe(false);
+      expect(box.find("img").exists()).toBe(false);
+      // Shown as text, never as elements or handlers.
+      expect(box.findAll("*").some((el) => el.attributes("onerror") !== undefined)).toBe(false);
+      expect(box.text()).toContain("<script>");
+      expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    });
+
+    it("shows labels, checks, the deploy preview and reviewers in the sidebar", async () => {
+      const { w } = await mountChange(
+        {
+          ...base(),
+          review: vi.fn(async () => ({ ...DETAIL, labels: [{ name: "orso", color: "ffffff" }] })),
+          reviewConversation: vi.fn(async () => TALK),
+          reviewPreview: vi.fn(async () => ({ state: "ready", headSha: "abc", url: "https://pr-7.acme.pages.dev/" })),
+        },
+        "conversation",
+      );
+      const label = w.get("[data-testid='review-label']").element as HTMLElement;
+      expect(label.textContent).toBe("orso");
+      expect(label.style.backgroundColor).toBe("#ffffff");
+      expect(label.style.color).toBe("#1f2328");
+      expect(w.get("[data-testid='review-checks-count']").text()).toBe("1/2");
+      expect(w.find("[data-testid='review-checks-list']").exists()).toBe(false);
+      await w.get("[data-testid='review-checks-toggle']").trigger("click");
+      const links = w.findAll("[data-testid='review-checks-list'] a");
+      expect(links.map((a) => [a.text(), a.attributes("href")])).toEqual([
+        ["build", "https://gh/runs/1"],
+        ["deploy", "https://gh/runs/2"],
+      ]);
+      expect(w.get("[data-testid='review-deploy-link']").attributes("href")).toBe("https://pr-7.acme.pages.dev/");
+      expect(w.findAll("[data-testid='review-reviewer']").map((r) => r.text())).toEqual([
+        "boGreenlit",
+        "eveAwaiting review",
+      ]);
+    });
+
+    it("posts a comment and adds it to the timeline", async () => {
+      const commentOnReview = vi.fn(async (_p: string, _n: number, body: string) => ({
+        kind: "comment", id: 9, author: "me", at: new Date().toISOString(), body, url: "u9",
+      }));
+      const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
+      const submit = () => w.get("[data-testid='review-comment-submit']");
+      const input = w.get("[data-testid='review-comment-input']");
+      expect(submit().attributes("disabled")).toBeDefined();
+      await input.setValue("   ");
+      expect(submit().attributes("disabled")).toBeDefined();
+      await input.setValue("Ship it");
+      expect(submit().attributes("disabled")).toBeUndefined();
+      await w.get("[data-testid='review-comment-form']").trigger("submit");
+      await flushPromises();
+      expect(commentOnReview).toHaveBeenCalledWith("site", 7, "Ship it");
+      const comments = w.findAll("[data-testid='review-timeline-comment']");
+      expect(comments).toHaveLength(1);
+      expect(comments[0]!.text()).toContain("me");
+      expect((input.element as HTMLTextAreaElement).value).toBe("");
+      expect(w.get("[data-testid='review-tab-conversation']").text()).toContain("1");
+    });
+
+    it("keeps the comment and says why when posting fails", async () => {
+      const commentOnReview = vi.fn(async () => {
+        throw new ApiError("UNKNOWN", "Couldn't post your comment. Try again in a moment.", 502);
+      });
+      const { w } = await mountChange({ ...base(), commentOnReview }, "conversation");
+      const input = w.get("[data-testid='review-comment-input']");
+      await input.setValue("Ship it");
+      await w.get("[data-testid='review-comment-form']").trigger("submit");
+      await flushPromises();
+      expect(w.get("[data-testid='review-comment-error']").text()).toContain("Couldn't post your comment");
+      expect((input.element as HTMLTextAreaElement).value).toBe("Ship it");
+      expect(w.find("[data-testid='review-timeline-comment']").exists()).toBe(false);
+    });
   });
 
   describe("preview", () => {

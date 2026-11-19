@@ -13,16 +13,20 @@ import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
 import { BrowserFrame, isHttpUrl, type BrowserFrameSide } from "@/components/ui/browser-frame";
 import { relativeTime } from "@/lib/relativeTime";
-import { reviewPath } from "@/router";
+import { reviewPath, type ReviewPage } from "@/router";
+import { RouterLink } from "vue-router";
 import SendBackDialog from "./SendBackDialog.vue";
 import { useReviewStore } from "./store";
 import { useReviewPreview } from "./useReviewPreview";
+import { useReviewConversation } from "./useReviewConversation";
+import ReviewConversation from "./ReviewConversation.vue";
+import { labelStyle } from "./labels";
 
 // Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
 const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/ChangedFilesTree.vue"));
 const DiffView = defineAsyncComponent(() => import("../checkpoints/DiffView.vue"));
 
-const props = defineProps<{ projectId: string; number: number }>();
+const props = defineProps<{ projectId: string; number: number; page: ReviewPage }>();
 const store = useReviewStore();
 const daemon = useDaemon();
 const router = useRouter();
@@ -51,6 +55,29 @@ watch(
 );
 
 const change = computed(() => store.current);
+const talk = useReviewConversation(
+  () => props.projectId,
+  () => props.number,
+  () => change.value?.headSha,
+);
+/** Open / Draft / Merged / Closed, as GitHub labels the pull request. */
+const STATES = {
+  open: { label: "Open", color: "success", icon: "i-hugeicons-git-pull-request" },
+  draft: { label: "Draft", color: "neutral", icon: "i-hugeicons-git-pull-request-draft" },
+  merged: { label: "Merged", color: "secondary", icon: "i-hugeicons-git-merge" },
+  closed: { label: "Closed", color: "error", icon: "i-hugeicons-git-pull-request-closed" },
+} as const;
+const prState = computed(() => {
+  const c = change.value;
+  if (!c) return STATES.open;
+  if (c.merged) return STATES.merged;
+  if (!c.open) return STATES.closed;
+  return c.draft ? STATES.draft : STATES.open;
+});
+const filesCount = computed(() => store.diff?.files.length ?? null);
+const PAGE_TAB =
+  "text-muted hover:text-highlighted -mb-px flex items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium";
+const PAGE_TAB_ACTIVE = "text-highlighted border-primary";
 const back = () => router.push(reviewPath(props.projectId));
 
 function openSendBack() {
@@ -144,10 +171,27 @@ function reveal(path: string) {
         />
       </UTooltip>
       <div v-if="change" class="min-w-0 flex-1 space-y-1">
-        <p class="text-highlighted truncate text-base font-medium" data-testid="review-title">{{ change.title }}</p>
+        <p class="truncate text-base font-medium">
+          <span class="text-highlighted" data-testid="review-title">{{ change.title }}</span>
+          <span class="text-muted font-normal" data-testid="review-number"> #{{ change.number }}</span>
+        </p>
         <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+          <UBadge
+            :color="prState.color"
+            variant="solid"
+            :icon="prState.icon"
+            :label="prState.label"
+            data-testid="review-state"
+          />
           <UBadge color="neutral" variant="soft" class="max-w-40 truncate" :label="change.author" />
           <UBadge color="neutral" variant="outline" :label="relativeTime(change.updatedAt) ?? ''" />
+          <span
+            v-for="label in change.labels ?? []"
+            :key="label.name"
+            class="rounded-full px-2 py-0.5 text-xs font-medium"
+            :style="labelStyle(label.color)"
+            data-testid="review-header-label"
+          >{{ label.name }}</span>
         </div>
       </div>
       <div v-else class="flex-1" />
@@ -217,14 +261,31 @@ function reveal(path: string) {
       <UAlert color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.openError" role="alert" />
     </div>
     <template v-else-if="change">
-      <p
-        v-if="change.description"
-        class="text-default max-h-32 shrink-0 overflow-y-auto px-3 pb-2 text-sm whitespace-pre-wrap"
-        data-testid="review-description"
-      >
-        {{ change.description }}
-      </p>
+      <nav class="border-default mx-3 mb-3 flex shrink-0 gap-1 border-b" aria-label="Change pages" data-testid="review-pages">
+        <RouterLink
+          :to="reviewPath(projectId, number)"
+          :class="[PAGE_TAB, page === 'conversation' && PAGE_TAB_ACTIVE]"
+          :aria-current="page === 'conversation' ? 'page' : undefined"
+          data-testid="review-tab-conversation"
+        >
+          <UIcon name="i-hugeicons-message-multiple-01" class="size-4" />
+          Conversation
+          <UBadge v-if="talk.count.value !== null" color="neutral" variant="soft" size="sm" :label="String(talk.count.value)" />
+        </RouterLink>
+        <RouterLink
+          :to="reviewPath(projectId, number, 'files')"
+          :class="[PAGE_TAB, page === 'files' && PAGE_TAB_ACTIVE]"
+          :aria-current="page === 'files' ? 'page' : undefined"
+          data-testid="review-tab-files"
+        >
+          <UIcon name="i-hugeicons-file-validation" class="size-4" />
+          Review
+          <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
+        </RouterLink>
+      </nav>
+      <ReviewConversation v-if="page === 'conversation'" :change="change" :talk="talk" :preview="preview" />
       <div
+        v-else
         class="border-default bg-default mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
         data-testid="review-card"
       >

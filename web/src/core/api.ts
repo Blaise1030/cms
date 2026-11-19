@@ -44,7 +44,9 @@ import {
   type ProviderVerifyResult,
   type ReviewDetail,
   type ReviewItem,
+  type ReviewConversation,
   type ReviewPreview,
+  type TimelineItem,
   type RuntimeStatus,
   type SetupSnapshot,
   type SetupStatus,
@@ -431,6 +433,12 @@ export function createApi(
       number: number,
       body: { decision: "greenlight" | "send_back"; comment?: string; headSha: string },
     ) => send("POST", `/api/projects/${enc(project)}/reviews/${number}/decision`, { body }).then(() => undefined),
+    /** Comments, reviews, pushes, checks and reviewers of a labelled change. */
+    reviewConversation: (project: string, number: number) =>
+      json<ReviewConversation>("GET", `/api/projects/${enc(project)}/reviews/${number}/conversation`),
+    /** Comment on an open change as the signed-in user; the new timeline entry. */
+    commentOnReview: (project: string, number: number, body: string) =>
+      json<TimelineItem>("POST", `/api/projects/${enc(project)}/reviews/${number}/comments`, { body: { body } }),
     /** The change's deploy preview and the live site; 404 when it is no longer waiting. */
     reviewPreview: (project: string, number: number) =>
       json<ReviewPreview>("GET", `/api/projects/${enc(project)}/reviews/${number}/preview`),

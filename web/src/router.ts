@@ -72,7 +72,14 @@ export const routes: RouteRecordRaw[] = [
         props: (r) => ({
           projectId: r.params.id as string,
           number: r.params.number ? Number(r.params.number) : undefined,
+          page: "conversation",
         }),
+      },
+      {
+        path: "review/:number/files",
+        name: "project-review-files",
+        component: ReviewPanel,
+        props: (r) => ({ projectId: r.params.id as string, number: Number(r.params.number), page: "files" }),
       },
       {
         path: "settings",
@@ -113,9 +120,13 @@ export function historyPath(id: string, sha?: string | null) {
   return sha ? `${base}/${encodeURIComponent(sha)}` : base;
 }
 
-export function reviewPath(id: string, number?: number | null) {
+/** A change's page: its Conversation (default) or its Review (the preview and what changed). */
+export type ReviewPage = "conversation" | "files";
+
+export function reviewPath(id: string, number?: number | null, page: ReviewPage = "conversation") {
   const base = projectPath(id, "review");
-  return number ? `${base}/${number}` : base;
+  if (!number) return base;
+  return page === "files" ? `${base}/${number}/files` : `${base}/${number}`;
 }
 
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
@@ -123,7 +134,7 @@ export function projectTabFromRoute(name: string | symbol | null | undefined): P
   if (name === "project-design") return "design";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
-  if (name === "project-review") return "review";
+  if (name === "project-review" || name === "project-review-files") return "review";
   if (name === "project-settings") return "settings";
   return "preview";
 }

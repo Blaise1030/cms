@@ -119,9 +119,43 @@ export interface ReviewDetail extends ReviewItem {
   description: string | null;
   open: boolean;
   draft: boolean;
+  merged?: boolean;
+  /** Labels as GitHub shows them; `color` is hex without `#`. */
+  labels?: ReviewLabel[];
   /** The reviewer may greenlight or send back; false carries a `reason`. */
   canDecide: boolean;
   reason: string | null;
+}
+
+export interface ReviewLabel {
+  name: string;
+  color: string;
+}
+
+/** One entry of a change's conversation (`kind` is the wire tag). */
+export type TimelineItem =
+  | { kind: "comment"; id: number; author: string; at: string; body: string; url: string }
+  | { kind: "review"; author: string; at: string; verdict: "greenlit" | "sent_back" | "commented"; body: string | null }
+  | { kind: "push"; at: string; commits: { sha: string; message: string; author: string }[] }
+  | { kind: "state"; at: string; state: "closed" | "merged" };
+
+export interface ReviewCheck {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface ReviewReviewer {
+  login: string;
+  state: "requested" | "commented" | "greenlit" | "sent_back" | "dismissed";
+}
+
+/** `GET /api/projects/{id}/reviews/{n}/conversation`. */
+export interface ReviewConversation {
+  items: TimelineItem[];
+  checks: ReviewCheck[];
+  reviewers: ReviewReviewer[];
 }
 
 /**
