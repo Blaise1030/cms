@@ -2,6 +2,8 @@
 // Pagefind Component UI over one section's index (built by integrations/pagefind.js after
 // `astro build`). Renders a search button that opens a search dialog (also on ⌘K / Ctrl+K).
 // The index only exists in a build, so under `astro dev` the dialog shows no results.
+import Icon from "./Icon.astro";
+
 interface Props {
   /** Index name from astro.config.mjs, e.g. "blog" → `<base>pagefind-blog/`. */
   bundle: string;
@@ -21,7 +23,7 @@ const bundlePath = `${base}pagefind-${bundle}/`;
   <!-- Stand-in bar until the Pagefind element upgrades (always under `astro dev`, where the
        index doesn't exist). Hidden by CSS once pagefind-modal-trigger is :defined. -->
   <div class="search-fallback" aria-hidden="true">
-    <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+    <Icon name="search" class="size-4 shrink-0" />
     <span class="truncate">{placeholder}</span>
   </div>
   <pagefind-modal instance={bundle} reset-on-close>

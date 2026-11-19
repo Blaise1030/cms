@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { MenuIcon, XIcon } from "lucide-react";
+import { MenuIcon, XIcon } from "../icons";
 import { Dialog } from "radix-ui";
 
 export type NavItem = {

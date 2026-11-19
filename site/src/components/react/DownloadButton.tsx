@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronDownIcon, CoffeeIcon, DownloadIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CoffeeIcon, DownloadIcon, XIcon } from "../icons";
 import { Dialog } from "radix-ui";
 import { cn } from "cn";
 import { buttonVariants } from "../ui/button";

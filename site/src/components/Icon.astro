@@ -1,46 +1,27 @@
 ---
+// Hugeicons glyph for Astro markup, rendered to static SVG at build time (no client JS).
+// The set lives in ./icons.tsx; add a name here when an Astro page needs a new one.
+import * as icons from "./icons";
+
+const byName = {
+  scale: icons.ScaleIcon,
+  "file-text": icons.FileTextIcon,
+  globe: icons.GlobeIcon,
+  "arrow-up-right": icons.ArrowUpRightIcon,
+  "arrow-left": icons.ArrowLeftIcon,
+  "chevron-down": icons.ChevronDownIcon,
+  search: icons.SearchIcon,
+};
+
 interface Props {
-  name: "scale" | "file-text" | "globe" | "arrow-up-right";
+  name: keyof typeof byName;
   class?: string;
+  /** Extra attributes for the svg, e.g. data-icon="inline-start" inside a button. */
+  [attr: `data-${string}`]: string;
 }
 
-const { name, class: className = "size-5" } = Astro.props;
-
-const icons: Record<Props["name"], string> = {
-  scale: `
-    <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
-    <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
-    <path d="M7 21h10" />
-    <path d="M12 3v18" />
-    <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
-  `,
-  "file-text": `
-    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-    <path d="M10 9H8" />
-    <path d="M16 13H8" />
-    <path d="M16 17H8" />
-  `,
-  globe: `
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
-    <path d="M2 12h20" />
-  `,
-  "arrow-up-right": `
-    <path d="M7 17 17 7" />
-    <path d="M7 7h10v10" />
-  `,
-};
+const { name, class: className = "size-5", ...rest } = Astro.props;
+const Glyph = byName[name];
 ---
 
-<svg
-  class={className}
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="1.5"
-  stroke-linecap="round"
-  stroke-linejoin="round"
-  aria-hidden="true"
-  set:html={icons[name]}
-/>
+<Glyph className={className} strokeWidth={1.5} {...rest} />
