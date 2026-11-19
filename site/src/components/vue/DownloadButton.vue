@@ -74,7 +74,7 @@ const items = computed<DropdownMenuItem[][]>(() => [
     v-model:open="open"
     title="Thanks for downloading Orso"
     description="Your download should start in a moment."
-    :ui="{ overlay: 'z-50', content: 'max-w-md', title: 'text-body font-medium text-ink', description: 'text-small text-muted' }"
+    :ui="{ overlay: 'z-50 bg-night/30 backdrop-blur-md', content: 'z-50 max-w-md', title: 'text-body font-medium text-ink', description: 'text-small text-muted' }"
   >
     <template #body>
       <div class="space-y-3 text-small text-muted">

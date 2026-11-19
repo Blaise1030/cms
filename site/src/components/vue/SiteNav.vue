@@ -31,7 +31,7 @@ const links: NavigationMenuItem[] = props.items.map((item) => ({ label: item.lab
     fullscreen
     title="Menu"
     :close="false"
-    :ui="{ overlay: 'z-50 lg:hidden', content: 'inset-2 rounded-xl border border-line bg-surface-raised lg:hidden', header: 'sr-only', body: 'my-auto flex flex-col px-6 py-24 sm:px-6' }"
+    :ui="{ overlay: 'z-50 bg-night/60 lg:hidden', content: 'z-50 inset-2 rounded-xl border border-line bg-surface-raised lg:hidden', header: 'sr-only', body: 'my-auto flex flex-col px-6 py-24 sm:px-6' }"
   >
     <UButton color="neutral" variant="outline" size="lg" icon="i-hugeicons-menu-01" class="lg:hidden" aria-label="Open menu" />
     <template #body="{ close }">
