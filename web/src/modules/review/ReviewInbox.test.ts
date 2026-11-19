@@ -37,6 +37,7 @@ vi.mock("@nuxt/ui/components/DropdownMenu.vue", async () => {
 
 import ReviewInbox from "./ReviewInbox.vue";
 import { reviewKeys } from "./queries";
+import { useProjectsStore } from "@/modules/projects/store";
 import { queryPlugin } from "@/test/queryClient";
 
 const item = (over: Partial<ReviewItem>): ReviewItem => ({
@@ -54,14 +55,15 @@ const item = (over: Partial<ReviewItem>): ReviewItem => ({
 
 async function mountInbox(
   reviews: ReviewItem[],
-  opts: { closed?: ReviewItem[]; more?: boolean; q?: string } = {},
+  opts: { closed?: ReviewItem[]; more?: boolean; q?: string; labels?: string[]; repo?: string } = {},
 ) {
   const api = {
     reviews: vi.fn(async () => reviews),
-    closedReviews: vi.fn(async () => ({ reviews: opts.closed ?? [], more: opts.more ?? false })),
+    closedReviews: vi.fn(async () => ({ reviews: opts.closed ?? [], more: opts.more ?? false, labels: opts.labels })),
   };
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
+  if (opts.repo) useProjectsStore().projects = [{ id: "site", repo: opts.repo } as never];
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -95,6 +97,22 @@ describe("ReviewInbox", () => {
     expect(rows[1]!.text()).toContain("You sent back");
     expect(rows[1]!.find("[data-testid='review-checks']").attributes("data-checks")).toBe("failing");
     expect(rows[2]!.text()).toContain("You greenlit");
+  });
+
+  it("titles the page and names the repository and labels it lists", async () => {
+    const { w } = await mountInbox([], { repo: "acme/site", labels: ["orso", "content"] });
+    expect(w.get("[data-testid='review-inbox-header'] h1").text()).toBe("Changes for review");
+    expect(w.get("[data-testid='review-inbox-subtitle']").text()).toBe(
+      "Shared changes on acme/site labelled orso, content",
+    );
+  });
+
+  it("keeps the title and drops the subtitle parts it can't know", async () => {
+    const bare = await mountInbox([]);
+    expect(bare.w.get("[data-testid='review-inbox-header'] h1").text()).toBe("Changes for review");
+    expect(bare.w.find("[data-testid='review-inbox-subtitle']").exists()).toBe(false);
+    const labelsOnly = await mountInbox([], { labels: ["orso"] });
+    expect(labelsOnly.w.get("[data-testid='review-inbox-subtitle']").text()).toBe("Shared changes labelled orso");
   });
 
   it("shows the empty copy", async () => {

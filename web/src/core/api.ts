@@ -421,7 +421,7 @@ export function createApi(
       (await json<{ reviews: ReviewItem[] }>("GET", `/api/projects/${enc(project)}/reviews`)).reviews,
     /** The most recently updated labelled closed or merged changes; `more` when the page was full. */
     closedReviews: (project: string) =>
-      json<{ reviews: ReviewItem[]; more: boolean }>("GET", `/api/projects/${enc(project)}/reviews`, {
+      json<{ reviews: ReviewItem[]; more: boolean; labels?: string[] }>("GET", `/api/projects/${enc(project)}/reviews`, {
         query: { state: "closed" },
       }),
     review: (project: string, number: number) =>

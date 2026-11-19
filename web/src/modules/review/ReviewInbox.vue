@@ -14,11 +14,20 @@ import { relativeTime } from "@/lib/relativeTime";
 import { reviewPath } from "@/router";
 import { applyQuery, DEFAULT_QUERY, parseQuery, setQualifier, SORT_KEY, type InboxSort, type ReviewFilter } from "./inboxQuery";
 import { labelStyle } from "./labels";
+import { useProjectsStore } from "@/modules/projects/store";
 import { useClosedInbox, useInbox } from "./queries";
 
 const props = defineProps<{ projectId: string }>();
 const inbox = useInbox(() => props.projectId);
 const closed = useClosedInbox(() => props.projectId);
+const projects = useProjectsStore();
+/** "Shared changes on owner/repo labelled orso", leaving out what isn't known. */
+const subtitle = computed(() => {
+  const repo = projects.projects.find((p) => p.id === props.projectId)?.repo;
+  const labels = closed.labels;
+  if (!repo && labels.length === 0) return null;
+  return `Shared changes${repo ? ` on ${repo}` : ""}${labels.length ? ` labelled ${labels.join(", ")}` : ""}`;
+});
 /** One object for the template: open changes (shared with the rail) and closed ones. */
 const store = reactive({ ...toRefs(inbox), ...toRefs(closed) });
 const route = useRoute();
@@ -145,6 +154,10 @@ const open = (number: number) => router.push(reviewPath(props.projectId, number)
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-inbox">
     <div class="flex min-h-full flex-col gap-3 p-3">
+      <header class="flex shrink-0 flex-col gap-0.5 pt-1" data-testid="review-inbox-header">
+        <h1 class="text-highlighted text-lg font-semibold">Changes for review</h1>
+        <p v-if="subtitle" class="text-muted truncate text-sm" data-testid="review-inbox-subtitle">{{ subtitle }}</p>
+      </header>
       <form class="flex shrink-0" role="search" @submit.prevent="draft !== null && setQ(draft)">
         <UInput
           :model-value="draft ?? q"

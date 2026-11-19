@@ -62,6 +62,8 @@ export function useClosedInbox(projectId: () => string) {
   return reactive({
     closedItems: computed<ReviewItem[] | null>(() => q.data.value?.reviews ?? null),
     closedMore: computed(() => q.data.value?.more ?? false),
+    /** The `orso.json` `prLabels` the inbox filters on, as the daemon read them. */
+    labels: computed<string[]>(() => q.data.value?.labels ?? []),
     closedLoading: computed(() => q.isFetching.value),
     closedError: computed(() => (q.error.value ? errorMessage(q.error.value) : null)),
   });

@@ -44,8 +44,9 @@ pub struct ListQuery {
     state: Option<String>,
 }
 
-/// `GET /api/projects/{id}/reviews` → `{ reviews: ReviewItem[] }`; with `?state=closed`,
-/// `{ reviews, more }` of the most recently updated labelled closed or merged changes.
+/// `GET /api/projects/{id}/reviews` → `{ reviews: ReviewItem[], labels }`; with
+/// `?state=closed`, `{ reviews, more, labels }` of the most recently updated labelled closed or
+/// merged changes. `labels` are the `orso.json` `prLabels` the list filters on.
 pub async fn list(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -57,14 +58,14 @@ pub async fn list(
     if query.state.as_deref() == Some("closed") {
         let closed = state.github.closed_reviews(&repo, &labels, &me).await?;
         return Ok(Json(
-            json!({ "reviews": closed.reviews, "more": closed.more }),
+            json!({ "reviews": closed.reviews, "more": closed.more, "labels": labels }),
         ));
     }
     let inbox = state.github.review_inbox(&repo, &labels, &me).await?;
     // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref until
     // it actually closes.
     review::prune_refs(&project.dir, &inbox.open).await;
-    Ok(Json(json!({ "reviews": inbox.reviews })))
+    Ok(Json(json!({ "reviews": inbox.reviews, "labels": labels })))
 }
 
 /// Why `me` may not greenlight or send back a change by `author` (the string the UI shows).
@@ -557,6 +558,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
         let v = body_json(list(State(state), Path(id), Query(ListQuery::default())).await).await;
+        // The prLabels it filtered on (orso.json's default here), for the inbox's subtitle.
+        assert_eq!(v["labels"], json!(["orso"]));
         let nums: Vec<u64> = v["reviews"]
             .as_array()
             .unwrap()
@@ -646,6 +649,7 @@ mod tests {
             state: Some("closed".into()),
         });
         let v = body_json(list(State(state), Path(id), q).await).await;
+        assert_eq!(v["labels"], json!(["orso"]));
         let rows: Vec<(u64, String)> = v["reviews"]
             .as_array()
             .unwrap()
