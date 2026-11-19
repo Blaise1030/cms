@@ -95,7 +95,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects/{id}/reviews/{n}/diff", get(reviews::diff))
         .route(
             "/api/projects/{id}/reviews/{n}/preview",
-            get(reviews::preview_status).post(reviews::prepare_preview),
+            get(reviews::preview),
         )
         .route(
             "/api/projects/{id}/reviews/{n}/decision",

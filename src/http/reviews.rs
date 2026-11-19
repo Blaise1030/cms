@@ -1,19 +1,18 @@
 //! `GET /api/projects/{id}/reviews`, `GET /api/projects/{id}/reviews/{n}`,
-//! `GET /api/projects/{id}/reviews/{n}/diff`, `POST /api/projects/{id}/reviews/{n}/decision`:
-//! the review inbox over HTTP.
+//! `GET /api/projects/{id}/reviews/{n}/diff`, `GET /api/projects/{id}/reviews/{n}/preview`,
+//! `POST /api/projects/{id}/reviews/{n}/decision`: the review inbox over HTTP.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::github::Decision;
+use crate::github::{Decision, DeployState};
 
 use crate::error::ApiError;
 use crate::projects::Project;
-use crate::review_preview::ReviewPreview;
 use crate::state::AppState;
 use crate::{review, settings};
 
@@ -45,10 +44,9 @@ pub async fn list(
     let me = state.github.signed_in_login().await?;
     let labels = settings::pr_labels(&project.dir);
     let inbox = state.github.review_inbox(&repo, &labels, &me).await?;
-    // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref and
-    // preview until it actually closes.
+    // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref until
+    // it actually closes.
     review::prune_refs(&project.dir, &inbox.open).await;
-    state.review_previews.prune(&project.id, &inbox.open).await;
     Ok(Json(json!({ "reviews": inbox.reviews })))
 }
 
@@ -154,32 +152,52 @@ pub async fn diff(
         .into_response())
 }
 
-/// Body of `POST /api/projects/{id}/reviews/{n}/preview`.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewBody {
-    /// The head commit the reviewer is looking at.
-    head_sha: String,
+/// Where a change's deploy preview stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewState {
+    /// Its deploy is still running.
+    Deploying,
+    /// A deployment of the head succeeded; `url` is its preview.
+    Ready,
+    /// Its deploy check failed.
+    Failed,
+    /// No deployment and no deploy check: the site doesn't publish previews for changes.
+    None,
 }
 
-/// Query of `GET /api/projects/{id}/reviews/{n}/preview`.
-#[derive(Deserialize)]
+/// `GET /api/projects/{id}/reviews/{n}/preview`: the change's deploy preview and the live
+/// site, so the reviewer can compare them. Nothing is built on this machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewQuery {
-    head_sha: String,
+pub struct ReviewPreview {
+    pub state: PreviewState,
+    /// The head commit this describes.
+    pub head_sha: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_url: Option<String>,
 }
 
-/// `POST /api/projects/{id}/reviews/{n}/preview` → the preview of the change's head. Refuses (404)
-/// a change that is closed, a draft or unlabelled; fetches the head so the commit exists locally, refuses when it is no longer `headSha`, then starts (or joins)
-/// the build.
-pub async fn prepare_preview(
+/// A successful deployment wins; otherwise the head's deploy check says whether one is coming.
+fn preview_state(url: Option<&str>, deploy: DeployState) -> PreviewState {
+    match (url, deploy) {
+        (Some(_), _) => PreviewState::Ready,
+        (None, DeployState::Building) => PreviewState::Deploying,
+        (None, DeployState::Failed) => PreviewState::Failed,
+        // A deploy check that passed without recording a deployment has no URL to show.
+        (None, DeployState::Live | DeployState::Unknown) => PreviewState::None,
+    }
+}
+
+/// `GET /api/projects/{id}/reviews/{n}/preview` → [`ReviewPreview`] of the change's current
+/// head. 404 for a change that is closed, a draft or unlabelled.
+pub async fn preview(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, u64)>,
-    Json(body): Json<PreviewBody>,
 ) -> Result<Json<ReviewPreview>, ApiError> {
     let (project, repo) = project_repo(&state, &id).await?;
-    // A build runs the change's own code on this machine: only for a change that is really
-    // waiting for review here (open, not a draft, carrying one of the project's labels).
     let me = state.github.signed_in_login().await?;
     let detail = state.github.review_detail(&repo, number, &me).await?;
     let labels = settings::pr_labels(&project.dir);
@@ -190,35 +208,35 @@ pub async fn prepare_preview(
     if !detail.open || detail.draft || !labelled {
         return Err(ApiError::enoent(GONE));
     }
-    let env = state.github.git_env().await?;
-    let head = review::fetch_head(&project.dir, number, &env).await?;
-    if !head.eq_ignore_ascii_case(&body.head_sha) {
-        return Err(
-            ApiError::conflict("This change was updated since you opened it")
-                .with_reason("head_moved"),
-        );
-    }
-    let preview = state
-        .review_previews
-        .prepare(&project.id, &project.dir, number, &head)
-        .await;
-    Ok(Json(preview))
-}
-
-/// `GET /api/projects/{id}/reviews/{n}/preview?headSha=` → the preview's state; 404 when it was
-/// never prepared.
-pub async fn preview_status(
-    State(state): State<AppState>,
-    Path((id, number)): Path<(String, u64)>,
-    Query(query): Query<PreviewQuery>,
-) -> Result<Json<ReviewPreview>, ApiError> {
-    let (project, _) = project_repo(&state, &id).await?;
-    state
-        .review_previews
-        .status(&project.id, number, &query.head_sha)
-        .await
-        .map(Json)
-        .ok_or_else(|| ApiError::enoent("This preview has not been prepared"))
+    let sha = detail.item.head_sha;
+    let worker = crate::github::worker_name_from_wrangler(&project.dir);
+    let change = async {
+        if sha.is_empty() {
+            return Ok((None, DeployState::Unknown));
+        }
+        let url = state.github.preview_url(&repo, &sha).await?;
+        let deploy = match url {
+            Some(_) => DeployState::Live,
+            None => state.github.deploy_state(&repo, &sha).await,
+        };
+        Ok::<_, ApiError>((url, deploy))
+    };
+    // Best effort: without a live URL the reviewer still sees the change.
+    let live = async {
+        state
+            .github
+            .live_url(&repo, worker.as_deref())
+            .await
+            .unwrap_or_default()
+    };
+    let (change, live_url) = tokio::join!(change, live);
+    let (url, deploy) = change?;
+    Ok(Json(ReviewPreview {
+        state: preview_state(url.as_deref(), deploy),
+        head_sha: sha,
+        url,
+        live_url,
+    }))
 }
 
 #[cfg(test)]
@@ -227,6 +245,7 @@ mod tests {
     use crate::config::{Config, GithubConfig};
     use crate::projects::Source;
     use axum::body::to_bytes;
+    use axum::extract::Query;
     use axum::routing::get;
     use axum::Router;
     use std::path::Path as FsPath;
@@ -299,6 +318,7 @@ mod tests {
                             p["labels"] = json!([]);
                             p
                         }
+                        12 | 13 => pull(n, "bob", "open", false),
                         _ => pull(n, "bob", "open", true),
                     })
                 }),
@@ -310,7 +330,43 @@ mod tests {
             )
             .route(
                 "/repos/acme/site/commits/{sha}/check-runs",
-                get(|| async { axum::Json(json!({ "check_runs": [] })) }),
+                get(|Path(sha): Path<String>| async move {
+                    let runs = match sha.as_str() {
+                        "h12" => json!([{ "name": "deploy", "status": "in_progress" }]),
+                        "h13" => json!([{ "name": "deploy", "status": "completed",
+                            "conclusion": "failure" }]),
+                        _ => json!([]),
+                    };
+                    axum::Json(json!({ "check_runs": runs }))
+                }),
+            )
+            .route(
+                "/repos/acme/site/branches/main",
+                get(|| async { axum::Json(json!({ "commit": { "sha": "hmain" } })) }),
+            )
+            // Deployments: #7's head has a preview, main's tip is the live site.
+            .route(
+                "/repos/acme/site/deployments",
+                get(
+                    |Query(q): Query<std::collections::HashMap<String, String>>| async move {
+                        axum::Json(match q.get("sha").map(String::as_str) {
+                            Some("h7") => json!([{ "id": 7, "sha": "h7" }]),
+                            Some("hmain") => json!([{ "id": 1, "sha": "hmain" }]),
+                            _ => json!([]),
+                        })
+                    },
+                ),
+            )
+            .route(
+                "/repos/acme/site/deployments/{id}/statuses",
+                get(|Path(id): Path<u64>| async move {
+                    let url = if id == 7 {
+                        "https://pr-7.site.test/"
+                    } else {
+                        "https://site.test/"
+                    };
+                    axum::Json(json!([{ "state": "success", "environment_url": url }]))
+                }),
             )
             .route(
                 "/repos/acme/site",
@@ -381,7 +437,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_returns_only_labelled_changes_by_others() {
+    async fn list_returns_every_labelled_change_marking_your_own() {
         let tmp = tempfile::tempdir().unwrap();
         let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
         let v = body_json(list(State(state), Path(id)).await).await;
@@ -391,8 +447,10 @@ mod tests {
             .iter()
             .map(|r| r["number"].as_u64().unwrap())
             .collect();
-        assert_eq!(nums, vec![7, 9]);
+        assert_eq!(nums, vec![7, 8, 9]);
         assert_eq!(v["reviews"][0]["author"], "bob");
+        assert_eq!(v["reviews"][0]["mine"], false);
+        assert_eq!(v["reviews"][1]["mine"], true);
         assert_eq!(v["reviews"][0]["headSha"], "h7");
     }
 
@@ -563,22 +621,6 @@ mod tests {
     }
 
     /// `state` with a builder that writes a one-page site instead of running npm.
-    fn with_fake_builds(state: &mut AppState, root: &FsPath) {
-        use crate::review_preview::ReviewPreviews;
-        let builder: crate::review_preview::Builder = std::sync::Arc::new(|_, _, _, out| {
-            Box::pin(async move {
-                tokio::fs::create_dir_all(&out).await.unwrap();
-                tokio::fs::write(out.join("index.html"), "<h1>Hero</h1>")
-                    .await
-                    .unwrap();
-                Ok(())
-            })
-        });
-        state.review_previews = std::sync::Arc::new(
-            ReviewPreviews::new(root.join("rp"), std::time::SystemTime::now).with_builder(builder),
-        );
-    }
-
     fn head_of(root: &FsPath) -> String {
         let out = Command::new("git")
             .args(["rev-parse", "refs/pull/7/head"])
@@ -588,133 +630,71 @@ mod tests {
         String::from_utf8(out.stdout).unwrap().trim().to_string()
     }
 
-    #[tokio::test]
-    async fn preview_is_building_then_ready() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        with_fake_builds(&mut state, tmp.path());
-        let sha = head_of(tmp.path());
-        let first = prepare_preview(
-            State(state.clone()),
-            Path((id.clone(), 7)),
-            Json(PreviewBody {
-                head_sha: sha.clone(),
-            }),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(first, ReviewPreview::Building);
-        let want = ReviewPreview::Ready {
-            url: format!("/preview/{id}/reviews/7/{sha}/"),
-        };
-        let mut last = None;
-        for _ in 0..400 {
-            let got = preview_status(
-                State(state.clone()),
-                Path((id.clone(), 7)),
-                Query(PreviewQuery {
-                    head_sha: sha.clone(),
-                }),
-            )
+    async fn preview_of(state: &AppState, id: &str, n: u64) -> Result<ReviewPreview, ApiError> {
+        preview(State(state.clone()), Path((id.to_string(), n)))
             .await
-            .unwrap()
-            .0;
-            if got != ReviewPreview::Building {
-                last = Some(got);
-                break;
+            .map(|j| j.0)
+    }
+
+    #[test]
+    fn preview_state_prefers_a_deployment_then_the_deploy_check() {
+        use DeployState::*;
+        assert_eq!(
+            preview_state(Some("https://x"), Failed),
+            PreviewState::Ready
+        );
+        assert_eq!(preview_state(None, Building), PreviewState::Deploying);
+        assert_eq!(preview_state(None, Failed), PreviewState::Failed);
+        assert_eq!(preview_state(None, Live), PreviewState::None);
+        assert_eq!(preview_state(None, Unknown), PreviewState::None);
+    }
+
+    #[tokio::test]
+    async fn preview_is_the_heads_deployment_with_the_live_site() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let got = preview_of(&state, &id, 7).await.unwrap();
+        assert_eq!(
+            got,
+            ReviewPreview {
+                state: PreviewState::Ready,
+                head_sha: "h7".into(),
+                url: Some("https://pr-7.site.test/".into()),
+                live_url: Some("https://site.test/".into()),
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert_eq!(last, Some(want));
-        let page = state.review_previews.serve(&id, 7, &sha, "").await.unwrap();
-        assert_eq!(page.status(), 200);
-        // A path cannot climb out of the build folder, plain or encoded.
-        for rest in ["../../x", "a/../../x", "%2e%2e/x", "a/%2E%2E/x"] {
-            let err = state
-                .review_previews
-                .serve(&id, 7, &sha, rest)
-                .await
-                .unwrap_err();
-            assert!(matches!(err.http_status(), 400 | 404), "{rest}");
-        }
+        );
+        let json = serde_json::to_value(&got).unwrap();
+        assert_eq!(json["state"], "ready");
+        assert_eq!(json["liveUrl"], "https://site.test/");
+        assert_eq!(json["headSha"], "h7");
     }
 
     #[tokio::test]
-    async fn preview_of_a_moved_head_is_a_conflict() {
+    async fn preview_follows_the_deploy_check_until_a_deployment_exists() {
         let tmp = tempfile::tempdir().unwrap();
-        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        with_fake_builds(&mut state, tmp.path());
-        let err = prepare_preview(
-            State(state.clone()),
-            Path((id.clone(), 7)),
-            Json(PreviewBody {
-                head_sha: "abc123".into(),
-            }),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.http_status(), 409);
-        assert_eq!(err.reason, Some("head_moved"));
-        // Nothing was started.
-        let err = preview_status(
-            State(state),
-            Path((id, 7)),
-            Query(PreviewQuery {
-                head_sha: "abc123".into(),
-            }),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.http_status(), 404);
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        let building = preview_of(&state, &id, 12).await.unwrap();
+        assert_eq!(building.state, PreviewState::Deploying);
+        assert_eq!(building.url, None);
+        assert_eq!(building.live_url.as_deref(), Some("https://site.test/"));
+        let failed = preview_of(&state, &id, 13).await.unwrap();
+        assert_eq!(failed.state, PreviewState::Failed);
+        // #8 has neither a deployment nor a deploy check.
+        let none = preview_of(&state, &id, 8).await.unwrap();
+        assert_eq!(none.state, PreviewState::None);
+        let json = serde_json::to_value(&none).unwrap();
+        assert!(json.get("url").is_none());
     }
 
     #[tokio::test]
-    async fn preview_of_a_change_not_waiting_is_refused_without_building() {
+    async fn preview_of_a_change_not_waiting_is_gone() {
         let tmp = tempfile::tempdir().unwrap();
-        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        with_fake_builds(&mut state, tmp.path());
-        let sha = head_of(tmp.path());
-        // 9 is closed, 10 a draft, 11 open but unlabelled.
+        let (state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        // Closed, draft, unlabelled.
         for n in [9, 10, 11] {
-            let err = prepare_preview(
-                State(state.clone()),
-                Path((id.clone(), n)),
-                Json(PreviewBody {
-                    head_sha: sha.clone(),
-                }),
-            )
-            .await
-            .unwrap_err();
-            assert_eq!(err.http_status(), 404, "#{n}");
-            assert_eq!(err.message, "This change is no longer waiting", "#{n}");
-            let status = preview_status(
-                State(state.clone()),
-                Path((id.clone(), n)),
-                Query(PreviewQuery {
-                    head_sha: sha.clone(),
-                }),
-            )
-            .await;
-            assert!(status.is_err(), "#{n} started a build");
+            let err = preview_of(&state, &id, n).await.unwrap_err();
+            assert_eq!(err.message, GONE, "#{n}");
+            assert_eq!(err.code.status(), 404);
         }
-    }
-
-    #[tokio::test]
-    async fn list_prunes_against_every_open_change_not_just_the_inbox() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
-        with_fake_builds(&mut state, tmp.path());
-        let project = state.projects.get(&id).await.unwrap();
-        // #8 is open but not in the inbox (its author is the reviewer); #42 is not open.
-        for n in [8, 42] {
-            state
-                .review_previews
-                .prepare(&id, &project.dir, n, "abc")
-                .await;
-        }
-        let _ = list(State(state.clone()), Path(id.clone())).await.unwrap();
-        assert!(state.review_previews.status(&id, 8, "abc").await.is_some());
-        assert!(state.review_previews.status(&id, 42, "abc").await.is_none());
     }
 }

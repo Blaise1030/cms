@@ -88,33 +88,10 @@ pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
             Err(e) => e.into_response(),
         };
     }
-    if let Some((project, number, sha, rest)) = review_path(req.uri().path()) {
-        return state
-            .review_previews
-            .respond(&project, number, &sha, &rest)
-            .await;
-    }
     match forward(&state, req, None).await {
         Ok(res) => res,
         Err(e) => e.into_response(),
     }
-}
-
-/// `/preview/{project}/reviews/{number}/{sha}/{rest}` → its parts; `None` unless the number is a
-/// `u64` and the sha is hex, so anything else falls through to the dev server.
-fn review_path(path: &str) -> Option<(String, u64, String, String)> {
-    let rest = path.strip_prefix("/preview/")?;
-    let (project, rest) = rest.split_once("/reviews/")?;
-    let (number, rest) = rest.split_once('/')?;
-    let (sha, rest) = rest.split_once('/').unwrap_or((rest, ""));
-    if project.is_empty() || project.contains('/') {
-        return None;
-    }
-    let number = number.parse().ok()?;
-    if sha.is_empty() || sha.len() > 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    Some((project.to_owned(), number, sha.to_owned(), rest.to_owned()))
 }
 
 fn conflict_path(path: &str) -> Option<(String, String, Source, String)> {
@@ -379,34 +356,6 @@ fn strip_credentials(headers: &mut HeaderMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn review_path_parses_number_sha_and_rest() {
-        assert_eq!(
-            review_path("/preview/site/reviews/7/abc123/assets/a.js"),
-            Some(("site".into(), 7, "abc123".into(), "assets/a.js".into()))
-        );
-        assert_eq!(
-            review_path("/preview/site/reviews/7/abc123/"),
-            Some(("site".into(), 7, "abc123".into(), "".into()))
-        );
-        assert_eq!(
-            review_path("/preview/site/reviews/7/abc123"),
-            Some(("site".into(), 7, "abc123".into(), "".into()))
-        );
-    }
-
-    #[test]
-    fn review_path_rejects_bad_parts() {
-        assert_eq!(review_path("/preview/site/reviews/7"), None);
-        assert_eq!(review_path("/preview/site/reviews/7/"), None);
-        assert_eq!(review_path("/preview/site/reviews/x/abc123/"), None);
-        assert_eq!(review_path("/preview/site/reviews/-1/abc123/"), None);
-        assert_eq!(review_path("/preview/site/reviews/7/not-hex/"), None);
-        assert_eq!(review_path("/preview/site/reviews/7/../x/"), None);
-        assert_eq!(review_path("/preview/site/index.html"), None);
-        assert_eq!(review_path("/preview//reviews/7/abc123/"), None);
-    }
 
     #[test]
     fn id_from_path() {
