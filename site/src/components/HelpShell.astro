@@ -24,14 +24,14 @@ const hasRail = Astro.slots.has("rail");
 
 const docPath = (doc: Doc) => `/help/${doc.id}/`;
 const link = (label: string, path: string): NavigationMenuItem => ({ label, to: href(path), active: path === current });
-/** Overview, then one collapsible group per section; the section holding this page starts open. */
+/** Overview, then one collapsible group per section; every section starts open. */
 const navItems: NavigationMenuItem[] = [
   link("Overview", "/help/"),
   ...shown.map((section) => {
     const sectionPath = `/help/section/${section.id}/`;
     return {
       label: section.title,
-      defaultOpen: current === sectionPath || section.docs.some((doc) => docPath(doc) === current),
+      defaultOpen: true,
       children: [
         link("Overview", sectionPath),
         ...section.loose.map((doc) => link(doc.data.title, docPath(doc))),
