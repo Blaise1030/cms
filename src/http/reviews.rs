@@ -713,7 +713,7 @@ mod tests {
                 .prepare(&id, &project.dir, n, "abc")
                 .await;
         }
-        list(State(state.clone()), Path(id.clone())).await.unwrap();
+        let _ = list(State(state.clone()), Path(id.clone())).await.unwrap();
         assert!(state.review_previews.status(&id, 8, "abc").await.is_some());
         assert!(state.review_previews.status(&id, 42, "abc").await.is_none());
     }

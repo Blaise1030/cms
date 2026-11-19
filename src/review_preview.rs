@@ -704,17 +704,6 @@ mod tests {
         panic!("only {} builds finished", f.done.load(Ordering::SeqCst));
     }
 
-    /// Whether `dir` is (or soon becomes) absent.
-    async fn gone(dir: &Path) -> bool {
-        for _ in 0..400 {
-            if !dir.exists() {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        false
-    }
-
     #[tokio::test]
     async fn expire_now_drops_old_builds_without_other_calls() {
         let base = tempfile::tempdir().unwrap();
