@@ -174,6 +174,27 @@ non-blank comment → 400; deciding or commenting on a PR that is not open, an o
 - Reuses `ChangedFilesTree`, `DiffView` and the preview iframe component.
 - `PrMenu` shows **Sent back** + reviewer + comment for `changes_requested`.
 
+### Caching
+
+GitHub is asked as little as possible, in two layers:
+
+- **Daemon** (`src/github_cache.rs`): every REST GET made with a token goes through one cache
+  keyed by the token's identity and the full URL (each page of a list is its own entry). A
+  response is reused for 15 s without asking; after that it is revalidated with
+  `If-None-Match` / `If-Modified-Since`, and a `304` (free against the rate limit) reuses the
+  stored body. Identical GETs in flight at once share one request. Any write (comment,
+  review, merge, PR create or label, ready for review) drops every entry for that repository
+  (GraphQL writes drop everything). At most 500 entries, least recently used evicted; non-2xx
+  responses are never stored. The `gh` CLI path is not cached. Tests and e2e set the reuse
+  window to 0 (`get_cache_ttl`, `ORSO_GITHUB_CACHE_TTL_MS`) because they change GitHub behind
+  the daemon's back.
+- **Web** (`@tanstack/vue-query`, review module only): the inbox, closed list, change
+  (detail + diff), conversation and preview are queries shared by the rail and the pages.
+  Data is fresh for 30 s, read again when the page becomes visible, and polled only while
+  visible: the inbox (and badge) every 60 s, a running deploy every 10 s. A decision updates
+  the row and the change at once, then marks the inbox and change stale; a comment is added
+  from GitHub's answer and marks the inbox stale.
+
 ## Testing
 
 - **Rust unit:** inbox filtering (label, draft, own); myState from reviews vs head SHA;
