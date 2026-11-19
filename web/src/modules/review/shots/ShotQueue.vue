@@ -58,17 +58,24 @@ function revisit(item: ShotItem) {
 </script>
 
 <template>
+  <!-- One root, so the parent's layout classes (ml-auto) land here. -->
+  <div class="flex self-center">
+  <!-- Opened by hand, not as the slideover's trigger slot: the button appears only once the
+       stored queue has loaded, and a trigger that mounts late never gets its click wired. -->
+  <UButton
+    v-if="queue.items.value.length"
+    color="neutral"
+    variant="soft"
+    size="sm"
+    icon="i-hugeicons-crop"
+    class="self-center"
+    :label="`Queued (${queue.items.value.length})`"
+    aria-haspopup="dialog"
+    :aria-expanded="shown"
+    data-testid="shot-queue-open"
+    @click="shown = true"
+  />
   <USlideover v-model:open="shown" title="Screenshot comments" :ui="{ body: 'flex flex-col gap-3' }">
-    <UButton
-      v-if="queue.items.value.length"
-      color="neutral"
-      variant="soft"
-      size="sm"
-      icon="i-hugeicons-crop"
-      class="self-center"
-      :label="`Queued (${queue.items.value.length})`"
-      data-testid="shot-queue-open"
-    />
     <template #body>
       <p v-if="!queue.items.value.length" class="text-muted text-sm">Nothing queued.</p>
       <article
@@ -134,4 +141,5 @@ function revisit(item: ShotItem) {
       </div>
     </template>
   </USlideover>
+  </div>
 </template>

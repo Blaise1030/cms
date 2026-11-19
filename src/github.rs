@@ -2550,7 +2550,8 @@ impl GithubAuth {
     pub fn raw_blob_url(&self, repo: &str, commit: &str, path: &str) -> String {
         format!(
             "{}/{repo}/blob/{commit}/{path}?raw=true",
-            self.web().trim_end_matches('/')
+            // The site host (github.com), not `web()`: that falls back to the API URL.
+            self.cfg.git_url.trim_end_matches('/')
         )
     }
 
@@ -5068,6 +5069,16 @@ esac"#,
         }
         assert_eq!(hits.load(Ordering::SeqCst), 2);
         stop();
+    }
+
+    #[test]
+    fn raw_blob_url_points_at_the_site_not_the_api() {
+        // `web_url` falls back to the API URL; image links must still open on github.com.
+        let auth = status_auth("https://api.github.com".into(), "rawbloburl");
+        assert_eq!(
+            auth.raw_blob_url("acme/site", "abc123", "uploads/7/x.png"),
+            "https://github.com/acme/site/blob/abc123/uploads/7/x.png?raw=true"
+        );
     }
 
     fn status_auth(base: String, tag: &str) -> GithubAuth {

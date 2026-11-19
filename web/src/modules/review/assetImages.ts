@@ -12,7 +12,8 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  */
 export function rewriteAssetImages(markdown: string, repo: string, toUrl: (sha: string, path: string) => string): string {
   const pattern = new RegExp(
-    `(!\\[[^\\]]*\\]\\()https://github\\.com/${escape(repo)}/blob/([0-9a-f]{7,40})/((?:shots|uploads)/[^)\\s?#]+)\\?raw=true(\\))`,
+    // api.github.com too: links orso wrote before it used the site host pointed there.
+    `(!\\[[^\\]]*\\]\\()https://(?:api\\.)?github\\.com/${escape(repo)}/blob/([0-9a-f]{7,40})/((?:shots|uploads)/[^)\\s?#]+)\\?raw=true(\\))`,
     "gi",
   );
   return markdown.replace(pattern, (_m, open: string, sha: string, path: string, close: string) => `${open}${toUrl(sha, path)}${close}`);

@@ -23,6 +23,12 @@ describe("rewriteAssetImages", () => {
   });
 });
 
+it("also loads images whose links orso once wrote with the API host", () => {
+  const md = "![image](https://api.github.com/acme/site/blob/9947dba/uploads/84/2026-11-19/a.png?raw=true)";
+  expect(rewriteAssetImages(md, "acme/site", to)).toBe(`![image](${to("9947dba", "uploads/84/2026-11-19/a.png")})`);
+  expect(rewriteAssetImages(md.replace("api.github.com", "evil.example"), "acme/site", to)).toContain("evil.example");
+});
+
 describe("repoOfPullUrl", () => {
   it("reads owner/name from a pull request URL", () => {
     expect(repoOfPullUrl("https://github.com/acme/site/pull/7")).toBe("acme/site");

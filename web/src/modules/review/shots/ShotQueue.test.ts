@@ -80,3 +80,22 @@ describe("ShotQueue", () => {
     expect(q.items.value).toHaveLength(1);
   });
 });
+
+describe("ShotQueue opening", () => {
+  it("opens from a button that only appeared after the stored queue loaded", async () => {
+    // Start empty, as on a fresh page load before IndexedDB answers.
+    h.daemon = createFakeDaemon({ reviewWithShots: vi.fn() });
+    const w = mount(ShotQueue, {
+      props: { projectId: "p1", number: 7, headSha: "abc", open: true },
+      global: { plugins: [queryPlugin().plugin] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='shot-queue-open']").exists()).toBe(false);
+    useShotQueue(() => "p1", () => 7).add(item("Hero is cut off"));
+    await flushPromises();
+    await w.get("[data-testid='shot-queue-open']").trigger("click");
+    await flushPromises();
+    expect(document.body.querySelectorAll("[data-testid='shot-queue-item']")).toHaveLength(1);
+  });
+});
