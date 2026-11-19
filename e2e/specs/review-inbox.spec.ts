@@ -42,8 +42,11 @@ async function openReview(page: import("@playwright/test").Page, orso: import(".
   await item.click();
   await expect(page).toHaveURL(new RegExp(`/p/${projectId}/review/${PR}$`));
   await expect(page.getByTestId("review-title")).toHaveText("Fix the hero copy");
-  await expect(page.getByText("What changed")).toBeVisible();
+  // The preview fills the view; What changed is the other tab.
+  await expect(page.getByTestId("review-preview")).toBeVisible();
+  await page.getByRole("tab", { name: "What changed" }).click();
   await expect(page.getByText("serve.mjs").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("tab", { name: "Preview" }).click();
   return sha;
 }
 

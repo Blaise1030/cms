@@ -86,6 +86,26 @@ describe("ReviewChange", () => {
     expect(w.get("[data-testid='diff-stub']").text()).toBe("a.txt");
   });
 
+  it("fills the view with the preview by default and switches to what changed", async () => {
+    const { w } = await mountChange({
+      review: vi.fn(async () => DETAIL),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
+    });
+    const shown = (id: string) => (w.get(`[data-testid='${id}']`).element as HTMLElement).style.display !== "none";
+    const tabs = w.findAll("[data-testid='review-view-tabs'] [role='tab']");
+    expect(tabs.map((t) => t.text())).toEqual(["Preview", "What changed"]);
+    expect(w.get("[data-testid='review-preview']").classes()).toContain("flex-1");
+    expect(shown("review-preview")).toBe(true);
+    expect(shown("review-changes")).toBe(false);
+    await tabs[1]!.trigger("mousedown", { button: 0 });
+    await flushPromises();
+    expect(shown("review-preview")).toBe(false);
+    expect(shown("review-changes")).toBe(true);
+    // The decision stays in reach whichever view is showing.
+    expect(w.find("[data-testid='review-greenlight']").isVisible()).toBe(true);
+    expect(w.find("[data-testid='review-send-back']").isVisible()).toBe(true);
+  });
+
   it("hides the live site link when there is no URL", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),

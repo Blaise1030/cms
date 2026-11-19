@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import type { SplitterItem } from "@nuxt/ui";
+import type { SplitterItem, TabsItem } from "@nuxt/ui";
 import UAlert from "@nuxt/ui/components/Alert.vue";
 import UBadge from "@nuxt/ui/components/Badge.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UEmpty from "@nuxt/ui/components/Empty.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import USplitter from "@nuxt/ui/components/Splitter.vue";
+import UTabs from "@nuxt/ui/components/Tabs.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
 import type { ReviewPreview } from "@/core/types";
@@ -146,6 +147,18 @@ const previewSrc = computed(() =>
   preview.value?.state === "ready" ? new URL(preview.value.url, daemon.config.value.origin).toString() : "",
 );
 
+/** The rendered change fills the view by default; What changed is one click away. */
+type View = "preview" | "changes";
+const VIEWS: TabsItem[] = [
+  { label: "Preview", value: "preview", icon: "i-hugeicons-computer-video" },
+  { label: "What changed", value: "changes", icon: "i-hugeicons-file-validation" },
+];
+const view = ref<View>("preview");
+watch(
+  () => [props.projectId, props.number] as const,
+  () => (view.value = "preview"),
+);
+
 const SPLIT: SplitterItem[] = [
   { id: "review-files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
   { id: "review-diffs", slot: "diffs", defaultSize: 80, minSize: 40 },
@@ -256,8 +269,21 @@ function reveal(path: string) {
       >
         {{ change.description }}
       </p>
-      <h2 class="text-muted m-0 shrink-0 px-3 pb-1 text-xs font-medium">Preview</h2>
-      <div class="bg-muted mx-3 mb-2 h-64 shrink-0 overflow-hidden rounded-md" data-testid="review-preview">
+      <UTabs
+        v-model="view"
+        :items="VIEWS"
+        :content="false"
+        size="sm"
+        variant="link"
+        color="neutral"
+        class="shrink-0 px-3"
+        data-testid="review-view-tabs"
+      />
+      <div
+        v-show="view === 'preview'"
+        class="bg-muted mx-3 my-2 min-h-0 flex-1 overflow-hidden rounded-md"
+        data-testid="review-preview"
+      >
         <p
           v-if="preview?.state === 'building'"
           class="text-muted flex h-full items-center justify-center gap-2 text-sm"
@@ -294,52 +320,53 @@ function reveal(path: string) {
           />
         </div>
       </div>
-      <h2 class="text-muted m-0 shrink-0 px-3 pb-1 text-xs font-medium">What changed</h2>
-      <UEmpty
-        v-if="store.diff && store.diff.files.length === 0"
-        variant="naked"
-        icon="i-hugeicons-file-validation"
-        title="No file changes in this change."
-      />
-      <USplitter
-        v-else-if="store.diff"
-        :items="SPLIT"
-        auto-save-id="review-files-sidebar"
-        class="min-h-0 flex-1"
-        :ui="{ handle: 'flex items-center justify-center' }"
-      >
-        <template #resize-handle>
-          <div
-            class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
-            aria-hidden="true"
-          />
-        </template>
-        <template #tree>
-          <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
-            <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
-          </aside>
-        </template>
-        <template #diffs>
-          <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
-            <div ref="diffs" class="flex flex-col gap-3 p-3">
-              <section
-                v-for="file in store.diff.files"
-                :key="file.path"
-                :data-path="file.path"
-                class="flex scroll-mt-3 flex-col gap-1.5"
-              >
-                <template v-if="file.binary">
-                  <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
-                    <span class="truncate">{{ file.path }}</span>
-                  </div>
-                  <p class="text-muted text-xs">Binary file changed.</p>
-                </template>
-                <DiffView v-else :diff="file.meta" />
-              </section>
+      <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
+        <UEmpty
+          v-if="store.diff && store.diff.files.length === 0"
+          variant="naked"
+          icon="i-hugeicons-file-validation"
+          title="No file changes in this change."
+        />
+        <USplitter
+          v-else-if="store.diff"
+          :items="SPLIT"
+          auto-save-id="review-files-sidebar"
+          class="min-h-0 flex-1"
+          :ui="{ handle: 'flex items-center justify-center' }"
+        >
+          <template #resize-handle>
+            <div
+              class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+              aria-hidden="true"
+            />
+          </template>
+          <template #tree>
+            <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
+              <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+            </aside>
+          </template>
+          <template #diffs>
+            <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
+              <div ref="diffs" class="flex flex-col gap-3 p-3">
+                <section
+                  v-for="file in store.diff.files"
+                  :key="file.path"
+                  :data-path="file.path"
+                  class="flex scroll-mt-3 flex-col gap-1.5"
+                >
+                  <template v-if="file.binary">
+                    <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
+                      <span class="truncate">{{ file.path }}</span>
+                    </div>
+                    <p class="text-muted text-xs">Binary file changed.</p>
+                  </template>
+                  <DiffView v-else :diff="file.meta" />
+                </section>
+              </div>
             </div>
-          </div>
-        </template>
-      </USplitter>
+          </template>
+        </USplitter>
+      </div>
     </template>
   </div>
 </template>
