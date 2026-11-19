@@ -67,6 +67,22 @@ fn serde_json_string(s: &str) -> String {
 /// room for the traffic lights and makes its top bars window drag regions (see web/src/lib/desktop.ts).
 const DESKTOP_MARKER: &str = r#"document.documentElement.dataset.desktop = "macos";"#;
 
+/// Main window only: a click on a link to another site opens it in the browser (via window.open,
+/// which `on_new_window` hands to the OS) instead of replacing the app. This is what keeps the
+/// app in place, because the navigation handler can't do it: WKWebView asks it about every frame
+/// too, and the review preview frames must be allowed to load their sites.
+const EXTERNAL_LINKS: &str = r#"document.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const a = event.target instanceof Element ? event.target.closest("a[href]") : null;
+  if (!a || (a.target && a.target !== "_self")) return;
+  let url;
+  try { url = new URL(a.href, location.href); } catch { return; }
+  if (!/^https?:$/.test(url.protocol) || url.origin === location.origin) return;
+  if (["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return;
+  event.preventDefault();
+  window.open(url.href, "_blank");
+}, true);"#;
+
 /// No title bar: the traffic lights float over the web UI's 44px top bar, vertically centred.
 fn build_window(app: &tauri::App) -> tauri::Result<WebviewWindow> {
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -74,14 +90,16 @@ fn build_window(app: &tauri::App) -> tauri::Result<WebviewWindow> {
         .inner_size(1440.0, 900.0)
         .min_inner_size(900.0, 600.0)
         .initialization_script(DESKTOP_MARKER)
+        .initialization_script(EXTERNAL_LINKS)
         // Tauri's native file-drop handler swallows every drag, which breaks the web UI's own
         // HTML5 drag and drop (rail reordering, dropping images into content). The UI handles
         // drops itself, so the native handler stays off.
         .disable_drag_drop_handler()
-        // In-window navigation stays on the app and the daemon; anything else (GitHub, docs,
-        // a published site) opens in the default browser instead.
+        // WKWebView asks about frame loads too, so web pages may load (the review compares a
+        // change's deploy preview with the live site in frames); links that would leave the app
+        // are sent to the browser by EXTERNAL_LINKS. Other schemes (mailto:) go to the OS.
         .on_navigation(|url| {
-            if is_internal(url) {
+            if allows_in_window(url) {
                 return true;
             }
             open_external(url);
@@ -110,6 +128,11 @@ fn build_window(app: &tauri::App) -> tauri::Result<WebviewWindow> {
 }
 
 /// The bundled loading page and anything on loopback (the daemon's UI and its previews).
+/// Loads the webview may make itself: the app and daemon, and web pages (frames included).
+fn allows_in_window(url: &Url) -> bool {
+    is_internal(url) || matches!(url.scheme(), "http" | "https")
+}
+
 fn is_internal(url: &Url) -> bool {
     match url.scheme() {
         "tauri" | "about" | "data" | "blob" => true,
@@ -273,6 +296,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_pages_load_in_window_so_preview_frames_work() {
+        let ok = |u: &str| allows_in_window(&Url::parse(u).unwrap());
+        assert!(ok("http://127.0.0.1:5000/p/site/review/7/files"));
+        assert!(ok("https://change-7.example.workers.dev/"));
+        assert!(ok("https://projectorso.cc/pricing"));
+        assert!(ok("about:blank"));
+        assert!(!ok("mailto:team@example.com"));
+        assert!(!ok("file:///etc/passwd"));
+    }
 
     #[test]
     fn daemon_links_opened_in_the_browser_carry_the_token() {
