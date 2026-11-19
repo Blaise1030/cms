@@ -419,6 +419,11 @@ export function createApi(
     /** Labelled changes waiting on the signed-in reviewer. */
     reviews: async (project: string): Promise<ReviewItem[]> =>
       (await json<{ reviews: ReviewItem[] }>("GET", `/api/projects/${enc(project)}/reviews`)).reviews,
+    /** The most recently updated labelled closed or merged changes; `more` when the page was full. */
+    closedReviews: (project: string) =>
+      json<{ reviews: ReviewItem[]; more: boolean }>("GET", `/api/projects/${enc(project)}/reviews`, {
+        query: { state: "closed" },
+      }),
     review: (project: string, number: number) =>
       json<ReviewDetail>("GET", `/api/projects/${enc(project)}/reviews/${number}`),
     /** Unified diff of a teammate's change, fetched without a checkout. */

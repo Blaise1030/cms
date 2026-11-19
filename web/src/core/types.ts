@@ -112,6 +112,16 @@ export interface ReviewItem {
   myState: MyReviewState;
   /** The signed-in user opened it: viewable, but they can't greenlight it. */
   mine: boolean;
+  /** Labels as GitHub shows them; `color` is hex without `#`. */
+  labels?: ReviewLabel[];
+  /** ISO timestamp. */
+  createdAt?: string;
+  /** Conversation comments. */
+  comments?: number;
+  checksPassed?: number;
+  checksTotal?: number;
+  state?: "open" | "closed" | "merged";
+  draft?: boolean;
 }
 
 /** `GET /api/projects/{id}/reviews/{n}`. */
@@ -120,8 +130,6 @@ export interface ReviewDetail extends ReviewItem {
   open: boolean;
   draft: boolean;
   merged?: boolean;
-  /** Labels as GitHub shows them; `color` is hex without `#`. */
-  labels?: ReviewLabel[];
   /** The reviewer may greenlight or send back; false carries a `reason`. */
   canDecide: boolean;
   reason: string | null;

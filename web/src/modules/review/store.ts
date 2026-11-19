@@ -10,6 +10,12 @@ export const useReviewStore = defineStore("review", () => {
 
   const items = ref<ReviewItem[]>([]);
   const loading = ref(false);
+  /** Closed and merged changes, loaded on demand; `null` until then. */
+  const closedItems = ref<ReviewItem[] | null>(null);
+  const closedMore = ref(false);
+  const closedLoading = ref(false);
+  const closedError = ref<string | null>(null);
+  let closedRequest = 0;
   const current = ref<ReviewDetail | null>(null);
   const diffText = ref<string | null>(null);
   const diff = ref<ParsedDiff | null>(null);
@@ -33,6 +39,11 @@ export const useReviewStore = defineStore("review", () => {
     openRequest++;
     loadRequest++;
     items.value = [];
+    closedItems.value = null;
+    closedMore.value = false;
+    closedLoading.value = false;
+    closedError.value = null;
+    closedRequest++;
     current.value = null;
     diffText.value = null;
     diff.value = null;
@@ -60,6 +71,23 @@ export const useReviewStore = defineStore("review", () => {
       if (request === loadRequest) inboxError.value = errorMessage(e);
     } finally {
       if (request === loadRequest) loading.value = false;
+    }
+  }
+
+  async function loadClosed(id: string) {
+    scope(id);
+    const request = ++closedRequest;
+    closedLoading.value = true;
+    try {
+      const { reviews, more } = await daemon.api.closedReviews(id);
+      if (request !== closedRequest) return;
+      closedItems.value = reviews;
+      closedMore.value = more;
+      closedError.value = null;
+    } catch (e) {
+      if (request === closedRequest) closedError.value = errorMessage(e);
+    } finally {
+      if (request === closedRequest) closedLoading.value = false;
     }
   }
 
@@ -138,5 +166,5 @@ export const useReviewStore = defineStore("review", () => {
     }
   }
 
-  return { deciding, decideError, decide, items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
+  return { closedItems, closedMore, closedLoading, closedError, loadClosed, deciding, decideError, decide, items, loading, waitingCount, current, diffText, diff, opening, inboxError, openError, gone, projectId, load, open };
 });
