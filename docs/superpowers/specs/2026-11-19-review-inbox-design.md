@@ -209,6 +209,55 @@ GitHub is asked as little as possible, in two layers:
   the row and the change at once, then marks the inbox and change stale; a comment is added
   from GitHub's answer and marks the inbox stale.
 
+### Screenshot comments and images
+
+Reviewers can point at the page itself, and anyone can attach images to a comment.
+
+- **Picking an area** (Review page): each side of the frame (*This change*, *Live site*) has
+  **Pick an area to comment on**. The side dims; a drag marks the area (at least 8 px; Esc
+  cancels). The frames are other origins, so the pixels come from sharing this tab
+  (`getDisplayMedia`, *this tab* preferred): the browser asks once, the stream is kept while
+  in use and stopped after 5 idle minutes or on leaving the page. The area is mapped from CSS
+  pixels to the capture's own size (device pixel ratio, a scaled capture), capped at 1600 px
+  on its longest side, and sent as PNG (JPEG at 0.85 above 1 MB). A popover at the selection
+  takes a note (**Add to queue**, ⌘/Ctrl+Enter). Without screen sharing (unsupported or
+  refused) a note alone can still be queued.
+- **The queue** lives per change in IndexedDB (memory when storage isn't available), so a
+  reload keeps it. **Queued (n)** in the card's top strip opens it: thumbnail, editable note,
+  page and side (click to open that page), remove, and **Send comments** (one review, event
+  `COMMENT`). **Give greenlight** and **Send back** carry the queue too (send back still needs
+  its summary). Sending clears it; a failure keeps it.
+- **Images on comments**: the Conversation composer takes images from its attach button,
+  paste or drag and drop (PNG, JPEG, GIF or WebP, 5 MB each, 10 per message), shown as
+  thumbnails with ×. Sending stays optimistic: the pending message shows its own images.
+- **Where images are stored**: in the same repository, on an orphan branch
+  `orso-review-assets` (constant; never merged, sharing no history with the site), under
+  `shots/{pr}/{date}/{uuid}.{ext}` and `uploads/{pr}/{date}/{uuid}.{ext}`, committed through
+  the Git Data API (blobs → tree → commit → create or fast-forward the ref, retried once when
+  another upload landed first). The change's own branch and `main` are never touched. Markdown
+  links them as `https://github.com/{repo}/blob/{commit}/{path}?raw=true`, which GitHub shows
+  to anyone who can see the repository, private ones included. **Anyone with read access to the
+  repository can see these images.**
+- **Showing them in orso**: review markdown points those links at
+  `GET /api/projects/{id}/reviews/assets?path=&sha=`, which reads the file with the signed-in
+  account (so private repositories work), only for `shots/`/`uploads/` paths and by commit,
+  and serves it as the image type its bytes are (`nosniff`, cached as immutable).
+- **Daemon endpoints**: `POST …/reviews/{n}/review-with-shots`
+  `{ event: COMMENT|APPROVE|REQUEST_CHANGES, body, headSha, items: [{ note, path, side,
+  viewport, imageBase64?, mime? }] }` (at most 10, PNG/JPEG checked by their bytes, 2 MB
+  each; the head is checked before anything is stored, so a moved change (409 `head_moved`)
+  stores nothing; greenlight and send back keep their rules). `POST …/reviews/{n}/comments`
+  accepts `images: [{ base64, mime, name }]` (blank text allowed with images) and appends an
+  `![image](…)` line per image. A repository that refuses the branch (no push access, a
+  ruleset restricting branches: 403/404/422) answers 403 `assets_refused`; the message then
+  offers **Send without images**, **Copy image** and **Open on GitHub**.
+- **Cleanup**: the images of pull requests that are no longer open are removed from the
+  branch in one commit, on inbox load (at most every 5 minutes per repository) and after
+  publishing; when no open change has images left the branch is deleted, so its history stops
+  riding along with `git clone` (which fetches every branch). History is not squashed. The
+  branch can be deleted by hand at any time; the next upload creates it again (images in
+  existing comments then stop loading).
+
 ## Testing
 
 - **Rust unit:** inbox filtering (label, draft, own); myState from reviews vs head SHA;
