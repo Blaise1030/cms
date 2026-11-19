@@ -420,8 +420,11 @@ export function createApi(
     review: (project: string, number: number) =>
       json<ReviewDetail>("GET", `/api/projects/${enc(project)}/reviews/${number}`),
     /** Unified diff of a teammate's change, fetched without a checkout. */
-    reviewDiff: async (project: string, number: number): Promise<string> =>
-      (await send("GET", `/api/projects/${enc(project)}/reviews/${number}/diff`)).text(),
+    /** The change's unified diff and the head it diffed (`X-Head-Sha`; null when absent). */
+    reviewDiff: async (project: string, number: number): Promise<{ text: string; headSha: string | null }> => {
+      const res = await send("GET", `/api/projects/${enc(project)}/reviews/${number}/diff`);
+      return { text: await res.text(), headSha: res.headers.get("x-head-sha") };
+    },
     /** Greenlight or send back; 409 `head_moved` when the change was updated since `headSha`. */
     decideReview: (
       project: string,

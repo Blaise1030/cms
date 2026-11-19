@@ -25,7 +25,7 @@ beforeEach(() => setActivePinia(createPinia()));
 describe("review store", () => {
   it("keeps the open change visible when a later inbox load fails", async () => {
     const reviews = vi.fn().mockResolvedValueOnce([item(7)]).mockRejectedValueOnce(new Error("offline"));
-    h.daemon = createFakeDaemon({ reviews, review: async () => DETAIL, reviewDiff: async () => "" });
+    h.daemon = createFakeDaemon({ reviews, review: async () => DETAIL, reviewDiff: async () => ({ text: "", headSha: null }) });
     const store = useReviewStore();
     await store.load("p");
     await store.open("p", 7);
@@ -39,7 +39,7 @@ describe("review store", () => {
     h.daemon = createFakeDaemon({
       reviews: async () => [item(7)],
       review: async () => { throw new Error("boom"); },
-      reviewDiff: async () => "",
+      reviewDiff: async () => ({ text: "", headSha: null }),
     });
     const store = useReviewStore();
     await store.open("p", 7);
@@ -70,7 +70,7 @@ describe("review store", () => {
     h.daemon = createFakeDaemon({
       reviews: vi.fn().mockResolvedValueOnce([item(1)]).mockReturnValueOnce(pending.promise),
       review: async () => DETAIL,
-      reviewDiff: async () => "",
+      reviewDiff: async () => ({ text: "", headSha: null }),
     });
     const store = useReviewStore();
     await store.load("A");
@@ -80,5 +80,31 @@ describe("review store", () => {
     expect(store.current).toBeNull();
     expect(store.waitingCount).toBe(0);
     expect(store.loading).toBe(true);
+  });
+
+  it("reloads once when the diff's head differs from the detail's", async () => {
+    const review = vi
+      .fn()
+      .mockResolvedValueOnce({ ...DETAIL, headSha: "old" })
+      .mockResolvedValue({ ...DETAIL, headSha: "new" });
+    const reviewDiff = vi.fn(async () => ({ text: "", headSha: "NEW" }));
+    h.daemon = createFakeDaemon({ review, reviewDiff });
+    const store = useReviewStore();
+    await store.open("p", 7);
+    expect(review).toHaveBeenCalledTimes(2);
+    expect(reviewDiff).toHaveBeenCalledTimes(2);
+    expect(store.current?.headSha).toBe("new");
+    expect(store.opening).toBe(false);
+  });
+
+  it("reloads at most once when the heads keep disagreeing", async () => {
+    const review = vi.fn(async () => ({ ...DETAIL, headSha: "a" }));
+    const reviewDiff = vi.fn(async () => ({ text: "", headSha: "b" }));
+    h.daemon = createFakeDaemon({ review, reviewDiff });
+    const store = useReviewStore();
+    await store.open("p", 7);
+    expect(review).toHaveBeenCalledTimes(2);
+    expect(store.current?.headSha).toBe("a");
+    expect(store.opening).toBe(false);
   });
 });

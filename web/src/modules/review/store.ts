@@ -63,7 +63,12 @@ export const useReviewStore = defineStore("review", () => {
     }
   }
 
-  async function open(id: string, number: number) {
+  /** Open change `number`; when the diff's head differs from the detail's, reload once. */
+  function open(id: string, number: number) {
+    return openChange(id, number, true);
+  }
+
+  async function openChange(id: string, number: number, recheck: boolean): Promise<void> {
     scope(id);
     const request = ++openRequest;
     opening.value = true;
@@ -75,12 +80,17 @@ export const useReviewStore = defineStore("review", () => {
     gone.value = false;
     try {
       // Lazy: the parser lives in `@pierre/diffs`, kept out of the app shell with the renderer.
-      const [{ parseUnifiedDiff }, detail, text] = await Promise.all([
+      const [{ parseUnifiedDiff }, detail, { text, headSha }] = await Promise.all([
         import("../checkpoints/diff"),
         daemon.api.review(id, number),
         daemon.api.reviewDiff(id, number),
       ]);
       if (request !== openRequest) return;
+      // The change moved between the two requests: the diff and the detail would disagree.
+      if (recheck && headSha && headSha.toLowerCase() !== detail.headSha.toLowerCase()) {
+        await openChange(id, number, false);
+        return;
+      }
       current.value = detail;
       diffText.value = text;
       diff.value = parseUnifiedDiff(text);

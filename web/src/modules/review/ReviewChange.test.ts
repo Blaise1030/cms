@@ -42,6 +42,7 @@ const DETAIL: ReviewDetail = {
 };
 const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-x\n+y\n";
 const BINARY = "Binary files a/site/logo.png and b/site/logo.png differ\n";
+const diffOf = (text: string, headSha: string | null = null) => ({ text, headSha });
 
 async function mountChange(api: Record<string, unknown>) {
   h.daemon = createFakeDaemon({ liveSiteUrl: vi.fn(async () => "https://acme.pages.dev"), ...api });
@@ -72,7 +73,7 @@ describe("ReviewChange", () => {
   it("shows the header and what changed", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),
-      reviewDiff: vi.fn(async () => DIFF),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
     });
     expect(w.text()).toContain("Fresh homepage hero");
     expect(w.text()).toContain("Ada");
@@ -88,7 +89,7 @@ describe("ReviewChange", () => {
   it("hides the live site link when there is no URL", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),
-      reviewDiff: vi.fn(async () => DIFF),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
       liveSiteUrl: vi.fn(async () => null),
     });
     expect(w.find("[data-testid='review-live-site']").exists()).toBe(false);
@@ -97,7 +98,7 @@ describe("ReviewChange", () => {
   it("lists a binary-only change", async () => {
     const { w } = await mountChange({
       review: vi.fn(async () => DETAIL),
-      reviewDiff: vi.fn(async () => BINARY),
+      reviewDiff: vi.fn(async () => diffOf(BINARY)),
     });
     expect(w.get("[data-testid='tree-stub']").text()).toContain("site/logo.png");
     expect(w.text()).toContain("Binary file changed.");
@@ -108,7 +109,7 @@ describe("ReviewChange", () => {
       review: vi.fn(async () => {
         throw new ApiError("UNKNOWN", "This change is no longer waiting", 404);
       }),
-      reviewDiff: vi.fn(async () => DIFF),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
     });
     expect(w.text()).toContain("This change is no longer waiting");
     await w.get("[data-testid='review-back']").trigger("click");
@@ -121,14 +122,14 @@ describe("ReviewChange", () => {
       review: vi.fn(async () => {
         throw new ApiError("UNKNOWN", "GitHub is unreachable", 502);
       }),
-      reviewDiff: vi.fn(async () => DIFF),
+      reviewDiff: vi.fn(async () => diffOf(DIFF)),
     });
     expect(w.get("[role='alert']").text()).toContain("GitHub is unreachable");
     expect(w.text()).not.toContain("no longer waiting");
   });
 
   describe("preview", () => {
-    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF) });
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
 
     it("prepares the current head and shows the building copy, polling every 2 s until ready", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -272,7 +273,7 @@ describe("ReviewChange", () => {
         .mockResolvedValue({ state: "building" });
       const { w } = await mountChange({
         review,
-        reviewDiff: vi.fn(async () => DIFF),
+        reviewDiff: vi.fn(async () => diffOf(DIFF)),
         prepareReviewPreview,
         reviewPreview: vi.fn(async () => ({ state: "building" })),
       });
@@ -307,7 +308,7 @@ describe("ReviewChange", () => {
       });
       const { w } = await mountChange({
         review,
-        reviewDiff: vi.fn(async () => DIFF),
+        reviewDiff: vi.fn(async () => diffOf(DIFF)),
         decideReview,
         prepareReviewPreview,
         reviewPreview: vi.fn(async () => ({ state: "building" })),
@@ -320,7 +321,7 @@ describe("ReviewChange", () => {
   });
 
   describe("decision", () => {
-    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF) });
+    const base = () => ({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)) });
 
     it("offers Give greenlight and Send back", async () => {
       const { w } = await mountChange(base());
@@ -362,7 +363,7 @@ describe("ReviewChange", () => {
         throw new ApiError("UNKNOWN", "This change was updated since you opened it", 409, { reason: "head_moved" });
       });
       const review = vi.fn(async () => ({ ...DETAIL }));
-      const reviewDiff = vi.fn(async () => DIFF);
+      const reviewDiff = vi.fn(async () => diffOf(DIFF));
       const { w } = await mountChange({ review, reviewDiff, decideReview });
       const { useReviewStore } = await import("./store");
       const store = useReviewStore();
@@ -378,7 +379,7 @@ describe("ReviewChange", () => {
     describe("send back dialog", () => {
       const dialog = () => new DOMWrapper(document.body);
       async function openDialog(api: Record<string, unknown>) {
-        const m = await mountChange({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => DIFF), ...api });
+        const m = await mountChange({ review: vi.fn(async () => ({ ...DETAIL })), reviewDiff: vi.fn(async () => diffOf(DIFF)), ...api });
         await m.w.get("[data-testid='review-send-back']").trigger("click");
         await flushPromises();
         await dialog().get("[data-testid='send-back-comment']").setValue("  Fix the hero  ");
