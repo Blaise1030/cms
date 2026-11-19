@@ -14,10 +14,10 @@ const { topics } = await loadHelp();
 >
   <div class="mx-auto w-full max-w-7xl border-x border-b border-line">
     <PageHeader title="Help topics" back={{ label: "Back to Help", href: "/help/" }} />
-    <div class="mt-12 border-t border-line">
-      {topics.length === 0 ? <p class="page py-8 text-muted">No help topics yet.</p> : (
-        <ul class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">{topics.map((topic) => (
-          <li class="group relative flex flex-col gap-2 border-b border-line bg-surface p-6 transition-colors duration-gentle ease-gentle hover:bg-sand sm:border-r lg:p-8">
+    <div class="page mt-12">
+      {topics.length === 0 ? <p class="text-muted">No help topics yet.</p> : (
+        <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-6">{topics.map((topic) => (
+          <li class="group relative flex flex-col gap-2 rounded-lg border border-line bg-surface-raised p-6 transition-colors duration-gentle ease-gentle hover:bg-sand">
             <p class="label">{topic.docs.length} {topic.docs.length === 1 ? "article" : "articles"}</p>
             <h2 class="text-heading tracking-tight text-ink">
               <a class="after:absolute after:inset-0" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>
