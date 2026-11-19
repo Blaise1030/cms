@@ -389,7 +389,21 @@ pub struct ReviewDetail {
     pub description: Option<String>,
     pub open: bool,
     pub draft: bool,
+    /// The pull request's label names (server-side gating only; not sent to the UI).
+    #[serde(skip)]
+    pub labels: Vec<String>,
 }
+
+/// The review inbox plus every open pull request's number, labelled or not (what prunes
+/// cached refs and previews, so a change opened by direct URL keeps its preview).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewInbox {
+    pub reviews: Vec<ReviewItem>,
+    pub open: Vec<u64>,
+}
+
+/// GitHub requests in flight at once while building the review inbox.
+const INBOX_CONCURRENCY: usize = 4;
 
 /// `me`'s latest decisive review (approved / changes requested / dismissed) on `head_sha`:
 /// approved -> greenlit, changes requested -> sent back, anything else -> new.
@@ -1533,7 +1547,8 @@ impl GithubAuth {
         repo: &str,
         labels: &[String],
         me: &str,
-    ) -> Result<Vec<ReviewItem>, ApiError> {
+    ) -> Result<ReviewInbox, ApiError> {
+        use futures_util::{StreamExt, TryStreamExt};
         let pulls = self
             .get_all_query::<Vec<ApiPull>, ApiPull>(
                 &format!("/repos/{repo}/pulls"),
@@ -1541,6 +1556,7 @@ impl GithubAuth {
                 |p| p,
             )
             .await?;
+        let open: Vec<u64> = pulls.iter().map(|p| p.number).collect();
         let kept: Vec<ApiPull> = pulls
             .into_iter()
             .filter(|p| {
@@ -1554,8 +1570,14 @@ impl GithubAuth {
                         .is_some_and(|u| u.login.eq_ignore_ascii_case(me))
             })
             .collect();
-        futures_util::future::try_join_all(kept.into_iter().map(|p| self.review_item(repo, p, me)))
-            .await
+        // Bounded, so a busy repository does not fire every PR's requests at once; `buffered`
+        // keeps the results in the listing's order.
+        let reviews = futures_util::stream::iter(kept)
+            .map(|p| self.review_item(repo, p, me))
+            .buffered(INBOX_CONCURRENCY)
+            .try_collect()
+            .await?;
+        Ok(ReviewInbox { reviews, open })
     }
 
     /// One pull request opened for review.
@@ -1570,12 +1592,14 @@ impl GithubAuth {
             .await?;
         let open = pull.state.as_deref() == Some("open") && pull.merged_at.is_none();
         let (draft, description) = (pull.draft, pull.body.clone());
+        let labels = pull.labels.iter().map(|l| l.name.clone()).collect();
         let item = self.review_item(repo, pull, me).await?;
         Ok(ReviewDetail {
             item,
             description,
             open,
             draft,
+            labels,
         })
     }
 
@@ -3489,10 +3513,12 @@ esac"#,
             );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "reviewinbox");
-        let items = auth
+        let inbox = auth
             .review_inbox("acme/site", &["orso".to_string()], "ada")
             .await
             .unwrap();
+        assert_eq!(inbox.open, vec![1, 2, 3, 4, 5]);
+        let items = inbox.reviews;
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].number, 1);
         assert_eq!(items[0].author, "bob");
@@ -3539,12 +3565,66 @@ esac"#,
             );
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "reviewpages");
-        let items = auth
+        let inbox = auth
             .review_inbox("acme/site", &["orso".to_string()], "ada")
             .await
             .unwrap();
+        assert_eq!(inbox.open.len(), 101);
+        let items = inbox.reviews;
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].number, 101);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn review_inbox_bounds_concurrency_and_keeps_order() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (l, pk) = (live.clone(), peak.clone());
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    let page: Vec<_> = (1..=12)
+                        .map(|n| {
+                            serde_json::json!({ "number": n, "html_url": "u", "title": "x",
+                                "draft": false, "labels": [{ "name": "orso" }],
+                                "user": { "login": "bob" } })
+                        })
+                        .collect();
+                    Json(serde_json::Value::Array(page))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/{n}/reviews",
+                get(move |AxPath(n): AxPath<u64>| {
+                    let (live, peak) = (l.clone(), pk.clone());
+                    async move {
+                        let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        // Earlier PRs answer last, so order comes from the listing, not timing.
+                        tokio::time::sleep(std::time::Duration::from_millis(5 * (13 - n))).await;
+                        live.fetch_sub(1, Ordering::SeqCst);
+                        Json(serde_json::json!([]))
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewbounded");
+        let inbox = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        let nums: Vec<u64> = inbox.reviews.iter().map(|r| r.number).collect();
+        assert_eq!(nums, (1..=12).collect::<Vec<_>>());
+        let peak = peak.load(Ordering::SeqCst);
+        assert!((1..=INBOX_CONCURRENCY).contains(&peak), "peak {peak}");
         stop();
     }
 

@@ -18,6 +18,8 @@ use crate::state::AppState;
 use crate::{review, settings};
 
 const GONE: &str = "This change is no longer waiting";
+/// Response header of `/diff`: the head commit that was diffed.
+const HEAD_SHA_HEADER: &str = "x-head-sha";
 const OWN_CHANGE: &str = "This is your change";
 const NEEDS_EDIT_ACCESS: &str = "You need edit access to this site's repository to greenlight";
 
@@ -42,11 +44,12 @@ pub async fn list(
     let (project, repo) = project_repo(&state, &id).await?;
     let me = state.github.signed_in_login().await?;
     let labels = settings::pr_labels(&project.dir);
-    let reviews = state.github.review_inbox(&repo, &labels, &me).await?;
-    let open: Vec<u64> = reviews.iter().map(|r| r.number).collect();
-    review::prune_refs(&project.dir, &open).await;
-    state.review_previews.prune(&project.id, &open).await;
-    Ok(Json(json!({ "reviews": reviews })))
+    let inbox = state.github.review_inbox(&repo, &labels, &me).await?;
+    // Every open PR, not just the inbox's: a change opened by direct URL keeps its ref and
+    // preview until it actually closes.
+    review::prune_refs(&project.dir, &inbox.open).await;
+    state.review_previews.prune(&project.id, &inbox.open).await;
+    Ok(Json(json!({ "reviews": inbox.reviews })))
 }
 
 /// Why `me` may not greenlight or send back a change by `author` (the string the UI shows).
@@ -128,7 +131,8 @@ pub async fn decide(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /api/projects/{id}/reviews/{n}/diff` → the change's unified diff (`text/plain`).
+/// `GET /api/projects/{id}/reviews/{n}/diff` → the change's unified diff (`text/plain`), with the
+/// diffed head in `X-Head-Sha` so the UI can tell when it is newer than the detail it shows.
 pub async fn diff(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, u64)>,
@@ -137,7 +141,17 @@ pub async fn diff(
     let env = state.github.git_env().await?;
     let head = review::fetch_head(&project.dir, number, &env).await?;
     let text = review::diff(&project.dir, &head).await?;
-    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "text/plain; charset=utf-8".to_string(),
+            ),
+            (header::HeaderName::from_static(HEAD_SHA_HEADER), head),
+        ],
+        text,
+    )
+        .into_response())
 }
 
 /// Body of `POST /api/projects/{id}/reviews/{n}/preview`.
@@ -155,15 +169,27 @@ pub struct PreviewQuery {
     head_sha: String,
 }
 
-/// `POST /api/projects/{id}/reviews/{n}/preview` → the preview of the change's head. Fetches the
-/// head so the commit exists locally, refuses when it is no longer `headSha`, then starts (or joins)
+/// `POST /api/projects/{id}/reviews/{n}/preview` → the preview of the change's head. Refuses (404)
+/// a change that is closed, a draft or unlabelled; fetches the head so the commit exists locally, refuses when it is no longer `headSha`, then starts (or joins)
 /// the build.
 pub async fn prepare_preview(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, u64)>,
     Json(body): Json<PreviewBody>,
 ) -> Result<Json<ReviewPreview>, ApiError> {
-    let (project, _) = project_repo(&state, &id).await?;
+    let (project, repo) = project_repo(&state, &id).await?;
+    // A build runs the change's own code on this machine: only for a change that is really
+    // waiting for review here (open, not a draft, carrying one of the project's labels).
+    let me = state.github.signed_in_login().await?;
+    let detail = state.github.review_detail(&repo, number, &me).await?;
+    let labels = settings::pr_labels(&project.dir);
+    let labelled = detail
+        .labels
+        .iter()
+        .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(l)));
+    if !detail.open || detail.draft || !labelled {
+        return Err(ApiError::enoent(GONE));
+    }
     let env = state.github.git_env().await?;
     let head = review::fetch_head(&project.dir, number, &env).await?;
     if !head.eq_ignore_ascii_case(&body.head_sha) {
@@ -268,6 +294,11 @@ mod tests {
                         7 => pull(7, "bob", "open", false),
                         8 => pull(8, "ADA", "open", false),
                         9 => pull(9, "bob", "closed", false),
+                        11 => {
+                            let mut p = pull(11, "bob", "open", false);
+                            p["labels"] = json!([]);
+                            p
+                        }
                         _ => pull(n, "bob", "open", true),
                     })
                 }),
@@ -431,6 +462,7 @@ mod tests {
             res.headers()[header::CONTENT_TYPE],
             "text/plain; charset=utf-8"
         );
+        assert_eq!(res.headers()["x-head-sha"], head_of(tmp.path()).as_str());
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert!(text.contains("a.md"), "{text}");
@@ -635,5 +667,54 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.http_status(), 404);
+    }
+
+    #[tokio::test]
+    async fn preview_of_a_change_not_waiting_is_refused_without_building() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        with_fake_builds(&mut state, tmp.path());
+        let sha = head_of(tmp.path());
+        // 9 is closed, 10 a draft, 11 open but unlabelled.
+        for n in [9, 10, 11] {
+            let err = prepare_preview(
+                State(state.clone()),
+                Path((id.clone(), n)),
+                Json(PreviewBody {
+                    head_sha: sha.clone(),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.http_status(), 404, "#{n}");
+            assert_eq!(err.message, "This change is no longer waiting", "#{n}");
+            let status = preview_status(
+                State(state.clone()),
+                Path((id.clone(), n)),
+                Query(PreviewQuery {
+                    head_sha: sha.clone(),
+                }),
+            )
+            .await;
+            assert!(status.is_err(), "#{n} started a build");
+        }
+    }
+
+    #[tokio::test]
+    async fn list_prunes_against_every_open_change_not_just_the_inbox() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut state, id) = setup(tmp.path(), true, Some("acme/site")).await;
+        with_fake_builds(&mut state, tmp.path());
+        let project = state.projects.get(&id).await.unwrap();
+        // #8 is open but not in the inbox (its author is the reviewer); #42 is not open.
+        for n in [8, 42] {
+            state
+                .review_previews
+                .prepare(&id, &project.dir, n, "abc")
+                .await;
+        }
+        list(State(state.clone()), Path(id.clone())).await.unwrap();
+        assert!(state.review_previews.status(&id, 8, "abc").await.is_some());
+        assert!(state.review_previews.status(&id, 42, "abc").await.is_none());
     }
 }
