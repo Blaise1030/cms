@@ -1,8 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The daemon's UI may drag and zoom the window from its data-tauri-drag-region top bars.",
-  "windows": ["main"],
-  "remote": { "urls": ["http://127.0.0.1:*/*"] },
-  "permissions": ["core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize"]
+  "description": "The daemon's UI may drag and zoom the window from its data-tauri-drag-region top bars, and take review screenshots of the app's own webview.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*"
+    ]
+  },
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "allow-capture-region"
+  ]
 }

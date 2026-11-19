@@ -9,6 +9,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+mod snapshot;
+
 use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 /// How long the daemon gets to stop its children after SIGTERM before it is killed.
@@ -229,8 +231,15 @@ fn stop_daemon(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// A review screenshot: `region` (window CSS px) of the app's own webview, as a PNG data URL.
+#[tauri::command]
+async fn capture_region(window: WebviewWindow, region: snapshot::Region) -> Result<String, String> {
+    snapshot::capture(&window, region).await
+}
+
 fn main() {
     let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![capture_region])
         .on_page_load(|webview, _| {
             // A reload in full screen must not lose the attribute.
             if let Ok(fullscreen) = webview.window().is_fullscreen() {
