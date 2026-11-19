@@ -25,7 +25,6 @@ const tabs: { id: ProjectTab; label: string; icon: string }[] = [
   { id: "design", label: "Design", icon: "i-hugeicons-paint-board" },
   { id: "code", label: "Code", icon: "i-hugeicons-source-code" },
   { id: "history", label: "History", icon: "i-hugeicons-clock-04" },
-  { id: "review", label: "Review", icon: "i-hugeicons-task-done-01" },
   { id: "settings", label: "Settings", icon: "i-hugeicons-settings-01" },
 ];
 
@@ -78,17 +77,35 @@ const tooltipContent = { side: "right" } as const;
           :aria-label="tab.label"
           :aria-current="active === tab.id ? 'page' : undefined"
           :data-testid="`workspace-tab-${tab.id}`"
-          :ui="tab.id === 'review' ? { ...ui, base: cn(ui.base, 'relative') } : ui"
-        >
-          <span
-            v-if="tab.id === 'review' && review.waitingCount > 0"
-            class="bg-primary text-inverted absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-medium"
-            data-testid="review-badge"
-          >{{ review.waitingCount }}</span>
-        </UButton>
+          :ui="ui"
+        />
       </UTooltip>
 
       <div class="mt-auto flex flex-col items-center gap-1">
+        <!-- Review sits with the app-level buttons, above App settings, keeping its count. -->
+        <UTooltip text="Review" :content="tooltipContent">
+          <UButton
+            :to="projectPath(props.projectId, 'review')"
+            color="neutral"
+            variant="ghost"
+            active-color="primary"
+            active-variant="soft"
+            square
+            icon="i-hugeicons-task-done-01"
+            :active="active === 'review'"
+            :class="cn(active === 'review' && current)"
+            aria-label="Review"
+            :aria-current="active === 'review' ? 'page' : undefined"
+            data-testid="workspace-tab-review"
+            :ui="{ ...ui, base: cn(ui.base, 'relative') }"
+          >
+            <span
+              v-if="review.waitingCount > 0"
+              class="bg-primary text-inverted absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-medium"
+              data-testid="review-badge"
+            >{{ review.waitingCount }}</span>
+          </UButton>
+        </UTooltip>
         <UTooltip text="App settings" :content="tooltipContent">
           <UButton
             to="/settings"

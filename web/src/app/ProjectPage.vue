@@ -105,7 +105,7 @@ watch(
 </script>
 
 <template>
-  <Shell ref="shell" :show-chat="sidebarChat">
+  <Shell ref="shell" :show-chat="sidebarChat" :hide-top-bar="projectTabFromRoute(route.name) === 'review'">
     <template #rail>
       <ProjectRail v-if="project" :project-id="project.id">
         <template #footer>

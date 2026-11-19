@@ -14,6 +14,21 @@ function mountShell(chatDetached: boolean, showChat = true) {
 const chatPanel = (w: ReturnType<typeof mountShell>) => w.find("[data-panel-id='chat']");
 
 describe("Shell", () => {
+  it("drops the top bar when asked, keeping the workspace", async () => {
+    const w = mount(Shell, {
+      props: { hideTopBar: true },
+      slots: { menubar: "<div data-testid='menubar' />", workspace: "<div data-testid='ws' />" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='top-bar']").exists()).toBe(false);
+    expect(w.find("[data-testid='menubar']").exists()).toBe(false);
+    expect(w.find("[data-testid='ws']").exists()).toBe(true);
+    await w.setProps({ hideTopBar: false });
+    expect(w.find("[data-testid='top-bar']").exists()).toBe(true);
+    w.unmount();
+  });
+
   it("collapses the chat column and hides its toggle while the chat is detached", async () => {
     const w = mountShell(false);
     await flushPromises();

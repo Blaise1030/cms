@@ -10,6 +10,7 @@ const props = withDefaults(
     showChat?: boolean;
     /** The chat floats over the page, so its column collapses (but stays mounted). */
     chatDetached?: boolean;
+    hideTopBar?: boolean;
   }>(),
   { showChat: true, chatDetached: false },
 );
@@ -107,6 +108,7 @@ watch(
         <template #workspace-panel>
           <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
             <header
+              v-if="!hideTopBar"
               :class="['bg-background flex h-11 shrink-0 items-center gap-3', topBarPadding]"
               :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
               data-testid="top-bar"

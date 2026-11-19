@@ -60,7 +60,8 @@ it("links each tab and marks the current one, including nested pages", async () 
 
 it("renders Settings as the last tab, linking to the project's settings", async () => {
   const { w } = await setup("/p/my%20site/preview");
-  const tabs = w.findAll('[data-testid^="workspace-tab-"]');
+  // Review lives in the footer, so it is left out here.
+  const tabs = w.findAll('[data-testid^="workspace-tab-"]:not([data-testid="workspace-tab-review"])');
   expect(tabs.at(-1)!.attributes("data-testid")).toBe("workspace-tab-settings");
   expect(tabs.at(-1)!.attributes("href")).toBe("/p/my%20site/settings");
   expect(tabs.at(-1)!.attributes("aria-label")).toBe("Settings");
@@ -96,6 +97,10 @@ it("keeps its buttons below the macOS traffic lights and drags the window from a
 
 it("shows the Review tab with a badge of changes waiting for you", async () => {
   const { w } = await setup("/p/site/preview", 2);
+  // In the footer group, directly above App settings.
+  const footer = w.get('[data-testid="project-rail-app-settings"]').element.closest("div.mt-auto")!;
+  const buttons = [...footer.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"));
+  expect(buttons.slice(0, 3)).toEqual(["workspace-tab-review", "review-badge", "project-rail-app-settings"]);
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("href")).toBe("/p/site/review");
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("aria-label")).toBe("Review");
   expect(useReviewStore().waitingCount).toBe(2);
