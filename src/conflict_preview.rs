@@ -2,7 +2,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,11 +9,14 @@ use axum::body::Body;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
 use serde::Serialize;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use crate::changes::conflicts;
 use crate::error::ApiError;
+use crate::snapshot_build::{self, BuildError};
+pub(crate) use crate::snapshot_build::{link_node_modules, BuildGroup};
+
+/// How long one side's preview build may run.
+const BUILD_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Source {
@@ -51,8 +53,8 @@ pub enum PreviewState {
 struct Snapshot {
     revision: String,
     state: PreviewState,
+    /// The built site; no checkout is kept once the build ends.
     dir: Option<PathBuf>,
-    repo: PathBuf,
 }
 #[derive(Clone, Default)]
 pub struct ConflictPreviewManager {
@@ -86,19 +88,21 @@ impl ConflictPreviewManager {
             "/preview/{project_id}/conflicts/{session_id}/{}/",
             source.as_str()
         );
-        let path = std::env::temp_dir().join(format!("wb-preview-{:016x}", rand::random::<u64>()));
-        let state = match build_snapshot(project_dir, &path, revision, &url).await {
-            Ok(()) => PreviewState::Ready { url },
-            Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
-            Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
-        };
+        let path = std::env::temp_dir()
+            .join("orso-conflict-previews")
+            .join(format!("{:016x}", rand::random::<u64>()));
+        let state =
+            match snapshot_build::build(project_dir, revision, &url, &path, BUILD_TIMEOUT).await {
+                Ok(()) => PreviewState::Ready { url },
+                Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
+                Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
+            };
         entries.insert(
             key,
             Snapshot {
                 revision: revision.to_owned(),
                 state: state.clone(),
                 dir: path.exists().then_some(path),
-                repo: project_dir.to_owned(),
             },
         );
         state
@@ -168,7 +172,7 @@ impl ConflictPreviewManager {
             .as_ref()
             .ok_or_else(|| ApiError::enoent("preview unavailable"))?;
         let safe = safe_route(rest).ok_or_else(|| ApiError::badreq("invalid preview path"))?;
-        let mut file = dir.join("dist").join(safe);
+        let mut file = dir.join(safe);
         if file.is_dir() {
             file = file.join("index.html");
         }
@@ -238,129 +242,8 @@ fn safe_route(rest: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-enum BuildError {
-    Unavailable(String),
-    Invalid(String),
-}
-async fn build_snapshot(
-    repo: &Path,
-    dir: &Path,
-    revision: &str,
-    url: &str,
-) -> Result<(), BuildError> {
-    if !repo.join("package.json").is_file() {
-        return Err(BuildError::Unavailable(
-            "This project has no preview build command".into(),
-        ));
-    }
-    let output = Command::new("git")
-        .args(["worktree", "add", "--detach", "--quiet"])
-        .arg(dir)
-        .arg(revision)
-        .current_dir(repo)
-        .output()
-        .await
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    if !output.status.success() {
-        return Err(BuildError::Unavailable(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    link_node_modules(repo, dir).map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    let mut build = Command::new("npm");
-    build
-        .args(["run", "build"])
-        .env("PUBLIC_BASE", url)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0);
-    let child = build
-        .spawn()
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    let group = BuildGroup(child.id().map(|pid| pid as i32));
-    let output = tokio::time::timeout(Duration::from_secs(90), child.wait_with_output())
-        .await
-        .map_err(|_| BuildError::Unavailable("Preview build timed out".into()))?
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    drop(group);
-    if !output.status.success() {
-        let output_text = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let message: String = output_text
-            .chars()
-            .rev()
-            .take(1800)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        let confirmed_invalid = [
-            "SyntaxError",
-            "ParseError",
-            "Unexpected token",
-            "Could not resolve",
-            "references missing section",
-            "error during build",
-            "CompileError",
-        ]
-        .iter()
-        .any(|marker| message.contains(marker));
-        return Err(if confirmed_invalid {
-            BuildError::Invalid(message)
-        } else {
-            BuildError::Unavailable(format!("Preview build could not complete: {message}"))
-        });
-    }
-    if !dir.join("dist").is_dir() {
-        return Err(BuildError::Unavailable(
-            "Preview build produced no dist directory".into(),
-        ));
-    }
-    if !dir.join("dist/index.html").is_file() {
-        return Err(BuildError::Unavailable(
-            "Preview build produced no home page".into(),
-        ));
-    }
-    Ok(())
-}
-
-/// Lets a worktree build with the project's installed dependencies.
-pub(crate) fn link_node_modules(repo: &Path, dir: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    if repo.join("node_modules").exists() {
-        std::os::unix::fs::symlink(repo.join("node_modules"), dir.join("node_modules"))?;
-    }
-    Ok(())
-}
-
-/// Kills a `process_group(0)` child's whole group when dropped.
-pub(crate) struct BuildGroup(pub(crate) Option<i32>);
-impl Drop for BuildGroup {
-    fn drop(&mut self) {
-        if let Some(group) = self.0 {
-            // SAFETY: the child was spawned in its own process group.
-            unsafe {
-                libc::killpg(group, libc::SIGKILL);
-            }
-        }
-    }
-}
-
 async fn remove_snapshot(old: Snapshot) {
     if let Some(dir) = old.dir {
-        let _ = conflicts::git(
-            &old.repo,
-            &["worktree", "remove", "--force", &dir.to_string_lossy()],
-            &[],
-            None,
-        )
-        .await;
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }
