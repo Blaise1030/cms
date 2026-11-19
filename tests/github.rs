@@ -438,6 +438,10 @@ async fn publish_pushes_and_merges_the_change_without_cleaning_up() {
             }),
         )
         .route(
+            "/repos/acme/site/pulls/4/reviews",
+            get(|| async { Json(json!([])) }),
+        )
+        .route(
             "/repos/acme/site/pulls/4/merge",
             put(move |AxJson(body): AxJson<Value>| {
                 let merges = merges2.clone();
