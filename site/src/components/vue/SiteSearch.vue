@@ -91,7 +91,7 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
     icon="i-hugeicons-search-01"
     :aria-label="props.placeholder"
     aria-keyshortcuts="Meta+K Control+K"
-    class="w-full bg-surface-raised ring-line text-small font-normal text-muted"
+    class="w-full bg-surface-raised text-small font-normal text-muted"
     @click="open = true"
   >
     <span class="truncate">{{ props.placeholder }}</span>

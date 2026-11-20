@@ -68,12 +68,19 @@ export default defineConfig({
         components: false,
         ui: {
           colors: { primary: "blue", neutral: "zinc" },
+          // Outlined neutral buttons and badges draw their edge in the site's border gray.
+          button: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
+          badge: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
+          kbd: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
           // Teach Nuxt UI's class merging the site's type roles, so `text-body` on a component
           // replaces its `text-sm` instead of being mistaken for a colour.
           tv: {
             twMergeConfig: {
               extend: {
-                classGroups: { "font-size": [{ text: ["label", "small", "body", "heading", "title", "display", "watermark"] }] },
+                classGroups: {
+                  "font-size": [{ text: ["label", "small", "body", "heading", "title", "display", "watermark"] }],
+                  "ring-color": [{ ring: ["line", "line-strong"] }],
+                },
               },
             },
           },
