@@ -691,6 +691,26 @@ pub async fn cleanup(
     ))
 }
 
+/// `GET /api/changes/{branch}/edits?project=` → `{ hasEdits }`: whether the change differs
+/// from `main` at all. Local only (no GitHub call), so the app can ask after every save; a
+/// change without edits has nothing GitHub would open a pull request for.
+pub async fn edits(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    // Only this project's own changes.
+    changes::get(&project.dir, &branch).await?;
+    let has_edits = changes::has_edits(&project.dir, &branch).await;
+    Ok(Json(json!({ "hasEdits": has_edits })))
+}
+
 /// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,
 /// previewUrl } | null }`. `null` when the project has no GitHub remote or the branch no PR.
 pub async fn status(

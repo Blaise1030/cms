@@ -73,6 +73,11 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /**
+   * Whether the active change differs from `main`. GitHub opens no pull request for a change
+   * without edits, so sharing waits for one. Unknown counts as true, leaving sharing open.
+   */
+  const hasEdits = ref(true);
   /** The deploy a publish set off; null when none is being watched. */
   const deploy = ref<DeployState | null>(null);
   /** Production site URL while on `main`; null on a change or when unknown. */
@@ -116,8 +121,10 @@ export const useChangesStore = defineStore("changes", () => {
     const branch = active.value?.branch;
     if (!id || !branch) {
       status.value = null;
+      hasEdits.value = true;
       return;
     }
+    void refreshEdits();
     try {
       const pr = await daemon.api.changeStatus(id, branch);
       if (run !== statusRun) return;
@@ -130,6 +137,19 @@ export const useChangesStore = defineStore("changes", () => {
     if (run !== statusRun) return;
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+    }
+  }
+
+  /** Re-read whether the active change has edits; a failure leaves the last answer. */
+  async function refreshEdits() {
+    const id = projectId.value;
+    const branch = active.value?.branch;
+    if (!id || !branch) return;
+    try {
+      const edits = await daemon.api.changeHasEdits(id, branch);
+      if (projectId.value === id && active.value?.branch === branch) hasEdits.value = edits;
+    } catch {
+      // Keep the last answer; sharing reports its own errors.
     }
   }
 
@@ -744,9 +764,14 @@ export const useChangesStore = defineStore("changes", () => {
     installPending = false;
     void refreshTreeAndPreview(active.value?.branch ?? "main");
   });
+  // A save (or an agent's turn) committed to the change: it may have its first edit now.
+  const offCheckpoint = daemon.on("checkpoint.created", (e) => {
+    if (e.projectId === projectId.value && active.value) void refreshEdits();
+  });
   onScopeDispose(() => {
     offDepsInstalling();
     offDevserverStatus();
+    offCheckpoint();
   });
 
   /**
@@ -826,6 +851,7 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     markingReady,
+    hasEdits,
     publishing,
     switching,
     updating,

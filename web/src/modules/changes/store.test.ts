@@ -396,6 +396,27 @@ describe("changes store", () => {
     expect(store.liveUrl).toBe("https://acme.pages.dev");
   });
 
+  it("knows whether the active change has edits, and re-checks after each save", async () => {
+    const changeHasEdits = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const store = setup({
+      activeChange: vi.fn(async () => ({ branch: "content/lw", title: "LW" })),
+      changeStatus: vi.fn(async () => null),
+      changeHasEdits,
+    });
+    await store.load("site");
+    await vi.waitFor(() => expect(store.hasEdits).toBe(false));
+    expect(changeHasEdits).toHaveBeenCalledWith("site", "content/lw");
+
+    // Another project's save says nothing about this change.
+    const saved = { type: "checkpoint.created", sha: "abc", summary: "s", author: "a", ts: 1 } as const;
+    h.daemon.emit({ ...saved, projectId: "other" });
+    await flushPromises();
+    expect(changeHasEdits).toHaveBeenCalledTimes(1);
+
+    h.daemon.emit({ ...saved, projectId: "site" });
+    await vi.waitFor(() => expect(store.hasEdits).toBe(true));
+  });
+
   it("load clears the live site URL when opening a change", async () => {
     const liveSiteUrl = vi.fn(async () => "https://acme.pages.dev");
     const store = setup({

@@ -391,6 +391,104 @@ async fn switch_from_dirty_main_says_discard_not_checkpoint() {
 }
 
 #[tokio::test]
+async fn has_edits_only_once_the_change_differs_from_main() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+
+    let change = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+    // Just created: nothing GitHub could open a pull request for.
+    assert!(!changes::has_edits(&work, &change.branch).await);
+
+    // An unsaved edit still has nothing to share.
+    std::fs::write(work.join("notes.md"), "hi\n").unwrap();
+    assert!(!changes::has_edits(&work, &change.branch).await);
+
+    git_cli(&work, &["add", "-A"]);
+    git_cli(&work, &["commit", "-m", "checkpoint: notes"]);
+    assert!(changes::has_edits(&work, &change.branch).await);
+
+    // Undone by a later save: the files match main again.
+    git_cli(&work, &["rm", "-q", "notes.md"]);
+    git_cli(&work, &["commit", "-m", "checkpoint: undo"]);
+    assert!(!changes::has_edits(&work, &change.branch).await);
+}
+
+#[tokio::test]
+async fn has_edits_ignores_merges_of_main() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let change = changes::create(&work, "New post: Launch week")
+        .await
+        .unwrap();
+
+    // Get latest merged a newer main in: still none of the writer's own edits.
+    git_cli(&work, &["checkout", "-q", "main"]);
+    commit_file(&work, "other.md", "x\n", "teammate");
+    git_cli(&work, &["push", "-q", "origin", "main"]);
+    git_cli(&work, &["checkout", "-q", &change.branch]);
+    git_cli(
+        &work,
+        &["merge", "-q", "--no-ff", "-m", "merge main", "main"],
+    );
+    git_cli(&work, &["fetch", "-q", "origin"]);
+    assert!(!changes::has_edits(&work, &change.branch).await);
+}
+
+#[tokio::test]
+async fn has_edits_without_origin_compares_with_local_main() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("site");
+    seed_repo(&dir);
+    let change = changes::create(&dir, "New post: Launch week")
+        .await
+        .unwrap();
+    assert!(!changes::has_edits(&dir, &change.branch).await);
+    commit_file(&dir, "notes.md", "hi\n", "checkpoint: notes");
+    assert!(changes::has_edits(&dir, &change.branch).await);
+}
+
+#[tokio::test]
+async fn http_edits_reports_whether_the_change_differs_from_main() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+    let st = AppState::with_scaffold_install(config(&projects), false);
+    let info = st.projects.create("Site").await.unwrap();
+    let dir = projects.join(&info.id);
+    let app = http::router(st);
+    let change = changes::create(&dir, "New post: Launch week")
+        .await
+        .unwrap();
+    let uri = format!(
+        "/api/changes/content%2Flaunch-week/edits?project={}",
+        info.id
+    );
+
+    let (s, body) = call(&app, req("GET", &uri, None)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "hasEdits": false }));
+
+    git_cli(&dir, &["checkout", "-q", &change.branch]);
+    commit_file(&dir, "notes.md", "hi\n", "checkpoint: notes");
+    let (_, body) = call(&app, req("GET", &uri, None)).await;
+    assert_eq!(body, json!({ "hasEdits": true }));
+
+    // Not a change of this project.
+    let (s, _) = call(
+        &app,
+        req(
+            "GET",
+            &format!("/api/changes/main/edits?project={}", info.id),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn push_sends_branch_to_origin() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());

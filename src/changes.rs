@@ -849,6 +849,21 @@ pub async fn pr_matches(dir: &Path, branch: &str, head_sha: &str) -> bool {
     !head_sha.is_empty() && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
 }
 
+/// Whether `branch` has saved work that `main` lacks (GitHub's `main` as last fetched, else the
+/// local one): its files differ from where it and `main` meet. A change just created, or one
+/// whose only commits are merges of `main`, has none, so there is nothing to open a pull
+/// request for. Unknown (no `main`, git failing) counts as having edits, so sharing stays open.
+pub async fn has_edits(dir: &Path, branch: &str) -> bool {
+    let base = if rev_parse(dir, "refs/remotes/origin/main").await.is_ok() {
+        "refs/remotes/origin/main"
+    } else {
+        "refs/heads/main"
+    };
+    let range = format!("{base}...refs/heads/{branch}");
+    // `git diff --quiet` exits 0 for no difference, 1 for a difference, >1 on errors.
+    run(dir, &["diff", "--quiet", &range]).await.is_err()
+}
+
 /// Whether `branch`'s tip is exactly `sha` (there is nothing local to push).
 pub async fn tip_is(dir: &Path, branch: &str, sha: &str) -> bool {
     !sha.is_empty()

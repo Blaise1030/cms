@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { toast } from "@/lib/toast";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UFieldGroup from "@nuxt/ui/components/FieldGroup.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { errorMessage } from "@orso/utils";
 import PrMenu from "@/modules/changes/PrMenu.vue";
 import ProtectionHint from "@/modules/changes/ProtectionHint.vue";
@@ -26,6 +27,13 @@ const shareIcon = computed(() => (changes.prUrl ? "i-hugeicons-cloud-upload" : "
 
 /** Nothing to push once the branch tip is the PR head; hide rather than offer a no-op. */
 const showShare = computed(() => changes.active !== null && !changes.status?.upToDate);
+
+/**
+ * GitHub opens no pull request for a change that doesn't differ from the live site, so the
+ * first share waits for an edit. Once a PR exists, updating it stays open.
+ */
+const shareBlocked = computed(() => !changes.prUrl && !changes.hasEdits);
+const blockedReason = "Make an edit first: there's nothing in this change to share yet.";
 
 /** Publish sits in the same group when this is a GitHub-backed draft that isn't live. */
 const showPublish = computed(
@@ -72,18 +80,23 @@ async function onShare() {
 <template>
   <div class="relative flex items-center gap-2">
     <UFieldGroup v-if="showGroup" data-testid="share-publish-group">
-      <UButton
-        v-if="showShare"
-        :color="variant === 'default' ? 'primary' : 'neutral'"
-        :variant="variant === 'default' ? 'solid' : 'outline'"
-        size="sm"
-        :icon="shareIcon"
-        :loading="changes.sharing"
-        :label="label"
-        data-testid="share-preview"
-        :disabled="changes.sharing"
-        @click="onShare"
-      />
+      <UTooltip v-if="showShare" :text="blockedReason" :disabled="!shareBlocked" :delay-duration="300">
+        <!-- A disabled button gets no pointer events; the span keeps the tooltip working. -->
+        <span class="inline-flex" data-testid="share-preview-wrap">
+          <UButton
+            :color="variant === 'default' ? 'primary' : 'neutral'"
+            :variant="variant === 'default' ? 'solid' : 'outline'"
+            size="sm"
+            :icon="shareIcon"
+            :loading="changes.sharing"
+            :label="label"
+            data-testid="share-preview"
+            :aria-description="shareBlocked ? blockedReason : undefined"
+            :disabled="changes.sharing || shareBlocked"
+            @click="onShare"
+          />
+        </span>
+      </UTooltip>
       <span
         v-if="showShare && (changes.prUrl || showPublish)"
         aria-hidden="true"

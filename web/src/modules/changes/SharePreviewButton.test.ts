@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { TooltipProvider } from "reka-ui";
+import { defineComponent, h } from "vue";
 import SharePreviewButton from "./SharePreviewButton.vue";
 import { useChangesStore } from "./store";
 
@@ -21,8 +23,11 @@ function mountWith(repo: string | null = "acme/site") {
     mergeableState: "clean",
     upToDate: false,
   };
-  const wrapper = mount(SharePreviewButton, {
-    props: { projectId: "site", repo },
+  // UTooltip needs a TooltipProvider; `UApp` supplies one in the app.
+  const Host = defineComponent(
+    () => () => h(TooltipProvider, null, () => h(SharePreviewButton, { projectId: "site", repo })),
+  );
+  const wrapper = mount(Host, {
     global: {
       stubs: { PrMenu: true, ProtectionHint: true },
     },
@@ -90,5 +95,30 @@ describe("SharePreviewButton", () => {
       global: { stubs: { PrMenu: true, ProtectionHint: true } },
     });
     expect(empty.find('[data-testid="live-site-link"]').exists()).toBe(false);
+  });
+
+  it("disables Share preview and Publish until the new change has an edit", async () => {
+    const { store, wrapper } = mountWith();
+    store.status = null;
+    store.prUrl = null;
+    store.hasEdits = false;
+    await flushPromises();
+    const share = wrapper.get('[data-testid="share-preview"]');
+    expect(share.attributes("disabled")).toBeDefined();
+    expect(share.attributes("aria-description")).toMatch(/Make an edit first/);
+    expect(wrapper.get('[data-testid="publish-change"]').attributes("disabled")).toBeDefined();
+
+    store.hasEdits = true;
+    await flushPromises();
+    expect(wrapper.get('[data-testid="share-preview"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[data-testid="publish-change"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("keeps Update preview open once a pull request exists", async () => {
+    const { store, wrapper } = mountWith();
+    store.prUrl = "https://github.com/acme/site/pull/1";
+    store.hasEdits = false;
+    await flushPromises();
+    expect(wrapper.get('[data-testid="share-preview"]').attributes("disabled")).toBeUndefined();
   });
 });
