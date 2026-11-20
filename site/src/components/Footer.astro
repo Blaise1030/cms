@@ -1,6 +1,6 @@
 ---
-// Site footer: an inset sand panel. The brand statement sits on the left, the link columns on
-// the right, and the legal row underneath. Group and link data live in `src/site.ts`.
+// Site footer: an inset sand panel. The brand statement sits on the left and the link columns,
+// ending with Legal, on the right. Group and link data live in `src/site.ts`.
 import BearMark from "./BearMark.astro";
 import UButton from "@nuxt/ui/components/Button.vue";
 import { getI18n } from "../i18n";
@@ -21,13 +21,13 @@ const groups = [
   { title: "Product", links: site.nav.filter((link) => link.href.startsWith("#")).map(navLink) },
   { title: "Resources", links: site.nav.filter((link) => !link.href.startsWith("#")).map(navLink) },
   { title: "More", links: [site.footer.source, ...site.socials.filter((social) => social.href !== site.footer.source.href)].map(footerLink) },
+  { title: "Legal", links: [...site.footer.links, site.footer.license].map(footerLink) },
 ]
   .map((group) => ({
-    label: t(`footer.groups.${group.title as "Product" | "Resources" | "More"}`),
+    label: t(`footer.groups.${group.title as "Product" | "Resources" | "More" | "Legal"}`),
     links: [...group.links, ...(site.footer.extra[group.title] ?? []).map(footerLink)],
   }))
   .filter((group) => group.links.length > 0);
-const legal = [...site.footer.links, site.footer.license].map(footerLink);
 ---
 
 <footer class="relative mx-auto -mt-px w-full max-w-7xl border-x border-t border-line" id="site-footer">
@@ -60,7 +60,7 @@ const legal = [...site.footer.links, site.footer.license].map(footerLink);
         />
       </div>
 
-      <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:col-span-7" aria-label={t("footer.label")}>
+      <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:col-span-7" aria-label={t("footer.label")}>
         {groups.map((group) => (
           <div>
             <p class="text-small font-medium text-ink">{group.label}</p>
@@ -81,25 +81,6 @@ const legal = [...site.footer.links, site.footer.license].map(footerLink);
           </div>
         ))}
       </nav>
-    </div>
-
-    <div class="mt-12 flex flex-col gap-4 border-t border-line pt-6 md:flex-row md:items-center md:justify-between md:gap-8">
-      <p class="text-label text-muted">{t("footer.copyright")}</p>
-      <ul class="-mr-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-label text-muted">
-        {legal.map((link) => (
-          <li>
-            <UButton
-              color="neutral"
-              variant="ghost"
-              size="xs"
-              class="text-muted"
-              label={link.label}
-              to={path(link.href)}
-              rel={external(link.href) ? "noopener noreferrer" : undefined}
-            />
-          </li>
-        ))}
-      </ul>
     </div>
   </div>
 </footer>

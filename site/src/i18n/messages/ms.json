@@ -22,11 +22,11 @@
   },
   "footer": {
     "label": "Pengaki",
-    "copyright": "© 2026 Project Orso",
     "groups": {
       "Product": "Produk",
       "Resources": "Sumber",
-      "More": "Lagi"
+      "More": "Lagi",
+      "Legal": "Undang-undang"
     },
     "links": {
       "privacy": "Privasi",

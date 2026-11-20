@@ -22,11 +22,11 @@
   },
   "footer": {
     "label": "Footer",
-    "copyright": "© 2026 Project Orso",
     "groups": {
       "Product": "Product",
       "Resources": "Resources",
-      "More": "More"
+      "More": "More",
+      "Legal": "Legal"
     },
     "links": {
       "privacy": "Privacy",

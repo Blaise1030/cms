@@ -22,11 +22,11 @@
   },
   "footer": {
     "label": "页脚",
-    "copyright": "© 2026 Project Orso",
     "groups": {
       "Product": "产品",
       "Resources": "资源",
-      "More": "更多"
+      "More": "更多",
+      "Legal": "法律"
     },
     "links": {
       "privacy": "隐私政策",
