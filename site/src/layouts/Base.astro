@@ -66,6 +66,7 @@ const alternates = translated
 const languages = localeKeys.map((key) => ({
   label: locales[key].label,
   lang: locales[key].lang,
+  flag: locales[key].flag,
   href: localeHref(key, translated ? here : "/"),
   current: key === locale,
 }));

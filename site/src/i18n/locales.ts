@@ -5,10 +5,14 @@
  * The key doubles as the Crowdin folder and file name (`%two_letters_code%` in crowdin.yml):
  * `src/content/blog/zh/*.md` and `src/i18n/messages/zh.json`.
  */
+/**
+ * `flag` is the language picker's icon, from the circle-flags set. Write the full
+ * `i-circle-flags-<country>` name so the icon bundler finds it.
+ */
 export const locales = {
-  en: { label: "English", lang: "en", intl: "en-US" },
-  zh: { label: "简体中文", lang: "zh-Hans", intl: "zh-CN" },
-  ms: { label: "Bahasa Melayu", lang: "ms", intl: "ms-MY" },
+  en: { label: "English", lang: "en", intl: "en-US", flag: "i-circle-flags-us" },
+  zh: { label: "简体中文", lang: "zh-Hans", intl: "zh-CN", flag: "i-circle-flags-cn" },
+  ms: { label: "Bahasa Melayu", lang: "ms", intl: "ms-MY", flag: "i-circle-flags-my" },
 } as const;
 
 export type Locale = keyof typeof locales;
