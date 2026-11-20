@@ -34,15 +34,22 @@ export function applySessionOrder(ids: string[], order: string[]): string[] {
   return sorted;
 }
 
-/** Move `fromId` in front of `toId` (drop-on-tab reorder). */
+/**
+ * Move `fromId` into `toId`'s place (drag-over reorder). Dragging right lands after the
+ * target and dragging left before it, so every position, the last included, is reachable.
+ */
 export function moveSessionId(ids: string[], fromId: string, toId: string): string[] {
-  if (fromId === toId) return ids;
-  const from = ids.indexOf(fromId);
-  if (from < 0 || !ids.includes(toId)) return ids;
+  const to = ids.indexOf(toId);
+  return to < 0 ? ids : moveSessionToIndex(ids, fromId, to);
+}
+
+/** Move `id` to index `to` (clamped); keyboard reorder and drag-over both land here. */
+export function moveSessionToIndex(ids: string[], id: string, to: number): string[] {
+  const from = ids.indexOf(id);
+  const target = Math.max(0, Math.min(to, ids.length - 1));
+  if (from < 0 || from === target) return ids;
   const next = ids.slice();
   next.splice(from, 1);
-  const insertAt = next.indexOf(toId);
-  if (insertAt < 0) return ids;
-  next.splice(insertAt, 0, fromId);
+  next.splice(target, 0, id);
   return next;
 }

@@ -2,7 +2,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,11 +9,14 @@ use axum::body::Body;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
 use serde::Serialize;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use crate::changes::conflicts;
 use crate::error::ApiError;
+use crate::snapshot_build::{self, BuildError};
+pub(crate) use crate::snapshot_build::{link_node_modules, BuildGroup};
+
+/// How long one side's preview build may run.
+const BUILD_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Source {
@@ -51,17 +53,44 @@ pub enum PreviewState {
 struct Snapshot {
     revision: String,
     state: PreviewState,
+    /// The built site; no checkout is kept once the build ends.
     dir: Option<PathBuf>,
-    repo: PathBuf,
 }
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ConflictPreviewManager {
     entries: Arc<Mutex<HashMap<(String, Source), Snapshot>>>,
+    /// Where built sides live; owned by this manager (swept at startup).
+    base: PathBuf,
+}
+
+impl Default for ConflictPreviewManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConflictPreviewManager {
+    /// A manager building under a fresh folder of its own in the system temp dir.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_base(std::env::temp_dir().join(format!(
+            "orso-conflict-previews-{:016x}",
+            rand::random::<u64>()
+        )))
+    }
+
+    /// A manager building under `base` (the daemon's state folder).
+    pub fn with_base(base: PathBuf) -> Self {
+        Self {
+            entries: Arc::default(),
+            base,
+        }
+    }
+
+    /// At daemon start, when no conflict session is live yet: removes every built side a
+    /// previous run left behind, plus legacy temp-dir builds, then prunes the checkouts'
+    /// stale worktrees.
+    pub async fn startup(&self, repos: &[PathBuf]) {
+        startup_sweep(&self.base, &std::env::temp_dir(), repos).await;
     }
 
     pub async fn prepare(
@@ -86,19 +115,19 @@ impl ConflictPreviewManager {
             "/preview/{project_id}/conflicts/{session_id}/{}/",
             source.as_str()
         );
-        let path = std::env::temp_dir().join(format!("wb-preview-{:016x}", rand::random::<u64>()));
-        let state = match build_snapshot(project_dir, &path, revision, &url).await {
-            Ok(()) => PreviewState::Ready { url },
-            Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
-            Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
-        };
+        let path = self.base.join(format!("{:016x}", rand::random::<u64>()));
+        let state =
+            match snapshot_build::build(project_dir, revision, &url, &path, BUILD_TIMEOUT).await {
+                Ok(()) => PreviewState::Ready { url },
+                Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
+                Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
+            };
         entries.insert(
             key,
             Snapshot {
                 revision: revision.to_owned(),
                 state: state.clone(),
                 dir: path.exists().then_some(path),
-                repo: project_dir.to_owned(),
             },
         );
         state
@@ -167,17 +196,7 @@ impl ConflictPreviewManager {
             .dir
             .as_ref()
             .ok_or_else(|| ApiError::enoent("preview unavailable"))?;
-        let safe = safe_route(rest).ok_or_else(|| ApiError::badreq("invalid preview path"))?;
-        let mut file = dir.join("dist").join(safe);
-        if file.is_dir() {
-            file = file.join("index.html");
-        }
-        if !file.exists() && file.extension().is_none() {
-            file = file.join("index.html");
-        }
-        let mut bytes = tokio::fs::read(&file)
-            .await
-            .map_err(|_| ApiError::enoent("preview page not found"))?;
+        let (file, mut bytes) = read_page(dir, rest).await?;
         if file.extension().is_some_and(|e| e == "html") {
             if let Some(id) = section.filter(|s| {
                 !s.is_empty()
@@ -200,28 +219,50 @@ impl ConflictPreviewManager {
                 }
             }
         }
-        let content_type = match file.extension().and_then(|s| s.to_str()).unwrap_or("") {
-            "html" => "text/html; charset=utf-8",
-            "js" | "mjs" => "text/javascript; charset=utf-8",
-            "css" => "text/css; charset=utf-8",
-            "svg" => "image/svg+xml",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "webp" => "image/webp",
-            "woff2" => "font/woff2",
-            "json" => "application/json",
-            _ => "application/octet-stream",
-        };
-        let mut response = Response::new(Body::from(bytes));
-        *response.status_mut() = StatusCode::OK;
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-        response
-            .headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        Ok(response)
+        Ok(page_response(&file, bytes))
     }
+}
+
+/// Reads the file a preview route names inside the built site `dir`: a folder or an
+/// extensionless route means its `index.html`; `..` and encoded segments are refused.
+pub(crate) async fn read_page(dir: &Path, rest: &str) -> Result<(PathBuf, Vec<u8>), ApiError> {
+    let safe = safe_route(rest).ok_or_else(|| ApiError::badreq("invalid preview path"))?;
+    let mut file = dir.join(safe);
+    if file.is_dir() {
+        file = file.join("index.html");
+    }
+    if !file.exists() && file.extension().is_none() {
+        file = file.join("index.html");
+    }
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|_| ApiError::enoent("preview page not found"))?;
+    Ok((file, bytes))
+}
+
+/// An uncached `200` carrying `bytes`, typed by `file`'s extension.
+pub(crate) fn page_response(file: &Path, bytes: Vec<u8>) -> Response {
+    let content_type = match file.extension().and_then(|s| s.to_str()).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "woff2" => "font/woff2",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    };
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn safe_route(rest: &str) -> Option<PathBuf> {
@@ -238,129 +279,35 @@ fn safe_route(rest: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-enum BuildError {
-    Unavailable(String),
-    Invalid(String),
-}
-async fn build_snapshot(
-    repo: &Path,
-    dir: &Path,
-    revision: &str,
-    url: &str,
-) -> Result<(), BuildError> {
-    if !repo.join("package.json").is_file() {
-        return Err(BuildError::Unavailable(
-            "This project has no preview build command".into(),
-        ));
-    }
-    let output = Command::new("git")
-        .args(["worktree", "add", "--detach", "--quiet"])
-        .arg(dir)
-        .arg(revision)
-        .current_dir(repo)
-        .output()
-        .await
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    if !output.status.success() {
-        return Err(BuildError::Unavailable(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    link_node_modules(repo, dir).map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    let mut build = Command::new("npm");
-    build
-        .args(["run", "build"])
-        .env("PUBLIC_BASE", url)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0);
-    let child = build
-        .spawn()
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    let group = BuildGroup(child.id().map(|pid| pid as i32));
-    let output = tokio::time::timeout(Duration::from_secs(90), child.wait_with_output())
-        .await
-        .map_err(|_| BuildError::Unavailable("Preview build timed out".into()))?
-        .map_err(|e| BuildError::Unavailable(e.to_string()))?;
-    drop(group);
-    if !output.status.success() {
-        let output_text = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let message: String = output_text
-            .chars()
-            .rev()
-            .take(1800)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        let confirmed_invalid = [
-            "SyntaxError",
-            "ParseError",
-            "Unexpected token",
-            "Could not resolve",
-            "references missing section",
-            "error during build",
-            "CompileError",
-        ]
-        .iter()
-        .any(|marker| message.contains(marker));
-        return Err(if confirmed_invalid {
-            BuildError::Invalid(message)
-        } else {
-            BuildError::Unavailable(format!("Preview build could not complete: {message}"))
-        });
-    }
-    if !dir.join("dist").is_dir() {
-        return Err(BuildError::Unavailable(
-            "Preview build produced no dist directory".into(),
-        ));
-    }
-    if !dir.join("dist/index.html").is_file() {
-        return Err(BuildError::Unavailable(
-            "Preview build produced no home page".into(),
-        ));
-    }
-    Ok(())
-}
-
-/// Lets a worktree build with the project's installed dependencies.
-pub(crate) fn link_node_modules(repo: &Path, dir: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    if repo.join("node_modules").exists() {
-        std::os::unix::fs::symlink(repo.join("node_modules"), dir.join("node_modules"))?;
-    }
-    Ok(())
-}
-
-/// Kills a `process_group(0)` child's whole group when dropped.
-pub(crate) struct BuildGroup(pub(crate) Option<i32>);
-impl Drop for BuildGroup {
-    fn drop(&mut self) {
-        if let Some(group) = self.0 {
-            // SAFETY: the child was spawned in its own process group.
-            unsafe {
-                libc::killpg(group, libc::SIGKILL);
+/// Removes `base` (this daemon's conflict previews), `tmp/orso-conflict-previews` and
+/// `tmp/wb-preview-*` (where older versions built), then runs `git worktree prune` in each
+/// of `repos` so worktrees whose folders went with them are forgotten.
+pub async fn startup_sweep(base: &Path, tmp: &Path, repos: &[PathBuf]) {
+    let _ = tokio::fs::remove_dir_all(base).await;
+    let _ = tokio::fs::remove_dir_all(tmp.join("orso-conflict-previews")).await;
+    if let Ok(mut entries) = tokio::fs::read_dir(tmp).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let legacy = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("wb-preview-"));
+            if legacy && entry.file_type().await.is_ok_and(|t| t.is_dir()) {
+                let _ = tokio::fs::remove_dir_all(entry.path()).await;
             }
         }
+    }
+    for repo in repos {
+        let _ = tokio::process::Command::new("git")
+            .args(["-c", "core.hooksPath=/dev/null", "worktree", "prune"])
+            .current_dir(repo)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await;
     }
 }
 
 async fn remove_snapshot(old: Snapshot) {
     if let Some(dir) = old.dir {
-        let _ = conflicts::git(
-            &old.repo,
-            &["worktree", "remove", "--force", &dir.to_string_lossy()],
-            &[],
-            None,
-        )
-        .await;
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }
@@ -373,5 +320,60 @@ mod tests {
         assert!(safe_route("../secret").is_none());
         assert!(safe_route("a/%2e%2e/b").is_none());
         assert_eq!(safe_route("page/").unwrap(), PathBuf::from("page"));
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_removes_leftovers_and_prunes_worktrees() {
+        let temp = tempfile::tempdir().unwrap();
+        let tmp = temp.path().join("tmp");
+        let base = temp.path().join("state/conflict-previews");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        // A worktree a crashed build left under the legacy temp base.
+        let stale = tmp.join("orso-conflict-previews/.build-1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "-q",
+                stale.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        std::fs::create_dir_all(base.join("0123/assets")).unwrap();
+        std::fs::create_dir_all(tmp.join("wb-preview-abc/dist")).unwrap();
+        std::fs::create_dir_all(tmp.join("unrelated")).unwrap();
+        std::fs::write(tmp.join("wb-preview-file"), "not a dir").unwrap();
+
+        startup_sweep(&base, &tmp, std::slice::from_ref(&repo)).await;
+
+        assert!(!base.exists());
+        assert!(!tmp.join("orso-conflict-previews").exists());
+        assert!(!tmp.join("wb-preview-abc").exists());
+        assert!(tmp.join("unrelated").is_dir(), "swept an unrelated folder");
+        assert!(tmp.join("wb-preview-file").is_file(), "swept a file");
+        let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
+        assert_eq!(worktrees.matches("worktree ").count(), 1, "{worktrees}");
     }
 }

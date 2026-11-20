@@ -28,6 +28,18 @@ const DRAFT_SUBJECT_TIMEOUT: Duration = Duration::from_secs(20);
 #[cfg(test)]
 const DRAFT_SUBJECT_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// How long a send keeps retrying while the agent says it is still running
+/// the previous prompt (OpenCode handles `session/cancel` asynchronously).
+#[cfg(not(test))]
+const BUSY_RETRY_BUDGET: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const BUSY_RETRY_BUDGET: Duration = Duration::from_millis(1500);
+const BUSY_RETRY_FIRST: Duration = Duration::from_millis(100);
+const BUSY_RETRY_MAX: Duration = Duration::from_secs(1);
+/// What the writer sees when the agent never lets go of its previous prompt.
+const BUSY_MESSAGE: &str =
+    "The assistant is still finishing the previous request. Try again in a moment.";
+
 const BROADCAST_CAPACITY: usize = 256;
 
 #[derive(Debug)]
@@ -658,21 +670,19 @@ impl ChatManager {
         let weak = Arc::downgrade(live);
         let mgr = self.clone();
         let task = tokio::spawn(async move {
+            let stopped = || {
+                weak.upgrade()
+                    .is_none_or(|live| live.cancel.load(Ordering::SeqCst))
+            };
             if replaced {
                 // The previous prompt may still be sitting in the agent
                 // (`stuck` / `slow`). Cancel it before writing another.
                 let _ = client.cancel(&acp_session_id).await;
-                client.clear_cancelled();
-            }
-            let first = client.prompt(&acp_session_id, &text).await;
-            let result = match first {
-                Err(e) if prompt_busy(&e.to_string()) => {
-                    let _ = client.cancel(&acp_session_id).await;
+                if !stopped() {
                     client.clear_cancelled();
-                    client.prompt(&acp_session_id, &text).await
                 }
-                other => other,
-            };
+            }
+            let result = prompt_when_free(&client, &acp_session_id, &text, stopped).await;
             if let Err(e) = result {
                 eprintln!("orso: ACP prompt failed: {e}");
                 let message = e.to_string();
@@ -788,8 +798,12 @@ impl ChatManager {
         let prompt = draft_subject_prompt(files);
         let session = live.acp_session_id.clone();
         let client = live.client.clone();
-        let result =
-            tokio::time::timeout(DRAFT_SUBJECT_TIMEOUT, client.prompt(&session, &prompt)).await;
+        let stopped = || live.cancel.load(Ordering::SeqCst);
+        let result = tokio::time::timeout(
+            DRAFT_SUBJECT_TIMEOUT,
+            prompt_when_free(&client, &session, &prompt, stopped),
+        )
+        .await;
 
         // `prompt` can return before the event pump has applied text + turn_end.
         if matches!(result, Ok(Ok(()))) {
@@ -1222,6 +1236,47 @@ fn prompt_busy(err: &str) -> bool {
         .contains("already has an active acp prompt")
 }
 
+/// `client.prompt`, waiting out an agent that still has an earlier prompt
+/// active. Our cancel ends that prompt locally at once, but the agent may
+/// take a moment to let go, and meanwhile rejects `session/prompt` as busy.
+/// On the first busy reply this sends `session/cancel` once, then retries
+/// with backoff until [`BUSY_RETRY_BUDGET`] runs out ([`BUSY_MESSAGE`]).
+/// When `stopped` (the user stopped, or the chat is gone) the next attempt
+/// is latched, so the turn ends `cancelled` instead of retrying.
+async fn prompt_when_free(
+    client: &AcpClient,
+    session_id: &str,
+    text: &str,
+    stopped: impl Fn() -> bool,
+) -> super::acp::Result<()> {
+    let deadline = tokio::time::Instant::now() + BUSY_RETRY_BUDGET;
+    let mut delay = BUSY_RETRY_FIRST;
+    let mut nudged = false;
+    loop {
+        let err = match client.prompt(session_id, text).await {
+            Err(e) if prompt_busy(&e.to_string()) => e,
+            other => return other,
+        };
+        if stopped() {
+            client.mark_cancelled();
+            continue;
+        }
+        if tokio::time::Instant::now() + delay > deadline {
+            eprintln!("orso: ACP agent stayed busy: {err}");
+            return Err(BUSY_MESSAGE.into());
+        }
+        if !nudged {
+            nudged = true;
+            let _ = client.cancel(session_id).await;
+            if !stopped() {
+                client.clear_cancelled();
+            }
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(BUSY_RETRY_MAX);
+    }
+}
+
 /// Hidden prompt after a dirty turn: one `COMMIT:` line, no tools, no chatter.
 fn draft_subject_prompt(files: &[String]) -> String {
     let mut lines = vec![
@@ -1379,6 +1434,105 @@ mod tests {
             }),
             "{history:?}"
         );
+        chats.shutdown().await;
+    }
+
+    fn replied(h: &[UiChunk], needle: &str) -> bool {
+        h.iter()
+            .any(|c| matches!(c, UiChunk::TextDelta { text, .. } if text.contains(needle)))
+    }
+
+    fn errors(h: &[UiChunk]) -> Vec<String> {
+        h.iter()
+            .filter_map(|c| match c {
+                UiChunk::Error { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Start a chat and leave a `linger` turn running in the fake agent.
+    async fn lingering(chats: &ChatManager, text: &str) {
+        let cwd = std::env::temp_dir();
+        chats
+            .start("proj", "chat-1", &cwd, &argv(), &[])
+            .await
+            .unwrap();
+        chats.send_message("proj", "chat-1", text).await.unwrap();
+        wait_until(chats, "proj", "chat-1", |h| replied(h, "linger started")).await;
+    }
+
+    #[tokio::test]
+    async fn send_while_previous_prompt_lingers_waits_for_the_agent() {
+        let (chats, _dir) = manager();
+        lingering(&chats, "linger").await;
+        // Replaces the running turn: we cancel it, the agent stays busy ~300 ms.
+        chats.send_message("proj", "chat-1", "next").await.unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| {
+            replied(h, "fake reply: next") || !errors(h).is_empty()
+        })
+        .await;
+        assert!(errors(&history).is_empty(), "{history:?}");
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn send_after_stop_waits_for_the_agent_to_finish_cancelling() {
+        let (chats, _dir) = manager();
+        lingering(&chats, "linger").await;
+        chats.cancel("proj", "chat-1").await.unwrap();
+        wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(
+                |c| matches!(c, UiChunk::TurnEnd { stop_reason, .. } if stop_reason == "cancelled"),
+            )
+        })
+        .await;
+        chats.send_message("proj", "chat-1", "next").await.unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| {
+            replied(h, "fake reply: next") || !errors(h).is_empty()
+        })
+        .await;
+        assert!(errors(&history).is_empty(), "{history:?}");
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn draft_while_agent_is_busy_does_not_break_the_next_send() {
+        let (chats, _dir) = manager();
+        lingering(&chats, "linger").await;
+        chats.cancel("proj", "chat-1").await.unwrap();
+        wait_until(&chats, "proj", "chat-1", |h| {
+            h.iter().any(
+                |c| matches!(c, UiChunk::TurnEnd { stop_reason, .. } if stop_reason == "cancelled"),
+            )
+        })
+        .await;
+        // Still busy for the whole (test) draft timeout: the ask gives up.
+        let subject = chats
+            .draft_checkpoint_subject("proj", "chat-1", &["a.md".into()])
+            .await;
+        assert_eq!(subject, None);
+        chats.send_message("proj", "chat-1", "next").await.unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| {
+            replied(h, "fake reply: next") || !errors(h).is_empty()
+        })
+        .await;
+        assert!(errors(&history).is_empty(), "{history:?}");
+        chats.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn send_gives_up_with_a_friendly_error_when_the_agent_stays_busy() {
+        let (chats, _dir) = manager();
+        lingering(&chats, "linger-long").await;
+        chats.send_message("proj", "chat-1", "next").await.unwrap();
+        let history = wait_until(&chats, "proj", "chat-1", |h| !errors(h).is_empty()).await;
+        assert_eq!(
+            errors(&history),
+            vec![BUSY_MESSAGE.to_string()],
+            "{history:?}"
+        );
+        assert!(!replied(&history, "fake reply: next"), "{history:?}");
         chats.shutdown().await;
     }
 

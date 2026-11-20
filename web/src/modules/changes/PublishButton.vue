@@ -18,6 +18,8 @@ const canMerge = computed(() => {
   const status = store.status;
   if (!status) return true;
   if (status.state === "closed") return false;
+  // A reviewer's send-back holds the change until it is updated, whatever GitHub says about merging.
+  if (status.state === "changes_requested") return false;
   // Publish marks a draft ready itself; GitHub reports drafts as unmergeable until then.
   if (status.state === "draft") return true;
   if (status.mergeable === false) return false;
@@ -25,11 +27,11 @@ const canMerge = computed(() => {
 });
 
 /** Explained on hover, so a disabled Publish still says why. */
-const disabledReason = computed(() =>
-  store.status?.state === "closed"
-    ? "This change was closed without publishing."
-    : "This change can't be published yet.",
-);
+const disabledReason = computed(() => {
+  if (store.status?.state === "closed") return "This change was closed without publishing.";
+  if (store.status?.state === "changes_requested") return "A reviewer sent this change back.";
+  return "This change can't be published yet.";
+});
 
 async function onPublish() {
   const branch = store.active?.branch;

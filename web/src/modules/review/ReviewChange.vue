@@ -1,0 +1,647 @@
+<script setup lang="ts">
+import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import type { SplitterItem, TabsItem } from "@nuxt/ui";
+import UAlert from "@nuxt/ui/components/Alert.vue";
+import UBadge from "@nuxt/ui/components/Badge.vue";
+import UButton from "@nuxt/ui/components/Button.vue";
+import UEmpty from "@nuxt/ui/components/Empty.vue";
+import UIcon from "@nuxt/ui/components/Icon.vue";
+import USplitter from "@nuxt/ui/components/Splitter.vue";
+import UTabs from "@nuxt/ui/components/Tabs.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
+import { useDaemon } from "@/core/daemon";
+import { BrowserFrame, isHttpUrl, type BrowserFramePick, type BrowserFrameSide } from "@/components/ui/browser-frame";
+import { useShotQueue, type ShotItem } from "./shots/queue";
+import type { ReviewPreview } from "@/core/types";
+import { relativeTime } from "@/lib/relativeTime";
+import { reviewPath, type ReviewPage } from "@/router";
+import { RouterLink } from "vue-router";
+import SendBackDialog from "./SendBackDialog.vue";
+import { useChange, useConversation, usePreview } from "./queries";
+import { labelStyle } from "./labels";
+import { isMacDesktop } from "@/lib/desktop";
+
+// Lazy: the Pierre renderers bring Shiki along, which must stay out of the precached app shell.
+const ChangedFilesTree = defineAsyncComponent(() => import("../checkpoints/ChangedFilesTree.vue"));
+const DiffView = defineAsyncComponent(() => import("../checkpoints/DiffView.vue"));
+// Lazy too: the chat feed keeps the precached app shell under its 2.5 MiB cap.
+const ReviewConversation = defineAsyncComponent(() => import("./ReviewConversation.vue"));
+// Lazy as well: the screenshot picker and queue (capture, popover, slideover).
+const ShotPicker = defineAsyncComponent(() => import("./shots/ShotPicker.vue"));
+const ShotQueue = defineAsyncComponent(() => import("./shots/ShotQueue.vue"));
+
+const props = defineProps<{ projectId: string; number: number; page: ReviewPage }>();
+const store = useChange(
+  () => props.projectId,
+  () => props.number,
+);
+const daemon = useDaemon();
+const router = useRouter();
+
+const diffs = ref<HTMLElement | null>(null);
+const liveUrl = ref<string | null>(null);
+const sendingBack = ref(false);
+
+// The live site link is a convenience; a failed lookup just hides it.
+watch(
+  () => props.projectId,
+  async (id) => {
+    try {
+      const url = await daemon.api.liveSiteUrl(id);
+      liveUrl.value = url && /^https?:\/\/./i.test(url) ? url : null;
+    } catch {
+      liveUrl.value = null;
+    }
+  },
+  { immediate: true },
+);
+
+const change = computed(() => store.current);
+const talk = useConversation(
+  () => props.projectId,
+  () => props.number,
+  () => change.value?.headSha,
+);
+/** Open / Draft / Merged / Closed, as GitHub labels the pull request. */
+const STATES = {
+  open: { label: "Open", color: "success", icon: "i-hugeicons-git-pull-request" },
+  draft: { label: "Draft", color: "neutral", icon: "i-hugeicons-git-pull-request-draft" },
+  merged: { label: "Merged", color: "secondary", icon: "i-hugeicons-git-merge" },
+  closed: { label: "Closed", color: "error", icon: "i-hugeicons-git-pull-request-closed" },
+} as const;
+const prState = computed(() => {
+  const c = change.value;
+  if (!c) return STATES.open;
+  if (c.merged) return STATES.merged;
+  if (!c.open) return STATES.closed;
+  return c.draft ? STATES.draft : STATES.open;
+});
+const filesCount = computed(() => store.diff?.files.length ?? null);
+
+/** Everything about the change, read again: detail and diff, plus this page's conversation or preview. */
+const refreshing = ref(false);
+async function refresh() {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  try {
+    await Promise.all([
+      store.refresh(),
+      props.page === "conversation" ? talk.reload() : reloadPreview(),
+    ]);
+  } finally {
+    refreshing.value = false;
+  }
+}
+const PAGE_TAB =
+  "text-muted hover:text-highlighted -mb-px flex items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm font-medium";
+const PAGE_TAB_ACTIVE = "text-highlighted border-primary";
+const back = () => router.push(reviewPath(props.projectId));
+
+function openSendBack() {
+  store.decideError = null;
+  sendingBack.value = true;
+}
+/** Queued screenshot comments ride along with a greenlight or send-back, then leave the queue. */
+async function greenlight() {
+  const shots = [...shotQueue.items.value];
+  if ((await store.decide("greenlight", undefined, shots)) === true && shots.length) shotQueue.clear();
+}
+async function sendBack(comment: string) {
+  const shots = [...shotQueue.items.value];
+  const done = await store.decide("send_back", comment, shots);
+  if (done === true && shots.length) shotQueue.clear();
+  // A moved change closes the dialog (and drops the comment) so the reviewer sees the reloaded
+  // change before choosing again; other failures stay in the dialog with the comment.
+  if (done || store.gone) sendingBack.value = false;
+}
+
+/** Screenshot comments: the side being picked on, the area just picked, and the queue. */
+const picking = ref<string | null>(null);
+const pickedArea = ref<BrowserFramePick | null>(null);
+const frame = ref<{
+  open: (path: string) => void;
+  canCapture: (side: string) => boolean;
+  captureSide: (side: string, rect: BrowserFramePick["rect"]) => Promise<string>;
+} | null>(null);
+const shotQueue = useShotQueue(
+  () => props.projectId,
+  () => props.number,
+);
+/** The queue pane beside the preview; opens by itself when a new comment is queued. */
+const queueShown = ref(false);
+watch(
+  () => shotQueue.items.value.length,
+  (n, before) => {
+    if (n > (before ?? 0)) queueShown.value = true;
+    if (n === 0) queueShown.value = false;
+  },
+);
+async function toggleQueue() {
+  if (props.page !== "files") {
+    await router.push(reviewPath(props.projectId, props.number, "files"));
+    view.value = "preview";
+    queueShown.value = true;
+    return;
+  }
+  view.value = "preview";
+  queueShown.value = !queueShown.value;
+}
+/** The preview, and the queue beside it when shown. The preview pane keeps its id, so showing the
+ *  queue never remounts (and reloads) the frames. */
+const previewSplit = computed<SplitterItem[]>(() => [
+  { id: "review-preview-frames", slot: "frames", defaultSize: 72, minSize: 40 },
+  ...(queueShown.value
+    ? [{ id: "review-shot-queue", slot: "queue", defaultSize: 28, minSize: 18, maxSize: 50 } as SplitterItem]
+    : []),
+]);
+
+/** Opens a queued comment's page, on the Review page's preview, with its side showing. */
+async function revisitShot(item: ShotItem) {
+  if (props.page !== "files") await router.push(reviewPath(props.projectId, props.number, "files"));
+  view.value = "preview";
+  collapsed.value = null;
+  await nextTick();
+  frame.value?.open(item.path);
+}
+
+/** The change's deploy preview next to the live site; nothing is built on this machine. */
+const { preview, error: previewError, loading: previewLoading, reload: reloadPreview } = usePreview(
+  () => props.projectId,
+  () => props.number,
+  () => change.value?.headSha,
+);
+const previewLive = computed(() => preview.value?.liveUrl ?? liveUrl.value);
+
+const CHANGE_LABEL = "This change";
+const LIVE_LABEL = "Live site";
+const COLLAPSED_KEY = "orso.review.collapsed";
+/** The side this browser last folded ("change" / "live" / none). Storage may be unavailable. */
+function storedCollapsed(): string | null {
+  try {
+    const v = localStorage.getItem(COLLAPSED_KEY);
+    return v === "change" || v === "live" ? v : null;
+  } catch {
+    return null;
+  }
+}
+/** `undefined` until the reviewer folds or unfolds a side while this change is open. */
+const picked = ref<string | null | undefined>(undefined);
+watch(
+  () => [props.projectId, props.number] as const,
+  () => (picked.value = undefined),
+);
+/** Both sides show side by side; a side with nothing to show starts folded, else the remembered one. */
+const collapsed = computed<string | null>({
+  get: () => {
+    if (picked.value !== undefined) return picked.value;
+    if (!isHttpUrl(previewLive.value)) return "live";
+    if (preview.value && preview.value.state !== "ready") return "change";
+    return storedCollapsed();
+  },
+  set: (value) => {
+    picked.value = value;
+    try {
+      if (value) localStorage.setItem(COLLAPSED_KEY, value);
+      else localStorage.removeItem(COLLAPSED_KEY);
+    } catch {
+      // Remembering is a convenience.
+    }
+  },
+});
+const CHANGE_STATUS: Record<ReviewPreview["state"], string> = {
+  deploying: "Deploying…",
+  failed: "Deploy failed",
+  none: "No preview",
+  ready: "",
+};
+const frames = computed<BrowserFrameSide[]>(() => [
+  {
+    key: "change",
+    label: CHANGE_LABEL,
+    url: preview.value?.url ?? null,
+    status: preview.value ? CHANGE_STATUS[preview.value.state] || undefined : "Loading…",
+  },
+  {
+    key: "live",
+    label: LIVE_LABEL,
+    url: previewLive.value ?? null,
+    status: isHttpUrl(previewLive.value) ? undefined : "Not found",
+  },
+]);
+const checksUrl = computed(() => (change.value?.url ? `${change.value.url.replace(/\/+$/, "")}/checks` : null));
+
+/** The rendered change fills the view by default; What changed is one click away. */
+type View = "preview" | "changes";
+const VIEWS: TabsItem[] = [
+  { label: "Preview", value: "preview", icon: "i-hugeicons-computer-video" },
+  { label: "What changed", value: "changes", icon: "i-hugeicons-file-validation" },
+];
+const view = ref<View>("preview");
+/** What changed is built the first time it's opened: highlighting every file's diff up front
+ *  (66 on a big change) held up the switch to the Review page by seconds. */
+const changesOpened = ref(false);
+watch(view, (v) => v === "changes" && (changesOpened.value = true), { immediate: true });
+watch(
+  () => [props.projectId, props.number] as const,
+  () => {
+    view.value = "preview";
+    changesOpened.value = false;
+  },
+);
+
+const SPLIT: SplitterItem[] = [
+  { id: "review-files-tree", slot: "tree", defaultSize: 20, minSize: 12, maxSize: 45 },
+  { id: "review-diffs", slot: "diffs", defaultSize: 80, minSize: 40 },
+];
+
+/** Scroll a file's diff into view when it is picked in the changed-files tree. */
+function reveal(path: string) {
+  const section = [...(diffs.value?.querySelectorAll<HTMLElement>("section[data-path]") ?? [])].find(
+    (el) => el.dataset.path === path,
+  );
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+/** The macOS desktop app's traffic lights sit over this page's top-left corner. */
+const macDesktop = isMacDesktop();
+</script>
+
+<template>
+  <div class="relative flex h-full min-h-0 flex-col" data-testid="review-change">
+    <!-- No project top bar here: on the macOS desktop app this row clears the traffic lights and
+         is where the window is dragged from; its back button and title centre on them (22px down). -->
+    <div
+      :class="[
+        'flex min-h-10 shrink-0 items-center gap-3 px-3 pb-3',
+        macDesktop ? 'pt-2 pl-10 fullscreen:pl-3' : 'pt-2',
+      ]"
+      :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
+      data-testid="review-change-header"
+    >
+      <UTooltip text="Back to inbox">
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-hugeicons-arrow-left-01"
+          class="self-start"
+          aria-label="Back to inbox"
+          data-testid="review-back"
+          @click="back()"
+        />
+      </UTooltip>
+      <div v-if="change" class="min-w-0 flex-1 space-y-1">
+        <p class="truncate text-base font-medium">
+          <span class="text-highlighted" data-testid="review-title">{{ change.title }}</span>
+          <span class="text-muted font-normal" data-testid="review-number"> #{{ change.number }}</span>
+        </p>
+        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+          <UBadge
+            :color="prState.color"
+            variant="solid"
+            :icon="prState.icon"
+            :label="prState.label"
+            data-testid="review-state"
+          />
+          <UBadge color="neutral" variant="soft" class="max-w-40 truncate" :label="change.author" />
+          <UBadge color="neutral" variant="outline" :label="relativeTime(change.updatedAt) ?? ''" />
+          <span
+            v-for="label in change.labels ?? []"
+            :key="label.name"
+            class="rounded-full px-2 py-0.5 text-xs font-medium"
+            :style="labelStyle(label.color)"
+            data-testid="review-header-label"
+          >{{ label.name }}</span>
+        </div>
+      </div>
+      <div v-else class="flex-1" />
+      <div v-if="change" class="flex shrink-0 items-center gap-2">
+        <p v-if="!change.canDecide && change.reason" class="text-muted max-w-64 text-xs" data-testid="review-reason">
+          {{ change.reason }}
+        </p>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          label="Send back"
+          :disabled="!change.canDecide || store.deciding"
+          data-testid="review-send-back"
+          @click="openSendBack()"
+        />
+        <UButton
+          size="sm"
+          label="Give greenlight"
+          :loading="store.deciding"
+          :disabled="!change.canDecide || store.deciding"
+          data-testid="review-greenlight"
+          @click="greenlight()"
+        />
+      </div>
+    </div>
+
+    <UAlert
+      v-if="store.decideError && !store.gone && !sendingBack"
+      color="warning"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      :description="store.decideError"
+      role="alert"
+      class="mx-3 mb-2 w-auto shrink-0"
+      data-testid="review-decide-error"
+    />
+    <UAlert
+      v-if="store.refreshError && !store.gone"
+      color="warning"
+      variant="subtle"
+      icon="i-hugeicons-alert-circle"
+      :description="store.refreshError"
+      role="alert"
+      class="mx-3 mb-2 w-auto shrink-0"
+      data-testid="review-refresh-error"
+    />
+    <SendBackDialog v-model:open="sendingBack" :busy="store.deciding" :error="store.decideError" @submit="sendBack" />
+    <p v-if="store.opening" class="text-muted flex items-center gap-2 p-3 text-sm">
+      <UIcon name="i-hugeicons-loading-03" class="size-4 animate-spin" />
+      Loading change…
+    </p>
+    <UEmpty
+      v-else-if="store.gone"
+      variant="naked"
+      icon="i-hugeicons-task-done-01"
+      title="This change is no longer waiting"
+    >
+      <template #actions>
+        <UButton color="neutral" variant="outline" label="Back to inbox" data-testid="review-gone-back" @click="back()" />
+      </template>
+    </UEmpty>
+    <div v-else-if="store.openError" class="p-3">
+      <UAlert color="error" variant="subtle" icon="i-hugeicons-alert-circle" :description="store.openError" role="alert" />
+    </div>
+    <template v-else-if="change">
+      <!-- One card below the header: the page tabs as its top strip, then the page. -->
+      <div
+        class="border-default bg-default mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
+        data-testid="review-card"
+      >
+        <nav class="border-default flex shrink-0 gap-1 border-b px-2" aria-label="Change pages" data-testid="review-pages">
+          <RouterLink
+            :to="reviewPath(projectId, number)"
+            :class="[PAGE_TAB, page === 'conversation' && PAGE_TAB_ACTIVE]"
+            :aria-current="page === 'conversation' ? 'page' : undefined"
+            data-testid="review-tab-conversation"
+          >
+            <UIcon name="i-hugeicons-message-multiple-01" class="size-4" />
+            Conversation
+            <UBadge v-if="talk.count.value !== null" color="neutral" variant="soft" size="sm" :label="String(talk.count.value)" />
+          </RouterLink>
+          <RouterLink
+            :to="reviewPath(projectId, number, 'files')"
+            :class="[PAGE_TAB, page === 'files' && PAGE_TAB_ACTIVE]"
+            :aria-current="page === 'files' ? 'page' : undefined"
+            data-testid="review-tab-files"
+          >
+            <UIcon name="i-hugeicons-file-validation" class="size-4" />
+            Review
+            <UBadge v-if="filesCount !== null" color="neutral" variant="soft" size="sm" :label="String(filesCount)" />
+          </RouterLink>
+          <!-- Queued screenshot comments, when there are any: shows or hides their pane. -->
+          <UButton
+            v-if="change && shotQueue.items.value.length"
+            color="neutral"
+            :variant="queueShown && page === 'files' ? 'soft' : 'ghost'"
+            size="sm"
+            icon="i-hugeicons-crop"
+            class="ml-auto self-center"
+            :label="`Queued (${shotQueue.items.value.length})`"
+            :aria-pressed="queueShown && page === 'files'"
+            data-testid="shot-queue-open"
+            @click="toggleQueue"
+          />
+          <!-- Review only: what the card below shows, as a compact switch beside Refresh. -->
+          <UTabs
+            v-if="page === 'files'"
+            v-model="view"
+            :items="VIEWS"
+            :content="false"
+            size="xs"
+            variant="pill"
+            color="neutral"
+            :class="['w-auto self-center', !shotQueue.items.value.length && 'ml-auto']"
+            :ui="{ trigger: 'data-[state=active]:text-highlighted' }"
+            data-testid="review-view-tabs"
+          />
+          <UTooltip text="Refresh">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              icon="i-hugeicons-refresh"
+              :class="['self-center', page !== 'files' && !shotQueue.items.value.length && 'ml-auto']"
+              aria-label="Refresh"
+              :disabled="refreshing"
+              :aria-busy="refreshing"
+              :ui="{ leadingIcon: refreshing ? 'animate-spin' : '' }"
+              data-testid="review-refresh"
+              @click="refresh()"
+            />
+          </UTooltip>
+        </nav>
+        <ReviewConversation
+          v-if="page === 'conversation'"
+          :project-id="projectId"
+          :change="change"
+          :talk="talk"
+          :preview="preview"
+        />
+        <div v-else class="flex min-h-0 flex-1 flex-col" data-testid="review-files">
+          <div
+            v-show="view === 'preview'"
+            class="relative flex min-h-0 flex-1 flex-col"
+            data-testid="review-preview"
+          >
+            <USplitter
+              :items="previewSplit"
+              auto-save-id="review-shot-queue"
+              class="min-h-0 flex-1"
+              :ui="{ handle: 'flex items-center justify-center' }"
+            >
+              <template #resize-handle>
+                <div
+                  class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+                  aria-hidden="true"
+                />
+              </template>
+              <template #frames>
+                <div class="relative flex h-full min-h-0 w-full flex-col">
+                <ShotPicker
+                  v-if="change?.open"
+                  :project-id="projectId"
+                  :number="number"
+                  :picking="picking"
+                  :picked="pickedArea"
+              :bridge="frame"
+                  @cancel="picking = null"
+                  @done="pickedArea = null"
+                />
+                <BrowserFrame
+                  :key="`${projectId}:${number}`"
+                  ref="frame"
+                  v-model:collapsed="collapsed"
+                  v-model:picking="picking"
+                  :pickable="!!change?.open"
+                  :frames="frames"
+                  @pick="pickedArea = $event"
+                  class="min-h-0 flex-1"
+                >
+                  <template #placeholder="{ frame }">
+                    <UEmpty
+                      v-if="frame.key === 'live'"
+                      variant="naked"
+                      icon="i-hugeicons-globe-02"
+                      title="No live site found for this project."
+                      class="m-auto"
+                      data-testid="review-live-missing"
+                    />
+                    <UEmpty
+                      v-else-if="previewError"
+                      variant="naked"
+                      icon="i-hugeicons-alert-circle"
+                      title="The preview could not be loaded."
+                      :description="previewError"
+                      class="m-auto"
+                      role="alert"
+                      data-testid="review-preview-error"
+                    >
+                      <template #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="Try again"
+                          data-testid="review-preview-retry"
+                          @click="reloadPreview()"
+                        />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'deploying' || (!preview && previewLoading)"
+                      variant="naked"
+                      :title="preview ? 'Deploying preview…' : 'Loading preview…'"
+                      class="m-auto"
+                      data-testid="review-preview-deploying"
+                    >
+                      <template #leading>
+                        <UIcon name="i-hugeicons-loading-03" class="text-muted size-5 animate-spin" role="status" />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'failed'"
+                      variant="naked"
+                      icon="i-hugeicons-alert-02"
+                      title="The preview deploy failed."
+                      class="m-auto"
+                      data-testid="review-preview-failed"
+                    >
+                      <template v-if="checksUrl" #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="See the checks on GitHub"
+                          trailing-icon="i-hugeicons-link-square-02"
+                          :to="checksUrl"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid="review-preview-checks"
+                        />
+                      </template>
+                    </UEmpty>
+                    <UEmpty
+                      v-else-if="preview?.state === 'none'"
+                      variant="naked"
+                      icon="i-hugeicons-computer-video"
+                      title="This site doesn't publish previews for changes."
+                      description="See What changed."
+                      class="m-auto"
+                      data-testid="review-preview-none"
+                    >
+                      <template #actions>
+                        <UButton
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                          label="What changed"
+                          data-testid="review-preview-to-changes"
+                          @click="view = 'changes'"
+                        />
+                      </template>
+                    </UEmpty>
+                  </template>
+                </BrowserFrame>
+                </div>
+              </template>
+              <template #queue>
+                <ShotQueue
+                  v-if="change"
+                  :project-id="projectId"
+                  :number="number"
+                  :head-sha="change.headSha"
+                  :open="change.open"
+                  @navigate="revisitShot"
+                  @close="queueShown = false"
+                />
+              </template>
+            </USplitter>
+          </div>
+          <div v-show="view === 'changes'" class="flex min-h-0 flex-1 flex-col" data-testid="review-changes">
+            <UEmpty
+              v-if="changesOpened && store.diff && store.diff.files.length === 0"
+              variant="naked"
+              icon="i-hugeicons-file-validation"
+              title="No file changes in this change."
+            />
+            <USplitter
+              v-else-if="changesOpened && store.diff"
+              :items="SPLIT"
+              auto-save-id="review-files-sidebar"
+              class="min-h-0 flex-1"
+              :ui="{ handle: 'flex items-center justify-center' }"
+            >
+              <template #resize-handle>
+                <div
+                  class="bg-accented group-hover:bg-inverted/70 group-data-[resize-handle-state=drag]:bg-inverted h-8 w-1 rounded-full transition-colors"
+                  aria-hidden="true"
+                />
+              </template>
+              <template #tree>
+                <aside class="flex h-full w-full flex-col overflow-hidden px-1 pt-1">
+                  <ChangedFilesTree fill :files="store.diff.files" @select="reveal" />
+                </aside>
+              </template>
+              <template #diffs>
+                <div class="bg-background h-full min-h-0 w-full overflow-y-auto">
+                  <div ref="diffs" class="flex flex-col gap-3 p-3">
+                    <section
+                      v-for="file in store.diff.files"
+                      :key="file.path"
+                      :data-path="file.path"
+                      class="flex scroll-mt-3 flex-col gap-1.5"
+                    >
+                      <template v-if="file.binary">
+                        <div class="text-default flex items-center justify-between gap-2 font-mono text-xs">
+                          <span class="truncate">{{ file.path }}</span>
+                        </div>
+                        <p class="text-muted text-xs">Binary file changed.</p>
+                      </template>
+                      <DiffView v-else :diff="file.meta" />
+                    </section>
+                  </div>
+                </div>
+              </template>
+            </USplitter>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

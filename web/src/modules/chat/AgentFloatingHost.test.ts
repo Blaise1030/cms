@@ -231,6 +231,7 @@ describe("AgentFloatingHost", () => {
     await tabs[1]!.trigger("dragstart", {
       dataTransfer: { setData: vi.fn(), effectAllowed: "move" },
     });
+    await tabs[0]!.trigger("dragover", { dataTransfer: { dropEffect: "move" } });
     await tabs[0]!.trigger("drop", {
       dataTransfer: { getData: () => "c2", dropEffect: "move" },
     });
@@ -240,5 +241,69 @@ describe("AgentFloatingHost", () => {
     expect(reordered[0]!.text()).toContain("Homepage");
     expect(reordered[1]!.text()).toContain("SEO audit");
     expect(localStorage.getItem("orso.chat.sessionOrder.p1")).toBe(JSON.stringify(["c2", "c1"]));
+  });
+
+  it("restores the order when a drag ends outside the tabs", async () => {
+    localStorage.clear();
+    h.daemon = createFakeDaemon({
+      listChats: async () => ({ chats: [chat("c1", "SEO audit"), chat("c2", "Homepage")], running: null }),
+    });
+    setActivePinia(createPinia());
+    const w = mountHost();
+    await flushPromises();
+    const tabs = w.findAll("[data-testid='agent-session-tab']");
+    await tabs[1]!.trigger("dragstart", { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+    await tabs[0]!.trigger("dragover", { dataTransfer: { dropEffect: "move" } });
+    expect(w.findAll("[data-testid='agent-session-tab']")[0]!.text()).toContain("Homepage");
+    await tabs[1]!.trigger("dragend");
+    await nextTick();
+    expect(w.findAll("[data-testid='agent-session-tab']")[0]!.text()).toContain("SEO audit");
+  });
+
+  it("moves a tab to the last place by dragging, and with Alt+Arrow keys", async () => {
+    localStorage.clear();
+    h.daemon = createFakeDaemon({
+      listChats: async () => ({
+        chats: [chat("c1", "One"), chat("c2", "Two"), chat("c3", "Three")],
+        running: null,
+      }),
+    });
+    setActivePinia(createPinia());
+    const w = mountHost();
+    await flushPromises();
+    const titles = () => w.findAll("[data-testid='agent-session-tab']").map((t) => t.text());
+    let tabs = w.findAll("[data-testid='agent-session-tab']");
+    await tabs[0]!.trigger("dragstart", { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+    await tabs[2]!.trigger("dragover", { dataTransfer: { dropEffect: "move" } });
+    await tabs[2]!.trigger("drop", { dataTransfer: { getData: () => "c1" } });
+    await nextTick();
+    expect(titles()).toEqual(["Two", "Three", "One"]);
+    tabs = w.findAll("[data-testid='agent-session-tab']");
+    await tabs[2]!.trigger("keydown", { key: "ArrowLeft", altKey: true });
+    await nextTick();
+    expect(titles()).toEqual(["Two", "One", "Three"]);
+    expect(localStorage.getItem("orso.chat.sessionOrder.p1")).toBe(JSON.stringify(["c2", "c1", "c3"]));
+  });
+});
+
+describe("session tab titles", () => {
+  it("shows a picked element as its tag instead of raw markup", async () => {
+    localStorage.clear();
+    h.daemon = createFakeDaemon({
+      listChats: async () => ({
+        chats: [chat("c1", '[element <div class="page hero">] Move the menu'), chat("c2", '[element <img src="/pre…')],
+        running: null,
+      }),
+    });
+    setActivePinia(createPinia());
+    const w = mountHost();
+    await flushPromises();
+    const tabs = w.findAll("[data-testid='agent-session-tab']");
+    expect(tabs[0]!.get("[data-testid='chat-title-tag']").text()).toBe("div.page");
+    expect(tabs[0]!.text()).toContain("Move the menu");
+    expect(tabs[0]!.text()).not.toContain("<div");
+    expect(tabs[1]!.get("[data-testid='chat-title-tag']").text()).toBe("img");
+    expect(tabs[1]!.text()).not.toContain("[element");
+    expect(tabs[0]!.attributes("aria-label")).toBe("div.page Move the menu, Idle");
   });
 });

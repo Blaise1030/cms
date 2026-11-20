@@ -3,7 +3,7 @@ import { Editor, mergeAttributes } from "@tiptap/core";
 import StarterKit, { type StarterKitOptions } from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
-import { TableKit } from "@tiptap/extension-table";
+import { renderTableToMarkdown, Table, TableKit } from "@tiptap/extension-table";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 
 /**
@@ -37,7 +37,8 @@ export function bodyExtensions(resolveImage?: (src: string) => string): AnyExten
     NumericOrderedList,
     TaskList,
     TaskItem.configure({ nested: true }),
-    TableKit.configure({ table: { resizable: false } }),
+    TableKit.configure({ table: false }),
+    TightTable.configure({ resizable: false }),
     resolveImage ? SafeImage.configure({ resolveSrc: resolveImage }) : SafeImage,
   ];
 }
@@ -63,6 +64,15 @@ export function markdownExtensions(resolveImage?: (src: string) => string): AnyE
     ...bodyExtensions(resolveImage),
   ];
 }
+
+/**
+ * Tiptap's table serializer wraps every table in an extra newline, so saving added a blank line
+ * at the top of a body that starts with a table and a third newline around any other. The block
+ * separator already spaces tables like other blocks; trim the wrapper.
+ */
+const TightTable = Table.extend({
+  renderMarkdown: (node, h) => renderTableToMarkdown(node, h).replace(/^\n+|\n+$/g, ""),
+});
 
 /**
  * Ordered lists that start only at a numeric marker. Tiptap also reads letter markers, so a

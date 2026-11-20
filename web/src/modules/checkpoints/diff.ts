@@ -49,8 +49,29 @@ function toFile(meta: FileDiffMetadata): FileDiff {
   };
 }
 
+const BINARY_LINE = /^Binary files (?:\/dev\/null|a\/(.+?)) and (?:\/dev\/null|b\/(.+?)) differ$/;
+
+/** A bare `Binary files … differ` line (no `diff --git` header before it) gets one, so the parser keeps the file. */
+function withBinaryHeaders(text: string): string {
+  const out: string[] = [];
+  let inFile = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) inFile = true;
+    else {
+      const m = BINARY_LINE.exec(line);
+      if (m && !inFile) {
+        const path = m[2] ?? m[1] ?? "";
+        out.push(`diff --git a/${m[1] ?? path} b/${m[2] ?? path}`);
+      }
+      if (m) inFile = false;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function parseUnifiedDiff(text: string): ParsedDiff {
-  const patches = parsePatchFiles(text.replace(/\r\n/g, "\n"));
+  const patches = parsePatchFiles(withBinaryHeaders(text.replace(/\r\n/g, "\n")));
   return {
     header: patches.map((p) => p.patchMetadata ?? "").join("\n").trim(),
     files: patches.flatMap((p) => p.files.map(toFile)),

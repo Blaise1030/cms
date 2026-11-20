@@ -82,6 +82,9 @@ once it meets these requirements:
 | `DESIGN.md` at the root | Design tab |
 | A deploy that records GitHub Deployments with an `environment_url` | Preview and Open live site links |
 | `orso.json` when you use pnpm/yarn or the site isn't at the repo root | Install and dev commands |
+| `orso.json` `prLabels` (optional, default `["orso"]`, `[]` for none) | Labels on the PRs orso opens, so reviewers can filter them |
+| Pull request preview builds with `ORSO_PREVIEW=1` (optional; never production) | Review screenshots of the preview without a screen-sharing prompt |
+| Push access to create the `orso-review-assets` branch (optional) | Screenshot comments and images on review comments; orso keeps them on that branch, deletes it when no open change needs it, and it can be deleted any time |
 
 Let your coding agent do it. Install the skills, then ask it to "set up this site for orso":
 
@@ -134,6 +137,7 @@ Before you share previews with others, protect `main` so merges need a review. S
 | `e2e/` | Playwright tests against a release-built daemon |
 | `templates/` | Starter site templates |
 | `scripts/install.sh` | Installer for GitHub Release tarballs |
+| `src-tauri/` | macOS desktop app: runs the daemon and shows its UI (`just desktop-dev`, [docs/desktop-release.md](docs/desktop-release.md)) |
 
 ### Prerequisites
 

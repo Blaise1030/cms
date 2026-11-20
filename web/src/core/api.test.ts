@@ -73,6 +73,15 @@ describe("createApi", () => {
     expect(await api(fetchMock).checkpointDiff("p", "abc")).toBe("diff --git a b");
   });
 
+  it("reads a review diff with the head it diffed", async () => {
+    const fetchMock = vi.fn<FetchLike>(
+      async () => new Response("diff --git a b", { headers: { "X-Head-Sha": "abc123" } }),
+    );
+    expect(await api(fetchMock).reviewDiff("p", 7)).toEqual({ text: "diff --git a b", headSha: "abc123" });
+    const bare = vi.fn<FetchLike>(async () => new Response("d"));
+    expect(await api(bare).reviewDiff("p", 7)).toEqual({ text: "d", headSha: null });
+  });
+
   it("throws ApiError from the error envelope", async () => {
     const fetchMock = vi.fn<FetchLike>(async () =>
       json({ error: { code: "ENOENT", message: "no such project" } }, { status: 404 }),

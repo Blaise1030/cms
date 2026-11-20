@@ -34,6 +34,7 @@
     "@pierre/diffs": "^1.5.2",
     "@pierre/trees": "1.0.0-beta.6",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/vue-query": "5.106.0",
     "@tiptap/core": "3.31.4",
     "@tiptap/extension-collaboration": "3.31.4",
     "@tiptap/extension-drag-handle": "3.31.4",

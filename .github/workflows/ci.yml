@@ -60,6 +60,43 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  # The desktop app (src-tauri): bundles orso.app with the release daemon as its sidecar, then
+  # lints the shell. Unsigned and not published: CI only proves it still builds.
+  desktop:
+    name: Desktop (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            src-tauri -> target
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            src-tauri/pnpm-lock.yaml
+      - name: Format
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+      # `tauri build` runs scripts/prepare-sidecar.sh first (web build + release daemon).
+      - name: Build orso.app
+        run: |
+          pnpm -C src-tauri install --frozen-lockfile
+          pnpm -C src-tauri tauri build --bundles app
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
   # The ignored real-npm tests: a scaffolded project's `npm ci` + `astro build`, and a save
   # through a real Astro dev server's `orso()` integration. Other ignored tests stay out.
   real-astro:

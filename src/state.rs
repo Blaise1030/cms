@@ -217,7 +217,7 @@ impl AppState {
         let projects = Arc::new(projects);
         let events = EventBus::new();
         let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
-        let chats = Arc::new(ChatManager::new(events.clone(), state_dir));
+        let chats = Arc::new(ChatManager::new(events.clone(), state_dir.clone()));
         let devservers = Arc::new(DevServerManager::new(
             projects.clone(),
             events.clone(),
@@ -236,7 +236,9 @@ impl AppState {
             github,
             preview: preview::new_client(),
             conflicts: Arc::new(ConflictSessions::new()),
-            conflict_previews: Arc::new(ConflictPreviewManager::new()),
+            conflict_previews: Arc::new(ConflictPreviewManager::with_base(
+                state_dir.join("conflict-previews"),
+            )),
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
             runtimes: Arc::new(runtimes),

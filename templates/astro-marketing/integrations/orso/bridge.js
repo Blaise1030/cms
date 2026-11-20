@@ -1,10 +1,12 @@
 /**
- * Preview bridge, injected inline into every page by `orso()` during `astro dev`.
+ * Preview bridge, injected inline into every page by `orso()` during `astro dev`, and into
+ * pull request preview builds (`ORSO_PREVIEW=1`) together with `capture.js`.
  *
  * The dev UI frames the project's dev server directly (so Astro islands and other client
  * modules hydrate), which makes the frame cross-origin for the app. This script lets the
  * app drive the element picker and the appearance overrides without framing the proxied
- * preview. It does nothing unless the parent posts an `orso:preview` message.
+ * preview, and lets a review screenshot an area of a deployed preview without asking to
+ * share the screen. It does nothing unless the parent posts an `orso:preview` message.
  */
 (() => {
   const TYPE = "orso:preview";
@@ -211,6 +213,21 @@
     parent.postMessage(Object.assign({ type: TYPE, op }, extra), parentOrigin || "*");
   }
 
+  /** An area of this page (its own CSS px) as a PNG, or why not. */
+  async function captureArea(id, rect) {
+    if (typeof __orsoCaptureRect !== "function") {
+      post("capture", { id, ok: false, error: "This preview can't capture itself." });
+      return;
+    }
+    try {
+      const r = rect || {};
+      const area = { x: +r.x || 0, y: +r.y || 0, width: +r.width || 0, height: +r.height || 0 };
+      post("capture", { id, ok: true, dataUrl: await __orsoCaptureRect(area) });
+    } catch (err) {
+      post("capture", { id, ok: false, error: String((err && err.message) || err) });
+    }
+  }
+
   function postSnapshot() {
     post("snapshot", {
       url: location.href,
@@ -227,6 +244,11 @@
       applyAppearance({ rtl: !!e.data.rtl, dark: !!e.data.dark });
     } else if (e.data.op === "snapshot") {
       postSnapshot();
+    } else if (e.data.op === "hello") {
+      // The handshake: orso learns the bridge is here and whether it can capture itself.
+      post("ready", { version: 1, capture: typeof __orsoCaptureRect === "function" });
+    } else if (e.data.op === "capture") {
+      captureArea(e.data.id, e.data.rect);
     }
   });
 

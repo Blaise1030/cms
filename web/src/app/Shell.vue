@@ -10,14 +10,15 @@ const props = withDefaults(
     showChat?: boolean;
     /** The chat floats over the page, so its column collapses (but stays mounted). */
     chatDetached?: boolean;
+    hideTopBar?: boolean;
   }>(),
   { showChat: true, chatDetached: false },
 );
 
-// The traffic lights end ~80px from the window's left edge; the 56px project rail covers most of that.
+// The traffic lights end ~80px from the window's left edge; the padding leaves a clear gap after them (the 56px rail covers most of it).
 const slots = useSlots();
 const macDesktop = isMacDesktop();
-const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-7 fullscreen:pl-3" : "pr-3 pl-20 fullscreen:pl-3";
+const topBarPadding = !macDesktop ? "px-3" : slots.rail ? "pr-3 pl-10 fullscreen:pl-3" : "pr-3 pl-24 fullscreen:pl-3";
 
 // Panel ids and the auto-save id match the old resizable layout, so saved widths carry over.
 const panels = computed<SplitterItem[]>(() => [
@@ -107,6 +108,7 @@ watch(
         <template #workspace-panel>
           <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
             <header
+              v-if="!hideTopBar"
               :class="['bg-background flex h-11 shrink-0 items-center gap-3', topBarPadding]"
               :data-tauri-drag-region="macDesktop ? 'deep' : undefined"
               data-testid="top-bar"

@@ -57,4 +57,15 @@ describe("parseUnifiedDiff", () => {
   it("returns no files for empty input", () => {
     expect(parseUnifiedDiff("")).toEqual({ header: "", files: [] });
   });
+
+  it("lists a binary-only change, with or without the diff --git line", () => {
+    for (const text of [
+      "diff --git a/site/logo.png b/site/logo.png\nindex 1..2 100644\nBinary files a/site/logo.png and b/site/logo.png differ\n",
+      "Binary files a/site/logo.png and b/site/logo.png differ\n",
+    ]) {
+      const files = parseUnifiedDiff(text).files;
+      expect(files.map((f) => f.path)).toEqual(["site/logo.png"]);
+      expect(files[0]!.binary).toBe(true);
+    }
+  });
 });

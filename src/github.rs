@@ -8,6 +8,7 @@
 //! The token is sent to the GitHub API as a bearer token and to git per command through
 //! `GIT_CONFIG_*` environment variables, so it never appears in argv or in a repo's config.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -206,6 +207,30 @@ struct ApiPull {
     mergeable_state: Option<String>,
     #[serde(default)]
     head: Option<ApiPullHead>,
+    #[serde(default)]
+    labels: Vec<ApiLabel>,
+    /// Null when the author's account was deleted.
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    closed_at: Option<String>,
+    #[serde(default)]
+    created_at: String,
+    /// Reviewers asked for and not yet heard from.
+    #[serde(default)]
+    requested_reviewers: Vec<ApiLogin>,
+}
+
+#[derive(Deserialize)]
+struct ApiLabel {
+    name: String,
+    /// Hex colour without `#`.
+    #[serde(default)]
+    color: String,
 }
 
 #[derive(Deserialize)]
@@ -230,6 +255,9 @@ struct ApiMerge {
 pub enum PrState {
     Draft,
     Open,
+    /// A reviewer's latest decisive review asks for changes.
+    #[serde(rename = "changes_requested")]
+    ChangesRequested,
     Approved,
     Merged,
     Closed,
@@ -273,9 +301,27 @@ pub struct PrStatus {
     pub mergeable_state: Option<String>,
     /// The local branch tip is the PR head: nothing new to push.
     pub up_to_date: bool,
+    /// Why a reviewer sent the change back; set while the state is `changes_requested`.
+    pub sent_back: Option<SentBack>,
     /// The PR's head commit (ties the PR to the local branch's commits; not sent to the UI).
     #[serde(skip)]
     pub head_sha: String,
+}
+
+/// A reviewer's request for changes: who, and what they wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentBack {
+    pub reviewer: String,
+    pub comment: String,
+}
+
+/// What a reviewer decides about a change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Greenlight,
+    SendBack,
 }
 
 /// A pull request's [`PrState`] and head commit.
@@ -308,13 +354,455 @@ struct PullFacts {
 #[derive(Deserialize)]
 struct ApiLogin {
     login: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiSha {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ApiRef {
+    object: ApiSha,
+}
+
+#[derive(Deserialize)]
+struct ApiGitCommit {
+    tree: ApiSha,
+}
+
+#[derive(Deserialize)]
+struct ApiTree {
+    #[serde(default)]
+    tree: Vec<ApiTreeEntry>,
+}
+
+#[derive(Deserialize)]
+struct ApiTreeEntry {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+/// What [`GithubAuth::clean_review_assets`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetsCleanup {
+    Nothing,
+    /// These pull requests' images were removed in one commit.
+    Removed(Vec<u64>),
+    /// No kept pull request had images left: the branch is gone.
+    DeletedBranch,
 }
 
 #[derive(Deserialize)]
 struct ApiReview {
     #[serde(default)]
     user: Option<ApiLogin>,
+    /// The review on GitHub.
+    #[serde(default)]
+    html_url: Option<String>,
     state: String,
+    #[serde(default)]
+    commit_id: String,
+    /// The review comment.
+    #[serde(default)]
+    body: Option<String>,
+    /// Unset while the review is pending.
+    #[serde(default)]
+    submitted_at: Option<String>,
+}
+
+/// `GET /repos/{o}/{r}/issues` item: just its conversation's comment count.
+#[derive(Deserialize)]
+struct ApiIssueCount {
+    number: u64,
+    #[serde(default)]
+    comments: u64,
+}
+
+/// `items` with their comment counts filled in from `counts`.
+fn with_comments(items: Vec<ReviewItem>, counts: &HashMap<u64, u64>) -> Vec<ReviewItem> {
+    items
+        .into_iter()
+        .map(|mut i| {
+            i.comments = counts.get(&i.number).copied().unwrap_or(0);
+            i
+        })
+        .collect()
+}
+
+/// `GET /repos/{o}/{r}/issues/{n}/comments` item.
+#[derive(Deserialize)]
+struct ApiIssueComment {
+    #[serde(default)]
+    id: u64,
+    #[serde(default)]
+    user: Option<ApiLogin>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    html_url: String,
+}
+
+/// `GET /repos/{o}/{r}/pulls/{n}/commits` item.
+#[derive(Deserialize)]
+struct ApiPullCommit {
+    sha: String,
+    commit: ApiCommitInfo,
+    /// The GitHub account, when the commit's email maps to one.
+    #[serde(default)]
+    author: Option<ApiLogin>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitInfo {
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    author: Option<ApiCommitPerson>,
+    #[serde(default)]
+    committer: Option<ApiCommitPerson>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitPerson {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    date: String,
+}
+
+/// The signed-in reviewer's standing on a pull request's current head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MyReviewState {
+    New,
+    SentBack,
+    Greenlit,
+}
+
+/// One change in the review inbox.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewItem {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub url: String,
+    pub updated_at: String,
+    pub head_sha: String,
+    pub checks: ChecksState,
+    /// Check runs that passed (success, neutral or skipped), of `checks_total`.
+    pub checks_passed: u64,
+    pub checks_total: u64,
+    pub my_state: MyReviewState,
+    /// `me` opened it: shown for viewing, but GitHub will not take a decision from its author.
+    pub mine: bool,
+    /// Labels as GitHub shows them.
+    pub labels: Vec<ReviewLabel>,
+    pub created_at: String,
+    /// Conversation comments (best effort: 0 when GitHub couldn't say).
+    pub comments: u64,
+    /// `open`, `closed` or `merged`.
+    pub state: String,
+    pub draft: bool,
+}
+
+/// Labelled closed or merged changes, most recently updated first; `more` when GitHub had
+/// a full page, so there may be older ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClosedReviews {
+    pub reviews: Vec<ReviewItem>,
+    pub more: bool,
+}
+
+/// Closed changes listed at most (one page).
+pub const CLOSED_PAGE: usize = 30;
+
+/// A single change opened for review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDetail {
+    #[serde(flatten)]
+    pub item: ReviewItem,
+    pub description: Option<String>,
+    pub open: bool,
+    pub draft: bool,
+    pub merged: bool,
+    /// The pull request's label names (server-side gating; the UI reads `item.labels`).
+    #[serde(skip)]
+    pub labels: Vec<String>,
+}
+
+/// A label on a pull request, with its GitHub colour (hex, no `#`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReviewLabel {
+    pub name: String,
+    pub color: String,
+}
+
+/// How a review reads in a change's conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Greenlit,
+    SentBack,
+    Commented,
+}
+
+/// One pushed commit: short sha and the first line of its message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PushedCommit {
+    pub sha: String,
+    pub message: String,
+    pub author: String,
+}
+
+/// An entry of a change's conversation, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TimelineItem {
+    Comment {
+        id: u64,
+        author: String,
+        /// The author's GitHub avatar.
+        #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
+        at: String,
+        body: String,
+        url: String,
+    },
+    Review {
+        author: String,
+        #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
+        at: String,
+        verdict: ReviewVerdict,
+        body: Option<String>,
+        /// The review on GitHub.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+    },
+    /// Consecutive commits with nothing else between them.
+    Push {
+        at: String,
+        commits: Vec<PushedCommit>,
+    },
+    /// The pull request was closed or merged (`state`).
+    State { at: String, state: String },
+}
+
+impl TimelineItem {
+    fn at(&self) -> &str {
+        match self {
+            Self::Comment { at, .. }
+            | Self::Review { at, .. }
+            | Self::Push { at, .. }
+            | Self::State { at, .. } => at,
+        }
+    }
+}
+
+/// One check run on the change's head.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckItem {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+}
+
+/// Where a reviewer stands: their latest decisive review, else `commented`, else `requested`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Reviewer {
+    pub login: String,
+    pub state: ReviewerState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewerState {
+    Requested,
+    Commented,
+    Greenlit,
+    SentBack,
+    Dismissed,
+}
+
+/// `GET /api/projects/{id}/reviews/{n}/conversation`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Conversation {
+    pub items: Vec<TimelineItem>,
+    pub checks: Vec<CheckItem>,
+    pub reviewers: Vec<Reviewer>,
+}
+
+/// Comments, reviews, pushes and the close/merge, oldest first, with consecutive commits
+/// grouped into one push dated by its latest commit. Pending reviews and empty comment-only
+/// reviews are left out.
+fn timeline(
+    comments: Vec<ApiIssueComment>,
+    reviews: &[ApiReview],
+    commits: Vec<ApiPullCommit>,
+    closed: Option<(String, bool)>,
+) -> Vec<TimelineItem> {
+    let login = |u: Option<&ApiLogin>| u.map_or_else(|| "ghost".to_string(), |u| u.login.clone());
+    let avatar = |u: Option<&ApiLogin>| {
+        u.and_then(|u| u.avatar_url.clone())
+            .filter(|a| is_http_url(a))
+    };
+    let mut raw: Vec<TimelineItem> = Vec::new();
+    for c in comments {
+        raw.push(TimelineItem::Comment {
+            id: c.id,
+            author: login(c.user.as_ref()),
+            avatar_url: avatar(c.user.as_ref()),
+            at: c.created_at,
+            body: c.body.unwrap_or_default(),
+            url: c.html_url,
+        });
+    }
+    for r in reviews {
+        let Some(at) = r.submitted_at.clone() else {
+            continue;
+        };
+        let body = r.body.clone().filter(|b| !b.trim().is_empty());
+        let verdict = match r.state.as_str() {
+            "APPROVED" => ReviewVerdict::Greenlit,
+            "CHANGES_REQUESTED" => ReviewVerdict::SentBack,
+            "COMMENTED" if body.is_some() => ReviewVerdict::Commented,
+            _ => continue,
+        };
+        raw.push(TimelineItem::Review {
+            author: login(r.user.as_ref()),
+            avatar_url: avatar(r.user.as_ref()),
+            at,
+            verdict,
+            body,
+            url: r.html_url.clone().filter(|u| is_http_url(u)),
+        });
+    }
+    for c in commits {
+        let person = c.commit.committer.as_ref().or(c.commit.author.as_ref());
+        let at = person.map(|p| p.date.clone()).unwrap_or_default();
+        // The GitHub account, else the name git recorded.
+        let author = c.author.map(|a| a.login).unwrap_or_else(|| {
+            c.commit
+                .author
+                .as_ref()
+                .or(c.commit.committer.as_ref())
+                .map(|p| p.name.clone())
+                .unwrap_or_default()
+        });
+        raw.push(TimelineItem::Push {
+            at,
+            commits: vec![PushedCommit {
+                sha: c.sha.chars().take(7).collect(),
+                message: c.commit.message.lines().next().unwrap_or("").to_string(),
+                author,
+            }],
+        });
+    }
+    if let Some((at, merged)) = closed {
+        let state = if merged { "merged" } else { "closed" };
+        raw.push(TimelineItem::State {
+            at,
+            state: state.to_string(),
+        });
+    }
+    // ISO 8601 UTC timestamps sort as strings; the sort is stable, so ties keep their order.
+    raw.sort_by(|a, b| a.at().cmp(b.at()));
+    let mut items: Vec<TimelineItem> = Vec::new();
+    for item in raw {
+        match (items.last_mut(), item) {
+            (
+                Some(TimelineItem::Push { commits, at }),
+                TimelineItem::Push {
+                    commits: more,
+                    at: later,
+                },
+            ) => {
+                // Dated by its latest commit, so the group sorts where it last moved.
+                commits.extend(more);
+                *at = later;
+            }
+            (_, item) => items.push(item),
+        }
+    }
+    items
+}
+
+/// Each reviewer's latest standing; requested reviewers who haven't answered come last.
+fn reviewers(reviews: &[ApiReview], requested: &[ApiLogin]) -> Vec<Reviewer> {
+    let mut out: Vec<Reviewer> = Vec::new();
+    for r in reviews.iter().filter(|r| r.submitted_at.is_some()) {
+        let Some(user) = r.user.as_ref() else {
+            continue;
+        };
+        let state = match r.state.as_str() {
+            "APPROVED" => ReviewerState::Greenlit,
+            "CHANGES_REQUESTED" => ReviewerState::SentBack,
+            "DISMISSED" => ReviewerState::Dismissed,
+            "COMMENTED" => ReviewerState::Commented,
+            _ => continue,
+        };
+        match out
+            .iter_mut()
+            .find(|o| o.login.eq_ignore_ascii_case(&user.login))
+        {
+            // A comment doesn't undo an earlier decision.
+            Some(_) if state == ReviewerState::Commented => {}
+            Some(o) => o.state = state,
+            None => out.push(Reviewer {
+                login: user.login.clone(),
+                state,
+            }),
+        }
+    }
+    for r in requested {
+        if !out.iter().any(|o| o.login.eq_ignore_ascii_case(&r.login)) {
+            out.push(Reviewer {
+                login: r.login.clone(),
+                state: ReviewerState::Requested,
+            });
+        }
+    }
+    out
+}
+
+/// The review inbox plus every open pull request's number, labelled or not (what prunes
+/// cached refs and previews, so a change opened by direct URL keeps its preview).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewInbox {
+    pub reviews: Vec<ReviewItem>,
+    pub open: Vec<u64>,
+}
+
+/// GitHub requests in flight at once while building the review inbox.
+const INBOX_CONCURRENCY: usize = 4;
+
+/// `me`'s latest decisive review (approved / changes requested / dismissed) on `head_sha`:
+/// approved -> greenlit, changes requested -> sent back, anything else -> new.
+fn my_review_state(reviews: &[ApiReview], me: &str, head_sha: &str) -> MyReviewState {
+    let latest = reviews.iter().rfind(|r| {
+        r.user
+            .as_ref()
+            .is_some_and(|u| u.login.eq_ignore_ascii_case(me))
+            && r.commit_id == head_sha
+            && matches!(
+                r.state.as_str(),
+                "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED"
+            )
+    });
+    match latest.map(|r| r.state.as_str()) {
+        Some("APPROVED") => MyReviewState::Greenlit,
+        Some("CHANGES_REQUESTED") => MyReviewState::SentBack,
+        _ => MyReviewState::New,
+    }
 }
 
 #[derive(Deserialize)]
@@ -330,6 +818,8 @@ struct ApiCheckRun {
     status: String,
     #[serde(default)]
     conclusion: Option<String>,
+    #[serde(default)]
+    html_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -368,26 +858,56 @@ fn pr_state(pull: &PullFacts, reviews: &[ApiReview]) -> PrState {
     if pull.draft {
         return PrState::Draft;
     }
-    // Reviews arrive oldest first; keep each reviewer's latest decisive one.
-    let mut latest: Vec<(&str, &str)> = Vec::new();
-    for r in reviews {
-        let state = r.state.as_str();
-        if !matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") {
-            continue;
-        }
-        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
-        match latest.iter_mut().find(|(u, _)| *u == who) {
-            Some(entry) => entry.1 = state,
-            None => latest.push((who, state)),
-        }
-    }
-    let approved = latest.iter().any(|(_, s)| *s == "APPROVED")
-        && !latest.iter().any(|(_, s)| *s == "CHANGES_REQUESTED");
-    if approved {
+    let latest = latest_decisions(reviews);
+    if latest.iter().any(|r| r.state == "CHANGES_REQUESTED") {
+        PrState::ChangesRequested
+    } else if latest.iter().any(|r| r.state == "APPROVED") {
         PrState::Approved
     } else {
         PrState::Open
     }
+}
+
+/// Each reviewer's latest decisive review (approve, request changes, dismissed).
+fn latest_decisions(reviews: &[ApiReview]) -> Vec<&ApiReview> {
+    // Reviews arrive oldest first; a later one replaces the reviewer's earlier one.
+    let mut latest: Vec<&ApiReview> = Vec::new();
+    for r in reviews {
+        if !matches!(
+            r.state.as_str(),
+            "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED"
+        ) {
+            continue;
+        }
+        let who = r.user.as_ref().map_or("", |u| u.login.as_str());
+        match latest
+            .iter_mut()
+            .find(|e| e.user.as_ref().map_or("", |u| u.login.as_str()) == who)
+        {
+            Some(entry) => *entry = r,
+            None => latest.push(r),
+        }
+    }
+    latest
+}
+
+/// The newest outstanding change request, with its comment.
+fn sent_back(reviews: &[ApiReview]) -> Option<SentBack> {
+    let outstanding: Vec<&ApiReview> = latest_decisions(reviews)
+        .into_iter()
+        .filter(|r| r.state == "CHANGES_REQUESTED")
+        .collect();
+    // `reviews` is oldest first: the outstanding request that appears last is the newest.
+    let newest = reviews
+        .iter()
+        .rfind(|r| outstanding.iter().any(|o| std::ptr::eq(*o, *r)))?;
+    Some(SentBack {
+        reviewer: newest
+            .user
+            .as_ref()
+            .map_or_else(String::new, |u| u.login.clone()),
+        comment: newest.body.clone().unwrap_or_default(),
+    })
 }
 
 /// Only `http://` / `https://` URLs may become links (a deployment's `environment_url` is
@@ -639,6 +1159,10 @@ pub struct GithubAuth {
     cli: Mutex<Option<CliState>>,
     /// The identity last written to the projects, to notice changes (see `identity_change`).
     applied: Mutex<Option<Identity>>,
+    /// Token-made REST GETs, reused briefly and revalidated with ETags (see `github_cache`).
+    get_cache: crate::github_cache::GetCache,
+    /// Review images by `repo@sha:path`: a commit's file never changes, so they're kept as is.
+    raw_files: std::sync::Mutex<std::collections::VecDeque<(String, bytes::Bytes)>>,
 }
 
 impl GithubAuth {
@@ -653,6 +1177,7 @@ impl GithubAuth {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("HTTP client");
+        let cfg_ttl = cfg.get_cache_ttl;
         Self {
             cfg,
             path,
@@ -663,6 +1188,8 @@ impl GithubAuth {
             }),
             cli: Mutex::new(None),
             applied: Mutex::new(None),
+            get_cache: crate::github_cache::GetCache::new(cfg_ttl),
+            raw_files: std::sync::Mutex::default(),
         }
     }
 
@@ -1145,13 +1672,14 @@ impl GithubAuth {
         Ok(pulls.into_iter().next().map(PullRequest::from))
     }
 
-    /// Create a draft pull request from `head_branch` into `main`.
+    /// Create a draft pull request from `head_branch` into `main`, tagged with `labels`.
     pub async fn create_draft_pr(
         &self,
         repo: &str,
         head_branch: &str,
         title: &str,
         body: &str,
+        labels: &[String],
     ) -> Result<PullRequest, ApiError> {
         let pull: ApiPull = self
             .api_json(
@@ -1166,6 +1694,17 @@ impl GithubAuth {
                 })),
             )
             .await?;
+        // Tag it so reviewers can filter orso's PRs (e.g. `label:orso`). GitHub creates a label
+        // on first use. Best effort: a refused or failed label must not fail sharing the change.
+        if !labels.is_empty() {
+            let _ = self
+                .api_raw(
+                    reqwest::Method::POST,
+                    &format!("/repos/{repo}/issues/{}/labels", pull.number),
+                    Some(&serde_json::json!({ "labels": labels })),
+                )
+                .await;
+        }
         Ok(PullRequest::from(pull))
     }
 
@@ -1195,6 +1734,7 @@ impl GithubAuth {
                 mergeable: None,
                 mergeable_state: None,
                 up_to_date: false,
+                sent_back: None,
                 // Unknown without the re-read; only used server-side (cleanup), never sent.
                 head_sha: String::new(),
             },
@@ -1251,6 +1791,8 @@ impl GithubAuth {
                 }
             }
         };
+        // GraphQL names no repository path: drop every cached GET.
+        self.get_cache.clear();
         let excerpt =
             |n: usize| -> String { String::from_utf8_lossy(&body).chars().take(n).collect() };
         if status == reqwest::StatusCode::FORBIDDEN {
@@ -1302,6 +1844,14 @@ impl GithubAuth {
         let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
             ApiError::enoent("Couldn't publish. Share the draft first, then try again.")
         })?;
+        // A reviewer's send-back holds the change even when GitHub would merge it (no branch
+        // protection). Drafts have no reviews that count; publish readies them first.
+        if !pull.draft {
+            let state = self.pull_and_state(repo, head_branch).await?;
+            if matches!(state, Some((_, PrState::ChangesRequested, _))) {
+                return Err(ApiError::conflict("A reviewer sent this change back."));
+            }
+        }
         let (status, body) = self
             .api_raw(
                 reqwest::Method::PUT,
@@ -1333,7 +1883,7 @@ impl GithubAuth {
         repo: &str,
         head_branch: &str,
     ) -> Result<Option<PrStatus>, ApiError> {
-        let Some((pull, state)) = self.pull_and_state(repo, head_branch).await? else {
+        let Some((pull, state, sent_back)) = self.pull_and_state(repo, head_branch).await? else {
             return Ok(None);
         };
         let sha = pull.head.map(|h| h.sha).unwrap_or_default();
@@ -1361,8 +1911,718 @@ impl GithubAuth {
             mergeable: pull.mergeable,
             mergeable_state: pull.mergeable_state,
             up_to_date: false,
+            sent_back,
             head_sha: sha,
         }))
+    }
+
+    /// Login of the signed-in user.
+    pub async fn signed_in_login(&self) -> Result<String, ApiError> {
+        self.status()
+            .await
+            .user
+            .map(|u| u.login)
+            .ok_or_else(not_signed_in)
+    }
+
+    /// Whether the signed-in user can push to `repo`.
+    pub async fn can_push(&self, repo: &str) -> Result<bool, ApiError> {
+        let r: ApiRepo = self.get_json(&format!("/repos/{repo}")).await?;
+        Ok(r.permissions.is_some_and(|p| p.push))
+    }
+
+    /// Open, non-draft pull requests carrying any of `labels` (case-insensitive), `me`'s own
+    /// included (marked `mine`), each with `me`'s review standing and the head's checks.
+    pub async fn review_inbox(
+        &self,
+        repo: &str,
+        labels: &[String],
+        me: &str,
+    ) -> Result<ReviewInbox, ApiError> {
+        use futures_util::{StreamExt, TryStreamExt};
+        let pulls = self
+            .get_all_query::<Vec<ApiPull>, ApiPull>(
+                &format!("/repos/{repo}/pulls"),
+                "state=open&",
+                |p| p,
+            )
+            .await?;
+        let open: Vec<u64> = pulls.iter().map(|p| p.number).collect();
+        let kept: Vec<ApiPull> = pulls
+            .into_iter()
+            .filter(|p| {
+                !p.draft
+                    && p.labels
+                        .iter()
+                        .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(&l.name)))
+            })
+            .collect();
+        // Bounded, so a busy repository does not fire every PR's requests at once; `buffered`
+        // keeps the results in the listing's order.
+        let reviews = futures_util::stream::iter(kept)
+            .map(|p| self.review_item(repo, p, me))
+            .buffered(INBOX_CONCURRENCY)
+            .try_collect()
+            .await?;
+        let counts = self.comment_counts(repo, false).await;
+        Ok(ReviewInbox {
+            reviews: with_comments(reviews, &counts),
+            open,
+        })
+    }
+
+    /// The most recently updated closed or merged pull requests carrying any of `labels`
+    /// (one page of [`CLOSED_PAGE`]), each as an inbox row.
+    pub async fn closed_reviews(
+        &self,
+        repo: &str,
+        labels: &[String],
+        me: &str,
+    ) -> Result<ClosedReviews, ApiError> {
+        use futures_util::{StreamExt, TryStreamExt};
+        let pulls: Vec<ApiPull> = self
+            .get_json(&format!(
+                "/repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page={CLOSED_PAGE}"
+            ))
+            .await?;
+        let more = pulls.len() >= CLOSED_PAGE;
+        let kept: Vec<ApiPull> = pulls
+            .into_iter()
+            .filter(|p| {
+                p.labels
+                    .iter()
+                    .any(|l| labels.iter().any(|w| w.eq_ignore_ascii_case(&l.name)))
+            })
+            .collect();
+        let reviews = futures_util::stream::iter(kept)
+            .map(|p| self.review_item(repo, p, me))
+            .buffered(INBOX_CONCURRENCY)
+            .try_collect()
+            .await?;
+        let counts = self.comment_counts(repo, true).await;
+        Ok(ClosedReviews {
+            reviews: with_comments(reviews, &counts),
+            more,
+        })
+    }
+
+    /// Conversation comment counts by number, from the issues listing (which includes pull
+    /// requests). Best effort: an unreadable listing counts nothing. Open ones are every page;
+    /// closed ones the most recently updated page, matching [`Self::closed_reviews`].
+    async fn comment_counts(&self, repo: &str, closed: bool) -> HashMap<u64, u64> {
+        let path = format!("/repos/{repo}/issues");
+        let issues = if closed {
+            self.get_json::<Vec<ApiIssueCount>>(&format!(
+                "{path}?state=closed&sort=updated&direction=desc&per_page=100"
+            ))
+            .await
+        } else {
+            self.get_all_query::<Vec<ApiIssueCount>, ApiIssueCount>(&path, "state=open&", |p| p)
+                .await
+        };
+        issues
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| (i.number, i.comments))
+            .collect()
+    }
+
+    /// One pull request opened for review.
+    pub async fn review_detail(
+        &self,
+        repo: &str,
+        number: u64,
+        me: &str,
+    ) -> Result<ReviewDetail, ApiError> {
+        let pull: ApiPull = self
+            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .await?;
+        let open = pull.state.as_deref() == Some("open") && pull.merged_at.is_none();
+        let (draft, description, merged) =
+            (pull.draft, pull.body.clone(), pull.merged_at.is_some());
+        let labels = pull.labels.iter().map(|l| l.name.clone()).collect();
+        let item = self.review_item(repo, pull, me).await?;
+        Ok(ReviewDetail {
+            item,
+            description,
+            open,
+            draft,
+            merged,
+            labels,
+        })
+    }
+
+    /// Change `number`'s conversation: comments, reviews and pushes oldest first, its head's
+    /// checks, and where each reviewer stands.
+    pub async fn conversation(&self, repo: &str, number: u64) -> Result<Conversation, ApiError> {
+        let pull: ApiPull = self
+            .get_json(&format!("/repos/{repo}/pulls/{number}"))
+            .await?;
+        let sha = pull
+            .head
+            .as_ref()
+            .map(|h| h.sha.clone())
+            .unwrap_or_default();
+        let comments_path = format!("/repos/{repo}/issues/{number}/comments");
+        let reviews_path = format!("/repos/{repo}/pulls/{number}/reviews");
+        let commits_path = format!("/repos/{repo}/pulls/{number}/commits");
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        let comments = self.get_all::<Vec<ApiIssueComment>, ApiIssueComment>(&comments_path, |p| p);
+        let reviews = self.get_all::<Vec<ApiReview>, ApiReview>(&reviews_path, |p| p);
+        let commits = self.get_all::<Vec<ApiPullCommit>, ApiPullCommit>(&commits_path, |p| p);
+        // Checks are a sidebar extra: unreadable checks show as none.
+        let runs = async {
+            if sha.is_empty() {
+                return Vec::new();
+            }
+            self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+                .await
+                .unwrap_or_default()
+        };
+        let (comments, reviews, commits, runs) = tokio::join!(comments, reviews, commits, runs);
+        let reviews = reviews?;
+        let closed = match (&pull.merged_at, &pull.closed_at) {
+            (Some(at), _) => Some((at.clone(), true)),
+            (None, Some(at)) if pull.state.as_deref() == Some("closed") => {
+                Some((at.clone(), false))
+            }
+            _ => None,
+        };
+        Ok(Conversation {
+            items: timeline(comments?, &reviews, commits?, closed),
+            checks: runs
+                .into_iter()
+                .map(|r| CheckItem {
+                    name: r.name,
+                    status: r.status,
+                    conclusion: r.conclusion,
+                    url: r.html_url.filter(|u| is_http_url(u)),
+                })
+                .collect(),
+            reviewers: reviewers(&reviews, &pull.requested_reviewers),
+        })
+    }
+
+    /// Comment on change `number` as the signed-in user; the new timeline entry.
+    pub async fn add_comment(
+        &self,
+        repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<TimelineItem, ApiError> {
+        let (status, bytes) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/issues/{number}/comments"),
+                Some(&serde_json::json!({ "body": body })),
+            )
+            .await?;
+        if !status.is_success() {
+            return Err(match status {
+                reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND => {
+                    ApiError::sandbox("GitHub didn't let you comment on this change.")
+                }
+                _ => ApiError::github("Couldn't post your comment. Try again in a moment."),
+            });
+        }
+        let c: ApiIssueComment = serde_json::from_slice(&bytes)
+            .map_err(|e| ApiError::github(format!("unexpected answer from GitHub: {e}")))?;
+        let avatar_url = c
+            .user
+            .as_ref()
+            .and_then(|u| u.avatar_url.clone())
+            .filter(|a| is_http_url(a));
+        Ok(TimelineItem::Comment {
+            id: c.id,
+            author: c.user.map_or_else(|| "ghost".to_string(), |u| u.login),
+            avatar_url,
+            at: c.created_at,
+            body: c.body.unwrap_or_default(),
+            url: c.html_url,
+        })
+    }
+
+    /// Greenlight (approve) or send back (request changes) `number` as the signed-in user.
+    /// The review is pinned to `head_sha`, the commit the reviewer looked at: when the head
+    /// has moved since, nothing is sent and the caller is told to reopen the change.
+    pub async fn submit_review(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+        decision: Decision,
+        comment: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let event = match decision {
+            Decision::Greenlight => "APPROVE",
+            Decision::SendBack => "REQUEST_CHANGES",
+        };
+        self.submit_review_event(repo, number, head_sha, event, comment.unwrap_or_default())
+            .await
+    }
+
+    /// 409 `head_moved` unless `number`'s head is still `head_sha` (read fresh, not cached).
+    pub async fn ensure_head(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+    ) -> Result<(), ApiError> {
+        let pull: ApiPull = self
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/pulls/{number}"),
+                None,
+            )
+            .await?;
+        if pull.head.as_ref().map(|h| h.sha.as_str()) != Some(head_sha) {
+            return Err(
+                ApiError::conflict("This change was updated since you opened it")
+                    .with_reason("head_moved"),
+            );
+        }
+        Ok(())
+    }
+
+    /// A review of `number` with GitHub's `event` (`APPROVE`, `REQUEST_CHANGES` or `COMMENT`)
+    /// and `body`, pinned to `head_sha` (409 `head_moved` when the head has moved since).
+    pub async fn submit_review_event(
+        &self,
+        repo: &str,
+        number: u64,
+        head_sha: &str,
+        event: &str,
+        body: &str,
+    ) -> Result<(), ApiError> {
+        self.ensure_head(repo, number, head_sha).await?;
+        let (status, _) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/pulls/{number}/reviews"),
+                Some(&serde_json::json!({
+                    "event": event,
+                    "body": body,
+                    "commit_id": head_sha,
+                })),
+            )
+            .await?;
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(match status {
+            reqwest::StatusCode::FORBIDDEN => {
+                ApiError::sandbox("Ask an owner to add you to this site, then try again.")
+            }
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY => ApiError::conflict(
+                "GitHub didn't accept that review. Reopen the change and try again.",
+            ),
+            _ => ApiError::github("Couldn't send your review. Try again in a moment."),
+        })
+    }
+
+    /// Commits `files` (path → bytes) to `branch` in `repo` through the Git Data API, creating
+    /// the branch as an orphan on first use, and returns the new commit's sha. Never touches
+    /// any other branch. A branch that moved underneath (non-fast-forward, or created in the
+    /// meantime) is retried once from its new tip.
+    pub async fn commit_files_to_branch(
+        &self,
+        repo: &str,
+        branch: &str,
+        message: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<String, ApiError> {
+        use base64::Engine;
+        let mut blobs = Vec::with_capacity(files.len());
+        for (path, bytes) in files {
+            let blob: ApiSha = self
+                .git_post(
+                    repo,
+                    "blobs",
+                    serde_json::json!({
+                        "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+                        "encoding": "base64",
+                    }),
+                )
+                .await?;
+            blobs.push((path.clone(), blob.sha));
+        }
+        let mut last = None;
+        for _ in 0..2 {
+            match self.commit_blobs(repo, branch, message, &blobs).await? {
+                Ok(sha) => return Ok(sha),
+                Err(refused) => last = Some(refused),
+            }
+        }
+        Err(last.unwrap_or_else(|| ApiError::github("Couldn't save the screenshots.")))
+    }
+
+    /// Removes review images of pull requests that `keep` rejects from `branch` (files under
+    /// `shots/{pr}/` and `uploads/{pr}/`) in one commit. When no kept pull request has images
+    /// left, the branch itself is deleted, so its history stops riding along with every clone;
+    /// the next upload starts it again.
+    pub async fn clean_review_assets(
+        &self,
+        repo: &str,
+        branch: &str,
+        keep: impl Fn(u64) -> bool,
+    ) -> Result<AssetsCleanup, ApiError> {
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/ref/heads/{branch}"),
+                None,
+            )
+            .await?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(AssetsCleanup::Nothing);
+        }
+        if !status.is_success() {
+            return Err(github_error(status, &body));
+        }
+        let tip = serde_json::from_slice::<ApiRef>(&body)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))?
+            .object
+            .sha;
+        let commit: ApiGitCommit = self
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/commits/{tip}"),
+                None,
+            )
+            .await?;
+        let tree: ApiTree = self
+            .api_json(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/trees/{}?recursive=1", commit.tree.sha),
+                None,
+            )
+            .await?;
+        // The pull request each review image belongs to.
+        let pr_of = |path: &str| -> Option<u64> {
+            let mut parts = path.split('/');
+            matches!(parts.next(), Some("shots" | "uploads"))
+                .then(|| parts.next()?.parse().ok())
+                .flatten()
+        };
+        let files: Vec<(&str, u64)> = tree
+            .tree
+            .iter()
+            .filter(|e| e.kind == "blob")
+            .filter_map(|e| Some((e.path.as_str(), pr_of(&e.path)?)))
+            .collect();
+        if !files.iter().any(|(_, pr)| keep(*pr)) {
+            let (status, body) = self
+                .api_raw(
+                    reqwest::Method::DELETE,
+                    &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                    None,
+                )
+                .await?;
+            return if status.is_success() || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+                Ok(AssetsCleanup::DeletedBranch)
+            } else {
+                Err(github_error(status, &body))
+            };
+        }
+        let mut gone: Vec<u64> = files
+            .iter()
+            .map(|(_, pr)| *pr)
+            .filter(|pr| !keep(*pr))
+            .collect();
+        gone.sort_unstable();
+        gone.dedup();
+        if gone.is_empty() {
+            return Ok(AssetsCleanup::Nothing);
+        }
+        // A tree entry with a null sha removes that file.
+        let removals: Vec<_> = files
+            .iter()
+            .filter(|(_, pr)| gone.contains(pr))
+            .map(|(path, _)| serde_json::json!({ "path": path, "mode": "100644", "type": "blob", "sha": null }))
+            .collect();
+        let new_tree: ApiSha = self
+            .git_post(
+                repo,
+                "trees",
+                serde_json::json!({ "base_tree": commit.tree.sha, "tree": removals }),
+            )
+            .await?;
+        let list = gone
+            .iter()
+            .map(|n| format!("#{n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let new_commit: ApiSha = self
+            .git_post(
+                repo,
+                "commits",
+                serde_json::json!({
+                    "message": format!("Remove review images of closed changes {list}"),
+                    "tree": new_tree.sha,
+                    "parents": [tip],
+                }),
+            )
+            .await?;
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::PATCH,
+                &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                Some(&serde_json::json!({ "sha": new_commit.sha, "force": false })),
+            )
+            .await?;
+        if !status.is_success() {
+            // Someone uploaded meanwhile; the next inbox load tries again.
+            return Err(github_error(status, &body));
+        }
+        Ok(AssetsCleanup::Removed(gone))
+    }
+
+    /// One attempt: tree and commit on the branch's current tip, then move (or create) the ref.
+    /// The outer `Err` is a failure; the inner one a ref update GitHub refused, worth a retry.
+    async fn commit_blobs(
+        &self,
+        repo: &str,
+        branch: &str,
+        message: &str,
+        blobs: &[(String, String)],
+    ) -> Result<Result<String, ApiError>, ApiError> {
+        let (status, body) = self
+            .api_raw(
+                reqwest::Method::GET,
+                &format!("/repos/{repo}/git/ref/heads/{branch}"),
+                None,
+            )
+            .await?;
+        let parent = match status {
+            s if s.is_success() => Some(
+                serde_json::from_slice::<ApiRef>(&body)
+                    .map_err(|_| ApiError::github("unexpected response from GitHub"))?
+                    .object
+                    .sha,
+            ),
+            reqwest::StatusCode::NOT_FOUND => None,
+            s => return Err(github_error(s, &body)),
+        };
+        let base_tree = match &parent {
+            Some(sha) => {
+                let commit: ApiGitCommit = self
+                    .api_json(
+                        reqwest::Method::GET,
+                        &format!("/repos/{repo}/git/commits/{sha}"),
+                        None,
+                    )
+                    .await?;
+                Some(commit.tree.sha)
+            }
+            None => None,
+        };
+        let entries: Vec<_> = blobs
+            .iter()
+            .map(|(path, sha)| serde_json::json!({ "path": path, "mode": "100644", "type": "blob", "sha": sha }))
+            .collect();
+        let mut tree_body = serde_json::json!({ "tree": entries });
+        if let Some(base) = base_tree {
+            tree_body["base_tree"] = serde_json::json!(base);
+        }
+        let tree: ApiSha = self.git_post(repo, "trees", tree_body).await?;
+        let parents: Vec<&String> = parent.iter().collect();
+        let commit: ApiSha = self
+            .git_post(
+                repo,
+                "commits",
+                serde_json::json!({ "message": message, "tree": tree.sha, "parents": parents }),
+            )
+            .await?;
+        let (status, body) = match &parent {
+            Some(_) => {
+                self.api_raw(
+                    reqwest::Method::PATCH,
+                    &format!("/repos/{repo}/git/refs/heads/{branch}"),
+                    Some(&serde_json::json!({ "sha": commit.sha, "force": false })),
+                )
+                .await?
+            }
+            None => {
+                self.api_raw(
+                    reqwest::Method::POST,
+                    &format!("/repos/{repo}/git/refs"),
+                    Some(&serde_json::json!({ "ref": format!("refs/heads/{branch}"), "sha": commit.sha })),
+                )
+                .await?
+            }
+        };
+        if status.is_success() {
+            return Ok(Ok(commit.sha));
+        }
+        // Behind (someone else's upload landed first) is worth one more try; a refusal isn't.
+        let text = String::from_utf8_lossy(&body).to_lowercase();
+        if status == reqwest::StatusCode::CONFLICT
+            || (status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                && (text.contains("fast forward") || text.contains("already exists")))
+        {
+            return Ok(Err(ApiError::conflict(
+                "Another image upload landed at the same time. Try again.",
+            )));
+        }
+        Err(assets_write_error(status, &body))
+    }
+
+    /// `POST /repos/{repo}/git/{what}` → its `{ sha }`; a refusal is `assets_refused`.
+    async fn git_post<T: DeserializeOwned>(
+        &self,
+        repo: &str,
+        what: &str,
+        body: serde_json::Value,
+    ) -> Result<T, ApiError> {
+        let (status, bytes) = self
+            .api_raw(
+                reqwest::Method::POST,
+                &format!("/repos/{repo}/git/{what}"),
+                Some(&body),
+            )
+            .await?;
+        if !status.is_success() {
+            return Err(assets_write_error(status, &bytes));
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))
+    }
+
+    /// The bytes of `path` at commit `sha` in `repo`, kept in memory once read (a commit's file
+    /// never changes; the most recent 64 are kept).
+    pub async fn raw_file(
+        &self,
+        repo: &str,
+        sha: &str,
+        path: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        const KEEP: usize = 64;
+        let key = format!("{repo}@{sha}:{path}");
+        if let Some((_, b)) = self
+            .raw_files
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| *k == key)
+        {
+            return Ok(b.clone());
+        }
+        let api_path = format!("/repos/{repo}/contents/{path}?ref={}", urlencode(sha));
+        const RAW: &str = "application/vnd.github.raw+json";
+        let bytes = if let Some(token) = self.token().await {
+            let res = self
+                .http
+                .get(format!("{}{api_path}", self.api()))
+                .bearer_auth(&token)
+                .header(ACCEPT, RAW)
+                .send()
+                .await
+                .map_err(unreachable)?;
+            let status = res.status();
+            let body = res.bytes().await.map_err(unreachable)?;
+            if status == reqwest::StatusCode::NOT_FOUND {
+                return Err(ApiError::enoent("That image isn't there any more"));
+            }
+            if !status.is_success() {
+                return Err(github_error(status, &body));
+            }
+            body
+        } else {
+            // Not `RAW`: gh reads a `+json` type as JSON and fails on binary ("transform: short
+            // source buffer"). Plain `.raw` gets the file's bytes through untouched.
+            let accept = "Accept: application/vnd.github.raw";
+            let out = self
+                .run_gh_input(&["api", "-H", accept, &api_path], 30, None)
+                .await
+                .map_err(|f| f.err.with_status(502))?;
+            if out.code != Some(0) {
+                return Err(self.gh_api_error(out).await);
+            }
+            bytes::Bytes::from(out.stdout)
+        };
+        let mut kept = self.raw_files.lock().unwrap();
+        kept.push_back((key, bytes.clone()));
+        while kept.len() > KEEP {
+            kept.pop_front();
+        }
+        Ok(bytes)
+    }
+
+    /// A link that shows `path` at `commit` in `repo` as an image in GitHub markdown.
+    pub fn raw_blob_url(&self, repo: &str, commit: &str, path: &str) -> String {
+        format!(
+            "{}/{repo}/blob/{commit}/{path}?raw=true",
+            // The site host (github.com), not `web()`: that falls back to the API URL.
+            self.cfg.git_url.trim_end_matches('/')
+        )
+    }
+
+    async fn review_item(
+        &self,
+        repo: &str,
+        pull: ApiPull,
+        me: &str,
+    ) -> Result<ReviewItem, ApiError> {
+        let sha = pull.head.map(|h| h.sha).unwrap_or_default();
+        let reviews_path = format!("/repos/{repo}/pulls/{}/reviews", pull.number);
+        let runs_path = format!("/repos/{repo}/commits/{sha}/check-runs");
+        let reviews = self.get_all::<Vec<ApiReview>, ApiReview>(&reviews_path, |p| p);
+        let runs = async {
+            if sha.is_empty() {
+                return Vec::new();
+            }
+            self.get_all::<ApiCheckRuns, ApiCheckRun>(&runs_path, |p| p.check_runs)
+                .await
+                .unwrap_or_default()
+        };
+        let (reviews, runs) = tokio::join!(reviews, runs);
+        let my_state = my_review_state(&reviews?, me, &sha);
+        let mine = pull
+            .user
+            .as_ref()
+            .is_some_and(|u| u.login.eq_ignore_ascii_case(me));
+        let passed = runs
+            .iter()
+            .filter(|r| {
+                r.status == "completed"
+                    && matches!(
+                        r.conclusion.as_deref(),
+                        Some("success" | "neutral" | "skipped")
+                    )
+            })
+            .count();
+        let state = if pull.merged_at.is_some() {
+            "merged"
+        } else if pull.state.as_deref() == Some("closed") {
+            "closed"
+        } else {
+            "open"
+        };
+        Ok(ReviewItem {
+            number: pull.number,
+            title: pull.title,
+            author: pull.user.map_or_else(|| "ghost".to_string(), |u| u.login),
+            url: pull.html_url,
+            updated_at: pull.updated_at,
+            head_sha: sha,
+            checks: aggregate_checks(&runs),
+            checks_passed: passed as u64,
+            checks_total: runs.len() as u64,
+            my_state,
+            mine,
+            labels: pull
+                .labels
+                .iter()
+                .map(|l| ReviewLabel {
+                    name: l.name.clone(),
+                    color: l.color.clone(),
+                })
+                .collect(),
+            created_at: pull.created_at,
+            comments: 0,
+            state: state.to_string(),
+            draft: pull.draft,
+        })
     }
 
     /// The commit GitHub's `main` currently points at.
@@ -1433,7 +2693,7 @@ impl GithubAuth {
         Ok(self
             .pull_and_state(repo, head_branch)
             .await?
-            .map(|(pull, state)| PrRef {
+            .map(|(pull, state, _)| PrRef {
                 state,
                 head_sha: pull.head.map(|h| h.sha).unwrap_or_default(),
             }))
@@ -1444,7 +2704,7 @@ impl GithubAuth {
         &self,
         repo: &str,
         head_branch: &str,
-    ) -> Result<Option<(ApiPull, PrState)>, ApiError> {
+    ) -> Result<Option<(ApiPull, PrState, Option<SentBack>)>, ApiError> {
         let owner = repo
             .split_once('/')
             .map(|(o, _)| o)
@@ -1476,7 +2736,12 @@ impl GithubAuth {
             .await?
         };
         let state = pr_state(&facts, &reviews);
-        Ok(Some((pull, state)))
+        let back = if state == PrState::ChangesRequested {
+            sent_back(&reviews)
+        } else {
+            None
+        };
+        Ok(Some((pull, state, back)))
     }
 
     /// `environment_url` of the newest deployment of `sha` whose latest status is a success.
@@ -1548,10 +2813,20 @@ impl GithubAuth {
         path: &str,
         items: impl Fn(P) -> Vec<T>,
     ) -> Result<Vec<T>, ApiError> {
+        self.get_all_query(path, "", items).await
+    }
+
+    /// [`Self::get_all`] with extra query parameters (`extra` is `k=v&` pairs, or empty).
+    async fn get_all_query<P: DeserializeOwned, T>(
+        &self,
+        path: &str,
+        extra: &str,
+        items: impl Fn(P) -> Vec<T>,
+    ) -> Result<Vec<T>, ApiError> {
         let mut all = Vec::new();
         for page in 1..=MAX_PAGES {
             let batch = items(
-                self.get_json::<P>(&format!("{path}?per_page={PAGE_SIZE}&page={page}"))
+                self.get_json::<P>(&format!("{path}?{extra}per_page={PAGE_SIZE}&page={page}"))
                     .await?,
             );
             let short = batch.len() < PAGE_SIZE;
@@ -1563,13 +2838,127 @@ impl GithubAuth {
         Ok(all)
     }
 
+    /// A GET of `path`. With a token it goes through the GET cache; through `gh api` it
+    /// doesn't.
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
-        self.api_json(reqwest::Method::GET, path, None).await
+        let Some(token) = self.token().await else {
+            return self.api_json(reqwest::Method::GET, path, None).await;
+        };
+        let body = self.cached_get(&token, path).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| ApiError::github("unexpected response from GitHub"))
+    }
+
+    /// The body of a token GET of `path`: reused while fresh, revalidated once stale, and
+    /// fetched once for concurrent identical calls.
+    async fn cached_get(&self, token: &str, path: &str) -> Result<bytes::Bytes, ApiError> {
+        let url = format!("{}{path}", self.api());
+        let key = crate::github_cache::GetCache::key(token, &url);
+        let flight = self.get_cache.flight(&key).await;
+        let out = self.cached_get_in_flight(token, &url, &key).await;
+        self.get_cache.land(flight).await;
+        out
+    }
+
+    async fn cached_get_in_flight(
+        &self,
+        token: &str,
+        url: &str,
+        key: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        use crate::github_cache::Lookup;
+        use reqwest::header::{IF_MODIFIED_SINCE, IF_NONE_MATCH};
+        let (etag, last_modified) = match self.get_cache.lookup(key) {
+            Lookup::Fresh(body) => return Ok(body),
+            Lookup::Stale {
+                etag,
+                last_modified,
+            } => (etag, last_modified),
+            Lookup::Miss => (None, None),
+        };
+        let get = || {
+            self.http
+                .get(url)
+                .bearer_auth(token)
+                .header(ACCEPT, GITHUB_JSON)
+        };
+        let mut req = get();
+        if let Some(etag) = &etag {
+            req = req.header(IF_NONE_MATCH, etag);
+        }
+        if let Some(since) = &last_modified {
+            req = req.header(IF_MODIFIED_SINCE, since);
+        }
+        let res = req.send().await.map_err(unreachable)?;
+        if res.status() == reqwest::StatusCode::NOT_MODIFIED {
+            if let Some(body) = self.get_cache.revalidated(key) {
+                return Ok(body);
+            }
+            // Evicted in the meantime: ask again without validators.
+            let res = get().send().await.map_err(unreachable)?;
+            return self.store_get(res, token, url, key).await;
+        }
+        self.store_get(res, token, url, key).await
+    }
+
+    /// A GET response's body, stored when 2xx; otherwise the same errors as `parse_github`.
+    async fn store_get(
+        &self,
+        res: reqwest::Response,
+        token: &str,
+        url: &str,
+        key: &str,
+    ) -> Result<bytes::Bytes, ApiError> {
+        use reqwest::header::{ETAG, LAST_MODIFIED};
+        let status = res.status();
+        let header = |name| {
+            res.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        };
+        let (etag, last_modified) = (header(ETAG), header(LAST_MODIFIED));
+        let body = res.bytes().await.map_err(unreachable)?;
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let _ = self.sign_out_if_token(token).await;
+            return Err(ApiError::unauth(
+                "your GitHub session expired — sign in again",
+            ));
+        }
+        if !status.is_success() {
+            return Err(github_error(status, &body));
+        }
+        self.get_cache
+            .store(key, url, body.clone(), etag, last_modified);
+        Ok(body)
+    }
+
+    /// After a write to `path`, cached GETs of its repository (or, for a path that names
+    /// none, every cached GET) may be out of date.
+    fn forget_after_write(&self, path: &str) {
+        match crate::github_cache::repo_prefix(path) {
+            Some(repo) => self.get_cache.invalidate(&format!("{}{repo}", self.api())),
+            None => self.get_cache.clear(),
+        }
     }
 
     /// A REST call to `path` with the session token, else through `gh api` when only the
-    /// GitHub CLI is logged in.
+    /// GitHub CLI is logged in. A write also drops the cached GETs it may have changed.
     async fn api_json<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<T, ApiError> {
+        let write = method != reqwest::Method::GET;
+        let out = self.api_json_uncached(method, path, body).await;
+        if write {
+            self.forget_after_write(path);
+        }
+        out
+    }
+
+    async fn api_json_uncached<T: DeserializeOwned>(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -1598,6 +2987,20 @@ impl GithubAuth {
     /// Like [`Self::api_json`], but returns GitHub's status and body instead of mapping a
     /// failure to an error, so the caller can say what a refusal means for its own action.
     async fn api_raw(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), ApiError> {
+        let write = method != reqwest::Method::GET;
+        let out = self.api_raw_uncached(method, path, body).await;
+        if write {
+            self.forget_after_write(path);
+        }
+        out
+    }
+
+    async fn api_raw_uncached(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -1848,6 +3251,23 @@ async fn parse_github<T: DeserializeOwned>(
         return Err(github_error(status, &body));
     }
     serde_json::from_slice(&body).map_err(|_| ApiError::github("unexpected response from GitHub"))
+}
+
+/// Why images can't be stored in the repository: the account may not create or move the
+/// assets branch (no push access, or a ruleset restricting branches).
+pub const ASSETS_REFUSED: &str = "Couldn't upload images to this repository";
+
+/// A refused write to the assets branch (403, 404 or 422) is `assets_refused`, so the reviewer
+/// is offered to send without images; anything else is an ordinary GitHub error.
+fn assets_write_error(status: reqwest::StatusCode, body: &[u8]) -> ApiError {
+    match status {
+        reqwest::StatusCode::FORBIDDEN
+        | reqwest::StatusCode::NOT_FOUND
+        | reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+            ApiError::sandbox(ASSETS_REFUSED).with_reason("assets_refused")
+        }
+        _ => github_error(status, body),
+    }
 }
 
 /// A failed (non-401) GitHub API response: 403 and 422 get their own [`ApiError`] codes.
@@ -2196,6 +3616,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn raw_file_through_gh_asks_for_plain_raw_bytes() {
+        // Like real gh: a `+json` Accept makes it parse binary as JSON and fail.
+        let dir = tmp_dir("ghraw");
+        let gh = write_gh(
+            &dir,
+            r#"case "$*" in
+  *raw+json*) echo 'transform: short source buffer' >&2; exit 1 ;;
+  *vnd.github.raw*) printf '\211PNG\r\n' ;;
+  *) echo "unexpected: $*" >&2; exit 1 ;;
+esac"#,
+        );
+        let cfg = GithubConfig {
+            gh_path: gh,
+            git_global_config: Some(dir.join("none")),
+            ..GithubConfig::default()
+        };
+        let auth = GithubAuth::open(cfg, &dir);
+        let bytes = auth
+            .raw_file("acme/site", "abc123", "uploads/7/2026-11-19/x.png")
+            .await
+            .unwrap();
+        assert_eq!(&bytes[..], b"\x89PNG\r\n");
+    }
+
+    #[tokio::test]
     async fn a_transient_gh_failure_keeps_the_last_login_but_a_logout_clears_it() {
         let dir = tmp_dir("stale");
         let gh = write_gh(&dir, OK_GH);
@@ -2453,24 +3898,37 @@ mod tests {
 
         let seen: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let seen2 = seen.clone();
-        let routes = Router::new().route(
-            "/repos/acme/site/pulls",
-            post(move |AxJson(body): AxJson<serde_json::Value>| {
-                let seen2 = seen2.clone();
-                async move {
-                    *seen2.lock().unwrap() = Some(body);
-                    (
-                        axum::http::StatusCode::CREATED,
-                        Json(serde_json::json!({
-                            "number": 1,
-                            "html_url": "https://github.com/acme/site/pull/1",
-                            "title": "Launch week",
-                            "draft": true
-                        })),
-                    )
-                }
-            }),
-        );
+        let labels: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let labels2 = labels.clone();
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/issues/1/labels",
+                post(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let labels2 = labels2.clone();
+                    async move {
+                        *labels2.lock().unwrap() = Some(body);
+                        Json(serde_json::json!([{ "name": "orso" }]))
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                post(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let seen2 = seen2.clone();
+                    async move {
+                        *seen2.lock().unwrap() = Some(body);
+                        (
+                            axum::http::StatusCode::CREATED,
+                            Json(serde_json::json!({
+                                "number": 1,
+                                "html_url": "https://github.com/acme/site/pull/1",
+                                "title": "Launch week",
+                                "draft": true
+                            })),
+                        )
+                    }
+                }),
+            );
         let (base, stop) = mock_api(routes).await;
         let dir = tmp_dir("createdraft");
         write_session(&dir, "tok");
@@ -2487,7 +3945,13 @@ mod tests {
         let title = pr_title("Launch week");
         let body = pr_body("Launch week", None);
         let pr = auth
-            .create_draft_pr("acme/site", "content/launch-week", &title, &body)
+            .create_draft_pr(
+                "acme/site",
+                "content/launch-week",
+                &title,
+                &body,
+                &["orso".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(pr.number, 1);
@@ -2497,6 +3961,52 @@ mod tests {
         assert_eq!(sent["body"], "Preview of change: Launch week");
         assert_eq!(sent["head"], "content/launch-week");
         assert_eq!(sent["base"], "main");
+        let labelled = labels.lock().unwrap().clone().expect("PR labelled");
+        assert_eq!(labelled["labels"], serde_json::json!(["orso"]));
+        stop();
+    }
+
+    #[tokio::test]
+    async fn create_draft_pr_survives_a_refused_label() {
+        use axum::routing::post;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/issues/2/labels",
+                post(|| async { axum::http::StatusCode::FORBIDDEN }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                post(|| async {
+                    (
+                        axum::http::StatusCode::CREATED,
+                        Json(serde_json::json!({
+                            "number": 2,
+                            "html_url": "https://github.com/acme/site/pull/2",
+                            "title": "X",
+                            "draft": true
+                        })),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let dir = tmp_dir("createdraft-label-refused");
+        write_session(&dir, "tok");
+        let auth = GithubAuth::open(
+            GithubConfig {
+                api_url: base.clone(),
+                web_url: base,
+                gh_path: PathBuf::new(),
+                ..GithubConfig::default()
+            },
+            &dir,
+        );
+        let pr = auth
+            .create_draft_pr("acme/site", "content/x", "X", "b", &["orso".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(pr.number, 2);
         stop();
     }
 
@@ -2536,7 +4046,13 @@ esac"#,
             .unwrap()
             .is_none());
         let pr = auth
-            .create_draft_pr("acme/site", "content/x", "X", "Preview of change: X")
+            .create_draft_pr(
+                "acme/site",
+                "content/x",
+                "X",
+                "Preview of change: X",
+                &["orso".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(pr.number, 7);
@@ -2545,11 +4061,26 @@ esac"#,
         assert!(calls
             .contains("api --method GET /repos/acme/site/pulls?head=acme:content%2Fx&state=open"));
         assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
+        assert!(calls.contains("api --method POST /repos/acme/site/issues/7/labels --input -"));
+        // `gh.stdin` holds the last call's body: the label request after the PR create.
         let sent: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("gh.stdin")).unwrap()).unwrap();
-        assert_eq!(sent["head"], "content/x");
-        assert_eq!(sent["base"], "main");
-        assert_eq!(sent["draft"], true);
+        assert_eq!(sent["labels"], serde_json::json!(["orso"]));
+    }
+
+    #[tokio::test]
+    async fn no_labels_means_no_label_request() {
+        let dir = tmp_dir("ghnolabels");
+        let auth = gh_with_api(
+            &dir,
+            r#"printf '%s' '{"number":7,"html_url":"https://github.com/acme/site/pull/7","title":"X","draft":true}'"#,
+        );
+        auth.create_draft_pr("acme/site", "content/x", "X", "b", &[])
+            .await
+            .unwrap();
+        let calls = std::fs::read_to_string(dir.join("gh.calls")).unwrap();
+        assert!(calls.contains("api --method POST /repos/acme/site/pulls --input -"));
+        assert!(!calls.contains("/labels"));
     }
 
     #[tokio::test]
@@ -2560,7 +4091,7 @@ esac"#,
             r#"printf '{"message":"Validation Failed"}'; echo 'gh: Validation Failed (HTTP 422)' >&2; exit 1"#,
         );
         let err = auth
-            .create_draft_pr("acme/site", "content/x", "X", "b")
+            .create_draft_pr("acme/site", "content/x", "X", "b", &["orso".to_string()])
             .await
             .unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::Conflict);
@@ -2632,10 +4163,15 @@ esac"#,
 
     fn review(login: &str, state: &str) -> ApiReview {
         ApiReview {
+            html_url: None,
             user: Some(ApiLogin {
                 login: login.into(),
+                avatar_url: None,
             }),
             state: state.into(),
+            commit_id: String::new(),
+            body: None,
+            submitted_at: None,
         }
     }
 
@@ -2683,7 +4219,7 @@ esac"#,
             ),
             PrState::Approved
         );
-        // A later change request from the same reviewer withdraws it.
+        // A later change request from the same reviewer withdraws it and sends the change back.
         assert_eq!(
             pr_state(
                 &open,
@@ -2692,9 +4228,9 @@ esac"#,
                     review("grace", "CHANGES_REQUESTED")
                 ]
             ),
-            PrState::Open
+            PrState::ChangesRequested
         );
-        // Any outstanding change request blocks approval.
+        // Any outstanding change request beats approval.
         assert_eq!(
             pr_state(
                 &open,
@@ -2703,7 +4239,7 @@ esac"#,
                     review("alan", "CHANGES_REQUESTED")
                 ]
             ),
-            PrState::Open
+            PrState::ChangesRequested
         );
         // Re-approval after a change request.
         assert_eq!(
@@ -2728,6 +4264,178 @@ esac"#,
         );
     }
 
+    #[test]
+    fn pr_state_changes_requested_beats_approval() {
+        let open = pull(false, "open", false);
+        assert_eq!(
+            pr_state(&open, &[review("alan", "CHANGES_REQUESTED")]),
+            PrState::ChangesRequested
+        );
+        assert_eq!(
+            pr_state(
+                &open,
+                &[
+                    review("grace", "APPROVED"),
+                    review("alan", "CHANGES_REQUESTED")
+                ]
+            ),
+            PrState::ChangesRequested
+        );
+        assert_eq!(
+            serde_json::to_value(PrState::ChangesRequested).unwrap(),
+            "changes_requested"
+        );
+    }
+
+    #[test]
+    fn sent_back_is_the_newest_outstanding_request() {
+        let mut first = review("alan", "CHANGES_REQUESTED");
+        first.body = Some("fix the title".into());
+        let mut second = review("grace", "CHANGES_REQUESTED");
+        second.body = Some("and the image".into());
+        let mut resolved = review("alan", "CHANGES_REQUESTED");
+        resolved.body = Some("old".into());
+        let approve = review("alan", "APPROVED");
+        assert_eq!(
+            sent_back(&[first, second]),
+            Some(SentBack {
+                reviewer: "grace".into(),
+                comment: "and the image".into()
+            })
+        );
+        assert_eq!(sent_back(&[resolved, approve]), None);
+    }
+
+    /// `pulls/4` (head `h1`, or `head`) and `pulls/4/reviews` (GET: `reviews`; POST: recorded).
+    fn review_routes(
+        head: &'static str,
+        reviews: serde_json::Value,
+        posts: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) -> axum::Router {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        Router::new()
+            .route(
+                "/repos/acme/site/pulls/4",
+                get(move || async move {
+                    Json(
+                        serde_json::json!({ "number": 4, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": head } }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls",
+                get(move || async move {
+                    Json(
+                        serde_json::json!([{ "number": 4, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": head } }]),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(move || {
+                    let reviews = reviews.clone();
+                    async move { Json(reviews) }
+                })
+                .post(move |Json(b): Json<serde_json::Value>| {
+                    let posts = posts.clone();
+                    async move {
+                        posts.lock().unwrap().push(b);
+                        Json(serde_json::json!({ "id": 1 }))
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/{sha}/check-runs",
+                get(|| async { Json(serde_json::json!({ "check_runs": [] })) }),
+            )
+            .route(
+                "/repos/acme/site/commits/{sha}/status",
+                get(|| async { Json(serde_json::json!({})) }),
+            )
+            .route(
+                "/repos/acme/site/deployments",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+    }
+
+    #[tokio::test]
+    async fn submit_review_pins_commit_id() {
+        let posts = Default::default();
+        let (base, stop) = mock_api(review_routes(
+            "h1",
+            serde_json::json!([]),
+            std::sync::Arc::clone(&posts),
+        ))
+        .await;
+        let auth = status_auth(base, "submit-review");
+        auth.submit_review("acme/site", 4, "h1", Decision::SendBack, Some("fix it"))
+            .await
+            .unwrap();
+        auth.submit_review("acme/site", 4, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap();
+        let sent = posts.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![
+                serde_json::json!({ "event": "REQUEST_CHANGES", "body": "fix it", "commit_id": "h1" }),
+                serde_json::json!({ "event": "APPROVE", "body": "", "commit_id": "h1" }),
+            ]
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn submit_review_refuses_moved_head() {
+        let posts = Default::default();
+        let (base, stop) = mock_api(review_routes(
+            "h2",
+            serde_json::json!([]),
+            std::sync::Arc::clone(&posts),
+        ))
+        .await;
+        let auth = status_auth(base, "submit-moved");
+        let err = auth
+            .submit_review("acme/site", 4, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.message, "This change was updated since you opened it");
+        assert_eq!(err.reason, Some("head_moved"));
+        assert_eq!(err.http_status(), 409);
+        assert!(posts.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn pr_status_carries_send_back_comment() {
+        let reviews = serde_json::json!([
+            { "user": { "login": "alan" }, "state": "CHANGES_REQUESTED",
+              "commit_id": "h1", "body": "Please fix the headline" }
+        ]);
+        let (base, stop) = mock_api(review_routes("h1", reviews, Default::default())).await;
+        let auth = status_auth(base, "sent-back-status");
+        let st = auth
+            .pr_status("acme/site", "content/x")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(st.state, PrState::ChangesRequested);
+        assert_eq!(
+            st.sent_back,
+            Some(SentBack {
+                reviewer: "alan".into(),
+                comment: "Please fix the headline".into()
+            })
+        );
+        let json = serde_json::to_value(&st).unwrap();
+        assert_eq!(json["sentBack"]["reviewer"], "alan");
+        assert_eq!(json["state"], "changes_requested");
+        stop();
+    }
+
     fn run(status: &str, conclusion: Option<&str>) -> ApiCheckRun {
         named("test", status, conclusion)
     }
@@ -2737,6 +4445,7 @@ esac"#,
             name: name.into(),
             status: status.into(),
             conclusion: conclusion.map(Into::into),
+            html_url: None,
         }
     }
 
@@ -2821,6 +4530,584 @@ esac"#,
         );
     }
 
+    /// A mock whose `/repos/acme/site/pulls/1` answers with an ETag (and 304 when it
+    /// matches), counting every request and the `If-None-Match` headers it saw.
+    async fn cache_mock(
+        delay: Duration,
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::IntoResponse;
+        use axum::routing::{get, post};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (h, sn) = (hits.clone(), seen.clone());
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls/1",
+                get(move |headers: HeaderMap| {
+                    let (h, sn) = (h.clone(), sn.clone());
+                    async move {
+                        h.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(delay).await;
+                        if let Some(v) = headers.get("if-none-match") {
+                            sn.lock().unwrap().push(v.to_str().unwrap().to_string());
+                            if v == "\"v1\"" {
+                                return StatusCode::NOT_MODIFIED.into_response();
+                            }
+                        }
+                        (
+                            [("etag", "\"v1\"")],
+                            axum::Json(serde_json::json!({ "n": 1 })),
+                        )
+                            .into_response()
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/issues/1/comments",
+                post(|| async {
+                    (
+                        StatusCode::CREATED,
+                        axum::Json(serde_json::json!({ "id": 5, "user": { "login": "ada" },
+                            "created_at": "2026-01-01T00:00:00Z", "body": "hi",
+                            "html_url": "u" })),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        (base, stop, hits, seen)
+    }
+
+    #[tokio::test]
+    async fn get_cache_reuses_a_fresh_response_without_asking() {
+        let (base, stop, hits, _) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-fresh");
+        for _ in 0..2 {
+            let v: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+            assert_eq!(v["n"], 1);
+        }
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_revalidates_a_stale_response_and_reuses_it_on_304() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-stale");
+        auth.get_cache.set_ttl(Duration::ZERO);
+        let first: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+        let second: serde_json::Value = auth.get_json("/repos/acme/site/pulls/1").await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(*seen.lock().unwrap(), vec!["\"v1\"".to_string()]);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_shares_one_request_between_concurrent_calls() {
+        let (base, stop, hits, _) = cache_mock(Duration::from_millis(150)).await;
+        let auth = status_auth(base, "cache-dedupe");
+        let path = "/repos/acme/site/pulls/1";
+        let (a, b) = tokio::join!(
+            auth.get_json::<serde_json::Value>(path),
+            auth.get_json::<serde_json::Value>(path)
+        );
+        assert_eq!(a.unwrap(), b.unwrap());
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_forgets_a_repository_after_a_write_to_it() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-write");
+        let path = "/repos/acme/site/pulls/1";
+        auth.get_json::<serde_json::Value>(path).await.unwrap();
+        auth.add_comment("acme/site", 1, "hi").await.unwrap();
+        auth.get_json::<serde_json::Value>(path).await.unwrap();
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // Dropped, not merely stale: the re-read is unconditional.
+        assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_never_shares_responses_between_tokens() {
+        let (base, stop, hits, seen) = cache_mock(Duration::ZERO).await;
+        let auth = status_auth(base, "cache-tokens");
+        let path = "/repos/acme/site/pulls/1";
+        auth.cached_get("token-a", path).await.unwrap();
+        auth.cached_get("token-b", path).await.unwrap();
+        auth.cached_get("token-a", path).await.unwrap();
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(seen.lock().unwrap().is_empty());
+        stop();
+    }
+
+    /// A Git Data API mock for `acme/site`: `tip` is the assets branch's commit (None: no
+    /// branch), `refuse` how many ref updates to refuse with 422 before accepting. Records every
+    /// write as (method, path, body).
+    async fn git_data_mock(
+        tip: Option<&'static str>,
+        refuse: usize,
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::Mutex<Vec<(String, String, serde_json::Value)>>>,
+    ) {
+        use axum::http::{Method, StatusCode, Uri};
+        use axum::response::IntoResponse;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        type Log = Arc<Mutex<Vec<(String, String, serde_json::Value)>>>;
+        let log: Log = Arc::default();
+        let refused = Arc::new(AtomicUsize::new(0));
+        // After a refused update the branch has moved on.
+        let tip_now = Arc::new(Mutex::new(tip.map(str::to_string)));
+        let (l, rf, t) = (log.clone(), refused.clone(), tip_now.clone());
+        let handler = move |method: Method,
+                            uri: Uri,
+                            body: Option<axum::Json<serde_json::Value>>| {
+            let (log, refused, tip) = (l.clone(), rf.clone(), t.clone());
+            async move {
+                let path = uri.path().to_string();
+                let body = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
+                if method != Method::GET {
+                    log.lock()
+                        .unwrap()
+                        .push((method.to_string(), path.clone(), body.clone()));
+                }
+                let ok = |v: serde_json::Value| (StatusCode::OK, axum::Json(v)).into_response();
+                match (method.as_str(), path.as_str()) {
+                    ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
+                        match tip.lock().unwrap().clone() {
+                            Some(sha) => ok(serde_json::json!({ "object": { "sha": sha } })),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
+                    }
+                    ("GET", p) if p.starts_with("/repos/acme/site/git/commits/") => {
+                        let sha = p.rsplit('/').next().unwrap();
+                        ok(serde_json::json!({ "tree": { "sha": format!("tree-of-{sha}") } }))
+                    }
+                    ("POST", "/repos/acme/site/git/blobs") if refuse == usize::MAX => {
+                        // No push access.
+                        StatusCode::FORBIDDEN.into_response()
+                    }
+                    ("POST", "/repos/acme/site/git/blobs") => {
+                        ok(serde_json::json!({ "sha": "blob1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/trees") => {
+                        ok(serde_json::json!({ "sha": "tree1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/commits") => {
+                        ok(serde_json::json!({ "sha": "commit1" }))
+                    }
+                    ("POST", "/repos/acme/site/git/refs")
+                    | ("PATCH", "/repos/acme/site/git/refs/heads/orso-review-assets") => {
+                        if refuse == usize::MAX - 1 {
+                            // A ruleset: branch creation is restricted.
+                            let msg = serde_json::json!({ "message": "Repository rule violations found" });
+                            return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(msg))
+                                .into_response();
+                        }
+                        if refused.fetch_add(1, Ordering::SeqCst) < refuse {
+                            *tip.lock().unwrap() = Some("moved".into());
+                            let msg =
+                                serde_json::json!({ "message": "Update is not a fast forward" });
+                            return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(msg))
+                                .into_response();
+                        }
+                        ok(serde_json::json!({ "object": { "sha": "commit1" } }))
+                    }
+                    _ => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        };
+        let routes = axum::Router::new().fallback(handler);
+        let (base, stop) = mock_api(routes).await;
+        (base, stop, log)
+    }
+
+    fn writes(log: &std::sync::Mutex<Vec<(String, String, serde_json::Value)>>) -> Vec<String> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .map(|(m, p, _)| format!("{m} {}", p.trim_start_matches("/repos/acme/site/git/")))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn commit_files_creates_the_assets_branch_as_an_orphan() {
+        let (base, stop, log) = git_data_mock(None, 0).await;
+        let auth = status_auth(base, "assets-orphan");
+        let files = vec![("shots/3/2026-11-19/a.png".to_string(), b"png".to_vec())];
+        let sha = auth
+            .commit_files_to_branch(
+                "acme/site",
+                "orso-review-assets",
+                "Add review images",
+                &files,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sha, "commit1");
+        assert_eq!(
+            writes(&log),
+            ["POST blobs", "POST trees", "POST commits", "POST refs"]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[0].2["content"], "cG5n");
+        assert_eq!(log[0].2["encoding"], "base64");
+        // No base tree and no parent: the branch shares nothing with the site's history.
+        assert!(log[1].2.get("base_tree").is_none());
+        assert_eq!(log[1].2["tree"][0]["path"], "shots/3/2026-11-19/a.png");
+        assert_eq!(log[2].2["parents"], serde_json::json!([]));
+        assert_eq!(log[3].2["ref"], "refs/heads/orso-review-assets");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_appends_to_an_existing_assets_branch() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 0).await;
+        let auth = status_auth(base, "assets-append");
+        let files = vec![("shots/3/2026-11-19/b.png".to_string(), b"png".to_vec())];
+        auth.commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap();
+        assert_eq!(
+            writes(&log),
+            [
+                "POST blobs",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets"
+            ]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[1].2["base_tree"], "tree-of-tip0");
+        assert_eq!(log[2].2["parents"], serde_json::json!(["tip0"]));
+        assert_eq!(log[3].2["force"], false);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_retries_once_when_the_branch_moved() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 1).await;
+        let auth = status_auth(base, "assets-retry");
+        let files = vec![("shots/3/2026-11-19/c.png".to_string(), b"png".to_vec())];
+        auth.commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap();
+        // The blob is uploaded once; tree, commit and ref are redone on the moved tip.
+        assert_eq!(
+            writes(&log),
+            [
+                "POST blobs",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets",
+                "POST trees",
+                "POST commits",
+                "PATCH refs/heads/orso-review-assets",
+            ]
+        );
+        let log = log.lock().unwrap();
+        assert_eq!(log[5].2["parents"], serde_json::json!(["moved"]));
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_gives_up_after_a_second_refusal() {
+        let (base, stop, log) = git_data_mock(Some("tip0"), 2).await;
+        let auth = status_auth(base, "assets-refused");
+        let files = vec![("shots/3/x.png".to_string(), b"png".to_vec())];
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 409, "{err:?}");
+        assert_eq!(
+            writes(&log)
+                .iter()
+                .filter(|w| w.starts_with("PATCH"))
+                .count(),
+            2
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn commit_files_reports_a_refused_branch_without_retrying() {
+        // A ruleset refuses creating the branch: no second attempt.
+        let (base, stop, log) = git_data_mock(None, usize::MAX - 1).await;
+        let auth = status_auth(base, "assets-rules");
+        let files = vec![("uploads/3/x.png".to_string(), b"png".to_vec())];
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.reason, Some("assets_refused"), "{err:?}");
+        assert_eq!(err.message, ASSETS_REFUSED);
+        assert_eq!(
+            writes(&log)
+                .iter()
+                .filter(|w| w.starts_with("POST refs"))
+                .count(),
+            1
+        );
+        stop();
+
+        // No push access: refused at the first blob.
+        let (base, stop, log) = git_data_mock(None, usize::MAX).await;
+        let auth = status_auth(base, "assets-403");
+        let err = auth
+            .commit_files_to_branch("acme/site", "orso-review-assets", "m", &files)
+            .await
+            .unwrap_err();
+        assert_eq!(err.reason, Some("assets_refused"));
+        assert_eq!(err.code.status(), 403);
+        assert_eq!(writes(&log), ["POST blobs"]);
+        stop();
+    }
+
+    /// An assets branch at `tip0` holding `files`, recording writes like `git_data_mock`.
+    async fn assets_tree_mock(
+        files: &'static [&'static str],
+    ) -> (
+        String,
+        impl FnOnce(),
+        std::sync::Arc<std::sync::Mutex<Vec<(String, String, serde_json::Value)>>>,
+    ) {
+        use axum::http::{Method, StatusCode, Uri};
+        use axum::response::IntoResponse;
+        use std::sync::{Arc, Mutex};
+        let log: Arc<Mutex<Vec<(String, String, serde_json::Value)>>> = Arc::default();
+        let l = log.clone();
+        let handler =
+            move |method: Method, uri: Uri, body: Option<axum::Json<serde_json::Value>>| {
+                let log = l.clone();
+                async move {
+                    let path = uri.path().to_string();
+                    if method != Method::GET {
+                        let b = body.map(|b| b.0).unwrap_or(serde_json::Value::Null);
+                        log.lock()
+                            .unwrap()
+                            .push((method.to_string(), path.clone(), b));
+                    }
+                    let ok = |v: serde_json::Value| axum::Json(v).into_response();
+                    match (method.as_str(), path.as_str()) {
+                        ("GET", "/repos/acme/site/git/ref/heads/orso-review-assets") => {
+                            ok(serde_json::json!({ "object": { "sha": "tip0" } }))
+                        }
+                        ("GET", "/repos/acme/site/git/commits/tip0") => {
+                            ok(serde_json::json!({ "tree": { "sha": "tree0" } }))
+                        }
+                        ("GET", "/repos/acme/site/git/trees/tree0") => {
+                            let mut entries =
+                                vec![serde_json::json!({ "path": "shots", "type": "tree" })];
+                            entries.extend(
+                                files
+                                    .iter()
+                                    .map(|p| serde_json::json!({ "path": p, "type": "blob" })),
+                            );
+                            ok(serde_json::json!({ "tree": entries }))
+                        }
+                        ("POST", _) => ok(serde_json::json!({ "sha": "new1" })),
+                        ("PATCH", _) => ok(serde_json::json!({})),
+                        ("DELETE", _) => StatusCode::NO_CONTENT.into_response(),
+                        _ => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            };
+        let (base, stop) = mock_api(axum::Router::new().fallback(handler)).await;
+        (base, stop, log)
+    }
+
+    const ASSET_FILES: &[&str] = &[
+        "shots/3/2026-11-19/a.png",
+        "uploads/3/2026-11-19/b.png",
+        "shots/5/2026-11-19/c.png",
+        "README.md",
+    ];
+
+    #[tokio::test]
+    async fn cleanup_removes_closed_changes_images_in_one_commit() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-clean");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |pr| pr == 5)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::Removed(vec![3]));
+        let log = log.lock().unwrap();
+        let ops: Vec<_> = log.iter().map(|(m, p, _)| format!("{m} {p}")).collect();
+        assert_eq!(
+            ops,
+            [
+                "POST /repos/acme/site/git/trees",
+                "POST /repos/acme/site/git/commits",
+                "PATCH /repos/acme/site/git/refs/heads/orso-review-assets",
+            ]
+        );
+        assert_eq!(log[0].2["base_tree"], "tree0");
+        let removed: Vec<_> = log[0].2["tree"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (e["path"].as_str().unwrap().to_string(), e["sha"].is_null()))
+            .collect();
+        assert_eq!(
+            removed,
+            [
+                ("shots/3/2026-11-19/a.png".to_string(), true),
+                ("uploads/3/2026-11-19/b.png".to_string(), true),
+            ]
+        );
+        assert_eq!(log[1].2["parents"], serde_json::json!(["tip0"]));
+        assert_eq!(log[2].2["force"], false);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_the_branch_when_no_open_change_has_images() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-drop");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |_| false)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::DeletedBranch);
+        let ops: Vec<_> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(m, p, _)| format!("{m} {p}"))
+            .collect();
+        assert_eq!(
+            ops,
+            ["DELETE /repos/acme/site/git/refs/heads/orso-review-assets"]
+        );
+        stop();
+    }
+
+    #[tokio::test]
+    async fn cleanup_leaves_open_changes_alone() {
+        let (base, stop, log) = assets_tree_mock(ASSET_FILES).await;
+        let auth = status_auth(base, "assets-keep");
+        let done = auth
+            .clean_review_assets("acme/site", "orso-review-assets", |pr| pr == 3 || pr == 5)
+            .await
+            .unwrap();
+        assert_eq!(done, AssetsCleanup::Nothing);
+        assert!(log.lock().unwrap().is_empty());
+        stop();
+    }
+
+    #[tokio::test]
+    async fn head_check_reads_past_the_get_cache() {
+        use axum::routing::{get, post};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let reads = std::sync::Arc::new(AtomicUsize::new(0));
+        let posts = std::sync::Arc::new(AtomicUsize::new(0));
+        let (r, p) = (reads.clone(), posts.clone());
+        let routes = axum::Router::new()
+            .route(
+                "/repos/acme/site/pulls/3",
+                get(move || {
+                    let r = r.clone();
+                    async move {
+                        // The creator pushes right after the first read.
+                        let head = if r.fetch_add(1, Ordering::SeqCst) == 0 {
+                            "h1"
+                        } else {
+                            "h2"
+                        };
+                        axum::Json(
+                            serde_json::json!({ "number": 3, "html_url": "u", "title": "t",
+                            "head": { "sha": head } }),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/reviews",
+                post(move || {
+                    let p = p.clone();
+                    async move {
+                        p.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({}))
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "head-fresh");
+        // A cached read still says h1 for the next 15 s.
+        let cached: ApiPull = auth.get_json("/repos/acme/site/pulls/3").await.unwrap();
+        assert_eq!(cached.head.unwrap().sha, "h1");
+        let again: ApiPull = auth.get_json("/repos/acme/site/pulls/3").await.unwrap();
+        assert_eq!(again.head.unwrap().sha, "h1");
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        let err = auth
+            .submit_review("acme/site", 3, "h1", Decision::Greenlight, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code.status(), 409, "{err:?}");
+        assert_eq!(err.reason, Some("head_moved"));
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "the head check asked GitHub"
+        );
+        assert_eq!(posts.load(Ordering::SeqCst), 0, "nothing was submitted");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn get_cache_keeps_no_failed_response() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        let routes = axum::Router::new().route(
+            "/repos/acme/site/pulls/2",
+            get(move || {
+                let h = h.clone();
+                async move {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::BAD_GATEWAY
+                }
+            }),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "cache-error");
+        for _ in 0..2 {
+            assert!(auth
+                .get_json::<serde_json::Value>("/repos/acme/site/pulls/2")
+                .await
+                .is_err());
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        stop();
+    }
+
+    #[test]
+    fn raw_blob_url_points_at_the_site_not_the_api() {
+        // `web_url` falls back to the API URL; image links must still open on github.com.
+        let auth = status_auth("https://api.github.com".into(), "rawbloburl");
+        assert_eq!(
+            auth.raw_blob_url("acme/site", "abc123", "uploads/7/x.png"),
+            "https://github.com/acme/site/blob/abc123/uploads/7/x.png?raw=true"
+        );
+    }
+
     fn status_auth(base: String, tag: &str) -> GithubAuth {
         let dir = tmp_dir(tag);
         write_session(&dir, "tok");
@@ -2833,6 +5120,531 @@ esac"#,
             },
             &dir,
         )
+    }
+
+    fn review_on(user: &str, state: &str, commit: &str) -> ApiReview {
+        ApiReview {
+            html_url: None,
+            user: Some(ApiLogin {
+                login: user.to_string(),
+                avatar_url: None,
+            }),
+            state: state.to_string(),
+            commit_id: commit.to_string(),
+            body: None,
+            submitted_at: None,
+        }
+    }
+
+    #[test]
+    fn my_review_state_uses_latest_review_on_current_head() {
+        let rs = vec![
+            review_on("ada", "APPROVED", "aaa"),
+            review_on("ada", "CHANGES_REQUESTED", "bbb"),
+        ];
+        assert_eq!(my_review_state(&rs, "ada", "bbb"), MyReviewState::SentBack);
+        assert_eq!(my_review_state(&rs, "ada", "aaa"), MyReviewState::Greenlit);
+        assert_eq!(my_review_state(&rs, "ada", "ccc"), MyReviewState::New);
+        let others = vec![review_on("bob", "APPROVED", "bbb")];
+        assert_eq!(my_review_state(&others, "ada", "bbb"), MyReviewState::New);
+        assert_eq!(my_review_state(&rs, "Ada", "bbb"), MyReviewState::SentBack);
+        let commented = vec![
+            review_on("ada", "APPROVED", "bbb"),
+            review_on("ada", "COMMENTED", "bbb"),
+        ];
+        assert_eq!(
+            my_review_state(&commented, "ada", "bbb"),
+            MyReviewState::Greenlit
+        );
+        assert_eq!(
+            serde_json::to_value(MyReviewState::SentBack).unwrap(),
+            "sent_back"
+        );
+    }
+
+    fn submitted(user: &str, state: &str, at: Option<&str>, body: &str) -> ApiReview {
+        ApiReview {
+            html_url: None,
+            user: Some(ApiLogin {
+                login: user.into(),
+                avatar_url: None,
+            }),
+            state: state.into(),
+            commit_id: "h".into(),
+            body: Some(body.into()),
+            submitted_at: at.map(String::from),
+        }
+    }
+
+    fn commit(sha: &str, message: &str, date: &str) -> ApiPullCommit {
+        ApiPullCommit {
+            sha: sha.into(),
+            commit: ApiCommitInfo {
+                message: message.into(),
+                author: Some(ApiCommitPerson {
+                    name: "Bob B".into(),
+                    date: date.into(),
+                }),
+                committer: Some(ApiCommitPerson {
+                    name: "Bob B".into(),
+                    date: date.into(),
+                }),
+            },
+            author: Some(ApiLogin {
+                login: "bob".into(),
+                avatar_url: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn timeline_is_oldest_first_and_groups_consecutive_commits() {
+        let comments = vec![ApiIssueComment {
+            id: 9,
+            user: Some(ApiLogin {
+                login: "ada".into(),
+                avatar_url: None,
+            }),
+            created_at: "2026-01-02T00:00:00Z".into(),
+            body: Some("Looks close".into()),
+            html_url: "https://gh/c/9".into(),
+        }];
+        let reviews = vec![
+            submitted("ada", "COMMENTED", Some("2026-01-02T01:00:00Z"), ""),
+            submitted("ada", "PENDING", None, "draft"),
+            submitted(
+                "ada",
+                "CHANGES_REQUESTED",
+                Some("2026-01-03T00:00:00Z"),
+                "Fix title",
+            ),
+            submitted("cy", "COMMENTED", Some("2026-01-03T01:00:00Z"), "nit"),
+            submitted("ada", "APPROVED", Some("2026-01-05T00:00:00Z"), ""),
+        ];
+        let commits = vec![
+            commit("aaaaaaaaaa", "First\n\nbody", "2026-01-01T00:00:00Z"),
+            commit("bbbbbbbbbb", "Second", "2026-01-01T01:00:00Z"),
+            commit("cccccccccc", "Fix the title", "2026-01-04T00:00:00Z"),
+        ];
+        let items = timeline(
+            comments,
+            &reviews,
+            commits,
+            Some(("2026-01-06T00:00:00Z".into(), true)),
+        );
+        let kinds: Vec<String> = items
+            .iter()
+            .map(|i| {
+                serde_json::to_value(i).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["push", "comment", "review", "review", "push", "review", "state"]
+        );
+        // A group is dated by its latest commit; its commits keep their own order.
+        let TimelineItem::Push { commits, at } = &items[0] else {
+            panic!("{:?}", items[0])
+        };
+        assert_eq!(at, "2026-01-01T01:00:00Z");
+        assert_eq!(
+            commits,
+            &vec![
+                PushedCommit {
+                    sha: "aaaaaaa".into(),
+                    message: "First".into(),
+                    author: "bob".into()
+                },
+                PushedCommit {
+                    sha: "bbbbbbb".into(),
+                    message: "Second".into(),
+                    author: "bob".into()
+                },
+            ]
+        );
+        assert_eq!(
+            items[2],
+            TimelineItem::Review {
+                author: "ada".into(),
+                avatar_url: None,
+                at: "2026-01-03T00:00:00Z".into(),
+                verdict: ReviewVerdict::SentBack,
+                body: Some("Fix title".into()),
+                url: None,
+            }
+        );
+        assert!(
+            matches!(&items[3], TimelineItem::Review { verdict: ReviewVerdict::Commented, author, .. } if author == "cy")
+        );
+        assert!(matches!(
+            &items[5],
+            TimelineItem::Review {
+                verdict: ReviewVerdict::Greenlit,
+                body: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            items[6],
+            TimelineItem::State {
+                at: "2026-01-06T00:00:00Z".into(),
+                state: "merged".into()
+            }
+        );
+        let json = serde_json::to_value(&items[2]).unwrap();
+        assert_eq!(json["verdict"], "sent_back");
+    }
+
+    #[test]
+    fn reviewers_keep_their_latest_decision_and_list_requested_ones() {
+        let reviews = vec![
+            submitted("ada", "CHANGES_REQUESTED", Some("1"), "x"),
+            submitted("ada", "COMMENTED", Some("2"), "but"),
+            submitted("cy", "COMMENTED", Some("2"), "q"),
+            submitted("bo", "APPROVED", Some("1"), ""),
+            submitted("bo", "DISMISSED", Some("3"), ""),
+            submitted("ed", "APPROVED", None, ""),
+        ];
+        let requested = vec![
+            ApiLogin {
+                login: "dee".into(),
+                avatar_url: None,
+            },
+            ApiLogin {
+                login: "CY".into(),
+                avatar_url: None,
+            },
+        ];
+        let got = reviewers(&reviews, &requested);
+        let pairs: Vec<(&str, ReviewerState)> =
+            got.iter().map(|r| (r.login.as_str(), r.state)).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("ada", ReviewerState::SentBack),
+                ("cy", ReviewerState::Commented),
+                ("bo", ReviewerState::Dismissed),
+                ("dee", ReviewerState::Requested),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn closed_reviews_say_there_may_be_more_after_a_full_page() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    let pulls: Vec<_> = (1..=CLOSED_PAGE as u64)
+                        .map(|n| serde_json::json!({ "number": n, "html_url": "u", "title": "t",
+                            "state": "closed", "labels": [{ "name": if n == 1 { "orso" } else { "x" } }],
+                            "user": { "login": "bob" }, "head": { "sha": "" } }))
+                        .collect();
+                    Json(serde_json::Value::Array(pulls))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/1/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "closedmore");
+        let closed = auth
+            .closed_reviews("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        stop();
+        assert!(closed.more);
+        assert_eq!(closed.reviews.len(), 1);
+        assert_eq!(closed.reviews[0].state, "closed");
+        // No issues listing here: counts fall back to 0.
+        assert_eq!(closed.reviews[0].comments, 0);
+    }
+
+    #[tokio::test]
+    async fn conversation_reads_comments_reviews_commits_and_checks() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls/3",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "number": 3, "html_url": "u", "title": "t",
+                        "state": "open", "head": { "sha": "h3" },
+                        "requested_reviewers": [{ "login": "dee" }] }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/issues/3/comments",
+                get(|| async {
+                    Json(serde_json::json!([{ "id": 1, "user": { "login": "ada",
+                        "avatar_url": "https://avatars.example/ada" },
+                        "created_at": "2026-01-02T00:00:00Z", "body": "hi", "html_url": "c1" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/reviews",
+                get(|| async {
+                    Json(serde_json::json!([{ "user": { "login": "bo",
+                        "avatar_url": "javascript:alert(1)" }, "state": "APPROVED",
+                        "commit_id": "h3", "submitted_at": "2026-01-03T00:00:00Z",
+                        "html_url": "https://gh/pull/3#review-1" }]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/3/commits",
+                get(|| async {
+                    Json(
+                        serde_json::json!([{ "sha": "abcdef123", "commit": { "message": "Edit",
+                        "committer": { "name": "b", "date": "2026-01-01T00:00:00Z" } } }]),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/site/commits/h3/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({ "check_runs": [{ "name": "build",
+                        "status": "completed", "conclusion": "failure",
+                        "html_url": "https://gh/runs/1" }] }))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "conversation");
+        let c = auth.conversation("acme/site", 3).await.unwrap();
+        stop();
+        let json = serde_json::to_value(&c).unwrap();
+        // Oldest first: the push came before the comment.
+        assert_eq!(json["items"][0]["kind"], "push");
+        assert_eq!(json["items"][0]["commits"][0]["sha"], "abcdef1");
+        assert_eq!(json["items"][0]["commits"][0]["author"], "b");
+        assert_eq!(json["items"][1]["kind"], "comment");
+        assert_eq!(json["items"][1]["body"], "hi");
+        assert_eq!(json["items"][1]["avatarUrl"], "https://avatars.example/ada");
+        // A review links to itself on GitHub; an avatar that isn't http(s) is dropped.
+        assert_eq!(json["items"][2]["kind"], "review");
+        assert_eq!(json["items"][2]["url"], "https://gh/pull/3#review-1");
+        assert!(json["items"][2].get("avatarUrl").is_none());
+        assert_eq!(
+            json["checks"],
+            serde_json::json!([{ "name": "build", "status": "completed",
+                "conclusion": "failure", "url": "https://gh/runs/1" }])
+        );
+        assert_eq!(
+            json["reviewers"],
+            serde_json::json!([{ "login": "bo", "state": "greenlit" },
+                { "login": "dee", "state": "requested" }])
+        );
+    }
+
+    #[tokio::test]
+    async fn review_inbox_filters_label_and_draft_and_marks_mine() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "number": 1, "html_url": "u1", "title": "keep", "draft": false,
+                          "labels": [{ "name": "Orso" }], "user": { "login": "bob" },
+                          "updated_at": "2026-01-01T00:00:00Z",
+                          "head": { "sha": "h1" } },
+                        { "number": 2, "html_url": "u2", "title": "draft", "draft": true,
+                          "labels": [{ "name": "orso" }], "user": { "login": "bob" } },
+                        { "number": 3, "html_url": "u3", "title": "nolabel", "draft": false,
+                          "labels": [], "user": { "login": "bob" } },
+                        { "number": 4, "html_url": "u4", "title": "mine", "draft": false,
+                          "labels": [{ "name": "orso" }], "user": { "login": "ADA" } },
+                        { "number": 5, "html_url": "u5", "title": "ghost", "draft": false,
+                          "labels": [{ "name": "orso" }], "user": null }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/1/reviews",
+                get(|| async {
+                    Json(serde_json::json!([
+                        { "user": { "login": "ada" }, "state": "APPROVED", "commit_id": "h1" }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/5/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/commits/h1/check-runs",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "check_runs": [{ "status": "completed", "conclusion": "success" }]
+                    }))
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewinbox");
+        let inbox = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        assert_eq!(inbox.open, vec![1, 2, 3, 4, 5]);
+        let items = inbox.reviews;
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].number, 1);
+        assert!(!items[0].mine);
+        assert_eq!(items[0].author, "bob");
+        assert_eq!(items[0].head_sha, "h1");
+        assert_eq!(items[0].checks, ChecksState::Passing);
+        assert_eq!(items[0].my_state, MyReviewState::Greenlit);
+        assert_eq!(items[1].number, 4);
+        assert!(
+            items[1].mine,
+            "the signed-in user's own change is listed, marked mine"
+        );
+        assert_eq!(items[2].number, 5);
+        assert_eq!(items[2].author, "ghost");
+        assert!(!items[2].mine);
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["headSha"], "h1");
+        assert_eq!(json["myState"], "greenlit");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn review_inbox_paginates() {
+        use axum::extract::Query;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::collections::HashMap;
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|Query(q): Query<HashMap<String, String>>| async move {
+                    if q.get("page").map(String::as_str) == Some("2") {
+                        return Json(serde_json::json!([
+                            { "number": 101, "html_url": "u", "title": "late", "draft": false,
+                              "labels": [{ "name": "orso" }], "user": { "login": "bob" } }
+                        ]));
+                    }
+                    let page: Vec<_> = (1..=100)
+                        .map(|n| {
+                            serde_json::json!({ "number": n, "html_url": "u", "title": "x",
+                                "draft": false, "labels": [], "user": { "login": "bob" } })
+                        })
+                        .collect();
+                    Json(serde_json::Value::Array(page))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/101/reviews",
+                get(|| async { Json(serde_json::json!([])) }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewpages");
+        let inbox = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        assert_eq!(inbox.open.len(), 101);
+        let items = inbox.reviews;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].number, 101);
+        stop();
+    }
+
+    #[tokio::test]
+    async fn review_inbox_bounds_concurrency_and_keeps_order() {
+        use axum::extract::Path as AxPath;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (l, pk) = (live.clone(), peak.clone());
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site/pulls",
+                get(|| async {
+                    let page: Vec<_> = (1..=12)
+                        .map(|n| {
+                            serde_json::json!({ "number": n, "html_url": "u", "title": "x",
+                                "draft": false, "labels": [{ "name": "orso" }],
+                                "user": { "login": "bob" } })
+                        })
+                        .collect();
+                    Json(serde_json::Value::Array(page))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/{n}/reviews",
+                get(move |AxPath(n): AxPath<u64>| {
+                    let (live, peak) = (l.clone(), pk.clone());
+                    async move {
+                        let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        // Earlier PRs answer last, so order comes from the listing, not timing.
+                        tokio::time::sleep(std::time::Duration::from_millis(5 * (13 - n))).await;
+                        live.fetch_sub(1, Ordering::SeqCst);
+                        Json(serde_json::json!([]))
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "reviewbounded");
+        let inbox = auth
+            .review_inbox("acme/site", &["orso".to_string()], "ada")
+            .await
+            .unwrap();
+        let nums: Vec<u64> = inbox.reviews.iter().map(|r| r.number).collect();
+        assert_eq!(nums, (1..=12).collect::<Vec<_>>());
+        let peak = peak.load(Ordering::SeqCst);
+        assert!((1..=INBOX_CONCURRENCY).contains(&peak), "peak {peak}");
+        stop();
+    }
+
+    #[tokio::test]
+    async fn can_push_reads_permissions() {
+        use axum::routing::get;
+        use axum::{Json, Router};
+
+        let routes = Router::new()
+            .route(
+                "/repos/acme/site",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "full_name": "acme/site", "private": false,
+                        "default_branch": "main", "permissions": { "push": true } }),
+                    )
+                }),
+            )
+            .route(
+                "/repos/acme/ro",
+                get(|| async {
+                    Json(
+                        serde_json::json!({ "full_name": "acme/ro", "private": false,
+                        "default_branch": "main" }),
+                    )
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "canpush");
+        assert!(auth.can_push("acme/site").await.unwrap());
+        assert!(!auth.can_push("acme/ro").await.unwrap());
+        stop();
     }
 
     #[test]
@@ -3927,6 +6739,7 @@ esac"#,
                 mergeable: None,
                 mergeable_state: None,
                 up_to_date: false,
+                sent_back: None,
                 head_sha: String::new(),
             }
         );
@@ -3941,17 +6754,64 @@ esac"#,
     ) -> axum::Router {
         use axum::extract::Json as AxJson;
         use axum::routing::put;
-        one_open_pull(false).route(
-            "/repos/acme/site/pulls/4/merge",
-            put(move |AxJson(body): AxJson<serde_json::Value>| {
-                let seen = seen.clone();
-                let response = response.clone();
-                async move {
-                    seen.lock().unwrap().push(body);
-                    (status, axum::Json(response))
-                }
-            }),
-        )
+        one_open_pull(false)
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                axum::routing::get(|| async { axum::Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/merge",
+                put(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let seen = seen.clone();
+                    let response = response.clone();
+                    async move {
+                        seen.lock().unwrap().push(body);
+                        (status, axum::Json(response))
+                    }
+                }),
+            )
+    }
+
+    #[tokio::test]
+    async fn merge_pr_refuses_a_sent_back_change_without_merging() {
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let merges = seen.clone();
+        let routes = one_open_pull(false)
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!([
+                        { "user": { "login": "alan" }, "state": "CHANGES_REQUESTED",
+                          "commit_id": "abc", "body": "Fix the headline" }
+                    ]))
+                }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/merge",
+                axum::routing::put(move |axum::Json(b): axum::Json<serde_json::Value>| {
+                    let merges = merges.clone();
+                    async move {
+                        merges.lock().unwrap().push(b);
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(serde_json::json!({ "merged": true, "sha": "def" })),
+                        )
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-sent-back");
+        let err = auth
+            .merge_pr("acme/site", "content/launch-week")
+            .await
+            .unwrap_err();
+        stop();
+
+        assert_eq!(err.http_status(), 409);
+        assert_eq!(err.message, "A reviewer sent this change back.");
+        assert!(seen.lock().unwrap().is_empty(), "no merge request was sent");
     }
 
     #[tokio::test]

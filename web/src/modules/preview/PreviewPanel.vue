@@ -531,7 +531,7 @@ function openExternal() {
             color="neutral"
             variant="ghost"
             size="sm"
-            icon="i-hugeicons-arrow-turn-forward"
+            icon="i-hugeicons-reload"
             aria-label="Reload preview"
             @click="store.reload()"
           />
@@ -661,7 +661,7 @@ function openExternal() {
         </template>
         <template #frame>
           <div class="relative flex h-full min-h-0 min-w-0 flex-col">
-            <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-auto">
+            <div ref="viewport" class="bg-background flex min-h-0 flex-1 justify-center overflow-clip">
               <UEmpty
                 v-if="state === 'crashed'"
                 variant="naked"
@@ -716,10 +716,13 @@ function openExternal() {
                   <UButton color="neutral" variant="outline" size="sm" label="Try anyway" @click="forceFrame = true" />
                 </template>
               </UEmpty>
-              <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown. -->
+              <!-- Sized to the scaled frame, so the panel centres and clips what is actually shown.
+                   `overflow-clip` (here and on the viewport), not hidden/auto: a focus or
+                   scrollIntoView inside the framed page also scrolls the parent's scroll
+                   containers, and WebKit then shifts the scaled frame off to one side. -->
               <div
                 v-else
-                class="relative h-full shrink-0 overflow-hidden"
+                class="relative h-full shrink-0 overflow-clip"
                 data-testid="preview-canvas"
                 :style="zoomed ? { width: `${fit.width! * fit.scale}px` } : { width: fit.width ? `${fit.width}px` : '100%' }"
               >

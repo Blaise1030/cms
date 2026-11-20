@@ -92,9 +92,116 @@ export interface Change {
   prState?: PrState;
 }
 
-export type PrState = "draft" | "open" | "approved" | "merged" | "closed";
+export type PrState = "draft" | "open" | "approved" | "changes_requested" | "merged" | "closed";
 /** Check runs on the PR head: any failing → failing, else any pending → pending. */
 export type ChecksState = "none" | "pending" | "passing" | "failing";
+
+/** Where the signed-in reviewer stands on a change waiting for them. */
+export type MyReviewState = "new" | "sent_back" | "greenlit";
+
+/** One change in the Review inbox (`GET /api/projects/{id}/reviews`). */
+export interface ReviewItem {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  /** ISO timestamp. */
+  updatedAt: string;
+  headSha: string;
+  checks: ChecksState;
+  myState: MyReviewState;
+  /** The signed-in user opened it: viewable, but they can't greenlight it. */
+  mine: boolean;
+  /** Labels as GitHub shows them; `color` is hex without `#`. */
+  labels?: ReviewLabel[];
+  /** ISO timestamp. */
+  createdAt?: string;
+  /** Conversation comments. */
+  comments?: number;
+  checksPassed?: number;
+  checksTotal?: number;
+  state?: "open" | "closed" | "merged";
+  draft?: boolean;
+}
+
+/** `GET /api/projects/{id}/reviews/{n}`. */
+export interface ReviewDetail extends ReviewItem {
+  description: string | null;
+  open: boolean;
+  draft: boolean;
+  merged?: boolean;
+  /** The reviewer may greenlight or send back; false carries a `reason`. */
+  canDecide: boolean;
+  reason: string | null;
+}
+
+export interface ReviewLabel {
+  name: string;
+  color: string;
+}
+
+/** One entry of a change's conversation (`kind` is the wire tag). */
+export type TimelineItem =
+  | {
+      kind: "comment";
+      id: number;
+      author: string;
+      avatarUrl?: string;
+      at: string;
+      body: string;
+      url: string;
+      /** Client only: the row's key while it was being sent, kept after it arrives. */
+      clientId?: string;
+      /** Client only: still on its way to GitHub, or it didn't get there. */
+      pending?: "sending" | "failed";
+      /** Client only: the images it is sending (data URLs), shown until GitHub has them. */
+      images?: string[];
+      /** Client only: it failed because the repository refused to store its images. */
+      imagesRefused?: boolean;
+    }
+  | {
+      kind: "review";
+      author: string;
+      avatarUrl?: string;
+      at: string;
+      verdict: "greenlit" | "sent_back" | "commented";
+      body: string | null;
+      /** The review on GitHub. */
+      url?: string;
+    }
+  | { kind: "push"; at: string; commits: { sha: string; message: string; author: string }[] }
+  | { kind: "state"; at: string; state: "closed" | "merged" };
+
+export interface ReviewCheck {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface ReviewReviewer {
+  login: string;
+  state: "requested" | "commented" | "greenlit" | "sent_back" | "dismissed";
+}
+
+/** `GET /api/projects/{id}/reviews/{n}/conversation`. */
+export interface ReviewConversation {
+  items: TimelineItem[];
+  checks: ReviewCheck[];
+  reviewers: ReviewReviewer[];
+}
+
+/**
+ * `GET /api/projects/{id}/reviews/{n}/preview`: the change's deploy preview (`url`, once a
+ * deployment of its head succeeded) and the live site to compare it with.
+ */
+export interface ReviewPreview {
+  state: "deploying" | "ready" | "failed" | "none";
+  /** The head commit this describes. */
+  headSha: string;
+  url?: string;
+  liveUrl?: string;
+}
 
 /** `pr` of `GET /api/changes/{branch}/status`. */
 export interface PrStatus {
@@ -110,6 +217,8 @@ export interface PrStatus {
   mergeableState: string | null;
   /** The local branch tip is the PR head: there is nothing new to push. */
   upToDate: boolean;
+  /** Who sent the change back and what they said; null unless `state` is `changes_requested`. */
+  sentBack?: { reviewer: string; comment: string } | null;
 }
 
 /** Whether the deploy a publish set off has shipped. */
@@ -653,4 +762,20 @@ export interface SettingsDoc {
   errors: Record<string, string>;
   /** The site folder the daemon uses: the normalized `root`, or `.` when the file is missing or invalid. */
   siteRoot: string;
+}
+
+/** Body of `POST /api/projects/{id}/reviews/{n}/review-with-shots`. */
+export interface ReviewWithShots {
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  body: string;
+  headSha: string;
+  items: {
+    note: string;
+    path: string;
+    side: "change" | "live";
+    viewport: string;
+    /** Base64 without the `data:` prefix; absent for a note without a screenshot. */
+    imageBase64?: string;
+    mime?: string;
+  }[];
 }

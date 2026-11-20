@@ -32,6 +32,7 @@ const STATE_ICON: Record<PrState, StatusIcon> = {
   draft: { name: "i-hugeicons-dashed-line-circle", class: "text-muted" },
   open: { name: "i-hugeicons-record", class: "text-info" },
   approved: { name: "i-hugeicons-checkmark-badge-01", class: "text-success" },
+  changes_requested: { name: "i-hugeicons-arrow-turn-backward", class: "text-warning" },
   merged: { name: "i-hugeicons-checkmark-circle-02", class: "text-success" },
   closed: { name: "i-hugeicons-cancel-circle", class: "text-muted" },
 };
@@ -145,6 +146,13 @@ const items = computed<DropdownMenuItem[][]>(() => {
         />
         {{ prStatusLabel(status) }}
       </span>
+      <div
+        v-if="status?.state === 'changes_requested' && status.sentBack"
+        class="text-default mt-1.5 max-w-64 space-y-0.5 text-xs font-normal"
+      >
+        <p class="text-muted" data-testid="pr-sent-back-reviewer">Sent back by {{ status.sentBack.reviewer }}</p>
+        <p class="whitespace-pre-wrap" data-testid="pr-sent-back-comment">{{ status.sentBack.comment }}</p>
+      </div>
     </template>
   </UDropdownMenu>
 </template>

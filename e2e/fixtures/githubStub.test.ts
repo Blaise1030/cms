@@ -219,4 +219,89 @@ describe("githubStub", () => {
       await stub.close();
     }
   });
+
+  it("serves a review PR's comments and commits and records new comments", async () => {
+    const stub = await startGithubStub();
+    const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };
+    const get = async (p: string) => (await fetch(`${stub.baseUrl}${p}`, { headers: auth })).json();
+    try {
+      stub.addReviewPr({
+        number: 3, title: "Fix", author: "bob", headSha: "a".repeat(40),
+        comments: [{ author: "carol", body: "First look" }],
+      });
+      expect(await get("/repos/acme/site/issues/3/comments")).toMatchObject([
+        { user: { login: "carol" }, body: "First look" },
+      ]);
+      expect(await get("/repos/acme/site/pulls/3/commits")).toMatchObject([
+        { sha: "a".repeat(40), author: { login: "bob" } },
+      ]);
+      const res = await fetch(`${stub.baseUrl}/repos/acme/site/issues/3/comments`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ body: "Looks good" }),
+      });
+      expect(res.status).toBe(201);
+      expect(stub.commentPosts()).toEqual([{ path: "/repos/acme/site/issues/3/comments", body: { body: "Looks good" } }]);
+      expect(await get("/repos/acme/site/issues/3/comments")).toHaveLength(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("serves a deployed site's pages without auth", async () => {
+    const stub = await startGithubStub();
+    try {
+      stub.addSitePage("/pr-3/", "<h1>Fresh</h1>");
+      const res = await fetch(`${stub.baseUrl}/sites/pr-3/`);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(await res.text()).toBe("<h1>Fresh</h1>");
+      expect((await fetch(`${stub.baseUrl}/sites/other/`)).status).toBe(404);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("serves seeded review PRs and records review posts", async () => {
+    const stub = await startGithubStub();
+    const auth = { Authorization: `Bearer ${STUB_TOKEN}`, "Content-Type": "application/json" };
+    const get = async (p: string) => (await fetch(`${stub.baseUrl}${p}`, { headers: auth })).json();
+    try {
+      stub.addReviewPr({ number: 3, title: "Fix", author: "bob", headSha: "a".repeat(40) });
+      const list = (await get("/repos/acme/site/pulls?state=open&per_page=100&page=1")) as {
+        number: number;
+        labels: { name: string }[];
+        user: { login: string };
+        head: { sha: string };
+      }[];
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        number: 3,
+        labels: [{ name: "orso" }],
+        user: { login: "bob" },
+        head: { sha: "a".repeat(40) },
+      });
+      expect(await get("/repos/acme/site/pulls?state=open&per_page=100&page=2")).toEqual([]);
+      expect(await get("/repos/acme/site/pulls/3")).toMatchObject({ number: 3, state: "open" });
+      expect(await get("/repos/acme/site")).toMatchObject({ permissions: { push: true } });
+      expect(await get("/repos/acme/site/pulls/3/reviews")).toEqual([]);
+
+      const res = await fetch(`${stub.baseUrl}/repos/acme/site/pulls/3/reviews`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ event: "REQUEST_CHANGES", body: "No", commit_id: "a".repeat(40) }),
+      });
+      expect(res.ok).toBe(true);
+      expect(stub.reviewPosts()).toEqual([
+        {
+          path: "/repos/acme/site/pulls/3/reviews",
+          body: { event: "REQUEST_CHANGES", body: "No", commit_id: "a".repeat(40) },
+        },
+      ]);
+      expect(await get("/repos/acme/site/pulls/3/reviews")).toMatchObject([
+        { user: { login: STUB_USER.login }, state: "CHANGES_REQUESTED", body: "No" },
+      ]);
+    } finally {
+      await stub.close();
+    }
+  });
 });

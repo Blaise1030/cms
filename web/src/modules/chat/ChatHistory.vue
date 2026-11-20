@@ -6,6 +6,7 @@ import UIcon from "@nuxt/ui/components/Icon.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 import UPopover from "@nuxt/ui/components/Popover.vue";
+import ChatTitle from "./ChatTitle.vue";
 
 const props = defineProps<{ chats: ChatSummary[]; activeId: string | null; runningIds: string[] }>();
 const emit = defineEmits<{ pick: [id: string]; remove: [id: string] }>();
@@ -115,7 +116,7 @@ function confirmDelete() {
               <UIcon v-else name="i-hugeicons-message-01" class="text-muted size-3.5 opacity-70" aria-hidden="true" />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block w-full truncate">{{ titleOf(c) }}</span>
+              <ChatTitle class="w-full" :title="titleOf(c)" />
               <span class="text-muted block truncate text-xs">{{ when(c.updatedAt) }}</span>
             </span>
           </UButton>

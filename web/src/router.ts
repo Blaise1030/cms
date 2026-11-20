@@ -5,11 +5,13 @@ import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
 import ContentPanel from "@/modules/content/ContentPanel.vue";
 import DesignPanel from "@/modules/design/DesignPanel.vue";
 import FilesPanel from "@/modules/files/FilesPanel.vue";
+import ReviewPanel from "@/modules/review/ReviewPanel.vue";
 import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
 import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
+import { firstTab } from "@/lib/tabOrder";
 
 /** URL segment for a project workspace page (matches the tab labels). */
-export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "settings";
+export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "review" | "settings";
 
 /** App-level settings tabs, kept in the URL so a section can be linked to directly. */
 export type AppSettingsTab = "assistant" | "builder" | "github" | "appearance" | "about";
@@ -34,7 +36,8 @@ export const routes: RouteRecordRaw[] = [
     component: ProjectPage,
     props: true,
     children: [
-      { path: "", redirect: { name: "project-preview" } },
+      // A bare project link opens the first tab in the viewer's rail order.
+      { path: "", redirect: () => ({ name: `project-${firstTab()}` }) },
       { path: "preview", name: "project-preview", component: ProjectPreviewPage },
       {
         path: "content/:collection?/:entry(.*)?",
@@ -65,6 +68,22 @@ export const routes: RouteRecordRaw[] = [
         props: (r) => ({ projectId: r.params.id as string, sha: (r.params.sha as string) || undefined }),
       },
       {
+        path: "review/:number?",
+        name: "project-review",
+        component: ReviewPanel,
+        props: (r) => ({
+          projectId: r.params.id as string,
+          number: r.params.number ? Number(r.params.number) : undefined,
+          page: "conversation",
+        }),
+      },
+      {
+        path: "review/:number/files",
+        name: "project-review-files",
+        component: ReviewPanel,
+        props: (r) => ({ projectId: r.params.id as string, number: Number(r.params.number), page: "files" }),
+      },
+      {
         path: "settings",
         name: "project-settings",
         component: SettingsPanel,
@@ -75,7 +94,8 @@ export const routes: RouteRecordRaw[] = [
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 
-export function projectPath(id: string, tab: ProjectTab = "preview") {
+/** A project tab's path; with no tab, the first one in the viewer's rail order. */
+export function projectPath(id: string, tab: ProjectTab = firstTab()) {
   return `/p/${encodeURIComponent(id)}/${tab}`;
 }
 
@@ -103,11 +123,21 @@ export function historyPath(id: string, sha?: string | null) {
   return sha ? `${base}/${encodeURIComponent(sha)}` : base;
 }
 
+/** A change's page: its Conversation (default) or its Review (the preview and what changed). */
+export type ReviewPage = "conversation" | "files";
+
+export function reviewPath(id: string, number?: number | null, page: ReviewPage = "conversation") {
+  const base = projectPath(id, "review");
+  if (!number) return base;
+  return page === "files" ? `${base}/${number}/files` : `${base}/${number}`;
+}
+
 export function projectTabFromRoute(name: string | symbol | null | undefined): ProjectTab {
   if (name === "project-content") return "content";
   if (name === "project-design") return "design";
   if (name === "project-code") return "code";
   if (name === "project-history") return "history";
+  if (name === "project-review" || name === "project-review-files") return "review";
   if (name === "project-settings") return "settings";
   return "preview";
 }

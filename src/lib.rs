@@ -15,14 +15,18 @@ pub mod fs;
 pub mod git;
 pub mod git_shim;
 pub mod github;
+pub mod github_cache;
 pub mod http;
 pub mod preview;
 pub mod projects;
 pub mod providers;
+pub mod review;
+pub mod review_shots;
 pub mod runtime;
 pub mod settings;
 pub mod setup_prefs;
 pub mod shell;
+pub mod snapshot_build;
 pub mod state;
 pub mod watch;
 // `static` is a keyword, so the file `static.rs` is exposed as `static_files`.
@@ -62,6 +66,14 @@ pub async fn serve_until(
     // A sync that survived the restart is reconciled before anything watches it.
     changes::sync_chat::recover(&state).await;
     state.watch_all().await;
+    // No conflict session is live yet, so every conflict preview on disk is a leftover.
+    let mut repos = Vec::new();
+    for info in state.projects.list().await {
+        if let Some(project) = state.projects.get(&info.id).await {
+            repos.push(project.dir);
+        }
+    }
+    previews.startup(&repos).await;
     // Projects that survived a restart get their dev servers back (on a free port).
     devservers.resume_all().await;
     let cleanup = tokio::spawn({

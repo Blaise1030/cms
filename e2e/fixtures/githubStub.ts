@@ -24,7 +24,49 @@ export type PullsPost = {
 export const STUB_HEAD_SHA = "5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e5b1e";
 
 export type CheckRun = { status: string; conclusion: string | null };
-export type Review = { user: { login: string }; state: string };
+export type Review = {
+  user: { login: string };
+  state: string;
+  body?: string;
+  commit_id?: string;
+  submitted_at?: string;
+};
+
+/** A commit made through the stub's Git Data API, with the paths it added. */
+export interface GitCommit {
+  sha: string;
+  message: string;
+  parents: string[];
+  files: string[];
+}
+
+/** A comment on a pull request's conversation (`/issues/{n}/comments`). */
+export type IssueComment = {
+  id: number;
+  user: { login: string };
+  body: string;
+  created_at: string;
+  html_url: string;
+};
+
+/** A change opened by a teammate that waits in the review inbox. */
+export type ReviewPrSeed = {
+  number: number;
+  title: string;
+  author: string;
+  headSha: string;
+  body?: string;
+  labels?: string[];
+  /** Comments already on its conversation. */
+  comments?: { author: string; body: string }[];
+  draft?: boolean;
+};
+
+/** Body of a `POST /repos/{o}/{r}/pulls/{n}/reviews` the daemon sent. */
+export type ReviewPost = {
+  path: string;
+  body: { event?: string; body?: string; commit_id?: string };
+};
 
 /** Overrides applied to every stub PR (status endpoints read them). */
 export type PrStatusPatch = {
@@ -55,6 +97,18 @@ export type GithubStub = {
   readyForReviewCalls: () => string[];
   /** Force `POST /graphql` to return this HTTP status (null = normal). */
   setGraphqlStatus: (status: number | null) => void;
+  /** Add an open PR to the repo's list, as a teammate's change waiting for review. */
+  addReviewPr: (seed: ReviewPrSeed) => void;
+  /** Bodies of every `POST …/pulls/{n}/reviews` the daemon sent. */
+  reviewPosts: () => ReviewPost[];
+  /** Bodies of every `POST …/issues/{n}/comments` the daemon sent. */
+  commentPosts: () => { path: string; body: { body?: string } }[];
+  /** Commits made through the Git Data API, oldest first, with the files each added. */
+  gitCommits: () => GitCommit[];
+  /** A branch's tip commit (null when the branch doesn't exist). */
+  branchTip: (branch: string) => string | null;
+  /** Serve `html` at `GET /sites{path}`: a deployed site a deployment's URL can point at. */
+  addSitePage: (path: string, html: string) => void;
   close: () => Promise<void>;
 };
 
@@ -89,6 +143,23 @@ export function startGithubStub(
   const readyCalls: string[] = [];
   const pullsPosts: PullsPost[] = [];
   const prs: StoredPr[] = [];
+  const reviewPrs: ReviewPrSeed[] = [];
+  const reviewPosts: ReviewPost[] = [];
+  const reviewsByPr = new Map<number, Review[]>();
+  const reviewPrJson = (p: ReviewPrSeed) => ({
+    number: p.number,
+    node_id: nodeId(p.number),
+    title: p.title,
+    body: p.body ?? "",
+    html_url: `https://github.com/acme/site/pull/${p.number}`,
+    draft: p.draft ?? false,
+    state: "open",
+    merged_at: null,
+    updated_at: "2026-11-01T00:00:00Z",
+    user: { login: p.author },
+    labels: (p.labels ?? ["orso"]).map((name) => ({ name, color: "0e8a16" })),
+    head: { ref: `review-${p.number}`, sha: p.headSha },
+  });
   let nextPr = 1;
   const status: Required<Omit<PrStatusPatch, "draft">> & { draft: boolean | null } = {
     draft: null,
@@ -116,9 +187,36 @@ export function startGithubStub(
     res.end(JSON.stringify(body));
   };
 
+  const sitePages = new Map<string, string>();
+  // A tiny Git Data API: blobs, trees (path → blob), commits and refs, all in memory.
+  const blobs = new Map<string, Buffer>();
+  const trees = new Map<string, Map<string, string>>();
+  const commits = new Map<string, { tree: string; parents: string[]; message: string }>();
+  const gitCommitLog: GitCommit[] = [];
+  const refs = new Map<string, string>();
+  let gitSeq = 0;
+  const gitSha = (kind: string) => `${kind}${String(++gitSeq).padStart(40 - kind.length, "0")}`;
+  const commentsByPr = new Map<number, IssueComment[]>();
+  const commentPosts: { path: string; body: { body?: string } }[] = [];
+  let nextCommentId = 100;
+  const issueComment = (number: number, login: string, body: string): IssueComment => ({
+    id: nextCommentId++,
+    user: { login },
+    body,
+    created_at: new Date().toISOString(),
+    html_url: `https://github.com/acme/site/pull/${number}#issuecomment-${nextCommentId}`,
+  });
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const auth = req.headers.authorization;
+
+    // A deployed site, framed by the review preview.
+    const page = req.method === "GET" && url.pathname.startsWith("/sites/") && sitePages.get(url.pathname.slice(6));
+    if (page) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(page);
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/login/device/code") {
       let body = "";
@@ -297,7 +395,10 @@ export function startGithubStub(
         const matching = (head ? prs.filter((p) => p.head === head) : prs).filter(
           () => want === "all" || want === status.state,
         );
-        sendJson(res, 200, matching.map(pullJson));
+        // The review inbox lists every open PR (paged); only page 1 has any.
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const extra = !head && want !== "closed" && page === 1 ? reviewPrs.map(reviewPrJson) : [];
+        sendJson(res, 200, page > 1 ? [] : [...matching.map(pullJson), ...extra]);
         return;
       }
 
@@ -343,6 +444,146 @@ export function startGithubStub(
       }
     }
 
+    const reviewsPost = req.method === "POST" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/reviews$/);
+    if (reviewsPost) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        let body: ReviewPost["body"] = {};
+        try {
+          body = JSON.parse(raw) as ReviewPost["body"];
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        reviewPosts.push({ path: url.pathname, body });
+        const number = Number(reviewsPost[1]);
+        const state = body.event === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED";
+        const list = reviewsByPr.get(number) ?? [];
+        list.push({
+          user: { login: STUB_USER.login },
+          state,
+          body: body.body ?? "",
+          commit_id: body.commit_id ?? "",
+          submitted_at: new Date().toISOString(),
+        });
+        reviewsByPr.set(number, list);
+        sendJson(res, 200, { id: list.length, state });
+      });
+      return;
+    }
+
+    const git = url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/(git\/.+|contents\/.+)$/);
+    if (git) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        const what = git[1]!;
+        const refGet = what.match(/^git\/ref\/heads\/(.+)$/);
+        if (req.method === "GET" && refGet) {
+          const tip = refs.get(refGet[1]!);
+          return tip ? sendJson(res, 200, { object: { sha: tip } }) : sendJson(res, 404, { message: "Not Found" });
+        }
+        const commitGet = what.match(/^git\/commits\/(.+)$/);
+        if (req.method === "GET" && commitGet) {
+          const c = commits.get(commitGet[1]!);
+          return c ? sendJson(res, 200, { sha: commitGet[1], tree: { sha: c.tree } }) : sendJson(res, 404, {});
+        }
+        if (req.method === "POST" && what === "git/blobs") {
+          const sha = gitSha("b");
+          blobs.set(sha, Buffer.from(String(body.content), "base64"));
+          return sendJson(res, 201, { sha });
+        }
+        if (req.method === "POST" && what === "git/trees") {
+          const base = typeof body.base_tree === "string" ? (trees.get(body.base_tree) ?? new Map()) : new Map();
+          const tree = new Map(base);
+          for (const e of body.tree as { path: string; sha: string }[]) tree.set(e.path, e.sha);
+          const sha = gitSha("t");
+          trees.set(sha, tree);
+          return sendJson(res, 201, { sha });
+        }
+        if (req.method === "POST" && what === "git/commits") {
+          const sha = gitSha("c");
+          const c = { tree: String(body.tree), parents: body.parents as string[], message: String(body.message) };
+          commits.set(sha, c);
+          const parentTree = c.parents[0] ? trees.get(commits.get(c.parents[0])!.tree) : undefined;
+          const files = [...(trees.get(c.tree)?.keys() ?? [])].filter((p) => !parentTree?.has(p));
+          gitCommitLog.push({ sha, message: c.message, parents: c.parents, files });
+          return sendJson(res, 201, { sha });
+        }
+        const refPatch = what.match(/^git\/refs\/heads\/(.+)$/);
+        if ((req.method === "POST" && what === "git/refs") || (req.method === "PATCH" && refPatch)) {
+          const name = refPatch ? refPatch[1]! : String(body.ref).replace(/^refs\/heads\//, "");
+          refs.set(name, String(body.sha));
+          return sendJson(res, 200, { ref: `refs/heads/${name}`, object: { sha: body.sha } });
+        }
+        const contents = what.match(/^contents\/(.+)$/);
+        if (req.method === "GET" && contents) {
+          const c = commits.get(url.searchParams.get("ref") ?? "");
+          const blob = c && trees.get(c.tree)?.get(decodeURIComponent(contents[1]!));
+          if (!blob) return sendJson(res, 404, { message: "Not Found" });
+          res.writeHead(200, { "content-type": "application/octet-stream" }).end(blobs.get(blob));
+          return;
+        }
+        sendJson(res, 404, { message: "Not Found" });
+      });
+      return;
+    }
+
+    const commentsPost = req.method === "POST" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/);
+    if (commentsPost) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      let raw = "";
+      req.on("data", (c) => {
+        raw += c;
+      });
+      req.on("end", () => {
+        let body: { body?: string } = {};
+        try {
+          body = JSON.parse(raw) as { body?: string };
+        } catch {
+          res.writeHead(400).end();
+          return;
+        }
+        commentPosts.push({ path: url.pathname, body });
+        const number = Number(commentsPost[1]);
+        const comment = issueComment(number, STUB_USER.login, body.body ?? "");
+        commentsByPr.set(number, [...(commentsByPr.get(number) ?? []), comment]);
+        sendJson(res, 201, comment);
+      });
+      return;
+    }
+
+    if (req.method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) {
+      if (auth !== `Bearer ${STUB_TOKEN}`) {
+        sendJson(res, 401, { message: "Bad credentials" });
+        return;
+      }
+      sendJson(res, 200, {
+        full_name: "acme/site",
+        private: true,
+        default_branch: "main",
+        permissions: { push: true },
+      });
+      return;
+    }
+
     const repoGet =
       req.method === "GET" && url.pathname.match(/^\/repos\/[^/]+\/[^/]+(\/.*)$/);
     if (repoGet) {
@@ -351,8 +592,37 @@ export function startGithubStub(
         return;
       }
       const rest = repoGet[1]!;
-      if (/^\/pulls\/\d+\/reviews$/.test(rest)) {
-        sendJson(res, 200, status.reviews);
+      const reviewsGet = rest.match(/^\/pulls\/(\d+)\/reviews$/);
+      if (reviewsGet) {
+        const mine = reviewsByPr.get(Number(reviewsGet[1]));
+        sendJson(res, 200, mine ?? (reviewPrs.some((p) => p.number === Number(reviewsGet[1])) ? [] : status.reviews));
+        return;
+      }
+      const commentsGet = rest.match(/^\/issues\/(\d+)\/comments$/);
+      if (commentsGet) {
+        sendJson(res, 200, commentsByPr.get(Number(commentsGet[1])) ?? []);
+        return;
+      }
+      const commitsGet = rest.match(/^\/pulls\/(\d+)\/commits$/);
+      const pushed = commitsGet && reviewPrs.find((p) => p.number === Number(commitsGet[1]));
+      if (commitsGet) {
+        sendJson(
+          res,
+          200,
+          pushed
+            ? [{
+                sha: pushed.headSha,
+                commit: { message: pushed.title, committer: { name: pushed.author, date: "2026-11-01T00:00:00Z" } },
+                author: { login: pushed.author },
+              }]
+            : [],
+        );
+        return;
+      }
+      const pullGet = rest.match(/^\/pulls\/(\d+)$/);
+      const seeded = pullGet && reviewPrs.find((p) => p.number === Number(pullGet[1]));
+      if (seeded) {
+        sendJson(res, 200, reviewPrJson(seeded));
         return;
       }
       // Checks and deployments are served for whatever head SHA is asked about.
@@ -403,6 +673,20 @@ export function startGithubStub(
           rulesetRequiresPr = requiresPr;
         },
         readyForReviewCalls: () => readyCalls.slice(),
+        addReviewPr: (seed) => {
+          reviewPrs.push(seed);
+          commentsByPr.set(
+            seed.number,
+            (seed.comments ?? []).map((c) => issueComment(seed.number, c.author, c.body)),
+          );
+        },
+        commentPosts: () => commentPosts.slice(),
+        gitCommits: () => gitCommitLog.slice(),
+        branchTip: (branch) => refs.get(branch) ?? null,
+        reviewPosts: () => reviewPosts.slice(),
+        addSitePage: (path, html) => {
+          sitePages.set(path, html);
+        },
         setGraphqlStatus: (code) => {
           graphqlStatus = code;
         },

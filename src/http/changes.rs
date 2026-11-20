@@ -263,9 +263,10 @@ pub async fn share(
             let title = pr_title(&change.title);
             let description = changes::description(&project.dir, &branch).await;
             let body = pr_body(&change.title, description.as_deref());
+            let labels = crate::settings::pr_labels(&project.dir);
             state
                 .github
-                .create_draft_pr(&repo, &branch, &title, &body)
+                .create_draft_pr(&repo, &branch, &title, &body, &labels)
                 .await?
         }
     };
@@ -874,9 +875,10 @@ pub async fn publish(
             let title = pr_title(&change.title);
             let description = changes::description(&project.dir, &branch).await;
             let body = pr_body(&change.title, description.as_deref());
+            let labels = crate::settings::pr_labels(&project.dir);
             state
                 .github
-                .create_draft_pr(&repo, &branch, &title, &body)
+                .create_draft_pr(&repo, &branch, &title, &body, &labels)
                 .await
                 .map_err(|e| publish_step_error(e, false))?
         }
@@ -894,6 +896,9 @@ pub async fn publish(
         .merge_pr(&repo, &branch)
         .await
         .map_err(|e| publish_step_error(e, false))?;
+    // The published change's review images aren't needed any more.
+    let merged = pr.number;
+    super::reviews::clean_assets_soon(&state, &repo, move |n| n != merged, false);
     Ok(Json(json!({ "pr": pr })))
 }
 
@@ -930,7 +935,10 @@ async fn push_after_combining(
 /// Writer-plain copy for a failed publish step: git/GitHub details never reach the
 /// Publish button. Already-plain publish messages pass through unchanged.
 fn publish_step_error(e: ApiError, push_failed: bool) -> ApiError {
-    if e.message.starts_with("Couldn't publish") || e.message.starts_with("Ask an owner") {
+    if e.message.starts_with("Couldn't publish")
+        || e.message.starts_with("Ask an owner")
+        || e.message == "A reviewer sent this change back."
+    {
         return e;
     }
     if push_failed {
@@ -957,6 +965,16 @@ mod tests {
         );
         assert_eq!(ready.message, "Couldn't publish. Try again in a moment.");
         assert!(!ready.message.contains("pull request"));
+    }
+
+    #[test]
+    fn publish_step_errors_keep_the_sent_back_copy() {
+        let e = publish_step_error(
+            ApiError::conflict("A reviewer sent this change back."),
+            false,
+        );
+        assert_eq!(e.message, "A reviewer sent this change back.");
+        assert_eq!(e.http_status(), 409);
     }
 
     #[test]

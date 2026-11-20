@@ -168,4 +168,18 @@ describe("PrMenu", () => {
     expect(store.needsSignIn).toBe(true);
     expect(toast.error).not.toHaveBeenCalled();
   });
+
+  it("shows who sent a change back and what they said, verbatim", async () => {
+    const comment = "Please fix the <b>heading</b>\nand the footer";
+    const { w } = await mountWith({ ...draft, state: "changes_requested", checks: "none", sentBack: { reviewer: "Grace", comment } });
+    const status = w.get("[data-testid='pr-status']");
+    expect(status.text()).toContain("Sent back");
+    expect(w.get("[data-testid='pr-sent-back-reviewer']").text()).toContain("Grace");
+    expect(w.get("[data-testid='pr-sent-back-comment']").element.textContent).toBe(comment);
+  });
+
+  it("shows Greenlit for an approved change", async () => {
+    const { w } = await mountWith({ ...draft, state: "approved", checks: "none" });
+    expect(w.get("[data-testid='pr-status']").text()).toBe("Greenlit");
+  });
 });

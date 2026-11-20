@@ -84,6 +84,15 @@ describe("PublishButton", () => {
     expect(wrapper.get('[data-testid="publish-change"]').attributes("disabled")).toBeDefined();
   });
 
+  it("is disabled while a reviewer has sent the change back, even if GitHub says it can merge", async () => {
+    const { wrapper } = mountWith({
+      status: { ...open, state: "changes_requested", mergeable: true, mergeableState: "clean", sentBack: { reviewer: "Grace", comment: "Fix it" } },
+    });
+    const button = wrapper.get('[data-testid="publish-change"]');
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toBe("A reviewer sent this change back.");
+  });
+
   it("is disabled once the pull request is closed", async () => {
     const { wrapper } = mountWith({ status: { ...open, state: "closed" } });
     const button = wrapper.get('[data-testid="publish-change"]');

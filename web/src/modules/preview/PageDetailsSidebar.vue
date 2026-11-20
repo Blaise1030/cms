@@ -8,6 +8,7 @@ import UCard from "@nuxt/ui/components/Card.vue";
 import UEmpty from "@nuxt/ui/components/Empty.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import UTabs from "@nuxt/ui/components/Tabs.vue";
+import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { useDaemon } from "@/core/daemon";
 import type { Finding } from "./checks/findings";
 import { DESCRIPTION_MAX, TITLE_MAX, type PageMeta } from "./checks/meta";
@@ -156,15 +157,17 @@ const tabs = computed<TabsItem[]>(() => [
             data-testid="page-details-refresh"
             @click="emit('refresh')"
           />
-          <UButton
-            color="neutral"
-            variant="ghost"
-            size="xs"
-            icon="i-hugeicons-arrow-right-double"
-            aria-label="Close page details"
-            data-testid="page-details-close"
-            @click="emit('close')"
-          />
+          <UTooltip text="Close page details">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-hugeicons-arrow-right-double"
+              aria-label="Close page details"
+              data-testid="page-details-close"
+              @click="emit('close')"
+            />
+          </UTooltip>
         </div>
       </div>
       <div
@@ -172,22 +175,30 @@ const tabs = computed<TabsItem[]>(() => [
         data-testid="page-details-summary"
       >
         <template v-if="resources">
-          <span class="inline-flex items-center gap-1" title="Scripts">
-            <UIcon name="i-hugeicons-code" class="size-3 shrink-0" aria-hidden="true" />
-            <span class="tabular-nums">{{ resources.scripts }}</span>
-          </span>
-          <span class="inline-flex items-center gap-1" title="Styles">
-            <UIcon name="i-hugeicons-paint-board" class="size-3 shrink-0" aria-hidden="true" />
-            <span class="tabular-nums">{{ resources.styles }}</span>
-          </span>
-          <span class="inline-flex items-center gap-1" title="Images">
-            <UIcon name="i-hugeicons-image-01" class="size-3 shrink-0" aria-hidden="true" />
-            <span class="tabular-nums">{{ resources.images }}</span>
-          </span>
-          <span class="inline-flex items-center gap-1" title="HTML size">
-            <UIcon name="i-hugeicons-file-script" class="size-3 shrink-0" aria-hidden="true" />
-            <span class="tabular-nums">{{ formatBytes(resources.htmlBytes) }}</span>
-          </span>
+          <UTooltip text="Scripts">
+            <span class="inline-flex items-center gap-1" :aria-label="`Scripts: ${resources.scripts}`" tabindex="0" data-testid="page-details-stat-scripts">
+              <UIcon name="i-hugeicons-code" class="size-3 shrink-0" aria-hidden="true" />
+              <span class="tabular-nums">{{ resources.scripts }}</span>
+            </span>
+          </UTooltip>
+          <UTooltip text="Styles">
+            <span class="inline-flex items-center gap-1" :aria-label="`Styles: ${resources.styles}`" tabindex="0" data-testid="page-details-stat-styles">
+              <UIcon name="i-hugeicons-paint-board" class="size-3 shrink-0" aria-hidden="true" />
+              <span class="tabular-nums">{{ resources.styles }}</span>
+            </span>
+          </UTooltip>
+          <UTooltip text="Images">
+            <span class="inline-flex items-center gap-1" :aria-label="`Images: ${resources.images}`" tabindex="0" data-testid="page-details-stat-images">
+              <UIcon name="i-hugeicons-image-01" class="size-3 shrink-0" aria-hidden="true" />
+              <span class="tabular-nums">{{ resources.images }}</span>
+            </span>
+          </UTooltip>
+          <UTooltip text="HTML size">
+            <span class="inline-flex items-center gap-1" :aria-label="`HTML size: ${formatBytes(resources.htmlBytes)}`" tabindex="0" data-testid="page-details-stat-html">
+              <UIcon name="i-hugeicons-file-script" class="size-3 shrink-0" aria-hidden="true" />
+              <span class="tabular-nums">{{ formatBytes(resources.htmlBytes) }}</span>
+            </span>
+          </UTooltip>
         </template>
         <span v-else>Open a page to inspect SEO fields.</span>
       </div>
@@ -200,7 +211,7 @@ const tabs = computed<TabsItem[]>(() => [
       color="neutral"
       variant="pill"
       class="min-h-0 flex-1 gap-0"
-      :ui="{ root: 'items-stretch', list: 'mx-3', trigger: 'flex-1 justify-center data-[state=active]:text-highlighted', content: 'min-h-0 flex-1 overflow-auto' }"
+      :ui="{ root: 'items-stretch', list: 'mx-3 w-auto', trigger: 'flex-1 justify-center data-[state=active]:text-highlighted', content: 'min-h-0 flex-1 overflow-auto' }"
       @update:model-value="tab = $event as Tab"
     >
       <template #default="{ item }">

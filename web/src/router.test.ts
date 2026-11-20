@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { codePath, contentPath, historyPath, projectPath, projectTabFromRoute, routes, settingsPath } from "./router";
+import { codePath, contentPath, historyPath, projectPath, projectTabFromRoute, reviewPath, routes, settingsPath } from "./router";
 
 const router = () => createRouter({ history: createMemoryHistory(), routes });
 
@@ -17,7 +17,7 @@ describe("router", () => {
     expect(r.params.id).toBe("a b/c");
   });
 
-  it("redirects /p/:id to the preview tab", async () => {
+  it("redirects /p/:id to the first tab (preview by default)", async () => {
     const r = router();
     await r.push("/p/site");
     expect(r.currentRoute.value.name).toBe("project-preview");
@@ -41,6 +41,29 @@ describe("router", () => {
     expect(checkpoint.name).toBe("project-history");
     expect(checkpoint.params.sha).toBe("abc123");
     expect(historyPath("site")).toBe("/p/site/history");
+  });
+
+  it("routes a change's Conversation and Review pages, and the inbox", () => {
+    expect(reviewPath("site")).toBe("/p/site/review");
+    expect(reviewPath("site", 7)).toBe("/p/site/review/7");
+    expect(reviewPath("site", 7, "files")).toBe("/p/site/review/7/files");
+    const r = router();
+    const inbox = r.resolve("/p/site/review");
+    expect(inbox.name).toBe("project-review");
+    expect(inbox.params.number ?? "").toBe("");
+    const conv = r.resolve("/p/site/review/7");
+    expect(conv.name).toBe("project-review");
+    expect(conv.params.number).toBe("7");
+    const files = r.resolve("/p/site/review/7/files");
+    expect(files.name).toBe("project-review-files");
+    expect(files.params.number).toBe("7");
+    expect(projectTabFromRoute("project-review-files")).toBe("review");
+    const props = (name: string) => {
+      const rec = r.getRoutes().find((x) => x.name === name)!;
+      return (rec.props.default as (to: unknown) => Record<string, unknown>)(r.resolve(`/p/site/review/7${name === "project-review-files" ? "/files" : ""}`));
+    };
+    expect(props("project-review")).toEqual({ projectId: "site", number: 7, page: "conversation" });
+    expect(props("project-review-files")).toEqual({ projectId: "site", number: 7, page: "files" });
   });
 
   it("maps route names to tabs", () => {

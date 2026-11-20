@@ -27,6 +27,7 @@ const Moon = hugeicon("i-hugeicons-moon-02");
 const Palette = hugeicon("i-hugeicons-paint-board");
 const Plus = hugeicon("i-hugeicons-plus-sign");
 const RefreshCw = hugeicon("i-hugeicons-refresh");
+const TaskDone = hugeicon("i-hugeicons-task-done-01");
 const Settings = hugeicon("i-hugeicons-settings-01");
 const Sun = hugeicon("i-hugeicons-sun-03");
 const VolumeOff = hugeicon("i-hugeicons-volume-off");
@@ -37,6 +38,7 @@ const TABS: { id: ProjectTab; label: string; icon: Component }[] = [
   { id: "design", label: "Design", icon: Palette },
   { id: "code", label: "Code", icon: Code },
   { id: "history", label: "History", icon: History },
+  { id: "review", label: "Review", icon: TaskDone },
 ];
 
 const THEME_ICONS: Record<ThemePreference, Component> = { light: Sun, dark: Moon, system: Monitor };

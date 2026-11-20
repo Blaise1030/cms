@@ -14,6 +14,21 @@ function mountShell(chatDetached: boolean, showChat = true) {
 const chatPanel = (w: ReturnType<typeof mountShell>) => w.find("[data-panel-id='chat']");
 
 describe("Shell", () => {
+  it("drops the top bar when asked, keeping the workspace", async () => {
+    const w = mount(Shell, {
+      props: { hideTopBar: true },
+      slots: { menubar: "<div data-testid='menubar' />", workspace: "<div data-testid='ws' />" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='top-bar']").exists()).toBe(false);
+    expect(w.find("[data-testid='menubar']").exists()).toBe(false);
+    expect(w.find("[data-testid='ws']").exists()).toBe(true);
+    await w.setProps({ hideTopBar: false });
+    expect(w.find("[data-testid='top-bar']").exists()).toBe(true);
+    w.unmount();
+  });
+
   it("collapses the chat column and hides its toggle while the chat is detached", async () => {
     const w = mountShell(false);
     await flushPromises();
@@ -62,7 +77,7 @@ describe("Shell", () => {
     it("is a plain header in the browser", () => {
       const w = mountShell(false);
       expect(topBar(w).attributes("data-tauri-drag-region")).toBeUndefined();
-      expect(topBar(w).classes()).not.toContain("pl-20");
+      expect(topBar(w).classes()).not.toContain("pl-24");
       w.unmount();
     });
 
@@ -71,7 +86,7 @@ describe("Shell", () => {
       const w = mountShell(false);
       await flushPromises();
       expect(topBar(w).attributes("data-tauri-drag-region")).toBe("deep");
-      expect(topBar(w).classes()).toContain("pl-20");
+      expect(topBar(w).classes()).toContain("pl-24");
 
       // Its buttons stay clickable.
       await w.find("[data-testid='chat-toggle']").trigger("click");
@@ -83,8 +98,8 @@ describe("Shell", () => {
     it("leaves less room for the traffic lights beside the project rail", () => {
       document.documentElement.dataset.desktop = "macos";
       const w = mount(Shell, { slots: { rail: "<nav class='w-14' />" } });
-      expect(topBar(w).classes()).not.toContain("pl-20");
-      expect(topBar(w).classes()).toContain("pl-7");
+      expect(topBar(w).classes()).not.toContain("pl-24");
+      expect(topBar(w).classes()).toContain("pl-10");
       w.unmount();
     });
   });
