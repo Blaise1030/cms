@@ -10,7 +10,7 @@ import { site } from "../../site";
 const { version, repo, coffeeUrl, downloads } = site.release;
 type Download = (typeof downloads)[number];
 
-const assetUrl = (target: string) => `${repo}/releases/download/${version}/orso-${version}-${target}.tar.gz`;
+const assetUrl = (d: { target: string; ext: string }) => `${repo}/releases/download/${version}/orso-${version}-${d.target}.${d.ext}`;
 
 /** Picks the build for the visitor's OS after hydration; macOS Apple Silicon is the server-rendered default. */
 function detectDownload(): Download {
@@ -32,8 +32,8 @@ const open = computed({
 const items = computed<DropdownMenuItem[][]>(() => [
   downloads.map((d) => ({
     label: d.label,
-    detail: `${d.detail} .tar.gz`,
-    to: assetUrl(d.target),
+    detail: `${d.detail} .${d.ext}`,
+    to: assetUrl(d),
     target: "_self",
     rel: "noopener noreferrer",
     slot: "download" as const,
@@ -49,7 +49,7 @@ const items = computed<DropdownMenuItem[][]>(() => [
       size="lg"
       icon="i-hugeicons-download-04"
       :label="`Download for ${primary.label}`"
-      :to="assetUrl(primary.target)"
+      :to="assetUrl(primary)"
       target="_self"
       rel="noopener noreferrer"
       @click="downloaded = primary"
@@ -80,11 +80,11 @@ const items = computed<DropdownMenuItem[][]>(() => [
       <div class="space-y-3 text-small text-muted">
         <template v-if="downloaded?.os === 'mac'">
           <p>
-            Orso isn't notarized by Apple yet, so macOS may block it the first time. After unpacking, run this once to
-            allow it:
+            Open the DMG and drag Orso to Applications. Orso isn't notarized by Apple yet, so macOS blocks it the first
+            time: open System Settings → Privacy &amp; Security and click Open Anyway, or run this once:
           </p>
           <code class="block overflow-x-auto rounded-md border border-line bg-surface px-3 py-2 whitespace-nowrap text-ink">
-            xattr -d com.apple.quarantine ./orso
+            xattr -dr com.apple.quarantine /Applications/orso.app
           </code>
           <p>Notarizing costs $99 a year. If Orso is useful to you, a coffee helps cover it.</p>
         </template>
