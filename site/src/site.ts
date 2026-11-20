@@ -23,15 +23,15 @@ export const site = {
   cta: { label: "Get Orso", href: "#get-orso" },
   /** Download button: bump `version` when a new GitHub release ships; asset names must match the release. */
   release: {
-    version: "v0.1.9",
+    version: "v0.1.10",
     repo: "https://github.com/Blaise1030/cms",
     /** Shown in the thank-you popup after a download. Placeholder: replace with your real page. */
     coffeeUrl: "https://buymeacoffee.com/blaise1030",
     downloads: [
-      { os: "mac", label: "macOS", detail: "Apple Silicon", target: "aarch64-apple-darwin" },
-      { os: "mac", label: "macOS", detail: "Intel", target: "x86_64-apple-darwin" },
-      { os: "linux", label: "Linux", detail: "x64", target: "x86_64-unknown-linux-gnu" },
-      { os: "linux", label: "Linux", detail: "ARM64", target: "aarch64-unknown-linux-gnu" },
+      { os: "mac", label: "macOS", detail: "Apple Silicon", target: "aarch64-apple-darwin", ext: "dmg" },
+      { os: "mac", label: "macOS", detail: "Intel", target: "x86_64-apple-darwin", ext: "dmg" },
+      { os: "linux", label: "Linux", detail: "x64", target: "x86_64-unknown-linux-gnu", ext: "tar.gz" },
+      { os: "linux", label: "Linux", detail: "ARM64", target: "aarch64-unknown-linux-gnu", ext: "tar.gz" },
     ],
   },
   footer: {
