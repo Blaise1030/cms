@@ -4,7 +4,7 @@ name: Release
 # and has no tag yet). It builds the daemon, with the web app embedded, for
 # macOS and Linux, then publishes a GitHub release tagged vX.Y.Z with that
 # version's CHANGELOG.md section. Last, it points the Homebrew tap at the new
-# release. (The Tauri desktop / notarized DMG path has been retired.)
+# release, and desktop-release.yml attaches the macOS desktop DMGs to it.
 on:
   push:
     branches: [main]
@@ -152,3 +152,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "orso $VERSION"
           git push
+
+  desktop:
+    name: Desktop DMGs
+    needs: [check, publish]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      version: ${{ needs.check.outputs.version }}

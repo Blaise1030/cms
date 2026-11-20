@@ -6,19 +6,24 @@ set -euo pipefail
 profile="${1:-release}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 root="$(cd "$here/.." && pwd)"
-triple="$(rustc -vV | sed -n 's/^host: //p')"
+host="$(rustc -vV | sed -n 's/^host: //p')"
+# `tauri build --target <triple>` sets TAURI_ENV_TARGET_TRIPLE; cross-build the daemon for it.
+triple="${TAURI_ENV_TARGET_TRIPLE:-$host}"
 
 pnpm -C "$root/web" install --frozen-lockfile
 pnpm -C "$root/web" build
 
-if [ "$profile" = "release" ]; then
-  cargo build --release --manifest-path "$root/Cargo.toml"
-else
-  cargo build --manifest-path "$root/Cargo.toml"
+args=(--manifest-path "$root/Cargo.toml")
+[ "$profile" = "release" ] && args+=(--release)
+out="$root/target/$profile"
+if [ "$triple" != "$host" ]; then
+  args+=(--target "$triple")
+  out="$root/target/$triple/$profile"
 fi
+cargo build "${args[@]}"
 
 mkdir -p "$here/binaries"
-cp "$root/target/$profile/orso" "$here/binaries/orso-$triple"
+cp "$out/orso" "$here/binaries/orso-$triple"
 # tauri-build copies the sidecar next to the app only when its build script reruns, which a
 # changed daemon alone doesn't trigger; refresh that copy too so the app never runs a stale one.
 if [ -d "$here/target/$profile" ]; then

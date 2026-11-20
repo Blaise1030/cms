@@ -1,0 +1,95 @@
+name: Desktop release
+
+# Builds the macOS desktop app (src-tauri/) as a DMG per architecture and attaches it to an
+# existing GitHub release. release.yml calls this after publishing a version; run it by hand
+# (Actions → Desktop release → Run workflow) to add DMGs to a release that lacks them.
+# The app is ad-hoc signed, not notarized: there are no Apple signing secrets yet.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version without the leading v, e.g. 0.1.10
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the leading v, e.g. 0.1.10
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Desktop ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    steps:
+      # The commit that runs this (the release commit, or main when run by hand), so the build
+      # scripts are current; its package.json must carry the version being attached to.
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: |
+          have=$(node -p "require('./package.json').version")
+          [ "$have" = "${{ inputs.version }}" ] || { echo "::error::package.json is $have, not ${{ inputs.version }}"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+          workspaces: |
+            . -> target
+            src-tauri -> target
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            src-tauri/pnpm-lock.yaml
+      # `tauri build` runs scripts/prepare-sidecar.sh first, which builds the web app and the
+      # daemon for the target as the sidecar.
+      - name: Build orso.app and the DMG
+        run: |
+          pnpm -C src-tauri install --frozen-lockfile
+          pnpm -C src-tauri tauri build --ci --target ${{ matrix.target }} --bundles app,dmg
+      - name: Package
+        run: |
+          dmgs=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
+          name=orso-v${{ inputs.version }}-${{ matrix.target }}.dmg
+          mkdir desktop
+          cp "${dmgs[0]}" "desktop/$name"
+          (cd desktop && shasum -a 256 "$name" > "$name.sha256")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: desktop/*
+
+  upload:
+    name: Attach DMGs to v${{ inputs.version }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: desktop
+          pattern: desktop-*
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ inputs.version }}" desktop/* --clobber --repo "${{ github.repository }}"
