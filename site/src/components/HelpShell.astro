@@ -1,0 +1,86 @@
+---
+// Documentation layout for every Help page: section sidebar | centred content | optional rail.
+// Desktop: the sidebar (search + every section, subsection and article) stays in view on the
+// left; the `rail` slot ("On this page") sits on the right from xl up. Mobile: search, then a
+// collapsible "Browse help" list, above the content.
+import type { BreadcrumbItem, NavigationMenuItem } from "@nuxt/ui";
+import UBreadcrumb from "@nuxt/ui/components/Breadcrumb.vue";
+import PagefindSearch from "./PagefindSearch.astro";
+import CtaBand from "./sections/CtaBand.astro";
+import HelpNav from "./vue/HelpNav.vue";
+import { href } from "../lib/href";
+import { loadHelp, type Doc } from "../lib/help";
+
+interface Props {
+  /** Site path of this page, e.g. "/help/" or "/help/create-a-project/", to mark it current. */
+  current: string;
+  /** Trail above the title; the last item is this page and is not linked. */
+  crumbs?: { label: string; href?: string }[];
+}
+const { current, crumbs = [] } = Astro.props;
+const { sections, docs } = await loadHelp();
+const shown = sections.filter((section) => section.docs.length > 0);
+const hasRail = Astro.slots.has("rail");
+
+const docPath = (doc: Doc) => `/help/${doc.id}/`;
+const link = (label: string, path: string): NavigationMenuItem => ({ label, to: href(path), active: path === current });
+/** Overview, then one collapsible group per section; every section starts open. */
+const navItems: NavigationMenuItem[] = [
+  link("Overview", "/help/"),
+  ...shown.map((section) => {
+    const sectionPath = `/help/section/${section.id}/`;
+    return {
+      label: section.title,
+      defaultOpen: true,
+      children: [
+        link("Overview", sectionPath),
+        ...section.loose.map((doc) => link(doc.data.title, docPath(doc))),
+        ...section.subsections
+          .filter((sub) => sub.docs.length > 0)
+          .map((sub) => ({ label: sub.title, defaultOpen: true, children: sub.docs.map((doc) => link(doc.data.title, docPath(doc))) })),
+      ],
+    };
+  }),
+];
+const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label, to: crumb.href ? href(crumb.href) : undefined }));
+---
+
+<div
+  class:list={[
+    "mx-auto w-full max-w-7xl border-x border-b border-line lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]",
+    hasRail && "xl:grid-cols-[16rem_minmax(0,1fr)_14rem]",
+  ]}
+>
+  <aside class="border-b border-line lg:border-r lg:border-b-0" aria-label="Help navigation" data-pagefind-ignore>
+    <div class="flex flex-col gap-4 px-gutter py-4 lg:sticky lg:top-header lg:max-h-[calc(100dvh-var(--spacing-header))] lg:overflow-y-auto lg:px-4 lg:py-6">
+      {docs.length > 0 && <PagefindSearch bundle="help" placeholder="Search help" />}
+
+      <HelpNav client:load items={navItems} />
+    </div>
+  </aside>
+
+  <div class="min-w-0 px-gutter py-10 md:px-gutter-wide md:py-14">
+    <div class="mx-auto max-w-3xl">
+      {breadcrumb.length > 0 && (
+        <UBreadcrumb
+          items={breadcrumb}
+          separator-icon="i-hugeicons-arrow-right-01"
+          data-pagefind-ignore
+          ui={{ link: "text-small font-normal text-muted hover:text-ink", linkLabel: "text-small", separatorIcon: "size-3.5 text-muted" }}
+        />
+      )}
+      <slot />
+    </div>
+  </div>
+
+  {hasRail && (
+    <div class="hidden border-l border-line xl:block">
+      <div class="sticky top-header px-5 py-14"><slot name="rail" /></div>
+    </div>
+  )}
+</div>
+
+<!-- Closing call to action under every Help page, framed like the docs layout above it. -->
+<div class="mx-auto w-full max-w-7xl border-x border-b border-line">
+  <CtaBand />
+</div>

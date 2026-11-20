@@ -7,6 +7,7 @@ import UButton from "@nuxt/ui/components/Button.vue";
 import UChatPrompt from "@nuxt/ui/components/ChatPrompt.vue";
 import UChatPromptSubmit from "@nuxt/ui/components/ChatPromptSubmit.vue";
 import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
+import UFileUpload from "@nuxt/ui/components/FileUpload.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import UTextarea from "@nuxt/ui/components/Textarea.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
@@ -167,7 +168,6 @@ const approvalItems = computed<MenuItem[][]>(() => [
   ],
 ]);
 const textarea = ref<{ textareaRef: HTMLTextAreaElement | null } | null>(null);
-const fileInput = ref<HTMLInputElement | null>(null);
 const dropping = ref(false);
 
 const canSend = computed(
@@ -189,14 +189,9 @@ function onKeydown(e: KeyboardEvent) {
   submit();
 }
 
-function pickFiles() {
-  fileInput.value?.click();
-}
-
-function onFileChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  if (input.files?.length) emit("attach", [...input.files]);
-  input.value = "";
+function onPicked(picked: unknown[] | null | undefined) {
+  const files = (picked ?? []).filter((f): f is File => f instanceof File);
+  if (files.length) emit("attach", files);
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -366,27 +361,30 @@ defineExpose({ focus: () => textarea.value?.textareaRef?.focus() });
 
         <template #footer>
           <div class="flex min-w-0 items-center gap-2">
-            <!-- Hidden native picker (no Nuxt UI equivalent for a headless file dialog trigger). -->
-            <input
-              ref="fileInput"
-              type="file"
+            <!-- The picker only: the whole composer is the drop target. -->
+            <UFileUpload
+              v-slot="{ open }"
               multiple
-              class="hidden"
-              data-testid="chat-attach-input"
+              reset
+              :dropzone="false"
+              :model-value="[]"
               accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md"
-              @change="onFileChange"
-            />
-            <UButton
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              icon="i-hugeicons-attachment-01"
               class="shrink-0"
-              aria-label="Attach image or file"
-              data-testid="chat-attach"
-              :disabled="attaching"
-              @click="pickFiles"
-            />
+              data-testid="chat-attach-input"
+              @update:model-value="onPicked"
+            >
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                icon="i-hugeicons-attachment-01"
+                class="shrink-0"
+                aria-label="Attach image or file"
+                data-testid="chat-attach"
+                :disabled="attaching"
+                @click="open()"
+              />
+            </UFileUpload>
             <UDropdownMenu
               v-model:open="pickerOpen"
               :items="pickerItems"

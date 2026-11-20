@@ -1,6 +1,7 @@
 ---
 // The logo: the Orso bear (Simple Black Bear by qubodup, CC0), plus the site name.
 // The same mark is public/favicon.svg.
+import UBadge from "@nuxt/ui/components/Badge.vue";
 import BearMark from "./BearMark.astro";
 import { site } from "../site";
 ---
@@ -8,4 +9,5 @@ import { site } from "../site";
 <span class="inline-flex items-center gap-2.5 text-ink">
   <BearMark class="h-4 w-auto shrink-0" />
   <span class="text-body font-medium tracking-tight whitespace-nowrap">{site.name}</span>
+  <UBadge color="neutral" variant="outline" size="sm" class="rounded-full" label="Alpha" />
 </span>

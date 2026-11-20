@@ -27,13 +27,13 @@ test("built sample Blog and Help articles render Markdown and navigation", () =>
   assert.match(html(root, "blog/welcome"), /<h2[^>]*>.*Welcome/);
   assert.match(html(root, "help"), /Getting started/);
   assert.match(html(root, "help/getting-started"), /<h2[^>]*>.*First steps/);
-  assert.match(html(root, ""), /href="\/blog\/"[^>]*>Blog/);
-  assert.match(html(root, ""), /href="\/help\/"[^>]*>Help/);
+  assert.match(html(root, ""), /href="\/blog\/"[^>]*>(?:<[^>]+>)*Blog/);
+  assert.match(html(root, ""), /href="\/help\/"[^>]*>(?:<[^>]+>)*Help/);
   for (const id of ["hero", "logos", "features", "testimonials", "pricing", "faq", "cta"]) assert.match(html(root, ""), new RegExp(`id="${id}"`));
 });
 
 test("built sample categories, sections and topics link their articles", () => {
-  assert.match(html(root, "blog"), /href="\/blog\/categories\/guides\/"[^>]*>Guides/);
+  assert.match(html(root, "blog"), /href="\/blog\/categories\/guides\/"[^>]*>(?:<[^>]+>)*Guides/);
   assert.match(html(root, "blog/categories"), /<h1[^>]*>Blog categories/);
   const guides = html(root, "blog/categories/guides");
   assert.match(guides, /<h1[^>]*>Guides/);
@@ -43,8 +43,9 @@ test("built sample categories, sections and topics link their articles", () => {
   const help = html(root, "help");
   assert.match(help, /href="\/help\/section\/projects\/"/);
   assert.match(help, /href="\/help\/categories\/setup\/"/);
-  assert.match(help, /<pagefind-config instance="help" bundle-path="\/pagefind-help\/"/);
-  assert.match(html(root, "blog"), /<pagefind-config instance="blog" bundle-path="\/pagefind-blog\/"/);
+  // The search palette island points at its section's index.
+  assert.match(help, /bundlePath&quot;:\[0,&quot;\/pagefind-help\/&quot;\]/);
+  assert.match(html(root, "blog"), /bundlePath&quot;:\[0,&quot;\/pagefind-blog\/&quot;\]/);
   for (const bundle of ["blog", "help"]) assert.ok(existsSync(join(root, "dist", `pagefind-${bundle}`, "pagefind.js")), `pagefind-${bundle} index`);
   const projects = html(root, "help/section/projects");
   assert.match(projects, /<h2[^>]*>Planning/);

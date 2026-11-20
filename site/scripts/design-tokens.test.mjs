@@ -7,7 +7,7 @@ import { join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const TOKENS_FILE = "src/styles/global.css";
-const EXTENSIONS = /\.(astro|ts|mdx|css)$/;
+const EXTENSIONS = /\.(astro|ts|vue|mdx|css)$/;
 
 const PALETTE = "slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
 const COLOR_UTILITIES = "bg|text|border(?:-[xytrblse])?|ring(?:-offset)?|outline|divide|fill|stroke|from|via|to|placeholder|caret|accent|decoration|shadow|inset-shadow|drop-shadow";

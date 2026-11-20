@@ -1,5 +1,6 @@
 ---
-// A list of help articles: title and one-line description, divided by hairlines.
+// A list of help articles as cards: title and one-line description, the whole card a link.
+import UPageCard from "@nuxt/ui/components/PageCard.vue";
 import { href } from "../lib/href";
 import type { Doc } from "../lib/help";
 
@@ -9,11 +10,21 @@ interface Props {
 const { docs } = Astro.props;
 ---
 
-<ul class="border-b border-line">
+<ul class="grid gap-3 sm:grid-cols-2">
   {docs.map((doc) => (
-    <li class="group relative border-t border-line py-5">
-      <a class="font-medium text-ink decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/${doc.id}/`)}>{doc.data.title}</a>
-      <p class="mt-1 text-muted">{doc.data.description}</p>
+    <li class="flex">
+      <UPageCard
+        variant="outline"
+        title={doc.data.title}
+        description={doc.data.description}
+        to={href(`/help/${doc.id}/`)}
+        class="w-full rounded-lg bg-surface-raised transition-colors duration-gentle ease-gentle hover:bg-sand"
+        ui={{
+          container: "p-4 sm:p-4",
+          title: "text-body font-medium text-ink",
+          description: "mt-1 text-small text-muted",
+        }}
+      />
     </li>
   ))}
 </ul>

@@ -6,9 +6,8 @@ import UFormField from "@nuxt/ui/components/FormField.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
 import UInputTags from "@nuxt/ui/components/InputTags.vue";
 import USelect from "@nuxt/ui/components/Select.vue";
+import UFileUpload from "@nuxt/ui/components/FileUpload.vue";
 import { useFormField } from "@nuxt/ui/composables/useFormField";
-// Kept: UFileUpload holds Files, not the saved image path this field shows.
-import { ImageUploader } from "@/components/ui/image-uploader";
 import type { FieldDescriptor } from "@/core/types";
 import { humanize, humanizeLower } from "@orso/utils";
 // The calendar is only needed for date fields, so it stays out of the startup bundle.
@@ -98,7 +97,15 @@ const imageSrc = computed(() => {
   if (typeof v !== "string" || !v) return null;
   return pendingPreview.value || !registry?.resolve ? v : registry.resolve(v);
 });
-function uploadImage(file: File) { imageFile.value = file; imageOpen.value = true; }
+/** The saved image as a UFileUpload item: its name plus a preview, not a File. */
+const imageItem = computed(() => imageSrc.value
+  ? { name: String(props.modelValue).split("/").pop() || "Image", avatar: { src: imageSrc.value, alt: "" } }
+  : null);
+/** A new file goes to the dialog for its alt text; clearing the upload clears the field. */
+function onImageChange(value: unknown) {
+  if (value instanceof File) { imageFile.value = value; imageOpen.value = true; }
+  else if (!value) setText("");
+}
 function chooseImage(image: PendingImage) {
   registry?.add(image);
   set(image.previewUrl);
@@ -208,9 +215,23 @@ const placeholder = computed(() => (phrase.value ? `Enter ${phrase.value}` : "En
       <USelect v-else-if="descriptor.type === 'reference' && referenceIds" :id="id" :data-testid="id" class="w-full" :items="referenceItems" :placeholder="optional ? 'Not set' : `Choose a ${descriptor.collection} entry`" :model-value="choice(modelValue)" @update:model-value="setChoice" />
       <UInput v-else-if="descriptor.type === 'reference'" :id="id" :data-testid="id" type="text" class="w-full" :placeholder="`${descriptor.collection} entry`" :model-value="modelValue as string | undefined" @update:model-value="setText" />
       <LabelTarget v-else-if="descriptor.type === 'image'" :id="id">
-        <ImageUploader :id="id" :data-testid="`${id}-uploader`" :src="imageSrc" :accept="ACCEPTED_IMAGES" @select="uploadImage" @remove="setText('')">
-          <template #hint><span class="text-xs">PNG, JPEG, WebP, or GIF up to 10 MiB</span></template>
-        </ImageUploader>
+        <!-- UFileUpload binds its attrs to the hidden input, so the test id sits on a wrapper. -->
+        <div :data-testid="`${id}-uploader`">
+          <UFileUpload
+            :id="id"
+            reset
+            layout="grid"
+            class="w-full"
+            icon="i-hugeicons-image-upload"
+            file-icon="i-hugeicons-image-not-found-01"
+            label="Click to upload or drag an image here"
+            description="PNG, JPEG, WebP, or GIF up to 10 MiB"
+            :accept="ACCEPTED_IMAGES"
+            :model-value="imageItem"
+            :ui="{ base: 'aspect-video', files: 'size-full', file: 'size-full', fileLeadingAvatar: 'rounded-md bg-muted/30 [&>img]:object-contain' }"
+            @update:model-value="onImageChange"
+          />
+        </div>
         <ImageDialog v-model:open="imageOpen" :file="imageFile" @insert="chooseImage" />
       </LabelTarget>
 
