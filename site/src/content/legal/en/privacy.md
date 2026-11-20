@@ -18,7 +18,7 @@ We use this information to run the service, answer support requests, send the em
 
 ## Your choices
 
-You can update or delete your account at any time from your settings. To ask for a copy of your data, or to ask a question about this policy, email privacy@example.com.
+You can update or delete your account at any time from your settings. To ask for a copy of your data, or to ask a question about this policy, email [privacy@example.com](mailto:privacy@example.com).
 
 ## Changes to this policy
 

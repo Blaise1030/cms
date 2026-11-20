@@ -24,4 +24,4 @@ You can close your account whenever you like. We may suspend accounts that break
 
 ## Contact
 
-Questions about these terms? Email legal@example.com.
+Questions about these terms? Email [legal@example.com](mailto:legal@example.com).
