@@ -58,7 +58,7 @@ const navItems = site.nav.map((link) => ({
   current: isCurrent(link.href),
 }));
 const navLabels = { main: t("nav.main"), menu: t("nav.menu"), open: t("nav.openMenu"), close: t("nav.close") };
-// The same page in every language. Pages that exist only in English (legal pages) get none.
+// The same page in every language. Pages that exist only in English get none.
 const translated = isLocalized(here);
 const alternates = translated
   ? localeKeys.map((key) => ({ lang: locales[key].lang, href: absoluteUrl(localePath(key, here)) }))

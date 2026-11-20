@@ -309,5 +309,9 @@
   },
   "common": {
     "home": "Home"
+  },
+  "legal": {
+    "lastUpdated": "Last updated",
+    "placeholder": "Placeholder text. Replace this page with your own policy, reviewed by someone qualified, before you launch."
   }
 }

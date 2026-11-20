@@ -9,7 +9,7 @@ preserve_hierarchy: true
 # Target languages (set in the Crowdin project): Chinese Simplified and Malay. Their two-letter
 # codes, zh and ms, are the locale keys in site/src/i18n/locales.ts.
 files:
-  # Blog and help Markdown. Lock every front-matter key except title, description and coverAlt
+  # Blog, help and legal Markdown. Lock every front-matter key except title, description and coverAlt
   # in the project's Markdown settings; the site ignores translated values for the rest.
   - source: /site/src/content/**/en/*.md
     translation: /site/src/content/**/%two_letters_code%/%original_file_name%

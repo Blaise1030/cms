@@ -1,0 +1,9 @@
+---
+// Text lives in src/content/legal/en/terms.md.
+import LegalPage from "../../components/LegalPage.astro";
+import { localeStaticPaths } from "../../i18n";
+
+export const getStaticPaths = localeStaticPaths;
+---
+
+<LegalPage id="terms" />

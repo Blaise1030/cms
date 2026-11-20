@@ -80,8 +80,8 @@ export function useTranslations(locale: Locale) {
   };
 }
 
-/** Site paths that exist in every language. Anything else (legal pages, llms.txt, feeds) is English-only. */
-export const isLocalized = (path: string) => path === "/" || path.startsWith("#") || /^\/(blog|help)(\/|$)/.test(path);
+/** Site paths that exist in every language. Anything else (llms.txt, feeds) is English-only. */
+export const isLocalized = (path: string) => path === "/" || path.startsWith("#") || /^\/(blog|help|privacy|terms)(\/|$)/.test(path);
 
 /** A site path in `locale`: `/blog/` → `/zh/blog/`, `#faq` → `/zh/#faq`. External links pass through. */
 export function localePath(locale: Locale, path: string) {

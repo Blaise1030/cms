@@ -309,5 +309,9 @@
   },
   "common": {
     "home": "Laman Utama"
+  },
+  "legal": {
+    "lastUpdated": "Kemas kini terakhir",
+    "placeholder": "Teks pemegang tempat. Gantikan halaman ini dengan polisi anda sendiri, disemak oleh orang yang berkelayakan, sebelum anda melancarkan."
   }
 }
