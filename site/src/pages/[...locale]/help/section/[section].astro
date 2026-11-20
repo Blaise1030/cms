@@ -1,0 +1,39 @@
+---
+import Base from "../../../../layouts/Base.astro";
+import DocList from "../../../../components/DocList.astro";
+import HelpShell from "../../../../components/HelpShell.astro";
+import { loadHelp } from "../../../../lib/help";
+import { breadcrumbs } from "../../../../lib/seo";
+import { getI18n, localizedStaticPaths } from "../../../../i18n";
+
+export const getStaticPaths = () =>
+  localizedStaticPaths(async (locale) => {
+    const { sections } = await loadHelp(locale);
+    return sections.map((section) => ({ params: { section: section.id }, props: { section } }));
+  });
+const { section } = Astro.props;
+const { t, sitePath } = getI18n(Astro.url);
+const description = section.description ?? t("help.section.description", { title: section.title });
+const groups = [{ id: "", title: "", docs: section.loose }, ...section.subsections].filter((group) => group.docs.length > 0);
+const current = `/help/section/${section.id}/`;
+---
+<Base
+  title={t("help.section.title", { title: section.title })}
+  description={description}
+  jsonLd={[
+    { "@context": "https://schema.org", "@type": "WebPage", name: section.title, description },
+    breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("help.title"), path: sitePath("/help/") }, { name: section.title, path: sitePath(current) }]),
+  ]}
+>
+  <HelpShell current={current} crumbs={[{ label: t("help.title"), href: "/help/" }, { label: section.title }]}>
+    <h1 class="mt-4 text-title tracking-display text-ink">{section.title}</h1>
+    {section.description && <p class="mt-4 max-w-prose text-body text-muted">{section.description}</p>}
+    {section.docs.length === 0 && <p class="mt-12 text-muted">{t("help.section.empty")}</p>}
+    {groups.map((group) => (
+      <section class="mt-10">
+        {group.title && <h2 class="mb-3 text-heading tracking-tight text-ink">{group.title}</h2>}
+        <DocList docs={group.docs} />
+      </section>
+    ))}
+  </HelpShell>
+</Base>

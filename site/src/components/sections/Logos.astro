@@ -1,5 +1,8 @@
 ---
 import { href } from "../../lib/href";
+import { getI18n } from "../../i18n";
+
+const { t } = getI18n(Astro.url);
 
 const logos = [
   { name: "Astro", file: "astro" },
@@ -11,8 +14,8 @@ const logos = [
 ];
 ---
 
-<section class="mx-auto max-w-7xl border-x border-line py-section" id="logos" aria-label="Works with your stack">
-  <p class="page mb-6 text-small text-muted">Works with the stack and agents you already have</p>
+<section class="mx-auto max-w-7xl border-x border-line py-section" id="logos" aria-label={t("home.logos.label")}>
+  <p class="page mb-6 text-small text-muted">{t("home.logos.intro")}</p>
   <ul class="grid grid-cols-2 gap-px border-y border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
     {logos.map((logo) => (
       <li class="flex min-h-20 items-center justify-center bg-surface px-4 py-5">
@@ -41,6 +44,6 @@ const logos = [
     ))}
   </ul>
   <p class="page mt-5 text-small text-muted">
-    Same files. Same history. Same deploy — drafts, checkpoints and Publish on the repo you already have.
+    {t("home.logos.outro")}
   </p>
 </section>

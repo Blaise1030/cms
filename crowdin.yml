@@ -1,0 +1,18 @@
+# Crowdin sync config, used by .github/workflows/crowdin.yml.
+# English is the source; Crowdin writes each translation next to it in a sibling locale folder,
+# e.g. site/src/content/blog/en/post.md -> site/src/content/blog/zh/post.md.
+project_id_env: CROWDIN_PROJECT_ID
+api_token_env: CROWDIN_PERSONAL_TOKEN
+base_path: "."
+preserve_hierarchy: true
+
+# Target languages (set in the Crowdin project): Chinese Simplified and Malay. Their two-letter
+# codes, zh and ms, are the locale keys in site/src/i18n/locales.ts.
+files:
+  # Blog and help Markdown. Lock every front-matter key except title, description and coverAlt
+  # in the project's Markdown settings; the site ignores translated values for the rest.
+  - source: /site/src/content/**/en/*.md
+    translation: /site/src/content/**/%two_letters_code%/%original_file_name%
+  # Page copy for every template (header, footer, home page, blog and help chrome).
+  - source: /site/src/i18n/messages/en.json
+    translation: /site/src/i18n/messages/%two_letters_code%.json

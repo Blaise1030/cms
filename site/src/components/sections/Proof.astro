@@ -1,25 +1,25 @@
 ---
+import { getI18n } from "../../i18n";
+
+const { t } = getI18n(Astro.url);
 ---
 
 <section class="page mx-auto grid max-w-7xl gap-14 border border-line py-section lg:grid-cols-12 lg:gap-10" id="proof">
   <figure class="lg:col-span-6">
-    <p class="text-label font-medium text-muted">Teams are deleting their CMS. Orso brings everyone else along.</p>
+    <p class="text-label font-medium text-muted">{t("home.proof.eyebrow")}</p>
     <blockquote class="mt-7 text-title font-normal tracking-tight text-ink">
-      “With AI and coding agents, the cost of an abstraction has never been higher.”
+      {t("home.proof.quote")}
     </blockquote>
     <figcaption class="mt-7 text-small">
       <span class="font-medium text-ink">Lee Robinson</span>
-      <span class="block text-muted">Coding Agents & Complexity Budgets</span>
+      <span class="block text-muted">{t("home.proof.source")}</span>
     </figcaption>
   </figure>
 
   <aside class="border-t border-line pt-8 lg:col-span-6 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
-    <p class="text-label font-medium text-muted">A note from the maker</p>
+    <p class="text-label font-medium text-muted">{t("home.proof.noteTitle")}</p>
     <p class="mt-5 text-muted">
-      That move works when the people editing the site already work like developers. Most marketing teams don't.
-      Delete the CMS and someone still asks, the week after, “can you change the pricing?” I built Orso so they can
-      do it themselves, with the forms, drafts and safe Publish button a CMS gave them, while the content stays in
-      the repo. If it isn't simple enough for my own non-technical teammates, it isn't done.
+      {t("home.proof.note")}
     </p>
     <p class="mt-5 text-small font-medium text-ink">
       — Blaise ·

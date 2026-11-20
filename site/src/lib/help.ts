@@ -1,4 +1,6 @@
-import { getCollection, type CollectionEntry } from "astro:content";
+import type { CollectionEntry } from "astro:content";
+import { defaultLocale, type Locale } from "../i18n/locales";
+import { getLocalizedCollection } from "./localized";
 
 export type Doc = CollectionEntry<"helpDocs">;
 
@@ -40,13 +42,16 @@ const byOrder = (a: Ordered, b: Ordered) => a.order - b.order || a.title.localeC
 const docOrder = (a: Doc, b: Doc) =>
   byOrder({ order: a.data.order, title: a.data.title, id: a.id }, { order: b.data.order, title: b.data.title, id: b.id });
 
-/** Sections, topics and the reading order (section, then subsection, then `order`) of every article. */
-export async function loadHelp() {
+/**
+ * Sections, topics and the reading order (section, then subsection, then `order`) of every
+ * article, in `locale` (English where untranslated).
+ */
+export async function loadHelp(locale: Locale = defaultLocale) {
   const [docs, sectionEntries, subsectionEntries, topicEntries] = await Promise.all([
-    getCollection("helpDocs"),
-    getCollection("helpCategories"),
-    getCollection("helpSubcategories"),
-    getCollection("helpDocsCategories"),
+    getLocalizedCollection("helpDocs", locale),
+    getLocalizedCollection("helpCategories", locale),
+    getLocalizedCollection("helpSubcategories", locale),
+    getLocalizedCollection("helpDocsCategories", locale),
   ]);
 
   const sections = new Map<string, Ordered & { description?: string }>();

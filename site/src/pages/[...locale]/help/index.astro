@@ -1,0 +1,56 @@
+---
+import Base from "../../../layouts/Base.astro";
+import HelpShell from "../../../components/HelpShell.astro";
+import Icon from "../../../components/Icon.astro";
+import UButton from "@nuxt/ui/components/Button.vue";
+import { loadHelp } from "../../../lib/help";
+import { breadcrumbs } from "../../../lib/seo";
+import { getI18n, localeStaticPaths } from "../../../i18n";
+
+export const getStaticPaths = localeStaticPaths;
+const { t, path, sitePath, locale } = getI18n(Astro.url);
+const { sections, topics, docs } = await loadHelp(locale);
+const shown = sections.filter((section) => section.docs.length > 0);
+const shownTopics = topics.filter((topic) => topic.docs.length > 0);
+const count = (n: number) => t("help.articleCount", { count: n });
+---
+<Base
+  title={t("help.title")}
+  description={t("help.description")}
+  jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: t("help.title") }, breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("help.title"), path: sitePath("/help/") }])]}
+>
+  <HelpShell current="/help/">
+    <h1 class="text-title tracking-display text-ink">{t("help.title")}</h1>
+    <p class="mt-4 max-w-prose text-body text-muted">{t("help.intro")}</p>
+
+    {docs.length === 0 ? <p class="mt-12 text-muted">{t("help.empty")}</p> : (
+      <>
+        <section class="mt-12" aria-labelledby="browse">
+          <h2 class="text-heading tracking-tight text-ink" id="browse">{t("help.browse")}</h2>
+          <ul class="mt-5 grid gap-3 sm:grid-cols-2">
+            {shown.map((section) => (
+              <li class="group relative flex items-center gap-3 rounded-lg border border-line bg-surface-raised px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand">
+                <div class="min-w-0 flex-1">
+                  <h3 class="font-medium text-ink">
+                    <a class="after:absolute after:inset-0" href={path(`/help/section/${section.id}/`)}>{section.title}</a>
+                  </h3>
+                  <p class="text-small text-muted">{count(section.docs.length)}</p>
+                </div>
+                <Icon name="chevron-right" class="size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:translate-x-0.5" />
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {shownTopics.length > 0 && (
+          <nav class="mt-12" aria-labelledby="topics">
+            <h2 class="text-heading tracking-tight text-ink" id="topics">{t("help.topics")}</h2>
+            <div class="mt-4 flex flex-wrap gap-2">
+              {shownTopics.map((topic) => <UButton color="neutral" variant="outline" size="sm" class="rounded-full px-3" label={topic.title} to={path(`/help/categories/${topic.id}/`)} />)}
+            </div>
+          </nav>
+        )}
+      </>
+    )}
+  </HelpShell>
+</Base>

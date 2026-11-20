@@ -1,0 +1,313 @@
+{
+  "site": {
+    "tagline": "Developer tools for content teams",
+    "description": "Let your content team edit the site with an agent. Drafts, previews and Publish — content stays in your repo.",
+    "homeLabel": "{name} home",
+    "alpha": "Alpha",
+    "skipToContent": "Skip to content",
+    "language": "Language"
+  },
+  "nav": {
+    "product": "Product",
+    "howItWorks": "How it works",
+    "faq": "FAQ",
+    "blog": "Blog",
+    "help": "Help",
+    "github": "GitHub",
+    "getOrso": "Get Orso",
+    "main": "Main",
+    "menu": "Menu",
+    "openMenu": "Open menu",
+    "close": "Close"
+  },
+  "footer": {
+    "label": "Footer",
+    "copyright": "© 2026 Project Orso",
+    "groups": {
+      "Product": "Product",
+      "Resources": "Resources",
+      "More": "More"
+    },
+    "links": {
+      "privacy": "Privacy",
+      "terms": "Terms",
+      "openSource": "Open source",
+      "licence": "MIT licence",
+      "download": "Download",
+      "releases": "Releases",
+      "blogTopics": "Blog topics",
+      "helpTopics": "Help topics",
+      "llms": "llms.txt",
+      "reportIssue": "Report an issue",
+      "coffee": "Buy me a coffee",
+      "portfolio": "Portfolio",
+      "github": "GitHub"
+    }
+  },
+  "download": {
+    "button": "Download for {platform}",
+    "otherPlatform": "Choose another platform",
+    "allReleases": "All releases on GitHub",
+    "thanksTitle": "Thanks for downloading Orso",
+    "thanksDescription": "Your download should start in a moment.",
+    "macSteps": "Open the DMG and drag Orso to Applications. Orso isn't notarized by Apple yet, so macOS blocks it the first time: open System Settings → Privacy & Security and click Open Anyway, or run this once:",
+    "macCost": "Notarizing costs $99 a year. If Orso is useful to you, a coffee helps cover it.",
+    "otherNote": "Orso is free and built in my spare time. If it's useful to you, a coffee helps keep it going.",
+    "coffee": "Buy me a coffee",
+    "later": "Maybe later"
+  },
+  "search": {
+    "hint": "Type to find a page, then press Enter to open it.",
+    "unavailable": "Search works on the published site.",
+    "noResults": "No results for “{term}”.",
+    "prompt": "Type to search."
+  },
+  "toc": {
+    "title": "On this page"
+  },
+  "home": {
+    "hero": {
+      "headline": "Let your content team edit the site with an",
+      "body": "You own the repo, so every “can you change the pricing?” lands on you. With Orso, marketers, writers and founders make those changes themselves, in a form or by asking an agent. Each one is a pull request you review before it goes live.",
+      "secondary": "See what it does",
+      "note": "Free and open source. Content stays in your repo.",
+      "tabs": {
+        "content": {
+          "label": "Content",
+          "description": "Every collection in the repo, as a list you can use.",
+          "alt": "Orso's editor open on a blog post: the markdown body beside its title, slug, date and tags."
+        },
+        "preview": {
+          "label": "Preview",
+          "description": "See the draft on desktop and mobile before anyone else.",
+          "alt": "Orso previewing the same blog post rendered on the draft site, with the agent panel open beside it."
+        },
+        "publish": {
+          "label": "Publish",
+          "description": "Checks run first, then one button puts it live.",
+          "alt": "Orso's changes menu over the preview, listing the live site and open drafts, next to Review and Publish."
+        },
+        "agent": {
+          "label": "Agent",
+          "description": "Ask for a page, a pass or a whole new section.",
+          "alt": "Orso's agent panel next to the site preview, ready for a request."
+        },
+        "history": {
+          "label": "History",
+          "description": "Every save is a checkpoint you can go back to.",
+          "alt": "Orso's history: a timeline of checkpoints with author, commit and time."
+        }
+      }
+    },
+    "logos": {
+      "label": "Works with your stack",
+      "intro": "Works with the stack and agents you already have",
+      "outro": "Same files. Same history. Same deploy — drafts, checkpoints and Publish on the repo you already have."
+    },
+    "ops": {
+      "title": "Handle content work at scale",
+      "body": "The desk your team uses for drafts, previews, Publish and history, built on the repo you already set up.",
+      "slides": {
+        "content": {
+          "title": "Collections you can browse",
+          "caption": "Every Markdown collection in the repo, as a list with status.",
+          "alt": "Orso editing a blog post: the body on the left, its fields (slug, title, date, tags) in a form on the right."
+        },
+        "preview": {
+          "title": "Desktop and mobile preview",
+          "caption": "Share a draft link, leave comments, approve before Publish.",
+          "alt": "Orso previewing a draft of the site, with the agent panel open beside it."
+        },
+        "publish": {
+          "title": "Publish with a checklist",
+          "caption": "Build, links and review run first. One button puts it live.",
+          "alt": "Orso's changes menu listing the live site and open drafts."
+        },
+        "agent": {
+          "title": "Ask in plain English",
+          "caption": "Whole pages, a pass on the FAQ, or a new section — as a draft.",
+          "alt": "Orso's agent panel beside the site preview."
+        },
+        "history": {
+          "title": "Checkpoints you can restore",
+          "caption": "Every save is history. Restoring makes a new draft, never a rewrite.",
+          "alt": "An Orso checkpoint opened from the history timeline."
+        }
+      }
+    },
+    "features": {
+      "eyebrow": "Their tools, your repo",
+      "title": "Get the most out of your repo with tools the team can actually use",
+      "body": "The same files you already own, with drafts, previews and an agent on top. There's no second CMS to keep in sync.",
+      "cards": {
+        "drafts": {
+          "title": "Drafts and checkpoints",
+          "description": "Every edit lands in a draft with a checkpoint you can restore. Nothing reaches the live site until someone presses Publish.",
+          "alt": "Orso's history: a timeline of checkpoints, newest first, with author, commit and time."
+        },
+        "review": {
+          "title": "Previews and review",
+          "description": "Share a preview link, leave comments on the page, and approve the change before it goes live — on desktop and mobile.",
+          "alt": "Orso previewing a draft, with the page details panel showing its title, description and social image."
+        },
+        "agent": {
+          "title": "Agent in plain English",
+          "description": "Ask for a page, a pass on the FAQ, or a whole new section. The agent edits the repo; you still own Publish.",
+          "alt": "Orso's agent panel next to the site preview, ready for a request."
+        }
+      }
+    },
+    "agentBand": {
+      "title": "Ship pages faster with an agent on your repo",
+      "editing": "Agentic editing",
+      "agents": "Which agents work",
+      "alt": "Orso's agent panel beside the site preview, where a teammate asks for changes in plain English."
+    },
+    "proof": {
+      "eyebrow": "Teams are deleting their CMS. Orso brings everyone else along.",
+      "quote": "“With AI and coding agents, the cost of an abstraction has never been higher.”",
+      "source": "Coding Agents & Complexity Budgets",
+      "noteTitle": "A note from the maker",
+      "note": "That move works when the people editing the site already work like developers. Most marketing teams don't. Delete the CMS and someone still asks, the week after, “can you change the pricing?” I built Orso so they can do it themselves, with the forms, drafts and safe Publish button a CMS gave them, while the content stays in the repo. If it isn't simple enough for my own non-technical teammates, it isn't done."
+    },
+    "faq": {
+      "title": "Questions, answered.",
+      "intro": "Anything else, write to the team. A person replies, not a ticket bot. The {link} has step-by-step guides.",
+      "introLink": "help centre",
+      "items": {
+        "who": {
+          "question": "Who is Project Orso for?",
+          "answer": "Teams where developers own the repo but marketers, writers and founders own the words. It gives the second group the tools the first already uses — drafts, previews, reviews and a coding agent — without asking them to learn any of it."
+        },
+        "git": {
+          "question": "Does my team need to know Git or code?",
+          "answer": "No. Copy, posts and help articles have forms, and anything bigger can go to the agent in plain English. They see drafts, previews and a Publish button, never branches or commits."
+        },
+        "github": {
+          "question": "Does everyone need a GitHub account?",
+          "answer": "Yes, and that's the only GitHub they'll touch. Access is your GitHub team, so there's no second login to manage and no separate list of who can publish."
+        },
+        "migrate": {
+          "question": "Do I have to migrate my content?",
+          "answer": "No. Orso reads the Markdown already in your repo. Open the repo and your posts and docs show up as collections."
+        },
+        "sites": {
+          "question": "Which sites does it work with, and what does it add to my repo?",
+          "answer": "Astro 7 sites with a main branch. New sites start from Orso's template. For an existing site, Orso adds a small integration and loads your collections through it. A setup skill makes those changes on a branch for you to review."
+        },
+        "live": {
+          "question": "Who decides what goes live?",
+          "answer": "You do, through GitHub. Every change is a pull request into main, and Publish merges it once it's approved. Turn on branch protection and nothing merges without a review."
+        },
+        "cms": {
+          "question": "How is this different from a hosted or Git-based CMS?",
+          "answer": "A hosted CMS keeps your content in its own database. A Git-based CMS keeps it in your repo and gives editors forms for the fields you configure. Orso also keeps it in your repo, then adds live previews of the real site, pull-request review and a coding agent for changes a form can't make."
+        },
+        "break": {
+          "question": "Can someone break the live site?",
+          "answer": "Not by accident. Every change lands in a draft with its own preview, nothing goes live until someone hits Publish, and every save is a checkpoint you can roll back in one click."
+        },
+        "agent": {
+          "question": "Which AI agent do I need?",
+          "answer": "Claude, Cursor, Codex or OpenCode. If your team already pays for one of the first three, that's everything Orso needs. OpenCode runs free models and needs no account."
+        },
+        "free": {
+          "question": "How is this free?",
+          "answer": "Project Orso is an open-source project, not a product with plans. Read it, fork it, run it locally — there's no paid tier and nothing behind a paywall."
+        },
+        "stop": {
+          "question": "What happens if we stop using Orso?",
+          "answer": "Nothing changes. Your content was always Markdown in your own repo, every change is already in its history, and the site is plain static files."
+        }
+      }
+    },
+    "cta": {
+      "title": "Ready to let your team run the site?",
+      "body": "You install Orso and connect the repo once. After that, your team edits with drafts, previews and Publish.",
+      "github": "View on GitHub",
+      "platforms": "macOS and Linux.",
+      "facts": {
+        "free": {
+          "title": "Free and open source",
+          "detail": "MIT licence, no paid tier."
+        },
+        "repo": {
+          "title": "Content stays in your repo",
+          "detail": "Plain Markdown you already own."
+        },
+        "static": {
+          "title": "Static files, any host",
+          "detail": "No runtime and no lock-in."
+        }
+      }
+    }
+  },
+  "blog": {
+    "title": "Blog",
+    "description": "Product news, practical guides and stories from the team behind Orso.",
+    "empty": "No blog posts yet. Check back soon for news and stories.",
+    "recent": "Recent posts",
+    "search": "Search posts",
+    "allPosts": "All posts",
+    "categoriesLabel": "Blog categories",
+    "tags": "Tags",
+    "keepReading": "Keep reading",
+    "posts": "Posts",
+    "postCount": {
+      "one": "{count} post",
+      "other": "{count} posts"
+    },
+    "categories": {
+      "title": "Blog categories",
+      "description": "Browse Orso blog posts by topic: product news, practical guides and company stories.",
+      "empty": "No blog categories yet.",
+      "back": "Back to Blog",
+      "all": "All categories",
+      "crumb": "Categories"
+    },
+    "category": {
+      "title": "Blog: {title}",
+      "description": "Blog posts about {title}.",
+      "empty": "No posts in this category yet."
+    }
+  },
+  "help": {
+    "title": "Help",
+    "description": "Guides and answers for using Orso, from connecting a repo to drafts, previews and Publish.",
+    "intro": "Guides and answers for every step, from your first sign-in to your next invoice.",
+    "empty": "No help docs yet. Check back soon for guides and answers.",
+    "browse": "Browse by section",
+    "topics": "Topics",
+    "overview": "Overview",
+    "search": "Search help",
+    "browseHelp": "Browse help",
+    "navLabel": "Help navigation",
+    "moreArticles": "More articles",
+    "previous": "Previous",
+    "next": "Next",
+    "articleCount": {
+      "one": "{count} article",
+      "other": "{count} articles"
+    },
+    "section": {
+      "title": "Help: {title}",
+      "description": "Help articles about {title}.",
+      "empty": "No articles in this section yet."
+    },
+    "topicsPage": {
+      "title": "Help topics",
+      "description": "Browse Orso help articles by topic, such as setup, collaboration and troubleshooting.",
+      "empty": "No help topics yet.",
+      "back": "Back to Help",
+      "all": "All topics"
+    },
+    "topic": {
+      "title": "Help topic: {title}",
+      "description": "Help articles about {title}.",
+      "empty": "No articles on this topic yet."
+    }
+  },
+  "common": {
+    "home": "Home"
+  }
+}

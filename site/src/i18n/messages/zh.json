@@ -1,0 +1,313 @@
+{
+  "site": {
+    "tagline": "面向内容团队的开发者工具",
+    "description": "让内容团队借助智能体编辑网站。草稿、预览和 Publish——内容始终保留在你的仓库中。",
+    "homeLabel": "{name} 首页",
+    "alpha": "Alpha",
+    "skipToContent": "跳到主要内容",
+    "language": "语言"
+  },
+  "nav": {
+    "product": "产品",
+    "howItWorks": "工作原理",
+    "faq": "常见问题",
+    "blog": "博客",
+    "help": "帮助",
+    "github": "GitHub",
+    "getOrso": "获取 Orso",
+    "main": "主导航",
+    "menu": "菜单",
+    "openMenu": "打开菜单",
+    "close": "关闭"
+  },
+  "footer": {
+    "label": "页脚",
+    "copyright": "© 2026 Project Orso",
+    "groups": {
+      "Product": "产品",
+      "Resources": "资源",
+      "More": "更多"
+    },
+    "links": {
+      "privacy": "隐私政策",
+      "terms": "服务条款",
+      "openSource": "开源",
+      "licence": "MIT 许可证",
+      "download": "下载",
+      "releases": "版本发布",
+      "blogTopics": "博客主题",
+      "helpTopics": "帮助主题",
+      "llms": "llms.txt",
+      "reportIssue": "报告问题",
+      "coffee": "请我喝杯咖啡",
+      "portfolio": "作品集",
+      "github": "GitHub"
+    }
+  },
+  "download": {
+    "button": "下载 {platform} 版",
+    "otherPlatform": "选择其他平台",
+    "allReleases": "在 GitHub 上查看所有版本",
+    "thanksTitle": "感谢下载 Orso",
+    "thanksDescription": "下载即将开始。",
+    "macSteps": "打开 DMG，将 Orso 拖到 Applications 文件夹。Orso 尚未通过 Apple 公证，因此 macOS 会在首次打开时阻止它：请打开 System Settings → Privacy & Security 并点击 Open Anyway，或运行一次以下命令：",
+    "macCost": "公证每年需要 $99。如果 Orso 对你有帮助，请我喝杯咖啡就能帮忙分担这笔费用。",
+    "otherNote": "Orso 免费提供，是我利用业余时间开发的。如果它对你有用，请我喝杯咖啡，帮它继续走下去。",
+    "coffee": "请我喝杯咖啡",
+    "later": "以后再说"
+  },
+  "search": {
+    "hint": "输入关键词查找页面，然后按 Enter 打开。",
+    "unavailable": "搜索功能仅在已发布的网站上可用。",
+    "noResults": "未找到与“{term}”相关的结果。",
+    "prompt": "输入以搜索。"
+  },
+  "toc": {
+    "title": "本页内容"
+  },
+  "home": {
+    "hero": {
+      "headline": "让内容团队借助智能体编辑网站。",
+      "body": "仓库归你管，所以每一句“能帮忙改下价格吗？”都会落到你头上。有了 Orso，市场人员、写作者和创始人可以自己完成这些修改——填写表单，或者直接让智能体代劳。每次修改都是一个拉取请求，上线前由你审核。",
+      "secondary": "看看它能做什么",
+      "note": "免费开源。内容始终保留在你的仓库中。",
+      "tabs": {
+        "content": {
+          "label": "内容",
+          "description": "仓库中的每个集合，都是一份可直接使用的列表。",
+          "alt": "Orso 编辑器中打开的一篇博客文章：Markdown 正文旁边是标题、slug、日期和标签。"
+        },
+        "preview": {
+          "label": "预览",
+          "description": "抢先在桌面端和移动端查看草稿。",
+          "alt": "Orso 正在预览草稿网站上渲染的同一篇博客文章，旁边打开着智能体面板。"
+        },
+        "publish": {
+          "label": "发布",
+          "description": "先运行检查，再一键上线。",
+          "alt": "Orso 的更改菜单覆盖在预览之上，列出线上网站和未完成的草稿，旁边是 Review 和 Publish 按钮。"
+        },
+        "agent": {
+          "label": "智能体",
+          "description": "让它新建页面、整体润色，或添加一个全新的版块。",
+          "alt": "Orso 的智能体面板位于网站预览旁，随时待命。"
+        },
+        "history": {
+          "label": "历史记录",
+          "description": "每次保存都是一个可以回退的检查点。",
+          "alt": "Orso 的历史记录：包含作者、提交和时间的检查点时间线。"
+        }
+      }
+    },
+    "logos": {
+      "label": "兼容你的技术栈",
+      "intro": "兼容你现有的技术栈和智能体",
+      "outro": "同样的文件。同样的历史。同样的部署——在你现有的仓库上使用草稿、检查点和 Publish。"
+    },
+    "ops": {
+      "title": "大规模处理内容工作",
+      "body": "团队处理草稿、预览、Publish 和历史记录的工作台，构建于你已搭建好的仓库之上。",
+      "slides": {
+        "content": {
+          "title": "可浏览的集合",
+          "caption": "仓库中的每个 Markdown 集合，都以带状态的列表呈现。",
+          "alt": "Orso 正在编辑一篇博客文章：左侧是正文，右侧表单中是其字段（slug、标题、日期、标签）。"
+        },
+        "preview": {
+          "title": "桌面端与移动端预览",
+          "caption": "分享草稿链接、留下评论，在 Publish 前批准。",
+          "alt": "Orso 正在预览网站草稿，旁边打开着智能体面板。"
+        },
+        "publish": {
+          "title": "按清单发布",
+          "caption": "先运行构建、链接检查和审核，一键即可上线。",
+          "alt": "Orso 的更改菜单，列出线上网站和未完成的草稿。"
+        },
+        "agent": {
+          "title": "用自然语言提需求",
+          "caption": "整个页面、润色常见问题，或新增版块——都以草稿形式呈现。",
+          "alt": "Orso 的智能体面板位于网站预览旁。"
+        },
+        "history": {
+          "title": "可恢复的检查点",
+          "caption": "每次保存都会留下历史。恢复会生成新草稿，绝不改写历史。",
+          "alt": "从历史时间线中打开的 Orso 检查点。"
+        }
+      }
+    },
+    "features": {
+      "eyebrow": "他们的工具，你的仓库",
+      "title": "用团队真正会用的工具，充分发挥仓库的价值",
+      "body": "还是你已拥有的那些文件，只是多了草稿、预览和智能体。无需再维护第二套需要同步的 CMS。",
+      "cards": {
+        "drafts": {
+          "title": "草稿与检查点",
+          "description": "每次编辑都会进入草稿，并生成可恢复的检查点。在有人点击 Publish 之前，任何内容都不会上线。",
+          "alt": "Orso 的历史记录：检查点时间线，最新的在前，包含作者、提交和时间。"
+        },
+        "review": {
+          "title": "预览与审核",
+          "description": "分享预览链接、在页面上留下评论，并在更改上线前批准——桌面端和移动端均可。",
+          "alt": "Orso 正在预览草稿，页面详情面板中显示其标题、描述和社交分享图。"
+        },
+        "agent": {
+          "title": "用自然语言驱动的智能体",
+          "description": "让它新建页面、润色常见问题，或添加一个全新的版块。智能体负责修改仓库，Publish 的决定权仍在你手中。",
+          "alt": "Orso 的智能体面板位于网站预览旁，随时待命。"
+        }
+      }
+    },
+    "agentBand": {
+      "title": "让智能体接入你的仓库，更快上线页面",
+      "editing": "智能体编辑",
+      "agents": "支持哪些智能体",
+      "alt": "Orso 的智能体面板位于网站预览旁，团队成员可以用自然语言提出修改需求。"
+    },
+    "proof": {
+      "eyebrow": "越来越多的团队正在删除 CMS。Orso 让其他人也能跟上。",
+      "quote": "“有了 AI 和编程智能体，抽象的代价从未如此之高。”",
+      "source": "Coding Agents & Complexity Budgets",
+      "noteTitle": "来自开发者的话",
+      "note": "当编辑网站的人本身就像开发者一样工作时，这种做法行得通。但大多数市场团队并非如此。删掉 CMS 之后，一周后还是会有人问：“能帮忙改下价格吗？”我开发 Orso，就是为了让他们能自己动手——用上 CMS 曾经提供的表单、草稿和安全的 Publish 按钮，同时内容仍保留在仓库中。如果它还没有简单到让我身边不懂技术的同事也能上手，那它就还没完成。"
+    },
+    "faq": {
+      "title": "常见问题，一一解答。",
+      "intro": "如有其他问题，欢迎写信给团队。回复你的是真人，而不是工单机器人。{link}提供分步指南。",
+      "introLink": "帮助中心",
+      "items": {
+        "who": {
+          "question": "Project Orso 适合谁？",
+          "answer": "适合开发者掌管仓库、而市场人员、写作者和创始人负责文字内容的团队。它让后者也能用上前者早已在用的工具——草稿、预览、审核和编程智能体——而无需学习其中任何一项。"
+        },
+        "git": {
+          "question": "我的团队需要懂 Git 或代码吗？",
+          "answer": "不需要。文案、文章和帮助文档都有对应的表单，更大的改动可以用自然语言交给智能体。他们看到的是草稿、预览和 Publish 按钮，而不是分支或提交。"
+        },
+        "github": {
+          "question": "每个人都需要 GitHub 账号吗？",
+          "answer": "需要，而且这是他们唯一会接触到的 GitHub 部分。访问权限就是你的 GitHub 团队，因此无需管理第二套登录，也无需另外维护一份谁能发布的名单。"
+        },
+        "migrate": {
+          "question": "我需要迁移内容吗？",
+          "answer": "不需要。Orso 直接读取仓库中已有的 Markdown。打开仓库，你的文章和文档就会以集合的形式显示出来。"
+        },
+        "sites": {
+          "question": "它支持哪些网站？会给我的仓库添加什么？",
+          "answer": "支持带有 main 分支的 Astro 7 网站。新网站可以从 Orso 的模板开始。对于现有网站，Orso 会添加一个小型集成，并通过它加载你的集合。一个设置技能会在分支上完成这些修改，供你审核。"
+        },
+        "live": {
+          "question": "由谁决定什么内容上线？",
+          "answer": "由你通过 GitHub 决定。每次更改都是一个合并到 main 的拉取请求，获批后由 Publish 合并。开启分支保护后，任何内容未经审核都无法合并。"
+        },
+        "cms": {
+          "question": "它与托管式或基于 Git 的 CMS 有何不同？",
+          "answer": "托管式 CMS 将内容保存在自己的数据库中。基于 Git 的 CMS 将内容保存在你的仓库中，并为编辑者提供你所配置字段的表单。Orso 同样将内容保存在你的仓库中，此外还提供真实网站的实时预览、拉取请求审核，以及一个编程智能体，处理表单无法完成的改动。"
+        },
+        "break": {
+          "question": "会有人把线上网站搞坏吗？",
+          "answer": "不会意外搞坏。每次更改都会进入带有独立预览的草稿，在有人点击 Publish 之前不会上线，而且每次保存都是一个检查点，一键即可回滚。"
+        },
+        "agent": {
+          "question": "我需要哪个 AI 智能体？",
+          "answer": "Claude、Cursor、Codex 或 OpenCode。如果你的团队已经在为前三者之一付费，Orso 所需的一切就都齐了。OpenCode 可运行免费模型，且无需账号。"
+        },
+        "free": {
+          "question": "为什么是免费的？",
+          "answer": "Project Orso 是一个开源项目，而不是分套餐的产品。阅读源码、fork、在本地运行都可以——没有付费版本，也没有任何付费墙。"
+        },
+        "stop": {
+          "question": "如果我们不再使用 Orso，会怎样？",
+          "answer": "什么都不会改变。你的内容始终是你自己仓库中的 Markdown，每次更改都已记录在历史中，网站本身也只是普通的静态文件。"
+        }
+      }
+    },
+    "cta": {
+      "title": "准备好让团队自己管理网站了吗？",
+      "body": "你只需安装 Orso 并连接一次仓库。之后，团队就能通过草稿、预览和 Publish 进行编辑。",
+      "github": "在 GitHub 上查看",
+      "platforms": "支持 macOS 和 Linux。",
+      "facts": {
+        "free": {
+          "title": "免费开源",
+          "detail": "MIT 许可证，没有付费版本。"
+        },
+        "repo": {
+          "title": "内容保留在你的仓库中",
+          "detail": "你本就拥有的纯 Markdown。"
+        },
+        "static": {
+          "title": "静态文件，任意托管",
+          "detail": "无运行时，无厂商锁定。"
+        }
+      }
+    }
+  },
+  "blog": {
+    "title": "博客",
+    "description": "来自 Orso 团队的产品动态、实用指南和故事。",
+    "empty": "暂无博客文章。敬请期待最新动态和故事。",
+    "recent": "最新文章",
+    "search": "搜索文章",
+    "allPosts": "全部文章",
+    "categoriesLabel": "博客分类",
+    "tags": "标签",
+    "keepReading": "继续阅读",
+    "posts": "文章",
+    "postCount": {
+      "one": "{count} 篇文章",
+      "other": "{count} 篇文章"
+    },
+    "categories": {
+      "title": "博客分类",
+      "description": "按主题浏览 Orso 博客文章：产品动态、实用指南和公司故事。",
+      "empty": "暂无博客分类。",
+      "back": "返回博客",
+      "all": "全部分类",
+      "crumb": "分类"
+    },
+    "category": {
+      "title": "博客：{title}",
+      "description": "{title}相关的博客文章。",
+      "empty": "此分类下暂无文章。"
+    }
+  },
+  "help": {
+    "title": "帮助",
+    "description": "Orso 使用指南与解答，涵盖连接仓库、草稿、预览和 Publish。",
+    "intro": "每一步都有指南和解答，从首次登录到下一张账单。",
+    "empty": "暂无帮助文档。敬请期待指南和解答。",
+    "browse": "按版块浏览",
+    "topics": "主题",
+    "overview": "概览",
+    "search": "搜索帮助",
+    "browseHelp": "浏览帮助",
+    "navLabel": "帮助导航",
+    "moreArticles": "更多文章",
+    "previous": "上一篇",
+    "next": "下一篇",
+    "articleCount": {
+      "one": "{count} 篇文章",
+      "other": "{count} 篇文章"
+    },
+    "section": {
+      "title": "帮助：{title}",
+      "description": "{title}相关的帮助文章。",
+      "empty": "此版块暂无文章。"
+    },
+    "topicsPage": {
+      "title": "帮助主题",
+      "description": "按主题浏览 Orso 帮助文章，例如设置、协作和故障排除。",
+      "empty": "暂无帮助主题。",
+      "back": "返回帮助",
+      "all": "全部主题"
+    },
+    "topic": {
+      "title": "帮助主题：{title}",
+      "description": "{title}相关的帮助文章。",
+      "empty": "此主题下暂无文章。"
+    }
+  },
+  "common": {
+    "home": "首页"
+  }
+}

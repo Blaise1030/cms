@@ -8,6 +8,21 @@ import UModal from "@nuxt/ui/components/Modal.vue";
 import { site } from "../../site";
 
 const { version, repo, coffeeUrl, downloads } = site.release;
+
+/** The button's copy, from `download` in src/i18n/messages (`{platform}` is filled in here). */
+export type DownloadLabels = {
+  button: string;
+  otherPlatform: string;
+  allReleases: string;
+  thanksTitle: string;
+  thanksDescription: string;
+  macSteps: string;
+  macCost: string;
+  otherNote: string;
+  coffee: string;
+  later: string;
+};
+const props = defineProps<{ labels: DownloadLabels }>();
 type Download = (typeof downloads)[number];
 
 const assetUrl = (d: { target: string; ext: string }) => `${repo}/releases/download/${version}/orso-${version}-${d.target}.${d.ext}`;
@@ -39,7 +54,7 @@ const items = computed<DropdownMenuItem[][]>(() => [
     slot: "download" as const,
     onSelect: () => (downloaded.value = d),
   })),
-  [{ label: "All releases on GitHub", to: `${repo}/releases/latest`, rel: "noopener noreferrer", class: "text-muted" }],
+  [{ label: props.labels.allReleases, to: `${repo}/releases/latest`, rel: "noopener noreferrer", class: "text-muted" }],
 ]);
 </script>
 
@@ -48,7 +63,7 @@ const items = computed<DropdownMenuItem[][]>(() => [
     <UButton
       size="lg"
       icon="i-hugeicons-download-04"
-      :label="`Download for ${primary.label}`"
+      :label="props.labels.button.replace('{platform}', primary.label)"
       :to="assetUrl(primary)"
       target="_self"
       rel="noopener noreferrer"
@@ -58,7 +73,7 @@ const items = computed<DropdownMenuItem[][]>(() => [
       <UButton
         size="lg"
         icon="i-hugeicons-arrow-down-01"
-        aria-label="Choose another platform"
+        :aria-label="props.labels.otherPlatform"
         class="border-l border-on-accent/20"
       />
       <template #download-label="{ item }">
@@ -72,29 +87,26 @@ const items = computed<DropdownMenuItem[][]>(() => [
 
   <UModal
     v-model:open="open"
-    title="Thanks for downloading Orso"
-    description="Your download should start in a moment."
+    :title="props.labels.thanksTitle"
+    :description="props.labels.thanksDescription"
     :ui="{ overlay: 'z-50 bg-night/30 backdrop-blur-md', content: 'z-50 max-w-md', title: 'text-body font-medium text-ink', description: 'text-small text-muted' }"
   >
     <template #body>
       <div class="space-y-3 text-small text-muted">
         <template v-if="downloaded?.os === 'mac'">
-          <p>
-            Open the DMG and drag Orso to Applications. Orso isn't notarized by Apple yet, so macOS blocks it the first
-            time: open System Settings → Privacy &amp; Security and click Open Anyway, or run this once:
-          </p>
+          <p>{{ props.labels.macSteps }}</p>
           <code class="block overflow-x-auto rounded-md border border-line bg-surface px-3 py-2 whitespace-nowrap text-ink">
             xattr -dr com.apple.quarantine /Applications/orso.app
           </code>
-          <p>Notarizing costs $99 a year. If Orso is useful to you, a coffee helps cover it.</p>
+          <p>{{ props.labels.macCost }}</p>
         </template>
-        <p v-else>Orso is free and built in my spare time. If it's useful to you, a coffee helps keep it going.</p>
+        <p v-else>{{ props.labels.otherNote }}</p>
       </div>
     </template>
     <template #footer="{ close }">
       <div class="flex flex-wrap gap-3">
-        <UButton size="lg" icon="i-hugeicons-coffee-02" label="Buy me a coffee" :to="coffeeUrl" target="_blank" rel="noopener noreferrer" />
-        <UButton size="lg" color="neutral" variant="outline" label="Maybe later" @click="close" />
+        <UButton size="lg" icon="i-hugeicons-coffee-02" :label="props.labels.coffee" :to="coffeeUrl" target="_blank" rel="noopener noreferrer" />
+        <UButton size="lg" color="neutral" variant="outline" :label="props.labels.later" @click="close" />
       </div>
     </template>
   </UModal>

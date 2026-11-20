@@ -1,5 +1,5 @@
 ---
-import { href } from "../lib/href";
+import { getI18n } from "../i18n";
 import UButton from "@nuxt/ui/components/Button.vue";
 import type { BlogCategory } from "../lib/blog";
 
@@ -9,12 +9,13 @@ interface Props {
   active?: string;
 }
 const { categories, active } = Astro.props;
+const { t, path } = getI18n(Astro.url);
 const shown = categories.filter((category) => category.posts.length > 0 || category.id === active);
 ---
 
 {shown.length > 0 && (
-  <nav class="-mx-1 flex gap-2 overflow-x-auto px-1 py-1 max-sm:-mx-gutter max-sm:px-gutter" aria-label="Blog categories">
-    <UButton color="neutral" variant={active ? "outline" : "soft"} size="lg" class="shrink-0 rounded-full px-4" label="All posts" to={href("/blog/")} aria-current={active ? undefined : "page"} />
+  <nav class="-mx-1 flex gap-2 overflow-x-auto px-1 py-1 max-sm:-mx-gutter max-sm:px-gutter" aria-label={t("blog.categoriesLabel")}>
+    <UButton color="neutral" variant={active ? "outline" : "soft"} size="lg" class="shrink-0 rounded-full px-4" label={t("blog.allPosts")} to={path("/blog/")} aria-current={active ? undefined : "page"} />
     {shown.map((category) => (
       <UButton
         color="neutral"
@@ -22,7 +23,7 @@ const shown = categories.filter((category) => category.posts.length > 0 || categ
         size="lg"
         class="shrink-0 rounded-full px-4"
         label={category.title}
-        to={href(`/blog/categories/${category.id}/`)}
+        to={path(`/blog/categories/${category.id}/`)}
         aria-current={category.id === active ? "page" : undefined}
       />
     ))}

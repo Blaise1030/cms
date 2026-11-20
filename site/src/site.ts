@@ -1,26 +1,33 @@
-/** Site-wide name, description, navigation and footer, rendered by `layouts/Base.astro`. */
+import en from "./i18n/messages/en.json";
+
+/**
+ * Site-wide name, links and release details, rendered by `layouts/Base.astro`. Every label the
+ * visitor reads lives in `src/i18n/messages/en.json` (and its translations); links here name
+ * their label by `key`: `nav.<key>` for header links, `footer.links.<key>` for footer links.
+ */
+export type FooterLink = { key: keyof typeof en.footer.links; href: string };
+
 export const site = {
   name: "Project Orso",
-  /** Short promise, used after the name in the home page title. */
-  tagline: "Developer tools for content teams",
-  /** Default meta description, social card text and llms.txt summary (keep it under 160 characters). */
-  description:
-    "Let your content team edit the site with an agent. Drafts, previews and Publish — content stays in your repo.",
+  /** Short promise, used after the name in the home page title. Edit it in messages/en.json (`site.tagline`). */
+  tagline: en.site.tagline,
+  /** Default meta description, social card text and llms.txt summary (under 160 characters). Edit it in messages/en.json (`site.description`). */
+  description: en.site.description,
   /** Placeholder live address. The build uses PUBLIC_SITE_URL when it is set; replace this with your domain. */
   url: "https://example.com",
   /** Default social card, served from `public/`. */
   ogImage: "/og-default.png",
   nav: [
-    { label: "Product", href: "#product" },
-    { label: "How it works", href: "#how-it-works" },
-    { label: "FAQ", href: "#faq" },
-    { label: "Blog", href: "/blog/" },
-    { label: "Help", href: "/help/" },
+    { key: "product", href: "#product" },
+    { key: "howItWorks", href: "#how-it-works" },
+    { key: "faq", href: "#faq" },
+    { key: "blog", href: "/blog/" },
+    { key: "help", href: "/help/" },
   ],
   /** Header secondary action; set to `null` to hide it. */
-  secondaryCta: { label: "GitHub", href: "https://github.com/Blaise1030/cms" },
+  secondaryCta: { key: "github", href: "https://github.com/Blaise1030/cms" },
   /** Header call to action; set to `null` to hide it. */
-  cta: { label: "Get Orso", href: "#get-orso" },
+  cta: { key: "getOrso", href: "#get-orso" },
   /** Download button: bump `version` when a new GitHub release ships; asset names must match the release. */
   release: {
     version: "v0.1.10",
@@ -35,32 +42,31 @@ export const site = {
     ],
   },
   footer: {
-    text: "© 2026 Project Orso",
     links: [
-      { label: "Privacy", href: "/privacy/" },
-      { label: "Terms", href: "/terms/" },
+      { key: "privacy", href: "/privacy/" },
+      { key: "terms", href: "/terms/" },
     ],
-    source: { label: "Open source", href: "https://github.com/Blaise1030/cms" },
-    license: { label: "MIT licence", href: "https://github.com/Blaise1030/cms/blob/main/LICENSE" },
+    source: { key: "openSource", href: "https://github.com/Blaise1030/cms" },
+    license: { key: "licence", href: "https://github.com/Blaise1030/cms/blob/main/LICENSE" },
     /** Footer-only links, appended to the column of the same name after the header nav links. */
     extra: {
       Product: [
-        { label: "Download", href: "#cta" },
-        { label: "Releases", href: "https://github.com/Blaise1030/cms/releases" },
+        { key: "download", href: "#cta" },
+        { key: "releases", href: "https://github.com/Blaise1030/cms/releases" },
       ],
       Resources: [
-        { label: "Blog topics", href: "/blog/categories/" },
-        { label: "Help topics", href: "/help/categories/" },
-        { label: "llms.txt", href: "/llms.txt" },
+        { key: "blogTopics", href: "/blog/categories/" },
+        { key: "helpTopics", href: "/help/categories/" },
+        { key: "llms", href: "/llms.txt" },
       ],
       More: [
-        { label: "Report an issue", href: "https://github.com/Blaise1030/cms/issues" },
-        { label: "Buy me a coffee", href: "https://buymeacoffee.com/blaise1030" },
+        { key: "reportIssue", href: "https://github.com/Blaise1030/cms/issues" },
+        { key: "coffee", href: "https://buymeacoffee.com/blaise1030" },
       ],
-    } as Record<string, { label: string; href: string }[]>,
+    } as Record<string, FooterLink[]>,
   },
   socials: [
-    { label: "GitHub", href: "https://github.com/Blaise1030/cms", icon: "github" as const },
-    { label: "Portfolio", href: "https://blaisetiong.dev", icon: "globe" as const },
+    { key: "github", href: "https://github.com/Blaise1030/cms", icon: "github" as const },
+    { key: "portfolio", href: "https://blaisetiong.dev", icon: "globe" as const },
   ],
 };

@@ -1,64 +1,12 @@
 ---
 import FaqAccordion from "../vue/FaqAccordion.vue";
-import { href } from "../../lib/href";
+import type { FaqItem } from "../vue/FaqAccordion.vue";
+import { getI18n } from "../../i18n";
 
-const faqs = [
-  {
-    question: "Who is Project Orso for?",
-    answer:
-      "Teams where developers own the repo but marketers, writers and founders own the words. It gives the second group the tools the first already uses — drafts, previews, reviews and a coding agent — without asking them to learn any of it.",
-  },
-  {
-    question: "Does my team need to know Git or code?",
-    answer:
-      "No. Copy, posts and help articles have forms, and anything bigger can go to the agent in plain English. They see drafts, previews and a Publish button, never branches or commits.",
-  },
-  {
-    question: "Does everyone need a GitHub account?",
-    answer:
-      "Yes, and that's the only GitHub they'll touch. Access is your GitHub team, so there's no second login to manage and no separate list of who can publish.",
-  },
-  {
-    question: "Do I have to migrate my content?",
-    answer:
-      "No. Orso reads the Markdown already in your repo. Open the repo and your posts and docs show up as collections.",
-  },
-  {
-    question: "Which sites does it work with, and what does it add to my repo?",
-    answer:
-      "Astro 7 sites with a main branch. New sites start from Orso's template. For an existing site, Orso adds a small integration and loads your collections through it. A setup skill makes those changes on a branch for you to review.",
-  },
-  {
-    question: "Who decides what goes live?",
-    answer:
-      "You do, through GitHub. Every change is a pull request into main, and Publish merges it once it's approved. Turn on branch protection and nothing merges without a review.",
-  },
-  {
-    question: "How is this different from a hosted or Git-based CMS?",
-    answer:
-      "A hosted CMS keeps your content in its own database. A Git-based CMS keeps it in your repo and gives editors forms for the fields you configure. Orso also keeps it in your repo, then adds live previews of the real site, pull-request review and a coding agent for changes a form can't make.",
-  },
-  {
-    question: "Can someone break the live site?",
-    answer:
-      "Not by accident. Every change lands in a draft with its own preview, nothing goes live until someone hits Publish, and every save is a checkpoint you can roll back in one click.",
-  },
-  {
-    question: "Which AI agent do I need?",
-    answer:
-      "Claude, Cursor, Codex or OpenCode. If your team already pays for one of the first three, that's everything Orso needs. OpenCode runs free models and needs no account.",
-  },
-  {
-    question: "How is this free?",
-    answer:
-      "Project Orso is an open-source project, not a product with plans. Read it, fork it, run it locally — there's no paid tier and nothing behind a paywall.",
-  },
-  {
-    question: "What happens if we stop using Orso?",
-    answer:
-      "Nothing changes. Your content was always Markdown in your own repo, every change is already in its history, and the site is plain static files.",
-  },
-];
+const { t, group, path } = getI18n(Astro.url);
+// "{link}" marks where the help-centre link sits in the sentence.
+const [introBefore, introAfter = ""] = t("home.faq.intro").split("{link}");
+const faqs = Object.values(group<Record<string, FaqItem>>("home.faq.items"));
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "FAQPage",
@@ -72,10 +20,9 @@ const jsonLd = {
 
 <section class="page mx-auto max-w-7xl border-x border-line grid gap-12 py-section md:grid-cols-12 md:gap-10" id="faq">
   <div class="md:col-span-4">
-    <h2 class="text-title tracking-display text-ink">Questions, answered.</h2>
+    <h2 class="text-title tracking-display text-ink">{t("home.faq.title")}</h2>
     <p class="mt-5 text-muted">
-      Anything else, write to the team. A person replies, not a ticket bot. The
-      <a class="link text-ink" href={href("/help/")}>help centre</a> has step-by-step guides.
+      {introBefore}<a class="link text-ink" href={path("/help/")}>{t("home.faq.introLink")}</a>{introAfter}
     </p>
   </div>
   <div class="md:col-span-7 md:col-start-6">

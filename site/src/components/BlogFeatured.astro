@@ -2,7 +2,7 @@
 import { Image } from "astro:assets";
 import Painting from "./Painting.astro";
 import { paintingFor } from "../lib/paintings";
-import { href } from "../lib/href";
+import { getI18n } from "../i18n";
 import UBadge from "@nuxt/ui/components/Badge.vue";
 import { categoriesOf, formatDate, type BlogCategory, type Post } from "../lib/blog";
 
@@ -14,6 +14,7 @@ interface Props {
 }
 const { post, categories, search } = Astro.props;
 const postCategories = categoriesOf(post, categories);
+const { path, locale } = getI18n(Astro.url);
 ---
 
 <article
@@ -41,13 +42,13 @@ const postCategories = categoriesOf(post, categories);
     </div>
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate)}</time>
+        <time class="label" datetime={post.data.pubDate}>{formatDate(post.data.pubDate, locale)}</time>
         {postCategories.map((category) => (
-          <UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={href(`/blog/categories/${category.id}/`)} label={category.title} />
+          <UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={path(`/blog/categories/${category.id}/`)} label={category.title} />
         ))}
       </div>
       <h2 class="text-title tracking-display text-ink">
-        <a class="after:absolute after:inset-0" href={href(`/blog/${post.id}/`)}>{post.data.title}</a>
+        <a class="after:absolute after:inset-0" href={path(`/blog/${post.id}/`)}>{post.data.title}</a>
       </h2>
       <p class="max-w-measure text-body text-muted">{post.data.description}</p>
     </div>

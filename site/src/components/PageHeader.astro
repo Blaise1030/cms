@@ -2,7 +2,7 @@
 // The title block at the top of inner pages: an optional back link, the page's single h1 and a
 // short introduction. Extra content (filters, search) goes in the default slot.
 import UButton from "@nuxt/ui/components/Button.vue";
-import { href } from "../lib/href";
+import { getI18n } from "../i18n";
 
 interface Props {
   title: string;
@@ -10,10 +10,11 @@ interface Props {
   back?: { label: string; href: string };
 }
 const { title, description, back } = Astro.props;
+const { path } = getI18n(Astro.url);
 ---
 
 <header class="page pt-14 md:pt-20">
-  {back && <UButton color="neutral" variant="outline" size="sm" class="rounded-full px-3" icon="i-hugeicons-arrow-left-02" label={back.label} to={href(back.href)} />}
+  {back && <UButton color="neutral" variant="outline" size="sm" class="rounded-full px-3" icon="i-hugeicons-arrow-left-02" label={back.label} to={path(back.href)} />}
   <h1 class:list={["rise text-title tracking-display text-ink", back && "mt-6"]}>{title}</h1>
   {description && <p class="rise-2 mt-5 max-w-measure text-body text-muted">{description}</p>}
   <slot />

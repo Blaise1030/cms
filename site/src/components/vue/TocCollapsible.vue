@@ -3,7 +3,7 @@ import UButton from "@nuxt/ui/components/Button.vue";
 import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
 
 /** The collapsible "On this page" list above a post or article on smaller screens. */
-defineProps<{ headings: { depth: number; slug: string; text: string }[] }>();
+defineProps<{ headings: { depth: number; slug: string; text: string }[]; title: string }>();
 </script>
 
 <template>
@@ -13,7 +13,7 @@ defineProps<{ headings: { depth: number; slug: string; text: string }[] }>();
       color="neutral"
       variant="ghost"
       block
-      label="On this page"
+:label="title"
       trailing-icon="i-hugeicons-arrow-down-01"
       class="group justify-between rounded-none px-0 py-3 text-small font-medium text-ink hover:bg-transparent"
       :ui="{ trailingIcon: 'size-4 text-muted transition-transform group-data-[state=open]:rotate-180' }"

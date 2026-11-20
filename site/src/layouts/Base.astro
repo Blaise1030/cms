@@ -5,7 +5,8 @@ import Footer from "../components/Footer.astro";
 import Wordmark from "../components/Wordmark.astro";
 import UButton from "@nuxt/ui/components/Button.vue";
 import SiteNav from "../components/vue/SiteNav.vue";
-import { href } from "../lib/href";
+import LocaleMenu from "../components/vue/LocaleMenu.vue";
+import { getI18n, isLocalized, localeKeys, localeHref, localePath, locales, unlocalizedPath } from "../i18n";
 import { absoluteUrl, themeColors } from "../lib/seo";
 import { site } from "../site";
 import "../styles/global.css";
@@ -13,7 +14,7 @@ import "../styles/global.css";
 interface Props {
   /** Page title; " | Project Orso" is appended. Omit on the home page to get "Project Orso | tagline". */
   title?: string;
-  /** Meta description; defaults to `site.description`. */
+  /** Meta description; defaults to the translated `site.description`. */
   description?: string;
   /** Social card image (a `public/` path or absolute URL); defaults to `site.ogImage`. */
   image?: string;
@@ -28,43 +29,61 @@ interface Props {
   /** Keep the page out of search results. */
   noindex?: boolean;
 }
+const { t, path, lang, locale } = getI18n(Astro.url);
+const tagline = t("site.tagline");
 const {
   title,
-  description = site.description,
+  description = t("site.description"),
   image = site.ogImage,
-  imageAlt = `${site.name}: ${site.tagline}`,
+  imageAlt = `${site.name}: ${tagline}`,
   type = "website",
   published,
   noindex = false,
 } = Astro.props;
-const fullTitle = title ? `${title} | ${site.name}` : `${site.name} | ${site.tagline}`;
+const fullTitle = title ? `${title} | ${site.name}` : `${site.name} | ${tagline}`;
 const canonical = new URL(Astro.url.pathname, Astro.site ?? site.url).href;
 const ogImage = absoluteUrl(image);
 const jsonLd = Astro.props.jsonLd ?? [
   { "@context": "https://schema.org", "@type": "WebPage", name: title ?? site.name, description, url: canonical },
 ];
 const base = import.meta.env.BASE_URL;
+// This page's path with no base or language prefix, e.g. "/blog/welcome/".
+const here = unlocalizedPath(Astro.url);
 // The nav item for the section being viewed (Blog or Help) gets aria-current.
-const here = Astro.url.pathname.slice(base.replace(/\/$/, "").length);
 const isCurrent = (link: string) => link.startsWith("/") && link !== "/" && here.startsWith(link);
 const external = (link: string) => /^https?:\/\//.test(link);
 const navItems = site.nav.map((link) => ({
-  label: link.label,
-  href: href(link.href),
+  label: t(`nav.${link.key}`),
+  href: path(link.href),
   current: isCurrent(link.href),
+}));
+const navLabels = { main: t("nav.main"), menu: t("nav.menu"), open: t("nav.openMenu"), close: t("nav.close") };
+// The same page in every language. Pages that exist only in English (legal pages) get none.
+const translated = isLocalized(here);
+const alternates = translated
+  ? localeKeys.map((key) => ({ lang: locales[key].lang, href: absoluteUrl(localePath(key, here)) }))
+  : [];
+const languages = localeKeys.map((key) => ({
+  label: locales[key].label,
+  lang: locales[key].lang,
+  href: localeHref(key, translated ? here : "/"),
+  current: key === locale,
 }));
 ---
 
-<html lang="en">
+<html lang={lang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    {alternates.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
+    {alternates.length > 0 && <link rel="alternate" hreflang="x-default" href={alternates[0].href} />}
     {noindex && <meta name="robots" content="noindex" />}
     <meta property="og:type" content={type} />
     <meta property="og:site_name" content={site.name} />
+    <meta property="og:locale" content={locales[locale].intl.replace("-", "_")} />
     <meta property="og:title" content={title ?? fullTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
@@ -89,20 +108,21 @@ const navItems = site.nav.map((link) => ({
   <body class="flex min-h-dvh flex-col bg-surface font-sans text-ink antialiased">
     <a
       class="sr-only rounded-md bg-accent px-4 py-2 text-on-accent focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50"
-      href="#main">Skip to content</a
+      href="#main">{t("site.skipToContent")}</a
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
       <div class="mx-auto flex min-h-header w-full max-w-7xl items-center gap-x-4 border-x border-line px-3 py-1 md:px-6">
-        <a class="-m-1 shrink-0 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
+        <a class="-m-1 shrink-0 rounded-sm p-1" href={path("/")} aria-label={t("site.homeLabel", { name: site.name })}><Wordmark /></a>
         <div class="ml-auto flex shrink-0 items-center gap-1">
-          <SiteNav part="links" items={navItems} />
+          <SiteNav part="links" items={navItems} labels={navLabels} />
+          <LocaleMenu client:idle items={languages} label={t("site.language")} />
           {site.secondaryCta && (
             <UButton
               color="neutral"
               variant="ghost"
               size="lg"
               class="hidden sm:inline-flex"
-              to={href(site.secondaryCta.href)}
+              to={path(site.secondaryCta.href)}
               rel={external(site.secondaryCta.href) ? "noopener noreferrer" : undefined}
             >
               <svg class="size-4" viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -113,16 +133,15 @@ const navItems = site.nav.map((link) => ({
                   d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.528 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
                 ></path>
               </svg>
-              {site.secondaryCta.label}
+              {t(`nav.${site.secondaryCta.key}`)}
             </UButton>
           )}
           {site.cta && (
-            <UButton size="lg" to={href(site.cta.href)} rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>
-              <span class="sm:hidden">Get Orso</span>
-              <span class="hidden sm:inline">{site.cta.label}</span>
+            <UButton size="lg" to={path(site.cta.href)} rel={external(site.cta.href) ? "noopener noreferrer" : undefined}>
+              {t(`nav.${site.cta.key}`)}
             </UButton>
           )}
-          <SiteNav client:load part="menu" items={navItems} />
+          <SiteNav client:load part="menu" items={navItems} labels={navLabels} />
         </div>
       </div>
     </header>

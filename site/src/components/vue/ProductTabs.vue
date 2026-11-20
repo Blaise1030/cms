@@ -5,41 +5,13 @@ import type { AppShotData } from "../../lib/appShotTypes";
 import { paintingUrl } from "../../lib/paintings";
 import AppShot from "./AppShot.vue";
 
-const tabs = [
-  {
-    value: "content",
-    label: "Content",
-    description: "Every collection in the repo, as a list you can use.",
-    alt: "Orso's editor open on a blog post: the markdown body beside its title, slug, date and tags.",
-  },
-  {
-    value: "preview",
-    label: "Preview",
-    description: "See the draft on desktop and mobile before anyone else.",
-    alt: "Orso previewing the same blog post rendered on the draft site, with the agent panel open beside it.",
-  },
-  {
-    value: "publish",
-    label: "Publish",
-    description: "Checks run first, then one button puts it live.",
-    alt: "Orso's changes menu over the preview, listing the live site and open drafts, next to Review and Publish.",
-  },
-  {
-    value: "agent",
-    label: "Agent",
-    description: "Ask for a page, a pass or a whole new section.",
-    alt: "Orso's agent panel next to the site preview, ready for a request.",
-  },
-  {
-    value: "history",
-    label: "History",
-    description: "Every save is a checkpoint you can go back to.",
-    alt: "Orso's history: a timeline of checkpoints with author, commit and time.",
-  },
-] as const;
-type TabValue = (typeof tabs)[number]["value"];
+const order = ["content", "preview", "publish", "agent", "history"] as const;
+type TabValue = (typeof order)[number];
+type TabCopy = { label: string; description: string; alt: string };
 
-const props = defineProps<{ shots: Record<TabValue, AppShotData> }>();
+/** `copy` is `home.hero.tabs` from src/i18n/messages, one entry per tab. */
+const props = defineProps<{ shots: Record<TabValue, AppShotData>; copy: Record<TabValue, TabCopy> }>();
+const tabs = order.map((value) => ({ value, ...props.copy[value] }));
 
 const SLIDE_MS = 6000;
 const value = ref<string>(tabs[0].value);

@@ -1,4 +1,6 @@
-import { getCollection, type CollectionEntry } from "astro:content";
+import type { CollectionEntry } from "astro:content";
+import { defaultLocale, locales, type Locale } from "../i18n/locales";
+import { getLocalizedCollection } from "./localized";
 
 export type Post = CollectionEntry<"blog">;
 
@@ -14,15 +16,15 @@ export interface BlogCategory {
 export const sortPosts = (posts: Post[]) =>
   [...posts].sort((a, b) => b.data.pubDate.localeCompare(a.data.pubDate) || a.id.localeCompare(b.id));
 
-export const formatDate = (value: string) =>
-  new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+export const formatDate = (value: string, locale: Locale = defaultLocale) =>
+  new Date(`${value}T00:00:00Z`).toLocaleDateString(locales[locale].intl, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** All posts (newest first) and all categories (A–Z), each with its posts. */
-export async function loadBlog() {
-  const [posts, categoryEntries] = await Promise.all([getCollection("blog"), getCollection("blogCategories")]);
+/** All posts (newest first) and all categories (A–Z), each with its posts, in `locale` (English where untranslated). */
+export async function loadBlog(locale: Locale = defaultLocale) {
+  const [posts, categoryEntries] = await Promise.all([getLocalizedCollection("blog", locale), getLocalizedCollection("blogCategories", locale)]);
   const sorted = sortPosts(posts);
   const categories: BlogCategory[] = [...categoryEntries]
-    .sort((a, b) => a.data.title.localeCompare(b.data.title) || a.id.localeCompare(b.id))
+    .sort((a, b) => a.data.title.localeCompare(b.data.title, locales[locale].intl) || a.id.localeCompare(b.id))
     .map((category) => ({
       id: category.id,
       title: category.data.title,

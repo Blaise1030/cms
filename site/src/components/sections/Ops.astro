@@ -1,6 +1,9 @@
 ---
 import OpsCarousel from "../vue/OpsCarousel.vue";
 import { appShot } from "../../lib/appShots";
+import { getI18n } from "../../i18n";
+
+const { t, group } = getI18n(Astro.url);
 
 const shots = {
   content: await appShot("ops-content"),
@@ -14,14 +17,14 @@ const shots = {
 <section class="mx-auto max-w-7xl border border-line pt-10 md:pt-12" id="scale">
   <div class="page">
     <div class="max-w-2xl">
-      <h2 class="text-title tracking-display text-ink">Handle content work at scale</h2>
+      <h2 class="text-title tracking-display text-ink">{t("home.ops.title")}</h2>
       <p class="mt-4 max-w-measure text-muted">
-        The desk your team uses for drafts, previews, Publish and history, built on the repo you already set up.
+        {t("home.ops.body")}
       </p>
     </div>
   </div>
 
   <div class="mt-6">
-    <OpsCarousel client:visible shots={shots} />
+    <OpsCarousel client:visible shots={shots} copy={group("home.ops.slides")} />
   </div>
 </section>

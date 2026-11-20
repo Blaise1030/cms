@@ -2,7 +2,7 @@
 import UButton from "@nuxt/ui/components/Button.vue";
 import ProductTabs from "../vue/ProductTabs.vue";
 import DownloadButton from "../vue/DownloadButton.vue";
-import { href } from "../../lib/href";
+import { getI18n } from "../../i18n";
 import { appShot } from "../../lib/appShots";
 
 const shots = {
@@ -13,8 +13,10 @@ const shots = {
   history: await appShot("hero-history"),
 };
 
-const headline = "Let your content team edit the site with an";
-const words = headline.split(" ");
+const { t, group, path, locale } = getI18n(Astro.url);
+const headline = t("home.hero.headline");
+// Chinese has no spaces between words, so it animates as one phrase.
+const words = locale === "zh" ? [headline] : headline.split(" ");
 ---
 
 <section class="mx-auto max-w-7xl border-x border-line pt-14 md:pt-20" id="product">
@@ -26,19 +28,17 @@ const words = headline.split(" ");
         ))}
       </h1>
       <p class="rise-2 mt-5 max-w-measure text-body text-muted md:mt-6">
-        You own the repo, so every “can you change the pricing?” lands on you. With Orso, marketers, writers and
-        founders make those changes themselves, in a form or by asking an agent. Each one is a pull request you review
-        before it goes live.
+        {t("home.hero.body")}
       </p>
       <div id="get-orso" class="rise-3 mt-8 flex flex-wrap items-center gap-3">
-        <DownloadButton client:load />
-        <UButton color="neutral" variant="outline" size="lg" label="See what it does" to={href("#scale")} />
+        <DownloadButton client:load labels={group("download")} />
+        <UButton color="neutral" variant="outline" size="lg" label={t("home.hero.secondary")} to={path("#scale")} />
       </div>
-      <p class="rise-3 mt-4 text-small text-muted">Free and open source. Content stays in your repo.</p>
+      <p class="rise-3 mt-4 text-small text-muted">{t("home.hero.note")}</p>
     </div>
   </div>
 
   <div class="rise-3 mt-12 md:mt-16">
-    <ProductTabs client:load shots={shots} />
+    <ProductTabs client:load shots={shots} copy={group("home.hero.tabs")} />
   </div>
 </section>

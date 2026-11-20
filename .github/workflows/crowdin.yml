@@ -1,0 +1,137 @@
+# Sync English site content with Crowdin at the pull request level.
+#
+#   pull request (opened, -> upload the PR's English sources into a Crowdin branch named after the
+#   updated, reopened)      Git branch, optionally machine pre-translate them, download the
+#                           translations and commit them back to the same PR branch. Reviewers see
+#                           English and translations together in one PR and one preview.
+#   pull request closed  -> delete that Crowdin branch so Crowdin doesn't fill up with old ones.
+#   push to main         -> upload sources and translations into Crowdin's main (branchless) tree,
+#                           so translation memory and the main tree match what shipped.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   secrets:   CROWDIN_PERSONAL_TOKEN  (Crowdin personal access token with project access)
+#   variables: CROWDIN_PROJECT_ID      (numeric ID from the Crowdin project's Tools -> API page)
+#              CROWDIN_MT_ENGINE_ID    (optional; machine translation engine ID. When set, new
+#                                       strings are pre-translated so PRs get translations within
+#                                       minutes instead of waiting for translators)
+# Commits pushed with GITHUB_TOKEN don't trigger workflows, so the translation commit can't loop.
+# PRs from forks get no secrets and are skipped.
+name: Crowdin
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths: ["site/src/content/**", "site/src/i18n/messages/**", "crowdin.yml", ".github/workflows/crowdin.yml"]
+  push:
+    branches: [main]
+    paths: ["site/src/content/**", "site/src/i18n/messages/**", "crowdin.yml", ".github/workflows/crowdin.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: crowdin-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CROWDIN_PROJECT_ID: ${{ vars.CROWDIN_PROJECT_ID }}
+  CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+
+jobs:
+  pr-sync:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      # Crowdin branch names can't contain "/", so content/new-title becomes content-new-title.
+      - name: Crowdin branch name
+        id: branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: echo "name=$(printf '%s' "$HEAD_REF" | tr '/\\:*?"<>|' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload English sources
+        uses: crowdin/github-action@v2
+        with:
+          upload_sources: true
+          upload_translations: false
+          download_translations: false
+          crowdin_branch_name: ${{ steps.branch.outputs.name }}
+
+      - name: Machine pre-translate new strings
+        if: vars.CROWDIN_MT_ENGINE_ID != ''
+        uses: crowdin/github-action@v2
+        with:
+          command: pre-translate
+          command_args: >-
+            --method=mt
+            --engine-id=${{ vars.CROWDIN_MT_ENGINE_ID }}
+            --branch=${{ steps.branch.outputs.name }}
+
+      - name: Download translations
+        uses: crowdin/github-action@v2
+        with:
+          upload_sources: false
+          download_translations: true
+          push_translations: false
+          create_pull_request: false
+          crowdin_branch_name: ${{ steps.branch.outputs.name }}
+
+      - name: Commit translations to the PR branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git add -A site/src/content site/src/i18n/messages
+          if git diff --cached --quiet; then
+            echo "No translation changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "content(i18n): sync translations from Crowdin"
+          git push origin "HEAD:$HEAD_REF"
+
+  pr-cleanup:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crowdin branch name
+        id: branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: echo "name=$(printf '%s' "$HEAD_REF" | tr '/\\:*?"<>|' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Delete Crowdin branch
+        uses: crowdin/github-action@v2
+        continue-on-error: true
+        with:
+          command: branch
+          command_args: delete ${{ steps.branch.outputs.name }}
+
+  main-sync:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload sources and translations to Crowdin's main tree
+        uses: crowdin/github-action@v2
+        with:
+          upload_sources: true
+          upload_translations: true
+          download_translations: false

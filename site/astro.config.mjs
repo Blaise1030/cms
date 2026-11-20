@@ -52,8 +52,10 @@ export default defineConfig({
     // Search indexes for the blog and help search boxes (build only; see integrations/pagefind.js).
     pagefindIndex({
       sections: [
-        { name: "blog", glob: "blog/**/*.html" },
-        { name: "help", glob: "help/**/*.html" },
+        // Translated pages (zh/blog/…) join the same index; Pagefind splits it by <html lang>, so
+        // each language only searches its own pages.
+        { name: "blog", glob: "{blog,*/blog}/**/*.html" },
+        { name: "help", glob: "{help,*/help}/**/*.html" },
       ],
     }),
   ],
