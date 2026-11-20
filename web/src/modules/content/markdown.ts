@@ -20,6 +20,36 @@ encodeProto.encodeTextForMarkdown = function (this: MarkdownManager, text, node,
 };
 
 /**
+ * Tiptap writes every link as `[text](href)`, so a bare address that Markdown links on its own
+ * (`privacy@example.com`, `https://x.test`, `www.x.test`, `<ftp://x.test>`) gained text on save and
+ * failed the round-trip check. When a link's text is its own address, write it as an autolink:
+ * bare where GFM links it, in angle brackets otherwise. Any other link keeps `[text](href)`.
+ */
+type MarkSyntax = (markType: string, mark: { attrs?: Record<string, unknown> }, openingMode?: string, markText?: string) => string;
+const markProto = MarkdownManager.prototype as unknown as { getMarkOpening: MarkSyntax; getMarkClosing: MarkSyntax };
+const EMAIL = /^[\w.+-]+@[a-z\d-]+(\.[a-z\d-]+)+$/i;
+function autolink(markType: string, mark: { attrs?: Record<string, unknown> }, openingMode?: string, text?: string): "bare" | "angle" | null {
+  if (markType !== "link" || openingMode === "html" || !text || /[\s<>\\`*_[\]]/.test(text)) return null;
+  const href = mark.attrs?.href;
+  if (typeof href !== "string" || mark.attrs?.title) return null;
+  if (href === `mailto:${text}` && EMAIL.test(text)) return "bare";
+  if (href === `http://${text}` && /^www\./i.test(text)) return "bare";
+  if (href !== text) return null;
+  if (/^https?:\/\/[^\s]+[\w/]$/i.test(text)) return "bare";
+  return /^[a-z][a-z\d+.-]{1,31}:[^\s<>]*$/i.test(text) ? "angle" : null;
+}
+const markOpening = markProto.getMarkOpening;
+const markClosing = markProto.getMarkClosing;
+markProto.getMarkOpening = function (this: MarkdownManager, markType, mark, openingMode, markText) {
+  const kind = autolink(markType, mark, openingMode, markText);
+  return kind ? (kind === "angle" ? "<" : "") : markOpening.call(this, markType, mark, openingMode, markText);
+};
+markProto.getMarkClosing = function (this: MarkdownManager, markType, mark, openingMode, markText) {
+  const kind = autolink(markType, mark, openingMode, markText);
+  return kind ? (kind === "angle" ? ">" : "") : markClosing.call(this, markType, mark, openingMode, markText);
+};
+
+/**
  * StarterKit for the rich editor: without underline (no Markdown syntax), the trailing empty
  * paragraph (it would add blank lines to the output) or its letter-reading ordered list.
  * Passed to Nuxt UI's `UEditor` as `starter-kit`.

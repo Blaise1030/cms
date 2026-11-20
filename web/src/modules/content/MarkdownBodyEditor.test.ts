@@ -86,6 +86,24 @@ describe("canRoundTrip", () => {
     ["entity", "Fish &amp; chips\n"],
   ])("rejects %s", (_name, source) => expect(canRoundTrip(source)).toBe(false));
 
+  it.each([
+    ["email", "Email privacy@example.com for a copy.\n"],
+    ["web address", "See https://example.com/docs for more.\n"],
+    ["www address", "Visit www.example.com today.\n"],
+    ["angle-bracket address", "See <https://example.com> for more.\n"],
+  ])("accepts a bare %s", (_name, source) => expect(canRoundTrip(source)).toBe(true));
+
+  it("keeps a bare address as written, and a named link as a Markdown link", () => {
+    const md = new Editor({ extensions: markdownExtensions() }).markdown!;
+    const roundTrip = (source: string) => md.serialize(md.parse(source));
+    expect(roundTrip("Email privacy@example.com now.")).toBe("Email privacy@example.com now.");
+    expect(roundTrip("See https://example.com/docs now.")).toBe("See https://example.com/docs now.");
+    expect(roundTrip("Visit www.example.com now.")).toBe("Visit www.example.com now.");
+    expect(roundTrip("See <ftp://example.com/file> now.")).toBe("See <ftp://example.com/file> now.");
+    expect(roundTrip("Read [the docs](https://example.com/docs).")).toBe("Read [the docs](https://example.com/docs).");
+    expect(roundTrip("Email [privacy@example.com](mailto:privacy@example.com).")).toBe("Email privacy@example.com.");
+  });
+
   it("writes a bare ampersand as-is, and escapes one that would read as an entity", () => {
     const md = new Editor({ extensions: markdownExtensions() }).markdown!;
     const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
