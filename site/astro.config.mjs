@@ -6,6 +6,7 @@ import { defineConfig, fontProviders } from "astro/config";
 import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
+import { legal } from "./integrations/legal.js";
 import { site } from "./src/site.ts";
 
 import vue from "@astrojs/vue";
@@ -46,7 +47,8 @@ export default defineConfig({
   ],
   integrations: [
     mdx(),
-    orso({ collections: marketingCollections }),
+    // The marketing collections plus the privacy policy and terms (see integrations/legal.js).
+    orso({ collections: { ...marketingCollections, legal } }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.
     vue({ appEntrypoint: "/src/vue-app.ts" }),
     // Search indexes for the blog and help search boxes (build only; see integrations/pagefind.js).

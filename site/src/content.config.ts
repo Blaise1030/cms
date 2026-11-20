@@ -37,22 +37,7 @@ const hasTranslations = (name: string) => translatedLocales.some((locale) => has
 
 const translated = ["blog", "blogCategories", "helpDocs", "helpCategories", "helpSubcategories", "helpDocsCategories", "legal"];
 
-/**
- * The privacy policy and terms (`src/content/legal/en/*.md`). Not an orso collection: legal text
- * is edited in the repo, and Crowdin translates it like the blog.
- */
-const legal = defineCollection({
-  loader: glob({ base: "./src/content/legal/en", pattern: "*.md" }),
-  schema: z.object({
-    title: z.string(),
-    description: z.string(),
-    /** Last change, YYYY-MM-DD. */
-    updated: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  }),
-});
-
 export const collections = {
   ...sourceCollections,
-  legal,
   ...Object.fromEntries(translated.filter(hasTranslations).map((name) => [`${name}I18n`, translations(name)])),
 };
