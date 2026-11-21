@@ -1,7 +1,8 @@
 ---
 title: Create your account
 description: Sign up with your work email and set up your workspace.
-category: basics
+section: basics
+category: setup
 order: 2
 ---
 

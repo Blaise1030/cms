@@ -10,6 +10,8 @@ test("marketingCollections lists the blog and help collections in sidebar order"
     "blogCategories",
     "helpDocs",
     "helpCategories",
+    "helpSubcategories",
+    "helpDocsCategories",
   ]);
 });
 
@@ -20,6 +22,8 @@ test("marketingCollections sets hasPreviewPath for every routed collection via n
     blogCategories: true,
     helpDocs: true,
     helpCategories: true,
+    helpSubcategories: false,
+    helpDocsCategories: true,
   });
 });
 
@@ -32,7 +36,8 @@ test("marketing previewPath helpers match normalize output", () => {
   assert.equal(marketingPreviewPaths.blog({ slug: "welcome" }), "/blog/welcome/");
   assert.equal(marketingPreviewPaths.helpDocs({ slug: "getting-started" }), "/help/getting-started/");
   assert.equal(marketingPreviewPaths.blogCategories({ slug: "guides" }), "/blog/categories/guides/");
-  assert.equal(marketingPreviewPaths.helpCategories({ slug: "basics" }), "/help/category/basics/");
+  assert.equal(marketingPreviewPaths.helpCategories({ slug: "basics" }), "/help/section/basics/");
+  assert.equal(marketingPreviewPaths.helpDocsCategories({ slug: "account" }), "/help/categories/account/");
 });
 
 test("attachMarketingPreviewPaths keeps the two-collection call shape working", () => {

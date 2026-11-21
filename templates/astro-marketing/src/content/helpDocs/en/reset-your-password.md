@@ -1,7 +1,8 @@
 ---
 title: Reset your password
 description: Get back into your account when you cannot sign in.
-category: billing
+section: billing
+category: troubleshooting
 order: 2
 ---
 

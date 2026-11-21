@@ -1,7 +1,9 @@
 ---
 title: Share a project
 description: Give clients or teammates outside the project a link to follow along.
-category: projects
+section: projects
+subcategory: sharing
+category: collaboration
 order: 3
 ---
 

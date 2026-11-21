@@ -1,7 +1,9 @@
 ---
 title: Create a project
 description: Start a project from scratch or from a template.
-category: projects
+section: projects
+subcategory: planning
+category: setup
 order: 1
 ---
 

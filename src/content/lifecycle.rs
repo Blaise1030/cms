@@ -95,7 +95,8 @@ fn public_url(collection: &str, id: &str) -> Option<String> {
         "blog" => Some(format!("/blog/{id}")),
         "helpDocs" => Some(format!("/help/{id}")),
         "blogCategories" => Some(format!("/blog/categories/{id}")),
-        "helpCategories" => Some(format!("/help/category/{id}")),
+        "helpCategories" => Some(format!("/help/section/{id}")),
+        "helpDocsCategories" => Some(format!("/help/categories/{id}")),
         _ => None,
     }
 }

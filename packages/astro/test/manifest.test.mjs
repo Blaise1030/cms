@@ -277,7 +277,9 @@ test.describe("loadContent", () => {
     assert.deepEqual(manifest.collections[1].fields.properties, {
       title: { type: "string", required: true },
       description: { type: "string", required: true },
-      category: { type: "reference", collection: "helpCategories", required: true },
+      section: { type: "reference", collection: "helpCategories", required: true },
+      category: { type: "reference", collection: "helpDocsCategories", required: false },
+      subcategory: { type: "reference", collection: "helpSubcategories", required: false },
       order: { type: "number", required: true },
     });
   });

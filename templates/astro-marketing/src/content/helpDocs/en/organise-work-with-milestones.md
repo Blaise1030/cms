@@ -1,7 +1,8 @@
 ---
 title: Organise work with milestones
 description: Group tasks under a shared goal and date to track progress.
-category: projects
+section: projects
+subcategory: planning
 order: 2
 ---
 
