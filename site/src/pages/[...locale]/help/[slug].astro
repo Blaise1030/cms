@@ -59,7 +59,7 @@ const crumbs = [
       <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
       <p class="rise-2 mt-4 max-w-prose text-body text-muted">{entry.data.description}</p>
       {toc.length > 1 && <BlogToc headings={toc} variant="inline" class="xl:hidden" />}
-      <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
+      <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md prose-table:block prose-table:max-w-full prose-table:overflow-x-auto"><Content /></div>
     </article>
     {(previous || next) && (
       <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label={t("help.moreArticles")} data-pagefind-ignore>
