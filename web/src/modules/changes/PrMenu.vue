@@ -108,7 +108,8 @@ const items = computed<DropdownMenuItem[][]>(() => {
 </script>
 
 <template>
-  <UDropdownMenu :items="items" :content="{ align: 'end' }" :ui="{ content: 'min-w-56' }">
+  <!-- Links out show their arrow at the item's end, not straight after the label. -->
+  <UDropdownMenu :items="items" :content="{ align: 'end' }" :ui="{ content: 'min-w-56' }" :external-icon="false">
     <UButton
       :color="props.variant === 'default' ? 'primary' : 'neutral'"
       :variant="props.variant === 'default' ? 'solid' : 'outline'"
@@ -128,6 +129,15 @@ const items = computed<DropdownMenuItem[][]>(() => {
         aria-hidden="true"
       />
     </UButton>
+    <template #item-trailing="{ item }">
+      <UIcon
+        v-if="item.target === '_blank'"
+        name="i-hugeicons-link-square-02"
+        class="text-dimmed size-3.5 shrink-0"
+        data-testid="pr-menu-external"
+        aria-hidden="true"
+      />
+    </template>
     <template #status>
       <span
         v-if="status"

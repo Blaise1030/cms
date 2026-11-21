@@ -97,10 +97,10 @@ it("keeps its buttons below the macOS traffic lights and drags the window from a
 
 it("shows the Review tab with a badge of changes waiting for you", async () => {
   const { w } = await setup("/p/site/preview", 2);
-  // In the footer group, directly above App settings.
+  // One of the project tabs (reorderable), between History and Settings by default.
+  expect(order(w)).toEqual(["preview", "content", "design", "code", "history", "review", "settings"]);
   const footer = w.get('[data-testid="project-rail-app-settings"]').element.closest("div.mt-auto")!;
-  const buttons = [...footer.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"));
-  expect(buttons.slice(0, 3)).toEqual(["workspace-tab-review", "review-badge", "project-rail-app-settings"]);
+  expect(footer.querySelector('[data-testid="workspace-tab-review"]')).toBeNull();
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("href")).toBe("/p/site/review");
   expect(w.get('[data-testid="workspace-tab-review"]').attributes("aria-label")).toBe("Review");
   expect(w.get('[data-testid="review-badge"]').text()).toBe("2");
@@ -124,9 +124,7 @@ it("reloads the review inbox when the project changes", async () => {
 const order = (w: Awaited<ReturnType<typeof setup>>["w"]) =>
   w
     .findAll('[data-testid^="workspace-tab-"]')
-    .map((t) => t.attributes("data-testid")!.slice("workspace-tab-".length))
-    // Review sits in the rail's footer, outside the reorderable tabs.
-    .filter((id) => id !== "review");
+    .map((t) => t.attributes("data-testid")!.slice("workspace-tab-".length));
 
 /** happy-dom has no DataTransfer; the rail only needs these fields. */
 const transfer = (dropEffect = "move") => ({ setData() {}, effectAllowed: "", dropEffect });
@@ -140,7 +138,7 @@ it("reorders tabs by dragging and remembers the order", async () => {
 
   await item("history").trigger("dragstart", { dataTransfer });
   await item("preview").trigger("dragover", { dataTransfer });
-  expect(order(w)).toEqual(["history", "preview", "content", "design", "code", "settings"]);
+  expect(order(w)).toEqual(["history", "preview", "content", "design", "code", "review", "settings"]);
   await item("history").trigger("dragend", { dataTransfer });
 
   expect(JSON.parse(localStorage.getItem("orso.rail.order")!)).toEqual(order(w));
@@ -156,7 +154,7 @@ it("puts the order back when a drag is cancelled", async () => {
   // Escape, or a drop outside the rail: the browser reports no drop effect.
   await item("code").trigger("dragend", { dataTransfer: transfer("none") });
 
-  expect(order(w)).toEqual(["preview", "content", "design", "code", "history", "settings"]);
+  expect(order(w)).toEqual(["preview", "content", "design", "code", "history", "review", "settings"]);
   expect(localStorage.getItem("orso.rail.order")).toBeNull();
 });
 
@@ -174,5 +172,5 @@ it("moves a focused tab with Alt+Up and Alt+Down, and ignores plain arrows", asy
 it("keeps tabs missing from a saved order, and drops unknown ones", async () => {
   localStorage.setItem("orso.rail.order", JSON.stringify(["code", "gone", "preview"]));
   const { w } = await setup("/p/site/preview");
-  expect(order(w)).toEqual(["code", "preview", "content", "design", "history", "settings"]);
+  expect(order(w)).toEqual(["code", "preview", "content", "design", "history", "review", "settings"]);
 });
