@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { TooltipProvider } from "reka-ui";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
-import { loadTabOrder, saveTabOrder } from "@/lib/tabOrder";
+import { loadTabOrder, saveTabOrder, tabOrderChanged } from "@/lib/tabOrder";
 import { useInbox } from "@/modules/review/queries";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
@@ -30,6 +30,10 @@ const defaultTabs: { id: ProjectTab; label: string; icon: string }[] = [
 // Tabs can be dragged (or moved with Alt+Up/Down) into the viewer's own order; see
 // lib/tabOrder.ts, which also makes opening a project land on the first tab.
 const order = ref<ProjectTab[]>(loadTabOrder());
+// The daemon's saved order arrived after this rail was drawn (a fresh desktop launch).
+watch(tabOrderChanged, () => {
+  if (dragging.value === null) order.value = loadTabOrder();
+});
 const byId = new Map(defaultTabs.map((t) => [t.id, t]));
 const tabs = computed(() => order.value.map((id) => byId.get(id)!));
 

@@ -262,6 +262,12 @@ export function createApi(
     setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
     /** Persist onboarding dismissal across desktop relaunches. */
     dismissSetup: () => json<{ dismissed: true }>("POST", "/api/setup/dismiss"),
+    /** The project rail's tab order, kept by the daemon; null until the user reorders. */
+    railOrder: async (): Promise<string[] | null> =>
+      (await json<{ order: string[] | null }>("GET", "/api/setup/rail-order")).order,
+    /** Save the rail's tab order app-wide (the desktop UI's localStorage doesn't survive relaunch). */
+    saveRailOrder: (order: string[]) =>
+      json<{ order: string[] }>("PUT", "/api/setup/rail-order", { body: { order } }),
     /** Save the assistant order app-wide (it lives with the daemon, not this browser). */
     saveAssistantOrder: (order: string[]) =>
       json<{ order: string[] }>("PUT", "/api/setup/assistant-order", { body: { order } }),

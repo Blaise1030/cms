@@ -67,6 +67,10 @@ pub fn router(state: AppState) -> Router {
             "/api/setup/assistant-order",
             put(setup::save_assistant_order),
         )
+        .route(
+            "/api/setup/rail-order",
+            get(setup::rail_order).put(setup::save_rail_order),
+        )
         .route("/api/setup/runtimes", get(setup::runtimes))
         .route("/api/setup/runtimes/{id}/download", post(setup::download))
         .route("/api/setup/runtimes/{id}/cancel", post(setup::cancel))
