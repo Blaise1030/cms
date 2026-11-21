@@ -11,14 +11,14 @@ export const site = {
   /** Default social card, served from `public/`. */
   ogImage: "/og-default.png",
   nav: [
-    { label: "Features", href: "#features" },
-    { label: "Pricing", href: "#pricing" },
-    { label: "FAQ", href: "#faq" },
+    { label: "Features", href: "/#features" },
+    { label: "Pricing", href: "/#pricing" },
+    { label: "FAQ", href: "/#faq" },
     { label: "Blog", href: "/blog/" },
     { label: "Help", href: "/help/" },
   ],
   /** Header call to action; set to `null` to hide it. */
-  cta: { label: "Start free", href: "#pricing" },
+  cta: { label: "Start free", href: "/#pricing" },
   footer: {
     text: "© 2026 Acme, Inc. All rights reserved.",
     links: [

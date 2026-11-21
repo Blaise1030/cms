@@ -1,5 +1,4 @@
 ---
-import { href } from "../../lib/href";
 
 const plans = [
   {
@@ -8,7 +7,7 @@ const plans = [
     price: "$0",
     period: "for up to 5 people",
     features: ["3 active projects", "Milestones, tasks and decisions", "Read-only share links"],
-    cta: { label: "Start free", href: "#" },
+    cta: { label: "Start free", href: "/#" },
     highlighted: false,
   },
   {
@@ -17,7 +16,7 @@ const plans = [
     price: "$8",
     period: "per person, per month",
     features: ["Unlimited projects", "Friday summary emails", "Priority email support"],
-    cta: { label: "Start a 14-day trial", href: "#" },
+    cta: { label: "Start a 14-day trial", href: "/#" },
     highlighted: true,
   },
 ];
@@ -45,7 +44,7 @@ const plans = [
             </li>
           ))}
         </ul>
-        <a class:list={["mt-10 self-start", plan.highlighted ? "button" : "button-quiet"]} href={href(plan.cta.href)}>{plan.cta.label}</a>
+        <a class:list={["mt-10 self-start", plan.highlighted ? "button" : "button-quiet"]} href={plan.cta.href}>{plan.cta.label}</a>
       </div>
     ))}
   </div>

@@ -8,7 +8,6 @@
  *   <a href={path("/blog/")}>{t("nav.blog")}</a>
  */
 import en from "./messages/en.json";
-import { href } from "../lib/href";
 import { defaultLocale, isLocale, localeKeys, locales, type Locale } from "./locales";
 
 export * from "./locales";
@@ -73,9 +72,9 @@ export function useTranslations(locale: Locale) {
     t,
     group,
     date,
-    /** A site path in this locale, with the base, for an `href`. */
+    /** A site path in this locale, ready for an `href`. */
     path: (target: string) => localeHref(locale, target),
-    /** A site path in this locale, without the base (for `absoluteUrl` and breadcrumbs). */
+    /** A site path in this locale, as `localePath` gives it (for `absoluteUrl` and breadcrumbs). */
     sitePath: (target: string) => localePath(locale, target),
   };
 }
@@ -89,24 +88,22 @@ export function localePath(locale: Locale, path: string) {
   return path.startsWith("#") ? `/${locale}/${path}` : `/${locale}${path}`;
 }
 
-/** `localePath`, then the configured site base, ready for an `href`. */
-export const localeHref = (locale: Locale, path: string) => href(localePath(locale, path));
+/** `localePath` with home-page anchors pointed at the home page (`#faq` → `/#faq`), for an `href`. */
+export const localeHref = (locale: Locale, path: string) => {
+  const target = localePath(locale, path);
+  return target.startsWith("#") ? `/${target}` : target;
+};
 
-const basePrefix = () => import.meta.env.BASE_URL.replace(/\/?$/, "/");
-
-/** The page's site path without the base or a locale prefix: `/preview/x/zh/blog/` → `/blog/`. */
+/** The page's path without a locale prefix: `/zh/blog/` → `/blog/`. */
 export function unlocalizedPath(url: URL) {
-  const base = basePrefix();
-  const rest = url.pathname.startsWith(base) ? url.pathname.slice(base.length) : url.pathname.replace(/^\//, "");
+  const rest = url.pathname.replace(/^\//, "");
   const [first, ...tail] = rest.split("/");
   return `/${isLocale(first) && first !== defaultLocale ? tail.join("/") : rest}`;
 }
 
-/** The locale a URL is in, from its first path segment after the base. */
+/** The locale a URL is in, from its first path segment. */
 export function localeFromUrl(url: URL): Locale {
-  const base = basePrefix();
-  const rest = url.pathname.startsWith(base) ? url.pathname.slice(base.length) : url.pathname.replace(/^\//, "");
-  const first = rest.split("/")[0];
+  const first = url.pathname.replace(/^\//, "").split("/")[0];
   return isLocale(first) ? first : defaultLocale;
 }
 

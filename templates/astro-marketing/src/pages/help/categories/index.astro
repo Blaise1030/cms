@@ -1,7 +1,6 @@
 ---
 import Base from "../../../layouts/Base.astro";
 import PageHeader from "../../../components/PageHeader.astro";
-import { href } from "../../../lib/href";
 import { loadHelp } from "../../../lib/help";
 import { breadcrumbs } from "../../../lib/seo";
 const { topics } = await loadHelp();
@@ -17,7 +16,7 @@ const { topics } = await loadHelp();
       <ul class="grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">{topics.map((topic) => (
         <li class="group relative border-t border-line py-8">
           <h2 class="text-xl font-medium tracking-tight text-ink">
-            <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a>
+            <a class="decoration-line-strong underline-offset-4 after:absolute after:inset-0 group-hover:underline" href={`/help/categories/${topic.id}/`}>{topic.title}</a>
           </h2>
           <p class="label mt-2">{topic.docs.length} {topic.docs.length === 1 ? "article" : "articles"}</p>
           {topic.description && <p class="mt-3 text-muted">{topic.description}</p>}

@@ -4,14 +4,8 @@ import { site } from "../site";
 /** The live site's origin (astro.config.mjs `site`, from PUBLIC_SITE_URL or `site.url`). */
 const origin = () => import.meta.env.SITE || site.url;
 
-/** Absolute URL for a site path such as `/blog/welcome/`, including the configured base. */
-export const absoluteUrl = (path = "/") => {
-  if (/^https?:\/\//.test(path)) return path;
-  const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
-  // Asset URLs from astro:assets already carry the base.
-  if (base !== "/" && path.startsWith(base)) return new URL(path, origin()).href;
-  return new URL(`${base}${path.replace(/^\//, "")}`, origin()).href;
-};
+/** Absolute URL for a site path such as `/blog/welcome/`, on the live site. */
+export const absoluteUrl = (path = "/") => new URL(path, origin()).href;
 
 /** The surface colour in each mode, read from the design tokens so `theme-color` never drifts. */
 export const themeColors = (() => {

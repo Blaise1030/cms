@@ -45,6 +45,5 @@ export const paintingFor = (seed: string): PaintingId => {
   return ids[n % ids.length];
 };
 
-/** Base-aware URL for a painting in `public/paintings/`. */
-export const paintingUrl = (id: PaintingId) =>
-  `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}paintings/${paintings[id].file}`;
+/** URL of a painting in `public/paintings/`. */
+export const paintingUrl = (id: PaintingId) => `/paintings/${paintings[id].file}`;

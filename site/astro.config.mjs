@@ -12,12 +12,6 @@ import { collectionsWithTranslations } from "./src/lib/translatedFiles.ts";
 
 import vue from "@astrojs/vue";
 
-// The orso dev server proxies the site under /preview/{id}/.
-const base = process.env.PUBLIC_BASE ?? "/";
-// The browser's HMR socket: the dev server's own port when the preview is framed directly
-// (orso's Vite dev UI), otherwise the daemon that proxies the preview.
-const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT || 0);
-
 // Absolute URL of the live site, used for canonical links, the sitemap, social cards and
 // llms.txt. Set PUBLIC_SITE_URL at build time (or change `url` in src/site.ts).
 const siteUrl = process.env.PUBLIC_SITE_URL || site.url;
@@ -29,7 +23,6 @@ const nuxtUiComponents = realpathSync(fileURLToPath(new URL("./node_modules/@nux
 
 export default defineConfig({
   site: siteUrl,
-  base,
   // Geist ships with the site (no third-party font request). Astro writes the
   // @font-face rules, a preload and a metric-matched fallback so the swap causes no layout shift.
   fonts: [
@@ -107,15 +100,6 @@ export default defineConfig({
       preserveSymlinks: true,
       dedupe: ["vue"],
       alias: [{ find: /^@nuxt\/ui\/components\//, replacement: `${nuxtUiComponents}/` }],
-    },
-    server: {
-      // Astro keeps Vite's own base at "/", so without this the HMR socket would connect to
-      // the proxy root instead of the /preview/{id}/ prefix. clientPort points it at this
-      // server (direct preview) or at the orso daemon that proxies it.
-      hmr: {
-        path: `${base}vite-hmr`.replace(/\/{2,}/g, "/"),
-        ...(hmrPort > 0 ? { clientPort: hmrPort } : {}),
-      },
     },
   },
 });

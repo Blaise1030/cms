@@ -15,17 +15,14 @@ import { defineShortcuts } from "@nuxt/ui/composables/defineShortcuts";
  * `astro dev` the palette says search is unavailable.
  */
 const props = defineProps<{
-  /** Base-aware URL of the index folder, e.g. `/pagefind-blog/`. */
+  /** URL of the index folder, e.g. `/pagefind-blog/`. */
   bundlePath: string;
-  /** Site base URL, so result links include it. */
-  baseUrl: string;
   placeholder: string;
   /** Translated palette copy, from `search` in src/i18n/messages (`{term}` is filled in here). */
   labels: { hint: string; unavailable: string; noResults: string; prompt: string };
 }>();
 
 type Pagefind = {
-  options: (opts: { baseUrl: string }) => Promise<void>;
   debouncedSearch: (term: string, opts?: object, ms?: number) => Promise<{ results: { data: () => Promise<PageData> }[] } | null>;
 };
 type PageData = { url: string; excerpt: string; meta: { title?: string } };
@@ -40,10 +37,7 @@ let pagefind: Promise<Pagefind> | undefined;
 
 /** Loads the section's Pagefind module once, on first search. */
 function load() {
-  pagefind ??= import(/* @vite-ignore */ `${props.bundlePath}pagefind.js`).then(async (mod: Pagefind) => {
-    await mod.options({ baseUrl: props.baseUrl });
-    return mod;
-  });
+  pagefind ??= import(/* @vite-ignore */ `${props.bundlePath}pagefind.js`) as Promise<Pagefind>;
   return pagefind;
 }
 

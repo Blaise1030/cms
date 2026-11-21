@@ -46,8 +46,7 @@ const ogImage = absoluteUrl(image);
 const jsonLd = Astro.props.jsonLd ?? [
   { "@context": "https://schema.org", "@type": "WebPage", name: title ?? site.name, description, url: canonical },
 ];
-const base = import.meta.env.BASE_URL;
-// This page's path with no base or language prefix, e.g. "/blog/welcome/".
+// This page's path with no language prefix, e.g. "/blog/welcome/".
 const here = unlocalizedPath(Astro.url);
 // The nav item for the section being viewed (Blog or Help) gets aria-current.
 const isCurrent = (link: string) => link.startsWith("/") && link !== "/" && here.startsWith(link);
@@ -99,9 +98,9 @@ const languages = localeKeys.map((key) => ({
     <meta name="twitter:image" content={ogImage} />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content={themeColors.light} />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content={themeColors.dark} />
-    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
-    <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
-    <link rel="sitemap" href={`${base}sitemap.xml`} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" href="/sitemap.xml" />
     <Font cssVariable="--font-geist" preload={[{ style: "normal" }]} />
     {jsonLd.map((data) => <script type="application/ld+json" is:inline set:html={JSON.stringify(data).replace(/</g, "\\u003c")} />)}
     <ClientRouter fallback="swap" />

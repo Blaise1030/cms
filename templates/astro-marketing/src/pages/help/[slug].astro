@@ -1,7 +1,6 @@
 ---
 import { render } from "astro:content";
 import Base from "../../layouts/Base.astro";
-import { href } from "../../lib/href";
 import { loadHelp } from "../../lib/help";
 import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
 
@@ -50,9 +49,9 @@ const navLink = "group block border-t border-line pt-6";
   <article class="page pt-14 md:pt-20">
     <nav class="text-sm text-muted" aria-label="Breadcrumb">
       <ol class="flex flex-wrap gap-x-2 gap-y-1">
-        <li><a class="link" href={href("/help/")}>Help</a></li>
+        <li><a class="link" href="/help/">Help</a></li>
         <li aria-hidden="true">/</li>
-        <li><a class="link" href={href(`/help/section/${section.id}/`)}>{section.title}</a></li>
+        <li><a class="link" href={`/help/section/${section.id}/`}>{section.title}</a></li>
         {subsection && <li aria-hidden="true">/</li>}
         {subsection && <li>{subsection}</li>}
       </ol>
@@ -61,12 +60,12 @@ const navLink = "group block border-t border-line pt-6";
       <div class="min-w-0 lg:col-span-8">
         <h1 class="rise text-4xl font-light tracking-display text-ink md:text-5xl">{entry.data.title}</h1>
         <p class="rise-2 mt-6 max-w-prose text-xl text-muted">{entry.data.description}</p>
-        {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={href(`/help/categories/${topic.id}/`)}>{topic.title}</a></p>}
+        {topic && <p class="mt-6"><a class="label text-accent transition-colors duration-quick ease-gentle hover:text-ink" href={`/help/categories/${topic.id}/`}>{topic.title}</a></p>}
         <div class="prose mt-10 max-w-prose border-t border-line pt-10 prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
         {(previous || next) && (
           <nav class="mt-16 grid max-w-prose gap-8 sm:grid-cols-2" aria-label="More articles">
-            <div>{previous && <a class={navLink} href={href(`/help/${previous.id}/`)}><span class="label block">Previous</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{previous.data.title}</span></a>}</div>
-            <div class="sm:text-right">{next && <a class={navLink} href={href(`/help/${next.id}/`)}><span class="label block">Next</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{next.data.title}</span></a>}</div>
+            <div>{previous && <a class={navLink} href={`/help/${previous.id}/`}><span class="label block">Previous</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{previous.data.title}</span></a>}</div>
+            <div class="sm:text-right">{next && <a class={navLink} href={`/help/${next.id}/`}><span class="label block">Next</span><span class="mt-2 block font-medium text-ink decoration-line-strong underline-offset-4 group-hover:underline">{next.data.title}</span></a>}</div>
           </nav>
         )}
       </div>
