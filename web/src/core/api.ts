@@ -29,6 +29,7 @@ import {
   type PendingCombine,
   type PublishResult,
   type PublishedPr,
+  type DeployState,
   type DeployStatus,
   type PrStatus,
   type CheckpointLog,
@@ -416,6 +417,14 @@ export function createApi(
       return conflict ? { conflict } : pr;
     },
 
+    /**
+     * Where the newest successful GitHub deployment of `sha` lives (`live`), or, without one,
+     * whether its deploy is still `building`, `failed`, or `unknown` (none, or GitHub can't say).
+     */
+    deployLink: (project: string, sha: string) =>
+      json<{ url: string | null; state: DeployState }>("GET", `/api/projects/${enc(project)}/deploy-url`, {
+        query: { sha },
+      }),
     /** Whether the deploy of a published change's merge commit has shipped. */
     deployStatus: (project: string, sha: string): Promise<DeployStatus> =>
       json<DeployStatus>("GET", `/api/projects/${enc(project)}/deploy`, { query: { sha } }),

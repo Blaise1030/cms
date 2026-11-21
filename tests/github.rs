@@ -901,3 +901,53 @@ async fn deploy_status_reports_the_merged_commits_checks() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "BADREQ");
 }
+
+#[tokio::test]
+async fn deploy_url_reports_a_building_or_failed_deploy_and_refuses_a_bad_sha() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    let git_root = tmp.path().join("git");
+    bare_repo(&git_root);
+    let base = fake_github().await;
+    let app = http::router(AppState::with_scaffold_install(
+        config(&projects, &base, &git_root),
+        false,
+    ));
+    call(&app, req("POST", "/api/github/device", None)).await;
+    call(&app, req("POST", "/api/github/device/poll", None)).await;
+    call(&app, req("POST", "/api/github/device/poll", None)).await;
+    let (s, _) = call(
+        &app,
+        req(
+            "POST",
+            "/api/github/clone",
+            Some(json!({ "repo": "acme/site" })),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    // The fake GitHub knows no deployments, so no link; its checks (by the sha's first
+    // character) say whether a deploy is still building or failed. Never an error.
+    for (initial, expected) in [('b', "building"), ('c', "failed"), ('d', "unknown")] {
+        let sha = initial.to_string().repeat(40);
+        let (s, body) = call(
+            &app,
+            req(
+                "GET",
+                &format!("/api/projects/site/deploy-url?sha={sha}"),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        assert_eq!(body, json!({ "url": null, "state": expected }), "{initial}");
+    }
+
+    let (s, _) = call(
+        &app,
+        req("GET", "/api/projects/site/deploy-url?sha=nope", None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}

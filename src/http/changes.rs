@@ -102,6 +102,7 @@ async fn save_edits(
                 "summary": cp.summary,
                 "author": cp.author,
                 "ts": cp.ts,
+                "avatarUrl": cp.avatar_url,
             }),
         );
     }
@@ -749,6 +750,38 @@ pub async fn deploy(
         None => DeployState::Unknown,
     };
     Ok(Json(json!({ "state": deployed })))
+}
+
+/// `GET /api/projects/{id}/deploy-url?sha=` → `{ url, state }`: where the newest successful
+/// GitHub deployment of `sha` lives (a published checkpoint's site, or a pushed commit's
+/// preview), and the deploy's state. With a `url` the state is `live`; without one it is the
+/// state of the deploy running on `sha` (`building`, `failed`, or `unknown` when there is none
+/// or GitHub can't say), so a change published before its site deployed shows as building
+/// rather than as having no site. Never an error: the link is a convenience.
+pub async fn deploy_url(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<DeployQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    if !is_full_sha(&q.sha) {
+        return Err(ApiError::badreq("expected a full commit sha"));
+    }
+    let project = state
+        .projects
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+    let Some(repo) = project.repo else {
+        return Ok(Json(json!({ "url": null, "state": DeployState::Unknown })));
+    };
+    let url = state.github.preview_url(&repo, &q.sha).await.ok().flatten();
+    let deployed = if url.is_some() {
+        DeployState::Live
+    } else {
+        state.github.deploy_state(&repo, &q.sha).await
+    };
+    Ok(Json(json!({ "url": url, "state": deployed })))
 }
 
 /// GitHub commit shas are 40 hex characters; anything else can't name a deploy.

@@ -32,6 +32,8 @@ const shell = ref<InstanceType<typeof Shell> | null>(null);
 const floatingHost = ref<InstanceType<typeof AgentFloatingHost> | null>(null);
 
 const project = computed(() => projects.projects.find((p) => p.id === props.id) ?? null);
+/** Review and History bring their own header row; the change picker and Publish aren't needed there. */
+const TABS_WITHOUT_TOP_BAR = new Set(["review", "history"]);
 /** Something was sent to the agent from a tab that normally hides it. */
 const chatRequested = ref(false);
 const showChat = computed(() => {
@@ -105,7 +107,7 @@ watch(
 </script>
 
 <template>
-  <Shell ref="shell" :show-chat="sidebarChat" :hide-top-bar="projectTabFromRoute(route.name) === 'review'">
+  <Shell ref="shell" :show-chat="sidebarChat" :hide-top-bar="TABS_WITHOUT_TOP_BAR.has(projectTabFromRoute(route.name))">
     <template #rail>
       <ProjectRail v-if="project" :project-id="project.id">
         <template #footer>

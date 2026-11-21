@@ -50,14 +50,39 @@ const CHECKPOINT_PREFIX: &str = "checkpoint: ";
 const MAX_SUMMARY_CHARS: usize = 100;
 const FALLBACK_SUMMARY: &str = "agent turn";
 
-/// `{ sha, summary, author, ts }` — `author` is the commit author name, `ts` the commit time in
-/// unix seconds.
+/// `{ sha, summary, author, ts, avatarUrl? }` — `author` is the commit author name, `ts` the
+/// commit time in unix seconds, `avatarUrl` the author's GitHub picture when their email says
+/// who they are (see [`github_avatar`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Checkpoint {
     pub sha: String,
     pub summary: String,
     pub author: String,
     pub ts: i64,
+    #[serde(rename = "avatarUrl", skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// In the timeline ([`log`]): whether the checkpoint is on `main`, i.e. it went out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published: Option<bool>,
+}
+
+/// The GitHub avatar for a commit author's email, when it is GitHub's noreply address
+/// (`{id}+{login}@users.noreply.github.com`, which orso commits with when signed in). Other
+/// emails would need a GitHub lookup, so they get none and the app shows initials.
+pub fn github_avatar(email: &str) -> Option<String> {
+    let local = email.trim().strip_suffix("@users.noreply.github.com")?;
+    let (id, login) = local.split_once('+')?;
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && !login.is_empty())
+        .then(|| format!("https://avatars.githubusercontent.com/u/{id}?v=4"))
+}
+
+/// Splits `show --format=%ct%x1f%an%x1f%ae` output into time, author and avatar.
+fn commit_meta(meta: &str) -> (i64, String, Option<String>) {
+    let mut it = meta.trim().splitn(3, '\u{1f}');
+    let ts = it.next().and_then(|t| t.parse().ok()).unwrap_or_default();
+    let author = it.next().unwrap_or("").to_string();
+    let avatar = it.next().and_then(github_avatar);
+    (ts, author, avatar)
 }
 
 pub(crate) fn lock_for(dir: &Path) -> Arc<Mutex<()>> {
@@ -211,16 +236,15 @@ pub async fn checkpoint(dir: &Path, summary: &str) -> Result<Option<Checkpoint>,
     )
     .await?;
     let sha = run(dir, &["rev-parse", "HEAD"]).await?.trim().to_string();
-    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an", "HEAD"]).await?;
-    let (ts, author) = meta
-        .trim()
-        .split_once('\u{1f}')
-        .unwrap_or((meta.trim(), ""));
+    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an%x1f%ae", "HEAD"]).await?;
+    let (ts, author, avatar_url) = commit_meta(&meta);
     Ok(Some(Checkpoint {
         sha,
         summary,
-        author: author.to_string(),
-        ts: ts.parse().unwrap_or_default(),
+        author,
+        ts,
+        avatar_url,
+        published: None,
     }))
 }
 
@@ -338,11 +362,8 @@ pub async fn checkpoint_paths(
     .await?
     .trim()
     .to_string();
-    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an", &sha]).await?;
-    let (ts, author) = meta
-        .trim()
-        .split_once('\u{1f}')
-        .unwrap_or((meta.trim(), ""));
+    let meta = run(dir, &["show", "-s", "--format=%ct%x1f%an%x1f%ae", &sha]).await?;
+    let (ts, author, avatar_url) = commit_meta(&meta);
     // Compare-and-swap HEAD refuses an external branch update during preparation.
     // Publish the prepared index through Git's lock path, on the same filesystem.
     std::fs::copy(&prepared, &guard.lock)?;
@@ -351,8 +372,10 @@ pub async fn checkpoint_paths(
     Ok(Some(Checkpoint {
         sha,
         summary,
-        author: author.to_string(),
-        ts: ts.parse().unwrap_or_default(),
+        author,
+        ts,
+        avatar_url,
+        published: None,
     }))
 }
 
@@ -405,6 +428,24 @@ fn scope_pathspec(scope: &str) -> Option<String> {
     (!scope.is_empty() && scope != ".").then(|| format!(":(literal){scope}"))
 }
 
+/// Commits on the current branch that `main` lacks (not published yet); `None` without a
+/// `main` branch, when nothing can be said about publishing.
+async fn unpublished(dir: &Path) -> Result<Option<HashSet<String>>, ApiError> {
+    if run(dir, &["rev-parse", "--verify", "--quiet", "main"])
+        .await
+        .is_err()
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        run(dir, &["rev-list", "HEAD", "^main"])
+            .await?
+            .lines()
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+
 /// Commits on the current branch, newest first. Includes the scaffold's initial commit so
 /// a project can be restored to its pristine state. A non-empty `scope` (a project-relative
 /// folder, see [`crate::settings::ProjectSettings::root`]) lists only commits touching it.
@@ -417,28 +458,33 @@ pub async fn log(dir: &Path, scope: &str) -> Result<Vec<Checkpoint>, ApiError> {
         return Ok(Vec::new());
     }
     let pathspec = scope_pathspec(scope);
-    let mut args = vec!["log", "--format=%H%x1f%ct%x1f%an%x1f%s"];
+    let mut args = vec!["log", "--format=%H%x1f%ct%x1f%an%x1f%ae%x1f%s"];
     if let Some(spec) = pathspec.as_deref() {
         args.extend(["--", spec]);
     }
     let out = run(dir, &args).await?;
+    let unpublished = unpublished(dir).await?;
     Ok(out
         .lines()
         .filter_map(|line| {
-            let mut it = line.splitn(4, '\u{1f}');
+            let mut it = line.splitn(5, '\u{1f}');
             let sha = it.next()?.to_string();
             let ts = it.next()?.parse().ok()?;
             let author = it.next()?.to_string();
+            let avatar_url = github_avatar(it.next()?);
             let subject = it.next().unwrap_or("");
             let summary = subject
                 .strip_prefix(CHECKPOINT_PREFIX)
                 .unwrap_or(subject)
                 .to_string();
+            let published = unpublished.as_ref().map(|set| !set.contains(&sha));
             Some(Checkpoint {
                 sha,
                 summary,
                 author,
                 ts,
+                avatar_url,
+                published,
             })
         })
         .collect())
@@ -548,17 +594,7 @@ pub async fn file_log(dir: &Path, path: &str) -> Result<Vec<FileVersion>, ApiErr
         ],
     )
     .await?;
-    let unpublished: Option<HashSet<String>> =
-        match run(dir, &["rev-parse", "--verify", "--quiet", "main"]).await {
-            Ok(_) => Some(
-                run(dir, &["rev-list", "HEAD", "^main"])
-                    .await?
-                    .lines()
-                    .map(str::to_string)
-                    .collect(),
-            ),
-            Err(_) => None,
-        };
+    let unpublished = unpublished(dir).await?;
     Ok(out
         .split('\u{1e}')
         .filter_map(|record| {
@@ -608,7 +644,21 @@ pub async fn restore(dir: &Path, sha: &str) -> Result<String, ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::clean_summary;
+    use super::{clean_summary, github_avatar};
+
+    #[test]
+    fn github_avatar_comes_from_the_noreply_address_only() {
+        assert_eq!(
+            github_avatar("42+ada@users.noreply.github.com").as_deref(),
+            Some("https://avatars.githubusercontent.com/u/42?v=4")
+        );
+        // Old-style noreply (no id), other hosts and malformed ids say nothing about the account.
+        assert_eq!(github_avatar("ada@users.noreply.github.com"), None);
+        assert_eq!(github_avatar("ada@example.com"), None);
+        assert_eq!(github_avatar("x1+ada@users.noreply.github.com"), None);
+        assert_eq!(github_avatar("42+@users.noreply.github.com"), None);
+        assert_eq!(github_avatar(""), None);
+    }
 
     #[test]
     fn published_index_cleanup_preserves_the_next_owners_lock() {
