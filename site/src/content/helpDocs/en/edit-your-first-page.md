@@ -9,6 +9,10 @@ order: 2
 
 orso never edits your live site directly. The first time you edit something, it asks you to start a change. A change is a Git branch with a readable title. Give it a title that says what you are doing, such as "Rewrite the home page headline".
 
+You can see the current change, switch to another one or start a **New change** from the menu at the top left.
+
+![The change menu open at the top of the workspace, with the current change ticked and New change at the bottom](../../../assets/helpDocs/edit-your-first-page/change-menu.png)
+
 ## Make an edit
 
 You can edit in three ways:

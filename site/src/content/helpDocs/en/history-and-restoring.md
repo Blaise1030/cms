@@ -7,9 +7,13 @@ order: 6
 
 orso saves versions of your work as you edit. The **History** tab lists them, newest first, with who made each one and what it changed.
 
+![The History tab listing saved versions, newest first, each with its title, author and time](../../../assets/helpDocs/history-and-restoring/history-list.png)
+
 ## See what changed
 
 Choose a version to see the files it changed, and what was added and removed in each.
+
+![A version opened in the History tab: its changed files on the left, and the lines added in one file highlighted on the right](../../../assets/helpDocs/history-and-restoring/version-diff.png)
 
 ## Restore a version
 

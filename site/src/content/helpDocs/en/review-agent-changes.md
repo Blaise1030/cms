@@ -15,6 +15,8 @@ Open the pages the assistant touched in the **Preview** tab. Read the text, clic
 
 The **History** tab ([more about history](../history-and-restoring/)) shows each saved version and the files it changed. Open a version to see exactly what was added and removed.
 
+![A version opened in the History tab: its changed files on the left, and the lines added in one file highlighted on the right](../../../assets/helpDocs/review-agent-changes/version-diff.png)
+
 ## Undo
 
 - **Ask for a fix.** If something is nearly right, tell the assistant what to change: "the new section is too wide; match the width of the features section".

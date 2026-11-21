@@ -12,14 +12,15 @@ Put the cursor where you want the image, then do one of these:
 - **Drop** an image file into the editor.
 - **Upload** one with the editor's image button.
 
+![The image dialog that opens from the editor's image button, reading "Choose an image or drop it here"](../../../assets/helpDocs/add-images/screenshot-2026-11-21-at-11-54-14-am.png)
+
 orso saves the file in your project and adds it to the body. For more on editing entries, see [Edit blog posts and other collections](../edit-blog-posts-and-collections/).
 
 ## In an image field
 
 For fields such as a blog post's cover image, use the field's upload control or drop a file onto it.
 
-![Test](../../../assets/helpDocs/add-images/screenshot-2026-11-21-at-11-54-14-am.png)
-
+![A blog post's Cover image field, reading "Click to upload or drag an image here", with the Cover alt field below it](../../../assets/helpDocs/add-images/image-field.png)
 ## Alt text
 
 Describe every image for people who can't see it. Blog covers have their own alt text field. Say what the image shows and why it matters, not "image of…".

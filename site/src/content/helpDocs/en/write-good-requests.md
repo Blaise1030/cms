@@ -19,9 +19,11 @@ The assistant works best when it knows what to change, where, and what "done" lo
 
 - **Name the page or section.** "The pricing page" or "the footer" saves the agent guessing.
 - **One request at a time.** Ask for the next thing after the first one is done.
-- **Point at it.** Open the page in the preview first, so you are both looking at the same thing.
+- **Point at it.** Open the page in the preview first, so you are both looking at the same thing. You can also use the element picker in the preview's toolbar to attach a part of the page to your request.
 - **Give it the words.** If you know the exact copy you want, paste it in.
 - **Say what to leave alone.** For example, "don't change the layout, only the text".
+
+![The home page headline picked in the preview and attached to a request in the assistant that reads "Make this headline shorter and punchier"](../../../assets/helpDocs/write-good-requests/pick-an-element.png)
 
 ## Example requests
 

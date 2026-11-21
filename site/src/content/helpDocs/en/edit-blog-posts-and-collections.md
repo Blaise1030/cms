@@ -13,6 +13,8 @@ The **Content** tab lists your site's content collections, such as blog posts, b
 2. Choose an entry. Its fields appear as a form, and its body opens in the rich-text editor.
 3. Make your edits. The preview updates as you go.
 
+![A blog post open in the Content tab: the body in the rich-text editor, and its fields, such as slug, title, date and cover image, on the right](../../../assets/helpDocs/edit-blog-posts-and-collections/content-entry.png)
+
 If you haven't started a change yet, orso asks you to start one first. See [Edit your first page](../edit-your-first-page/).
 
 ## Fields

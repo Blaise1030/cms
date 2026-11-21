@@ -4,7 +4,7 @@ description: Tell orso how to install and run your site when the defaults don't 
 category: existing-site
 order: 5
 ---
-By default, orso runs `npm install` and `npm run dev` at the root of your repo. Add an `orso.json` at the repo root when your site needs something else. See [Is my site compatible?](/is-my-site-compatible/) for the full checklist.
+By default, orso runs `npm install` and `npm run dev` at the root of your repo. Add an `orso.json` at the repo root when your site needs something else. See [Is my site compatible?](../is-my-site-compatible/) for the full checklist.
 
 ## Example
 
