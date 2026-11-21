@@ -115,7 +115,9 @@ describe("createApi", () => {
     await a.health();
     expect(fetchMock.mock.calls[0]![0]).toBe("http://a.test/api/health");
     expect(fetchMock.mock.calls[1]![0]).toBe("http://b.test/api/health");
-    expect(a.previewUrl("my proj")).toBe("http://b.test/preview/my%20proj/");
+    fetchMock.mockResolvedValueOnce(json({ port: 4999, token: "pt" }));
+    await expect(a.previewAccess("my proj")).resolves.toEqual({ port: 4999, token: "pt" });
+    expect(fetchMock.mock.calls[2]![0]).toBe("http://b.test/api/projects/my%20proj/preview");
   });
 
   it("builds chat routes and auth headers", async () => {

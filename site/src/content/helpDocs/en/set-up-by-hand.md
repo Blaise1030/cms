@@ -26,31 +26,23 @@ Don't edit files in `integrations/orso/`. They are replaced when you update.
 
 ## 2. Update `astro.config.mjs`
 
-Add `orso()` as the last integration, and route `base` and the HMR socket through orso's settings. Keep your existing settings.
+Add `orso()` as the last integration. Keep your existing settings.
 
 ```js
 import { orso } from "./integrations/orso/index.js";
 
-const base = process.env.PUBLIC_BASE ?? "/";
-const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT || 0);
-
 export default defineConfig({
-  base,
   integrations: [/* your integrations */, orso()],
-  vite: {
-    server: {
-      hmr: {
-        path: `${base}vite-hmr`.replace(/\/{2,}/g, "/"),
-        ...(hmrPort > 0 ? { clientPort: hmrPort } : {}),
-      },
-    },
-  },
 });
 ```
 
-## 3. Make links base-aware
+orso previews your site at the root of its own address, so links that start with `/` work as written. `orso()` connects live updates itself when orso runs the dev server.
 
-Links that start with `/` skip the preview's base path and break in orso. Route them through a small helper that adds `import.meta.env.BASE_URL`. Start with the header, footer and navigation.
+If your config still has settings for an older orso, remove them: a `base` read from `PUBLIC_BASE`, a `vite.server.hmr` block read from `ORSO_DEV_PORT` or `ORSO_PROXY_PORT`, and any link helper that adds `import.meta.env.BASE_URL`.
+
+## 3. Check your links
+
+There's nothing to change: write links the plain way (`/about/`, `/help/install-orso/`) in components, Markdown, scripts and CSS. If your live site itself needs a `base` (for example a project page on GitHub Pages), keep it. The preview still opens at `/`.
 
 ## 4. Make collections editable
 

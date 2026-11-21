@@ -38,13 +38,13 @@ describe("readPageMeta", () => {
     expect(DESCRIPTION_MAX).toBe(160);
   });
 
-  it("strips the Orso preview mount from canonical and asset paths", () => {
-    const page = "http://127.0.0.1:51995/preview/astro-marketing/blog/";
+  it("shows canonical and asset URLs as site paths", () => {
+    const page = "http://orso.localhost:51995/blog/";
     const m = readPageMeta(
       doc(`<!DOCTYPE html><html><head>
-        <link rel="canonical" href="https://astro-marketing.blaisetiong-dev.workers.dev/preview/astro-marketing/">
-        <link rel="icon" href="/preview/astro-marketing/favicon.svg">
-        <meta property="og:image" content="https://astro-marketing.blaisetiong-dev.workers.dev/preview/astro-marketing/og.png">
+        <link rel="canonical" href="https://astro-marketing.blaisetiong-dev.workers.dev/">
+        <link rel="icon" href="/favicon.svg">
+        <meta property="og:image" content="https://astro-marketing.blaisetiong-dev.workers.dev/og.png">
       </head><body></body></html>`),
       { baseUrl: page },
     );

@@ -206,13 +206,7 @@ impl ConflictSessions {
             let preview_commit =
                 conflicts::preview_commit(&session.dir, &candidate.tree, &session.tip).await?;
             match previews
-                .prepare(
-                    &session.dir,
-                    &session.project_id,
-                    id,
-                    Source::Result,
-                    &preview_commit,
-                )
+                .prepare(&session.dir, id, Source::Result, &preview_commit)
                 .await
             {
                 PreviewState::Invalid { errors } => {

@@ -92,8 +92,8 @@ describe("ConflictView", () => {
   it("keeps preview routes and widths aligned, and blocks a confirmed invalid result", async () => {
     const daemon = h.daemon.api as unknown as Record<string, unknown>;
     daemon.conflictPreviews = vi.fn(async () => ({
-      yours: { status: "ready", url: "/preview/site/conflicts/s1/yours/" },
-      latest: { status: "ready", url: "/preview/site/conflicts/s1/latest/" },
+      yours: { status: "ready", port: 5001, token: "ty" },
+      latest: { status: "ready", port: 5002, token: "tl" },
       result: { status: "invalid", errors: "Build failed" },
     }));
     const store = useChangesStore();
@@ -106,8 +106,9 @@ describe("ConflictView", () => {
     await wrapper.get('input[aria-label="Preview page"]').setValue("/about/");
     const frames = wrapper.findAll("iframe");
     expect(frames).toHaveLength(2);
-    expect(frames[0]!.attributes("src")).toContain("/about/?section=hero#hero");
-    expect(frames[1]!.attributes("src")).toContain("/about/?section=hero#hero");
+    // Each side at the root of its own origin (the daemon's host), first load with its token.
+    expect(frames[0]!.attributes("src")).toBe("http://127.0.0.1:5001/about/?t=ty&section=hero#hero");
+    expect(frames[1]!.attributes("src")).toBe("http://127.0.0.1:5002/about/?t=tl&section=hero#hero");
     await wrapper.findAll("button").find((button) => button.text() === "Mobile")!.trigger("click");
     expect(wrapper.findAll("iframe")[0]!.element.parentElement?.getAttribute("style")).toContain("390px");
   });
@@ -115,27 +116,33 @@ describe("ConflictView", () => {
   it("warns and blocks Finish when the selected result page is missing", async () => {
     const daemon = h.daemon.api as unknown as Record<string, unknown>;
     daemon.conflictPreviews = vi.fn(async () => ({
-      yours: { status: "ready", url: "/preview/site/conflicts/s1/yours/" },
-      latest: { status: "ready", url: "/preview/site/conflicts/s1/latest/" },
-      result: { status: "ready", url: "/preview/site/conflicts/s1/result/" },
+      yours: { status: "ready", port: 5001, token: "ty" },
+      latest: { status: "ready", port: 5002, token: "tl" },
+      result: { status: "ready", port: 5003, token: "tr" },
     }));
     const store = useChangesStore();
     await store.openConflict("site", "s1");
     store.candidate = { tree: "candidate", complete: true };
+    // The frames are cross-origin: whether a page exists comes from the daemon.
+    const conflictPreviewPage = vi.fn(async (_p: string, _id: string, _source: string, path: string) => ({
+      found: path === "/about/",
+    }));
+    daemon.conflictPreviewPage = conflictPreviewPage;
     const wrapper = mount(ConflictView, { props: { projectId: "site" } });
     await flushPromises();
     expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeDefined();
     const frame = wrapper.get('iframe[title="result preview"]');
-    Object.defineProperty(frame.element, "contentDocument", { value: { contentType: "application/json", body: { textContent: '{"error":{"code":"ENOENT"}}' } } });
     await frame.trigger("load");
+    await flushPromises();
+    expect(conflictPreviewPage).toHaveBeenCalledWith("site", "s1", "result", "/");
     expect(wrapper.text()).toContain("This page is missing from the preview");
     expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeDefined();
     await wrapper.get('input[aria-label="Preview page"]').setValue("/about/");
     await flushPromises();
     expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeDefined();
     const nextFrame = wrapper.get('iframe[title="result preview"]');
-    Object.defineProperty(nextFrame.element, "contentDocument", { value: { contentType: "text/html", body: { textContent: "About" } } });
     await nextFrame.trigger("load");
+    await flushPromises();
     expect(wrapper.get("[data-testid='finish-conflict']").attributes("disabled")).toBeUndefined();
   });
 });

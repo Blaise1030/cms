@@ -245,6 +245,19 @@ impl ProjectRegistry {
         }
     }
 
+    /// Every port a project owns or an in-flight `create` has claimed. A project's dev server
+    /// binds its port only while it runs, so listeners orso opens itself (preview origins)
+    /// steer clear of these instead of taking a port a project will need.
+    pub async fn claimed_ports(&self) -> HashSet<u16> {
+        let inner = self.inner.lock().await;
+        inner
+            .projects
+            .iter()
+            .map(|p| p.port)
+            .chain(inner.reserved_ports.iter().copied())
+            .collect()
+    }
+
     pub async fn list(&self) -> Vec<ProjectInfo> {
         self.inner
             .lock()

@@ -1,7 +1,6 @@
 ---
 // Client-side search over the help articles listed on the page; no search service or build step.
 // The field stays hidden until the script runs, so visitors without JavaScript never see a dead input.
-import { href } from "../lib/href";
 import type { Doc } from "../lib/help";
 
 interface Props {
@@ -19,7 +18,7 @@ const index = docs.map(({ doc, section }) => ({
   section,
   title: doc.data.title,
   description: doc.data.description,
-  href: href(`/help/${doc.id}/`),
+  href: `/help/${doc.id}/`,
   text: plain(doc.body),
 }));
 // `<` is escaped so article text can never close the JSON script element.

@@ -1,5 +1,4 @@
 ---
-import { href } from "../../lib/href";
 import { getI18n } from "../../i18n";
 
 const { t } = getI18n(Astro.url);
@@ -21,7 +20,7 @@ const logos = [
       <li class="flex min-h-20 items-center justify-center bg-surface px-4 py-5">
         <span class="inline-flex h-7 w-full max-w-[7.5rem] items-center justify-center">
           <img
-            src={href(`/logos/${logo.file}.svg`)}
+            src={`/logos/${logo.file}.svg`}
             alt={logo.name}
             width="120"
             height="32"
@@ -30,7 +29,7 @@ const logos = [
             decoding="async"
           />
           <img
-            src={href(`/logos/${logo.file}-on-dark.svg`)}
+            src={`/logos/${logo.file}-on-dark.svg`}
             alt=""
             width="120"
             height="32"

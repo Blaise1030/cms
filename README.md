@@ -76,7 +76,6 @@ once it meets these requirements:
 | --- | --- |
 | Default branch `main` | Changes, sync and publishing |
 | Astro `>=7.3.0 <8`, with a `dev` script | Live preview |
-| `base` and the HMR socket read `PUBLIC_BASE` / `ORSO_DEV_PORT`; links use `BASE_URL` | Live preview under `/preview/{id}/` |
 | orso's integration copied into `integrations/orso/`, `orso()` in the config, plus `yaml`, `js-yaml`, `jsonc-parser`, `linkedom` | Content tab and page checks |
 | Collections loaded with `orsoGlob` (`*.md`, `*.mdx` or `*.json`, with a schema) | Editable content |
 | `DESIGN.md` at the root | Design tab |

@@ -1,4 +1,9 @@
 //! Built, immutable previews of the three sides of a conflict.
+//!
+//! Each built side is served at the root of an origin of its own (see [`crate::preview`]),
+//! so it builds with base `/` like the live site and its root-relative links resolve. The
+//! app frames these cross-origin (and without scripts), so it cannot read the frame's
+//! document: it asks [`ConflictPreviewManager::has_page`] whether a page exists instead.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -6,12 +11,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
+use axum::Router;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
+use crate::config::Config;
 use crate::error::ApiError;
+use crate::preview::OriginServer;
 use crate::snapshot_build::{self, BuildError};
 pub(crate) use crate::snapshot_build::{link_node_modules, BuildGroup};
 
@@ -45,9 +54,18 @@ impl Source {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum PreviewState {
-    Ready { url: String },
-    Unavailable { reason: String },
-    Invalid { errors: String },
+    /// Served at the root of `http://<daemon host>:{port}/`; `token` is that origin's
+    /// first-load token (absent without auth).
+    Ready {
+        port: u16,
+        token: Option<String>,
+    },
+    Unavailable {
+        reason: String,
+    },
+    Invalid {
+        errors: String,
+    },
 }
 
 struct Snapshot {
@@ -55,12 +73,19 @@ struct Snapshot {
     state: PreviewState,
     /// The built site; no checkout is kept once the build ends.
     dir: Option<PathBuf>,
+    /// The origin serving `dir`; closed with the snapshot, which frees its port.
+    origin: Option<OriginServer>,
 }
 #[derive(Clone)]
 pub struct ConflictPreviewManager {
     entries: Arc<Mutex<HashMap<(String, Source), Snapshot>>>,
     /// Where built sides live; owned by this manager (swept at startup).
     base: PathBuf,
+    /// Auth and Host rules for the snapshot origins, and the app origins their pages report
+    /// to. The default accepts only each origin's own token.
+    config: Arc<Config>,
+    /// Ports to stay off when opening an origin (see [`Self::with_projects`]).
+    projects: Option<Arc<crate::projects::ProjectRegistry>>,
 }
 
 impl Default for ConflictPreviewManager {
@@ -83,7 +108,21 @@ impl ConflictPreviewManager {
         Self {
             entries: Arc::default(),
             base,
+            config: Arc::new(Config::default()),
+            projects: None,
         }
+    }
+
+    /// Serve snapshots under the daemon's auth and Host rules.
+    /// Keep conflict-preview origins off the ports projects have claimed.
+    pub fn with_projects(mut self, projects: Arc<crate::projects::ProjectRegistry>) -> Self {
+        self.projects = Some(projects);
+        self
+    }
+
+    pub fn with_config(mut self, config: Arc<Config>) -> Self {
+        self.config = config;
+        self
     }
 
     /// At daemon start, when no conflict session is live yet: removes every built side a
@@ -96,7 +135,6 @@ impl ConflictPreviewManager {
     pub async fn prepare(
         &self,
         project_dir: &Path,
-        project_id: &str,
         session_id: &str,
         source: Source,
         revision: &str,
@@ -111,26 +149,48 @@ impl ConflictPreviewManager {
         if let Some(old) = entries.remove(&key) {
             remove_snapshot(old).await;
         }
-        let url = format!(
-            "/preview/{project_id}/conflicts/{session_id}/{}/",
-            source.as_str()
-        );
         let path = self.base.join(format!("{:016x}", rand::random::<u64>()));
-        let state =
-            match snapshot_build::build(project_dir, revision, &url, &path, BUILD_TIMEOUT).await {
-                Ok(()) => PreviewState::Ready { url },
-                Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
-                Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
-            };
+        let mut origin = None;
+        let state = match snapshot_build::build(project_dir, revision, &path, BUILD_TIMEOUT).await {
+            Ok(()) => match self.open_origin(&path).await {
+                Ok(server) => {
+                    let access = server.access();
+                    origin = Some(server);
+                    PreviewState::Ready {
+                        port: access.port,
+                        token: access.token,
+                    }
+                }
+                Err(e) => PreviewState::Unavailable {
+                    reason: format!("Couldn't open a preview port: {e}"),
+                },
+            },
+            Err(BuildError::Unavailable(reason)) => PreviewState::Unavailable { reason },
+            Err(BuildError::Invalid(errors)) => PreviewState::Invalid { errors },
+        };
         entries.insert(
             key,
             Snapshot {
                 revision: revision.to_owned(),
                 state: state.clone(),
                 dir: path.exists().then_some(path),
+                origin,
             },
         );
         state
+    }
+
+    /// An origin serving the built site at `dir` from its root.
+    async fn open_origin(&self, dir: &Path) -> std::io::Result<OriginServer> {
+        let site = Arc::new(SnapshotSite {
+            dir: dir.to_owned(),
+        });
+        let app = Router::new().fallback(serve_snapshot).with_state(site);
+        let avoid = match &self.projects {
+            Some(projects) => projects.claimed_ports().await,
+            None => Default::default(),
+        };
+        OriginServer::bind(self.config.clone(), app, &avoid).await
     }
 
     pub async fn remove_session(&self, id: &str) {
@@ -196,30 +256,101 @@ impl ConflictPreviewManager {
             .dir
             .as_ref()
             .ok_or_else(|| ApiError::enoent("preview unavailable"))?;
-        let (file, mut bytes) = read_page(dir, rest).await?;
-        if file.extension().is_some_and(|e| e == "html") {
-            if let Some(id) = section.filter(|s| {
-                !s.is_empty()
-                    && s.bytes()
-                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            }) {
-                let html = String::from_utf8_lossy(&bytes);
-                if html.matches(&format!("id=\"{id}\"")).count() == 1 {
-                    let style = format!(
-                        // A band as wide as the preview, so the changed section reads edge to edge
-                        // even when the site insets it with margins.
-                        r#"<style data-conflict-highlight>html{{overflow-x:clip!important}}section[id="{id}"]{{position:relative!important}}section[id="{id}"]::after{{content:"";position:absolute;top:-4px;bottom:-4px;left:calc(50% - 50vw);width:100vw;box-sizing:border-box;border:3px solid #f59e0b;pointer-events:none;z-index:2147483647}}</style>"#
-                    );
-                    bytes = html
-                        .replace("</head>", &format!("{style}</head>"))
-                        .into_bytes();
-                    if !String::from_utf8_lossy(&bytes).contains(&style) {
-                        bytes.extend_from_slice(style.as_bytes());
-                    }
-                }
+        serve_dir(dir, rest, section).await
+    }
+
+    /// Whether the built side has a page at `route` (what its origin would answer `200`).
+    pub async fn has_page(&self, session: &str, source: Source, route: &str) -> bool {
+        let dir = {
+            let entries = self.entries.lock().await;
+            match entries.get(&(session.to_owned(), source)) {
+                Some(Snapshot {
+                    state: PreviewState::Ready { .. },
+                    dir: Some(dir),
+                    ..
+                }) => dir.clone(),
+                _ => return false,
+            }
+        };
+        read_page(&dir, route.trim_start_matches('/')).await.is_ok()
+    }
+}
+
+/// What one snapshot origin serves.
+struct SnapshotSite {
+    dir: PathBuf,
+}
+
+/// Router fallback of a snapshot origin: every path is a file of the built site.
+async fn serve_snapshot(State(site): State<Arc<SnapshotSite>>, req: Request) -> Response {
+    let rest = req.uri().path().trim_start_matches('/').to_owned();
+    let section = req
+        .uri()
+        .query()
+        .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("section=")))
+        .map(str::to_owned);
+    match serve_dir(&site.dir, &rest, section.as_deref()).await {
+        Ok(res) => res,
+        Err(e) if e.code == crate::error::ErrorCode::Enoent && is_page_route(&rest) => {
+            missing_page()
+        }
+        Err(e) => e.into_response(),
+    }
+}
+
+/// A route that names a page rather than an asset (a folder, an extensionless path or HTML).
+fn is_page_route(rest: &str) -> bool {
+    let last = rest.rsplit('/').next().unwrap_or("");
+    !last.contains('.') || last.ends_with(".html")
+}
+
+/// A readable `404` page for a route the built site does not have.
+fn missing_page() -> Response {
+    let html = r#"<!doctype html><html><head><meta charset="utf-8"></head><body>This page is missing from the preview.</body></html>"#;
+    let mut res = page_response(Path::new("missing.html"), html.as_bytes().to_vec());
+    *res.status_mut() = StatusCode::NOT_FOUND;
+    res
+}
+
+/// One file of the built site at `dir`; HTML pages get the conflict highlight for `section`.
+async fn serve_dir(dir: &Path, rest: &str, section: Option<&str>) -> Result<Response, ApiError> {
+    let (file, mut bytes) = read_page(dir, rest).await?;
+    if file.extension().is_some_and(|e| e == "html") {
+        if let Some(id) = section.filter(|s| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        }) {
+            let html = String::from_utf8_lossy(&bytes);
+            if html.matches(&format!("id=\"{id}\"")).count() == 1 {
+                let style = format!(
+                    // A band as wide as the preview, so the changed section reads edge to edge
+                    // even when the site insets it with margins.
+                    r#"<style data-conflict-highlight>html{{overflow-x:clip!important}}section[id="{id}"]{{position:relative!important}}section[id="{id}"]::after{{content:"";position:absolute;top:-4px;bottom:-4px;left:calc(50% - 50vw);width:100vw;box-sizing:border-box;border:3px solid #f59e0b;pointer-events:none;z-index:2147483647}}</style>"#
+                );
+                bytes = inject_head(html.into_owned().into_bytes(), &style);
             }
         }
-        Ok(page_response(&file, bytes))
+    }
+    Ok(page_response(&file, bytes))
+}
+
+/// `html` with `snippet` before its first `</head>`, or at the end when it has none.
+fn inject_head(html: Vec<u8>, snippet: &str) -> Vec<u8> {
+    let text = String::from_utf8_lossy(&html);
+    match text.find("</head>") {
+        Some(at) => {
+            let mut out = String::with_capacity(text.len() + snippet.len());
+            out.push_str(&text[..at]);
+            out.push_str(snippet);
+            out.push_str(&text[at..]);
+            out.into_bytes()
+        }
+        None => {
+            let mut out = html.clone();
+            out.extend_from_slice(snippet.as_bytes());
+            out
+        }
     }
 }
 
@@ -307,6 +438,9 @@ pub async fn startup_sweep(base: &Path, tmp: &Path, repos: &[PathBuf]) {
 }
 
 async fn remove_snapshot(old: Snapshot) {
+    if let Some(origin) = old.origin {
+        origin.close().await;
+    }
     if let Some(dir) = old.dir {
         let _ = tokio::fs::remove_dir_all(dir).await;
     }

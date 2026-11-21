@@ -2,7 +2,6 @@
 import { Font } from "astro:assets";
 import { ClientRouter } from "astro:transitions";
 import Wordmark from "../components/Wordmark.astro";
-import { href } from "../lib/href";
 import { absoluteUrl, themeColors } from "../lib/seo";
 import { site } from "../site";
 import "../styles/global.css";
@@ -40,12 +39,11 @@ const ogImage = absoluteUrl(image);
 const jsonLd = Astro.props.jsonLd ?? [
   { "@context": "https://schema.org", "@type": "WebPage", name: title ?? site.name, description, url: canonical },
 ];
-const base = import.meta.env.BASE_URL;
 // The nav item for the section being viewed (Blog or Help) gets aria-current.
-const here = Astro.url.pathname.slice(base.replace(/\/$/, "").length);
+const here = Astro.url.pathname;
 const isCurrent = (link: string) => link.startsWith("/") && link !== "/" && here.startsWith(link);
-const product = site.nav.filter((link) => link.href.startsWith("#"));
-const resources = site.nav.filter((link) => !link.href.startsWith("#"));
+const product = site.nav.filter((link) => link.href.startsWith("/#"));
+const resources = site.nav.filter((link) => !link.href.startsWith("/#"));
 const external = (link: string) => /^https?:\/\//.test(link);
 ---
 
@@ -73,9 +71,9 @@ const external = (link: string) => /^https?:\/\//.test(link);
     <meta name="twitter:image" content={ogImage} />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content={themeColors.light} />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content={themeColors.dark} />
-    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
-    <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
-    <link rel="sitemap" href={`${base}sitemap.xml`} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" href="/sitemap.xml" />
     <Font cssVariable="--font-albert-sans" preload={[{ style: "normal" }]} />
     {jsonLd.map((data) => <script type="application/ld+json" is:inline set:html={JSON.stringify(data).replace(/</g, "\\u003c")} />)}
     <ClientRouter fallback="swap" />
@@ -87,12 +85,12 @@ const external = (link: string) => /^https?:\/\//.test(link);
     >
     <header class="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur-md" transition:animate="none">
       <div class="page flex min-h-header flex-wrap items-center gap-x-10 gap-y-1 py-3 md:flex-nowrap">
-        <a class="-m-1 rounded-sm p-1" href={base} aria-label={`${site.name} home`}><Wordmark /></a>
+        <a class="-m-1 rounded-sm p-1" href="/" aria-label={`${site.name} home`}><Wordmark /></a>
         <nav class="order-last -mx-2 flex w-full gap-1 overflow-x-auto md:order-none md:w-auto" aria-label="Main">
           {site.nav.map((link) => (
             <a
               class="shrink-0 rounded-sm px-2 py-1 text-sm text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=page]:text-ink"
-              href={href(link.href)}
+              href={link.href}
               aria-current={isCurrent(link.href) ? "page" : undefined}>{link.label}</a
             >
           ))}
@@ -100,7 +98,7 @@ const external = (link: string) => /^https?:\/\//.test(link);
         {site.cta && (
           <a
             class="ml-auto shrink-0 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-on-accent transition-colors duration-quick ease-gentle hover:bg-accent-hover"
-            href={href(site.cta.href)}>{site.cta.label}</a
+            href={site.cta.href}>{site.cta.label}</a
           >
         )}
       </div>
@@ -128,7 +126,7 @@ const external = (link: string) => /^https?:\/\//.test(link);
                   <li>
                     <a
                       class="text-muted transition-colors duration-quick ease-gentle hover:text-ink"
-                      href={href(link.href)}
+                      href={link.href}
                       rel={external(link.href) ? "noopener noreferrer" : undefined}>{link.label}</a
                     >
                   </li>

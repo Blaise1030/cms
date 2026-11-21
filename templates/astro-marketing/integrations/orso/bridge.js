@@ -1,15 +1,23 @@
 /**
- * Preview bridge, injected inline into every page by `orso()` during `astro dev`, and into
- * pull request preview builds (`ORSO_PREVIEW=1`) together with `capture.js`.
+ * Preview bridge, injected inline into every page by `orso()` during `astro dev` and into
+ * pull request preview builds (`ORSO_PREVIEW=1`), together with `capture.js`.
  *
- * The dev UI frames the project's dev server directly (so Astro islands and other client
- * modules hydrate), which makes the frame cross-origin for the app. This script lets the
- * app drive the element picker and the appearance overrides without framing the proxied
- * preview, and lets a review screenshot an area of a deployed preview without asking to
- * share the screen. It does nothing unless the parent posts an `orso:preview` message.
+ * orso serves every preview at the root of an origin of its own, so the app's frame is always
+ * cross-origin and the app cannot touch the page. This script is the only way in: it drives
+ * the element picker and the appearance overrides, reports the page's address, its errors and
+ * its HTML (Page details), and screenshots areas of itself (picked elements, review shots)
+ * without asking to share the screen.
+ *
+ * It talks only to orso. Under orso's dev server, `__orsoAppOrigins` names the app origins
+ * (`ORSO_APP_ORIGINS`, set by the daemon): messages from any other origin are ignored, and
+ * messages go out to those origins by name, never to `*`. A deployed preview build has no
+ * such list and answers a loopback parent (orso's own app) once it has said hello.
  */
 (() => {
   const TYPE = "orso:preview";
+  /** Exact app origins, when the daemon named them. */
+  const APP_ORIGINS =
+    typeof __orsoAppOrigins !== "undefined" && Array.isArray(__orsoAppOrigins) ? __orsoAppOrigins : [];
   const OVERLAY_ID = "__orso-picker";
   const MAX_TEXT = 80;
   const MAX_TAG = 120;
@@ -23,6 +31,9 @@
   let prevCursor = "";
   let appearance = null;
   let original = null;
+  const OVERLAY_TAG = "vite-error-overlay";
+  const MAX_MESSAGE = 1000;
+  const MAX_STACK_LINES = 12;
 
   const isLoopback = (origin) => {
     try {
@@ -38,6 +49,9 @@
       return false;
     }
   };
+
+  /** Whether a message from `origin` is from orso's app. */
+  const trusted = (origin) => (APP_ORIGINS.length ? APP_ORIGINS.includes(origin) : isLoopback(origin));
 
   const classes = (el) => [...el.classList].filter((c) => !/^astro-[a-z0-9]+$/i.test(c));
 
@@ -131,13 +145,29 @@
     place();
   }
 
-  function onClick(e) {
+  async function onClick(e) {
     swallow(e);
     const el = target(e);
     if (!el) return;
     const element = describe(el);
     stop();
+    // A picture of the element goes with the mention when the page can take one.
+    const shot = await shoot(el);
+    if (shot) element.screenshot = shot;
     post("pick", { element });
+  }
+
+  /** A PNG data URL of the visible part of `el`, or null. */
+  async function shoot(el) {
+    if (typeof __orsoCaptureRect !== "function") return null;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return null;
+    try {
+      return await __orsoCaptureRect({ x: r.left, y: r.top, width: r.width, height: r.height });
+    } catch {
+      // The mention is still useful without the picture.
+      return null;
+    }
   }
 
   function onKey(e) {
@@ -209,8 +239,31 @@
     root.classList.toggle("dark", !!next.dark || original.dark);
   }
 
+  /** The framing page's origin as the referrer names it, when it is one of the app origins. */
+  const referrerOrigin = (() => {
+    try {
+      const origin = new URL(document.referrer).origin;
+      return APP_ORIGINS.includes(origin) ? origin : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  /**
+   * Send to the app: to the origin that last spoke to us, else to the app origin the referrer
+   * names, else to each named app origin (the browser delivers only to the one that matches the
+   * parent). Never to `*`: a page that frames this one without being orso hears nothing.
+   */
   function post(op, extra) {
-    parent.postMessage(Object.assign({ type: TYPE, op }, extra), parentOrigin || "*");
+    const message = Object.assign({ type: TYPE, op }, extra);
+    const targets = parentOrigin ? [parentOrigin] : referrerOrigin ? [referrerOrigin] : APP_ORIGINS;
+    for (const origin of targets) {
+      try {
+        parent.postMessage(message, origin);
+      } catch {
+        // A malformed origin in the list: skip it.
+      }
+    }
   }
 
   /** An area of this page (its own CSS px) as a PNG, or why not. */
@@ -236,7 +289,7 @@
   }
 
   addEventListener("message", (e) => {
-    if (e.source !== parent || !isLoopback(e.origin) || !e.data || e.data.type !== TYPE) return;
+    if (e.source !== parent || !trusted(e.origin) || !e.data || e.data.type !== TYPE) return;
     parentOrigin = e.origin;
     if (e.data.op === "pick:start") start();
     else if (e.data.op === "pick:stop") stop();
@@ -245,8 +298,12 @@
     } else if (e.data.op === "snapshot") {
       postSnapshot();
     } else if (e.data.op === "hello") {
-      // The handshake: orso learns the bridge is here and whether it can capture itself.
-      post("ready", { version: 1, capture: typeof __orsoCaptureRect === "function" });
+      // The handshake: orso learns the bridge is here and whether it can capture itself, then
+      // where the page is and what went wrong so far (earlier reports may have had no origin
+      // to go to).
+      post("ready", { version: 2, capture: typeof __orsoCaptureRect === "function" });
+      reportPath();
+      if (lastError) post("error", { error: lastError });
     } else if (e.data.op === "capture") {
       captureArea(e.data.id, e.data.rect);
     }
@@ -269,4 +326,90 @@
   addEventListener("hashchange", reportPath);
   document.addEventListener("astro:page-load", reportPath);
   reportPath();
+
+  // --- Page errors: the dev server's error overlay and uncaught errors -----------------------
+
+  let lastError = null;
+  let overlayEl = null;
+
+  function clip(text, max = MAX_MESSAGE) {
+    const t = text == null ? "" : String(text).trim();
+    if (!t) return undefined;
+    return t.length > max ? `${t.slice(0, max)}…` : t;
+  }
+
+  function clipStack(stack) {
+    const lines = stack == null ? [] : String(stack).trim().split("\n");
+    if (!lines.length || !lines[0]) return undefined;
+    return lines.length > MAX_STACK_LINES ? [...lines.slice(0, MAX_STACK_LINES), "    …"].join("\n") : lines.join("\n");
+  }
+
+  function firstText(root, selectors) {
+    for (const s of selectors) {
+      const el = root.querySelector(s);
+      const text = clip(el && el.textContent);
+      if (text) return text;
+    }
+    return undefined;
+  }
+
+  /** Read an error overlay: Astro's ids first, then Vite's classes. */
+  function readOverlay(el) {
+    const root = el.shadowRoot || el;
+    const title = firstText(root, ["#title"]);
+    const body = firstText(root, ["#message-content", ".message-body"]);
+    const message =
+      [title !== "An error occurred." ? title : undefined, body].filter(Boolean).join(": ") ||
+      clip(root.textContent) ||
+      "The page failed to build.";
+    // Astro puts the absolute location in the code header's `title`.
+    const header = root.querySelector("#code header h2");
+    const file = clip(header && header.getAttribute("title")) || firstText(root, ["#code header h2", ".file"]);
+    const error = { kind: "build", message };
+    if (file) error.file = file;
+    const stack = clipStack(firstText(root, ["#stack-content", ".stack"]));
+    if (stack) error.stack = stack;
+    const hint = firstText(root, ["#hint-content"]);
+    if (hint) error.hint = hint;
+    return error;
+  }
+
+  function fromThrown(reason, fallback) {
+    if (reason && typeof reason === "object" && "message" in reason) {
+      const error = { kind: "runtime", message: clip(`${reason.name || "Error"}: ${reason.message}`) };
+      const stack = clipStack(reason.stack);
+      if (stack) error.stack = stack;
+      return error;
+    }
+    return { kind: "runtime", message: clip(reason) || fallback };
+  }
+
+  function reportError(error) {
+    lastError = error;
+    post("error", { error });
+  }
+
+  function scanOverlay() {
+    const found = document.querySelector(OVERLAY_TAG);
+    if (found === overlayEl) return;
+    overlayEl = found;
+    if (found) reportError(readOverlay(found));
+    else if (lastError && lastError.kind === "build") {
+      lastError = null;
+      post("error-cleared");
+    }
+  }
+
+  addEventListener("error", (e) => {
+    // Resource load errors (a missing image) are not script errors.
+    if (typeof ErrorEvent === "function" && !(e instanceof ErrorEvent)) return;
+    const error = e.error ? fromThrown(e.error, e.message) : fromThrown(e.message, "Script error");
+    if (e.filename) error.file = [e.filename, e.lineno, e.colno].filter(Boolean).join(":");
+    reportError(error);
+  });
+  addEventListener("unhandledrejection", (e) => reportError(fromThrown(e.reason, "Unhandled promise rejection")));
+  if (typeof MutationObserver === "function" && document.documentElement) {
+    new MutationObserver(scanOverlay).observe(document.documentElement, { childList: true, subtree: true });
+    scanOverlay();
+  }
 })();

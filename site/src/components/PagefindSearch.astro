@@ -7,17 +7,16 @@ import SiteSearch from "./vue/SiteSearch.vue";
 import { getI18n } from "../i18n";
 
 interface Props {
-  /** Index name from astro.config.mjs, e.g. "blog" → `<base>pagefind-blog/`. */
+  /** Index name from astro.config.mjs, e.g. "blog" → `/pagefind-blog/`. */
   bundle: string;
   /** Button label, palette placeholder and accessible name. */
   placeholder: string;
   class?: string;
 }
 const { bundle, placeholder, class: className } = Astro.props;
-const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
 const { group } = getI18n(Astro.url);
 ---
 
 <div class:list={[className]}>
-  <SiteSearch client:idle bundlePath={`${base}pagefind-${bundle}/`} baseUrl={base} placeholder={placeholder} labels={group("search")} />
+  <SiteSearch client:idle bundlePath={`/pagefind-${bundle}/`} placeholder={placeholder} labels={group("search")} />
 </div>

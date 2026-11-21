@@ -2,7 +2,7 @@ import { loadBlog } from "./blog";
 import { loadHelp } from "./help";
 
 export interface SitePage {
-  /** Site path without the base, e.g. `/blog/welcome/`. */
+  /** Site path, e.g. `/blog/welcome/`. */
   path: string;
   /** Last change (YYYY-MM-DD), when known. */
   lastmod?: string;

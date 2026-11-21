@@ -163,18 +163,31 @@ const waiting = new Map<number, { resolve: (url: string) => void; reject: (e: Er
 let nextCapture = 0;
 const frameOf = (key: string) =>
   root.value?.querySelector<HTMLIFrameElement>(`iframe[data-testid='browser-frame-iframe-${key}']`) ?? null;
+/**
+ * The origin of the site `key` frames (its `url`). The bridge is only spoken to there, and only
+ * believed from there: a frame that navigated elsewhere is a different site.
+ */
+function originOf(key: string): string | null {
+  const url = props.frames.find((f) => f.key === key)?.url;
+  try {
+    return url ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+}
 
 function onFrameLoad(key: string, frame: HTMLIFrameElement) {
   const { [key]: _gone, ...rest } = bridges.value;
   bridges.value = rest;
-  frame.contentWindow?.postMessage({ type: BRIDGE, op: "hello" }, "*");
+  const origin = originOf(key);
+  if (origin) frame.contentWindow?.postMessage({ type: BRIDGE, op: "hello" }, origin);
 }
 function onBridgeMessage(e: MessageEvent) {
   const data = e.data as { type?: string; op?: string; id?: number; capture?: boolean; ok?: boolean; dataUrl?: string; error?: string };
   if (!data || data.type !== BRIDGE) return;
   // Only the frames this component shows.
   const key = props.frames.find((f) => frameOf(f.key)?.contentWindow === e.source)?.key;
-  if (!key) return;
+  if (!key || e.origin !== originOf(key)) return;
   if (data.op === "ready") bridges.value = { ...bridges.value, [key]: { capture: !!data.capture } };
   else if (data.op === "capture" && typeof data.id === "number") {
     const pending = waiting.get(data.id);
@@ -200,7 +213,8 @@ const canCapture = (side: string) => !!bridges.value[side]?.capture;
  */
 function captureSide(side: string, rect: BrowserFramePick["rect"], timeoutMs = 10_000): Promise<string> {
   const frame = frameOf(side);
-  if (!frame?.contentWindow || !canCapture(side)) return Promise.reject(new Error("No preview bridge."));
+  const origin = originOf(side);
+  if (!frame?.contentWindow || !origin || !canCapture(side)) return Promise.reject(new Error("No preview bridge."));
   const box = frame.getBoundingClientRect();
   const k = (frame.offsetWidth || box.width) / (box.width || 1);
   const x0 = Math.max(rect.x, box.left);
@@ -219,7 +233,7 @@ function captureSide(side: string, rect: BrowserFramePick["rect"], timeoutMs = 1
       resolve: (url) => (clearTimeout(timer), resolve(url)),
       reject: (e) => (clearTimeout(timer), reject(e)),
     });
-    frame.contentWindow!.postMessage({ type: BRIDGE, op: "capture", id, rect: local }, "*");
+    frame.contentWindow!.postMessage({ type: BRIDGE, op: "capture", id, rect: local }, origin);
   });
 }
 

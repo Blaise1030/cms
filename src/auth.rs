@@ -47,7 +47,7 @@ fn origin_host(origin: &str) -> &str {
     host_only(no_scheme.split('/').next().unwrap_or(no_scheme))
 }
 
-fn host_allowed(host: &str, origin: Option<&str>) -> bool {
+pub(crate) fn host_allowed(host: &str, origin: Option<&str>) -> bool {
     let h = host_only(host).to_ascii_lowercase();
     if h == "localhost" || h.ends_with(".localhost") || h == "127.0.0.1" || h == "::1" {
         return true;

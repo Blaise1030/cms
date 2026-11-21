@@ -1,4 +1,5 @@
 import type { DaemonConfig } from "./config";
+import type { PreviewAccess } from "./previewOrigin";
 import {
   ERROR_CODES,
   type ChatHistory,
@@ -372,6 +373,11 @@ export function createApi(
       json<ConflictSession>("GET", `/api/changes/conflicts/${enc(id)}`, { query: { project } }),
     conflictPreviews: (project: string, id: string) =>
       json<ConflictPreviews>("GET", `/api/changes/conflicts/${enc(id)}/previews`, { query: { project } }),
+    /** Whether a built side has the page at `path` (the app can't read the cross-origin frame). */
+    conflictPreviewPage: (project: string, id: string, source: "yours" | "latest" | "result", path: string) =>
+      json<{ found: boolean }>("GET", `/api/changes/conflicts/${enc(id)}/previews/page`, {
+        query: { project, source, path },
+      }),
     chooseConflict: (project: string, id: string, path: string, choice: ConflictChoice) =>
       json<ConflictCandidate>("POST", `/api/changes/conflicts/${enc(id)}/choice`, { body: { project, path, choice } }),
     finishConflict: (project: string, id: string) =>
@@ -497,16 +503,16 @@ export function createApi(
       json<FileContent>("GET", "/api/file", { query: { project, path } }),
 
     /**
-     * URL to embed the live preview in an iframe. Auth is via the `wb_session` cookie only (an
-     * iframe cannot send `Authorization`), and the daemon mints it `HttpOnly; SameSite=Lax`.
+     * Where the live preview is served: the root of an origin of its own, with that origin's
+     * first-load token (see `core/previewOrigin.ts`). Behind daemon auth, so only the app learns
+     * the token. The frame then authenticates with the origin's own `SameSite=Lax` cookie.
      *
      * KNOWN LIMITATION: when the page and the daemon are cross-site (hosted PWA at
      * `app.<domain>` driving a loopback daemon) the browser neither stores nor sends that cookie
-     * for the framed request, so every request inside the frame 401s. Only the embedded topology
-     * (SPA served by the daemon, same origin) and same-site setups (e.g. `localhost:5173` ->
-     * `localhost:7800`) work. `PreviewPanel` shows a notice instead of a broken frame in that case
-     * (see `isCrossSite`); a real fix needs a relay or a short-lived URL-scoped preview token.
+     * in the frame, so requests inside it 401 after the first. `PreviewPanel` shows a notice
+     * instead of a broken frame in that case (see `isCrossSite`).
      */
-    previewUrl: (id: string) => `${cfg().origin}/preview/${enc(id)}/`,
+    previewAccess: (id: string) =>
+      json<PreviewAccess>("GET", `/api/projects/${enc(id)}/preview`),
   };
 }

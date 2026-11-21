@@ -13,16 +13,16 @@ order: 4
 
 ## The page loads without styles, or links go to the wrong place
 
-orso serves your site's preview under `/preview/{id}/`. Sites that assume they live at `/` break there.
+orso serves your site's preview at the root of its own address, so plain links like `/about/` work. If styles or links break only in orso, look for settings left over from an older orso:
 
-- `base` in `astro.config.mjs` must read `PUBLIC_BASE`.
-- Links and images must use `BASE_URL`, not a bare `/`.
+- a `base` in `astro.config.mjs` read from `PUBLIC_BASE`;
+- a link helper that adds `BASE_URL` or strips a `/preview/{id}` prefix.
 
-This mostly affects existing sites. See [Is my site compatible?](/help/is-my-site-compatible/) and [Set up your site with the agent skill](/help/set-up-with-the-agent-skill/).
+Remove them. See [Set up your site by hand](/help/set-up-by-hand/) for the current setup.
 
 ## The preview doesn't update when I edit
 
-Live updates need the HMR socket set up as described in [Set up your site by hand](/help/set-up-by-hand/). Reloading the preview shows your latest saved edits in the meantime.
+`orso()` connects live updates when orso runs the dev server. Check that `orso()` is in your config's integrations, and remove any `vite.server.hmr` block left over from an older orso. Reloading the preview shows your latest saved edits in the meantime.
 
 ## The page shows an error
 

@@ -32,7 +32,8 @@ fn authorize(state: &AppState, body: &Bytes) -> Result<String, ApiError> {
 }
 
 /// `{devserver: "starting"|"ready"|"crashed", port, previewPath, message?}`; `message` is
-/// the dev server's output tail while `crashed`.
+/// the dev server's output tail while `crashed`. The site runs at the root of the dev server
+/// (`previewPath` is always `/`).
 pub async fn preview_status_value(state: &AppState, project: &str) -> Result<Value, ApiError> {
     let p = state
         .projects
@@ -42,7 +43,7 @@ pub async fn preview_status_value(state: &AppState, project: &str) -> Result<Val
     let mut v = json!({
         "devserver": p.devserver.as_str(),
         "port": p.port,
-        "previewPath": format!("/preview/{}/", p.id),
+        "previewPath": "/",
     });
     if p.devserver == DevserverStatus::Crashed {
         if let Some(m) = state.devservers.crash_message(&p.id) {

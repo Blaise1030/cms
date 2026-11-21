@@ -9,7 +9,7 @@ export function createFakeDaemon(api: Record<string, unknown> = {}) {
   const reconnect = new Set<() => void>();
   return {
     api: {
-      previewUrl: (id: string) => `http://127.0.0.1:7800/preview/${id}/`,
+      previewAccess: async () => ({ port: 56066, token: "pt" }),
       attachmentUrl: (project: string, name: string) =>
         `http://127.0.0.1:7800/api/chat/${project}/attachments/${name}`,
       changesSyncNeeded: async () => true,

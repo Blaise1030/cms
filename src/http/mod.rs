@@ -130,16 +130,11 @@ pub fn router(state: AppState) -> Router {
             "/api/projects/{id}/devserver/restart",
             post(devserver::restart),
         )
-        .route("/preview/{id}", any(preview::handle))
-        .route("/preview/{id}/", any(preview::handle))
-        .route("/preview/{id}/{*rest}", any(preview::handle))
-        // Astro hardcodes these at the site root even when `base` is `/preview/{id}/`.
-        .route("/@vite", any(preview::handle_vite_root))
-        .route("/@vite/{*rest}", any(preview::handle_vite_root))
-        .route("/@id/{*rest}", any(preview::handle_vite_root))
-        .route("/@fs/{*rest}", any(preview::handle_vite_root))
-        .route("/node_modules/{*rest}", any(preview::handle_vite_root))
-        .route("/src/{*rest}", any(preview::handle_vite_root))
+        .route("/api/projects/{id}/preview", get(devserver::preview))
+        // Previews live on origins of their own now; old links redirect there.
+        .route("/preview/{id}", any(preview::redirect_legacy))
+        .route("/preview/{id}/", any(preview::redirect_legacy))
+        .route("/preview/{id}/{*rest}", any(preview::redirect_legacy))
         .route("/api/chat/providers", get(chat::list_providers))
         .route(
             "/api/chat/providers/{provider}/models",
@@ -194,6 +189,10 @@ pub fn router(state: AppState) -> Router {
             get(changes::conflict_previews),
         )
         .route(
+            "/api/changes/conflicts/{id}/previews/page",
+            get(changes::conflict_preview_page),
+        )
+        .route(
             "/api/changes/conflicts/{id}/choice",
             post(changes::choose_conflict),
         )
@@ -228,7 +227,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/publish", post(changes::publish))
         .route("/api/tree", get(files::tree))
         .route("/api/file", get(files::file))
-        .fallback(preview::fallback)
+        .fallback(static_fallback)
         .method_not_allowed_fallback(error::method_not_allowed)
         // Applied bottom-up: host check runs first, then auth.
         .layer(middleware::from_fn_with_state(
@@ -265,6 +264,12 @@ pub fn router(state: AppState) -> Router {
         );
     }
     app.with_state(state)
+}
+
+/// Everything the router does not name is the app shell.
+async fn static_fallback(req: axum::extract::Request) -> axum::response::Response {
+    let (parts, _) = req.into_parts();
+    crate::static_files::serve(parts.method, parts.uri, parts.headers).await
 }
 
 /// Directory of a registered project, or `ENOENT`.

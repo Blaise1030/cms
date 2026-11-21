@@ -62,7 +62,7 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
         (Source::Latest, &latest, "Latest"),
         (Source::Result, &result, "Result"),
     ] {
-        let state = manager.prepare(&repo, "site", "session", source, rev).await;
+        let state = manager.prepare(&repo, "session", source, rev).await;
         assert!(matches!(state, PreviewState::Ready { .. }), "{state:?}");
         let response = manager
             .serve("session", source, "index.html", None)
@@ -114,7 +114,7 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
     .unwrap();
     let broken = commit(&repo, "<h1>Broken</h1>\n");
     let state = manager
-        .prepare(&repo, "site", "session", Source::Result, &broken)
+        .prepare(&repo, "session", Source::Result, &broken)
         .await;
     assert!(matches!(state, PreviewState::Invalid { .. }), "{state:?}");
     assert!(manager.is_invalid("session", Source::Result).await);
@@ -125,7 +125,7 @@ async fn distinct_snapshots_assets_invalid_build_and_cleanup() {
     .unwrap();
     let no_page = commit(&repo, "<h1>No build output</h1>\n");
     let state = manager
-        .prepare(&repo, "site", "session", Source::Result, &no_page)
+        .prepare(&repo, "session", Source::Result, &no_page)
         .await;
     assert!(
         matches!(state, PreviewState::Unavailable { .. }),
@@ -144,7 +144,92 @@ async fn missing_dependencies_keep_text_flow_available() {
     let temp = tempfile::tempdir().unwrap();
     let manager = ConflictPreviewManager::new();
     let state = manager
-        .prepare(temp.path(), "site", "s", Source::Yours, "abc")
+        .prepare(temp.path(), "s", Source::Yours, "abc")
         .await;
     assert!(matches!(state, PreviewState::Unavailable { .. }));
+}
+
+/// One request to a snapshot origin: `(status, head, body)`.
+async fn get(port: u16, path: &str, extra: &str) -> (u16, String, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    s.write_all(
+        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{extra}\r\n")
+            .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).await.unwrap();
+    let (head, body) = out.split_once("\r\n\r\n").unwrap();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head.to_string(), body.to_string())
+}
+
+#[tokio::test]
+async fn each_snapshot_is_served_at_the_root_of_its_own_origin() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("site");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-b", "main"]);
+    fs::write(
+        repo.join("package.json"),
+        r#"{"scripts":{"build":"mkdir -p dist && cp index.html dist/index.html"}}"#,
+    )
+    .unwrap();
+    let rev = commit(
+        &repo,
+        "<html><head></head><body><section id=\"hero\"><a href=\"/pricing\">Hi</a></section></body></html>",
+    );
+    fs::create_dir(repo.join("node_modules")).unwrap();
+    let config = orso::config::Config {
+        port: 7800,
+        token: Some("daemon-token".into()),
+        ..Default::default()
+    };
+    let manager = ConflictPreviewManager::new().with_config(std::sync::Arc::new(config));
+    let state = manager.prepare(&repo, "s", Source::Yours, &rev).await;
+    let PreviewState::Ready { port, token } = state else {
+        panic!("{state:?}")
+    };
+    let token = token.expect("an origin token under auth");
+
+    assert_eq!(
+        get(port, "/", "").await.0,
+        401,
+        "the origin needs its token"
+    );
+    let (status, head, _) = get(port, &format!("/?section=hero&t={token}"), "").await;
+    assert_eq!(status, 302);
+    assert!(head.contains("location: /?section=hero"), "{head}");
+    let cookie = format!("Cookie: orso_preview_{port}={token}\r\n");
+
+    let (status, _, body) = get(port, "/?section=hero", &cookie).await;
+    assert_eq!(status, 200);
+    assert!(
+        body.contains("<a href=\"/pricing\">"),
+        "links stay plain: {body}"
+    );
+    assert!(body.contains("data-conflict-highlight"), "{body}");
+    assert!(manager.has_page("s", Source::Yours, "/").await);
+
+    let (status, _, body) = get(port, "/missing/", &cookie).await;
+    assert_eq!(status, 404);
+    assert!(body.contains("missing from the preview"), "{body}");
+    assert!(!manager.has_page("s", Source::Yours, "/missing/").await);
+    assert!(
+        !manager.has_page("s", Source::Latest, "/").await,
+        "not prepared"
+    );
+    assert_eq!(get(port, "/missing.css", &cookie).await.0, 404);
+
+    manager.remove_session("s").await;
+    assert!(
+        tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err(),
+        "the snapshot's port is freed with it"
+    );
 }

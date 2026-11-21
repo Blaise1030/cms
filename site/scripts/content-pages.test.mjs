@@ -15,9 +15,9 @@ function fixture(run) {
     run(dir);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
-function build(dir, base = "/preview/example/") {
+function build(dir) {
   const result = spawnSync(process.execPath, [join(root, "node_modules/astro/bin/astro.mjs"), "build"], {
-    cwd: dir, encoding: "utf8", env: { ...process.env, PUBLIC_BASE: base },
+    cwd: dir, encoding: "utf8", env: process.env,
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 }
@@ -44,7 +44,7 @@ test("built sample blog categories link their posts", () => {
 });
 
 // Fixtures vary filenames and dates/orders to catch sorting by filesystem order.
-test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
+test("built routes sort Blog and Help entries", () => fixture((dir) => {
   for (const name of ["blog", "helpDocs", "helpCategories"]) mkdirSync(join(dir, "src/content", name, "en"), { recursive: true });
   writeFileSync(join(dir, "src/content/helpCategories/en/reference.md"), "---\ntitle: Reference\ndescription: Look things up\norder: 1\n---\n");
   writeFileSync(join(dir, "src/content/blog/en/a-new.md"), '---\ntitle: Newest article\ndescription: New article\npubDate: "2026-10-11"\n---\nNew **body**');
@@ -55,34 +55,34 @@ test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
   build(dir);
   const blog = html(dir, "blog");
   assert.ok(blog.indexOf("Newest article") < blog.indexOf("Oldest article"));
-  assert.match(blog, /href="\/preview\/example\/blog\/a-new\/"/);
-  assert.match(blog, /href="\/preview\/example\/#features"/);
+  assert.match(blog, /href="\/blog\/a-new\/"/);
+  assert.match(blog, /href="\/#features"/);
   const help = html(dir, "help");
   assert.ok(help.indexOf("First guide") < help.indexOf("Alpha guide"));
   assert.ok(help.indexOf("Alpha guide") < help.indexOf("Last guide"));
   // A category file sorts before free-text categories.
   assert.ok(help.indexOf("Reference") < help.indexOf("Other guide"));
   assert.ok(help.indexOf("Other guide") < help.indexOf("First guide"));
-  assert.match(help, /bundlePath&quot;:\[0,&quot;\/preview\/example\/pagefind-help\/&quot;\]/);
+  assert.match(help, /bundlePath&quot;:\[0,&quot;\/pagefind-help\/&quot;\]/);
   assert.ok(existsSync(join(dir, "dist", "pagefind-help", "pagefind.js")), "pagefind-help index");
   const reference = html(dir, "help/category/reference");
   assert.match(reference, /<h1[^>]*>Reference/);
-  assert.match(reference, /href="\/preview\/example\/help\/c-other\/"/);
+  assert.match(reference, /href="\/help\/c-other\/"/);
   assert.match(html(dir, "help/z-first"), /On this page/);
-  assert.match(help, /href="\/preview\/example\/help\/z-first\/"/);
+  assert.match(help, /href="\/help\/z-first\/"/);
   assert.match(html(dir, "blog/a-new"), /<strong>body<\/strong>/);
   // Free-text categories (no category file) still get a category page.
-  assert.match(help, /href="\/preview\/example\/help\/category\/setup\/"/);
+  assert.match(help, /href="\/help\/category\/setup\/"/);
   assert.match(html(dir, "help/category/setup"), /<h1[^>]*>Setup/);
-  // SEO files are base-aware and list the collections.
+  // SEO files use the live site URL and list the collections.
   const file = (path) => readFileSync(join(dir, "dist", path), "utf8");
-  assert.match(file("robots.txt"), /^Sitemap: https:\/\/example\.com\/preview\/example\/sitemap\.xml$/m);
-  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/blog\/a-new\/<\/loc>/);
-  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/help\/z-first\/<\/loc>/);
-  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/preview\/example\/privacy\/<\/loc>/);
+  assert.match(file("robots.txt"), /^Sitemap: https:\/\/example\.com\/sitemap\.xml$/m);
+  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/blog\/a-new\/<\/loc>/);
+  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/help\/z-first\/<\/loc>/);
+  assert.match(file("sitemap.xml"), /<loc>https:\/\/example\.com\/privacy\/<\/loc>/);
   assert.match(file("llms.txt"), /^# Orso\n\n> /);
-  assert.match(file("llms.txt"), /- \[Newest article\]\(https:\/\/example\.com\/preview\/example\/blog\/a-new\/\): New article/);
-  assert.match(html(dir, "blog/a-new"), /<link rel="canonical" href="https:\/\/example\.com\/preview\/example\/blog\/a-new\/"/);
+  assert.match(file("llms.txt"), /- \[Newest article\]\(https:\/\/example\.com\/blog\/a-new\/\): New article/);
+  assert.match(html(dir, "blog/a-new"), /<link rel="canonical" href="https:\/\/example\.com\/blog\/a-new\/"/);
   assert.match(html(dir, "blog/a-new"), /"@type":"BlogPosting"/);
 }));
 
@@ -99,5 +99,5 @@ test("empty or missing collections retain useful Blog and Help indexes", () => f
   assert.match(html(dir, "blog"), /No blog posts yet/);
   assert.match(html(dir, "help"), /No help docs yet/);
   assert.match(html(dir, "blog/categories"), /No blog categories yet/);
-  assert.match(readFileSync(join(dir, "dist/sitemap.xml"), "utf8"), /<loc>https:\/\/example\.com\/preview\/example\/<\/loc>/);
+  assert.match(readFileSync(join(dir, "dist/sitemap.xml"), "utf8"), /<loc>https:\/\/example\.com\/<\/loc>/);
 }));

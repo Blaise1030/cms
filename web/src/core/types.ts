@@ -305,7 +305,8 @@ export interface ConflictCandidate {
 }
 
 export type ConflictPreviewState =
-  | { status: "ready"; url: string }
+  /** Served at the root of an origin of its own; see `core/previewOrigin.ts`. */
+  | { status: "ready"; port: number; token: string | null }
   | { status: "unavailable"; reason: string }
   | { status: "invalid"; errors: string };
 

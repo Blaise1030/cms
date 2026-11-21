@@ -15,7 +15,6 @@ orso works best with sites made from its template, but an existing Astro site wo
 | The default branch is `main` | Changes, sync and publishing all work against `main` |
 | Astro 7.3 or later (below 8) | The Content tab's integration needs it |
 | A `dev` script in `package.json` that runs `astro dev` | orso starts the dev server for the live preview |
-| `base` and the HMR socket read `PUBLIC_BASE` and `ORSO_DEV_PORT`, and links use `BASE_URL` | The preview is served under `/preview/{id}/` |
 
 ## Needed for each feature
 

@@ -30,7 +30,6 @@ const floatingChrome = computed(() => props.floatingChat === true);
         :inert="tab !== 'preview'"
         :project-id="project.id"
         :devserver="project.devserver"
-        :port="project.port"
       />
       <div v-show="tab !== 'preview'" class="bg-background absolute inset-0" data-testid="workspace-surface">
         <RouterView />

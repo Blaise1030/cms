@@ -330,12 +330,12 @@ it("opens a read-only collection in a new tab when the dev server is ready", asy
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: false, supportedForEditing: true, reason: "This collection is read-only" }],
   resolveContentPreviewPath,
-  previewUrl: (id: string) => `http://daemon.test/preview/${id}/`,
+  previewAccess: async () => ({ port: 4999, token: "pt" }),
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
  expect(resolveContentPreviewPath).toHaveBeenCalledWith("p", "blog", "welcome");
- expect(open).toHaveBeenCalledWith("http://daemon.test/preview/p/blog/welcome/", "_blank", "noopener");
+ expect(open).toHaveBeenCalledWith("http://127.0.0.1:4999/blog/welcome/?t=pt", "_blank", "noopener");
  expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
  open.mockRestore();
  w.unmount();
@@ -347,12 +347,12 @@ it("resolves the preview path and opens it in a new tab when ready", async () =>
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
   resolveContentPreviewPath,
-  previewUrl: (id: string) => `http://daemon.test/preview/${id}/`,
+  previewAccess: async () => ({ port: 4999, token: "pt" }),
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();
  expect(resolveContentPreviewPath).toHaveBeenCalledWith("p", "blog", "welcome");
- expect(open).toHaveBeenCalledWith("http://daemon.test/preview/p/blog/welcome/", "_blank", "noopener");
+ expect(open).toHaveBeenCalledWith("http://127.0.0.1:4999/blog/welcome/?t=pt", "_blank", "noopener");
  expect(w.vm.$route.path).toBe("/p/p/content/blog/welcome");
  open.mockRestore();
  w.unmount();
@@ -364,6 +364,7 @@ it("toasts on preview-path failure without opening a tab", async () => {
  const w = await setup({
   listContentCollections: async () => [{ ...blogPreview, editable: true, reason: null }],
   resolveContentPreviewPath,
+  previewAccess: async () => ({ port: 4999, token: "pt" }),
  }, "/p/p/content/blog/welcome");
  withDevserver("ready"); await flushPromises();
  await w.get('[data-testid="content-open-preview"]').trigger("click"); await flushPromises();

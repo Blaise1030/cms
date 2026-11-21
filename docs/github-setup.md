@@ -46,9 +46,9 @@ itself, remove orso under github.com → Settings → Applications → Authorize
 
 ## Known limitations
 
-- **Previews of opened repositories:** the live preview expects the site to accept the
-  orso's preview base path (`/preview/<id>/`), which the orso Astro template does.
-  Other repositories open and can be edited, but their preview may not load until their
-  Astro config reads `PUBLIC_BASE` the same way.
+- **Previews of opened repositories:** orso serves each preview at the root of its own
+  loopback address, so a site previews with plain root-relative links and no orso settings.
+  A site whose live build needs a `base` path opens at `/`; type the base path in the
+  preview's address bar.
 - Opening a repository runs `npm install`, which executes that repository's install scripts —
   only open repositories you trust (the same trust you need to run `npm run dev` on them).

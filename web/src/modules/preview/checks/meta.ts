@@ -33,7 +33,7 @@ export function readPageMeta(doc: ParentNode, opts: { baseUrl?: string } = {}): 
   const description = (
     doc.querySelector('meta[name="description"]')?.getAttribute("content") ?? ""
   ).trim();
-  // Paths only — strip Orso's /preview/{id}/ mount so labels match the public site.
+  // Paths only, so labels match the public site.
   const canonical = previewSitePath(
     (doc.querySelector('link[rel="canonical"]')?.getAttribute("href") ?? "").trim(),
     base,

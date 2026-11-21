@@ -69,18 +69,45 @@ export function orsoGlob({ base, pattern, kind, singleton = null, ...options } =
 }
 
 /**
- * Element-picking and appearance bridge for the direct (cross-origin) dev preview.
- * Injected inline during `astro dev`; never part of a build.
+ * The bridge between orso's app and the (always cross-origin) preview frame: picking,
+ * appearance, address, errors, Page details. Injected inline during `astro dev` and into
+ * pull request preview builds; never into a production build.
  */
 const PREVIEW_BRIDGE = readFileSync(new URL("./bridge.js", import.meta.url), "utf8");
-/** Self-capture for review screenshots; only in pull request preview builds. */
+/** Self-capture for picked elements and review screenshots. */
 const PREVIEW_CAPTURE = readFileSync(new URL("./capture.js", import.meta.url), "utf8");
 
 /**
- * The bridge for a `ORSO_PREVIEW=1` build: with self-capture, in one function so neither adds
- * globals to the page.
+ * The bridge with self-capture, in one function so neither adds globals to the page.
+ * `appOrigins` are the only origins it talks to (empty: any loopback parent that says hello).
  */
-export const PREVIEW_BUILD_BRIDGE = `(() => {\n${PREVIEW_CAPTURE}\n${PREVIEW_BRIDGE}\n})();`;
+export function previewBridge(appOrigins = []) {
+  const origins = `const __orsoAppOrigins = ${JSON.stringify(appOrigins)};`;
+  return `(() => {\n${origins}\n${PREVIEW_CAPTURE}\n${PREVIEW_BRIDGE}\n})();`;
+}
+
+/** The bridge for a `ORSO_PREVIEW=1` build, which knows no app origins. */
+export const PREVIEW_BUILD_BRIDGE = previewBridge();
+
+/** `ORSO_APP_ORIGINS`: the comma-separated app origins the daemon lets the bridge talk to. */
+function appOriginsFromEnv(value = process.env.ORSO_APP_ORIGINS) {
+  return (value ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => /^https?:\/\/[^/\s]+$/i.test(origin));
+}
+
+/**
+ * Vite settings for running under orso's dev server. The daemon serves the preview at the root
+ * of its own origin (`ORSO_PREVIEW_PORT`) and tunnels the HMR socket there, so the browser must
+ * open HMR on that port rather than the dev server's own. Nothing otherwise: sites set no base
+ * and no HMR options for orso.
+ */
+export function orsoDevViteConfig(previewPort = process.env.ORSO_PREVIEW_PORT) {
+  const port = Number(previewPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  return { server: { hmr: { clientPort: port } } };
+}
 
 const CONTENT_CONFIG_NAMES = ["content.config.ts", "content.config.js", "content.config.mjs", "content.config.mts"];
 
@@ -199,11 +226,10 @@ export function orso(options = {}) {
       // `astro sync` runs as production, where Astro skips `astro:server:setup`.
       "astro:config:setup": ({ command: current, updateConfig, logger, injectScript }) => {
         command = current;
-        // The dev UI frames this server directly (so client components hydrate), which
-        // makes the frame cross-origin; the bridge keeps picking and appearance working.
+        // orso frames this server on an origin of its own, so the bridge is the app's only
+        // way into the page.
         if (command === "dev") {
-          // Pick / appearance / path / Page-details snapshot for the CMS preview frame.
-          injectScript("head-inline", PREVIEW_BRIDGE);
+          injectScript("head-inline", previewBridge(appOriginsFromEnv()));
         } else if (command === "build" && process.env.ORSO_PREVIEW === "1") {
           // A pull request's preview deploy: orso frames it in reviews and screenshots areas
           // of it without asking to share the screen. Never in production builds.
@@ -229,8 +255,12 @@ export function orso(options = {}) {
               }),
           });
         }
-        if (vitePlugins.length > 0) {
-          updateConfig({ vite: { plugins: vitePlugins } });
+        const vite = {};
+        if (vitePlugins.length > 0) vite.plugins = vitePlugins;
+        const underOrso = command === "dev" ? orsoDevViteConfig() : null;
+        if (underOrso) Object.assign(vite, underOrso);
+        if (Object.keys(vite).length > 0) {
+          updateConfig({ vite });
         }
       },
       "astro:config:done": ({ config: done }) => {

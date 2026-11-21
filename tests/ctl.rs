@@ -130,7 +130,7 @@ async fn preview_status_reports_devserver_port_and_path() {
         json!({
             "devserver": "starting",
             "port": port,
-            "previewPath": format!("/preview/{id}/"),
+            "previewPath": "/",
         })
     );
 }

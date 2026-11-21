@@ -17,7 +17,7 @@ use crate::error::ApiError;
 use crate::events::EventBus;
 use crate::github::GithubAuth;
 use crate::http::setup::SetupProbes;
-use crate::preview::{self, UpstreamClient};
+use crate::preview::{self, PreviewOrigins, UpstreamClient};
 use crate::projects::{DevserverStatus, ProjectRegistry};
 use crate::runtime::login::LoginManager;
 use crate::runtime::{LockFile, RuntimeManager, RuntimeResolver, RuntimeTarget};
@@ -37,8 +37,10 @@ pub struct AppState {
     pub watchers: Arc<WatchManager>,
     /// GitHub session (device-flow sign-in) and API access.
     pub github: Arc<GithubAuth>,
-    /// HTTP client for the `/preview/{id}/*` reverse proxy.
+    /// HTTP client for the preview origins' reverse proxy.
     pub preview: UpstreamClient,
+    /// Each project's preview origin (a loopback port proxying its dev server at `/`).
+    pub preview_origins: Arc<PreviewOrigins>,
     /// Proposed conflict resolutions; never mutates a branch until Finish.
     pub conflicts: Arc<ConflictSessions>,
     pub conflict_previews: Arc<ConflictPreviewManager>,
@@ -125,9 +127,8 @@ impl AppState {
     /// `node_modules`). This is an internal hook so tests do not need the network; use
     /// [`AppState::with_options`] to supervise a stand-in command instead.
     pub fn with_scaffold_install(config: Config, install: bool) -> Self {
-        let proxy_port = config.port;
         let devserver = if install {
-            DevServerOptions::configured(proxy_port)
+            DevServerOptions::configured()
         } else {
             DevServerOptions::disabled()
         };
@@ -208,7 +209,9 @@ impl AppState {
 
         let projects = ProjectRegistry::open(config.projects_dir.clone(), install)
             .with_install_path(node_path.clone());
-        let devserver = devserver.with_path(node_path);
+        let devserver = devserver
+            .with_path(node_path)
+            .with_app_origins(preview::app_origins(&config));
         let github = Arc::new(GithubAuth::open(
             config.github.clone(),
             &config.projects_dir.join(crate::projects::STATE_DIR),
@@ -218,27 +221,36 @@ impl AppState {
         let events = EventBus::new();
         let state_dir = config.projects_dir.join(crate::projects::STATE_DIR);
         let chats = Arc::new(ChatManager::new(events.clone(), state_dir.clone()));
-        let devservers = Arc::new(DevServerManager::new(
+        let client = preview::new_client();
+        let preview_origins = Arc::new(PreviewOrigins::new(
+            config.clone(),
             projects.clone(),
-            events.clone(),
-            devserver,
+            client.clone(),
         ));
+        let devservers = Arc::new(
+            DevServerManager::new(projects.clone(), events.clone(), devserver)
+                .with_preview_origins(preview_origins.clone()),
+        );
         let watchers = Arc::new(WatchManager::new(events.clone()));
         let logins = Arc::new(LoginManager::new((*resolver).clone()));
         bridge_runtime_events(&runtimes, &events);
+        let conflict_previews = Arc::new(
+            ConflictPreviewManager::with_base(state_dir.join("conflict-previews"))
+                .with_config(config.clone())
+                .with_projects(projects.clone()),
+        );
         let state = Self {
-            config,
+            config: config.clone(),
             projects,
             events,
             chats,
             devservers,
             watchers,
             github,
-            preview: preview::new_client(),
+            preview: client,
+            preview_origins,
             conflicts: Arc::new(ConflictSessions::new()),
-            conflict_previews: Arc::new(ConflictPreviewManager::with_base(
-                state_dir.join("conflict-previews"),
-            )),
+            conflict_previews,
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
             runtimes: Arc::new(runtimes),

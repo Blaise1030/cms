@@ -2,10 +2,10 @@
 name: setup-orso
 description: >-
   Use when preparing an existing Astro site for orso (not created from the orso
-  template), when orso preview fails under /preview/{id}/, when Content is empty
+  template), when orso preview fails to load, when Content is empty
   or read-only after opening a GitHub repo, when a repo still depends on
   orso-astro / file:packages/astro, or when asked to add or update orso(),
-  orsoGlob, PUBLIC_BASE, integrations/orso or orso.json.
+  orsoGlob, integrations/orso or orso.json.
 ---
 
 # Set up a site for orso
@@ -32,15 +32,14 @@ Read `package.json`, `astro.config.*`, `src/content.config.*` (or `src/content/c
 | 2 | Astro `>=7.3.0 <8` | The Content tab's integration needs it | Older Astro: offer to upgrade (`npx @astrojs/upgrade`). Not Astro (Next, Hugo…): stop — only Preview works, and only for Vite-based dev servers. |
 | 3 | `package.json` has a `dev` script running `astro dev` | orso runs `npm run dev -- --port {port} --host {host} --ignore-lock` | Add `"dev": "astro dev"`. |
 | 4 | Install works with the right package manager | orso runs `npm install` unless `orso.json` says otherwise, and opening fails if install fails | pnpm/yarn/bun lockfile → set `install` and `dev` in `orso.json` (Phase 2). |
-| 5 | `base` and HMR follow `PUBLIC_BASE` | The preview is served under `/preview/{id}/` | Phase 2, step 2. |
-| 6 | Internal links respect `import.meta.env.BASE_URL` | Hard-coded `/about` links leave the preview | Phase 2, step 3. |
-| 7 | orso integration installed (`integrations/orso/` + `orso()`) | Content tab, page checks | Phase 2, step 1. |
-| 8 | Content collections use `orsoGlob` with a `*.md`, `*.mdx` or `*.json` pattern and a schema | Only those are editable in the Content tab | Phase 2, step 4. |
-| 9 | `DESIGN.md` at the repo root | Design tab | Phase 2, step 5. |
-| 10 | Deploy workflow records GitHub Deployments with `environment_url` | orso's Preview and Open live site links | Phase 3. |
-| 11 | `.gitignore` covers `node_modules/`, `dist/`, `.astro/`, `.env` | orso writes `.astro/orso-content.json` and `node_modules/.orso-deps` | Add the missing lines. |
-| 12 | `npm run build` at the repo root produces `dist/index.html` in under 90 s | Side-by-side previews when two people change the same thing | Tell the user; previews show "Unavailable" otherwise. |
-| 13 | Pull request preview builds set `ORSO_PREVIEW=1` (production builds don't) | Review screenshots without a screen-sharing prompt | Phase 3. |
+| 5 | No preview-only `base`, `vite.server.hmr` or link-helper code | orso serves the preview at `/` and sets the HMR port itself | Phase 2, step 2. |
+| 6 | orso integration installed (`integrations/orso/` + `orso()`) | Content tab, page checks | Phase 2, step 1. |
+| 7 | Content collections use `orsoGlob` with a `*.md`, `*.mdx` or `*.json` pattern and a schema | Only those are editable in the Content tab | Phase 2, step 3. |
+| 8 | `DESIGN.md` at the repo root | Design tab | Phase 2, step 4. |
+| 9 | Deploy workflow records GitHub Deployments with `environment_url` | orso's Preview and Open live site links | Phase 3. |
+| 10 | `.gitignore` covers `node_modules/`, `dist/`, `.astro/`, `.env` | orso writes `.astro/orso-content.json` and `node_modules/.orso-deps` | Add the missing lines. |
+| 11 | `npm run build` at the repo root produces `dist/index.html` in under 90 s | Side-by-side previews when two people change the same thing | Tell the user; previews show "Unavailable" otherwise. |
+| 12 | Pull request preview builds set `ORSO_PREVIEW=1` (production builds don't) | Review screenshots without a screen-sharing prompt | Phase 3. |
 
 ## Phase 2 — Wire it in
 
@@ -79,56 +78,34 @@ without `linkedom`).
    `"../integrations/orso/index.js"` from `src/`, and so on (relative paths only).
 4. Reinstall so the lockfile drops `orso-astro`.
 
-### 2. Preview base path and HMR
+### 2. Add `orso()`
 
 In `astro.config.mjs` add `orso()` **last** among integrations (it checks the built pages
-after the others write theirs), and route `base` and the HMR socket through orso's env vars.
-Merge into the existing config; do not drop the user's settings.
+after the others write theirs). Merge into the existing config; do not drop the user's settings.
 
 ```js
 import { orso } from "./integrations/orso/index.js";
 
-// orso serves the dev server under /preview/{id}/.
-const base = process.env.PUBLIC_BASE ?? "/";
-// The browser's HMR socket: the dev server itself (direct preview) or the orso proxy.
-const hmrPort = Number(process.env.ORSO_DEV_PORT || process.env.ORSO_PROXY_PORT || 0);
-
 export default defineConfig({
-  base,
   integrations: [/* existing integrations */, orso()],
-  vite: {
-    server: {
-      hmr: {
-        path: `${base}vite-hmr`.replace(/\/{2,}/g, "/"),
-        ...(hmrPort > 0 ? { clientPort: hmrPort } : {}),
-      },
-    },
-  },
 });
 ```
 
-If the site sets `site` for canonical URLs or a sitemap, keep it, and strip the
-`/preview/{id}` prefix from generated URLs (`pathname.replace(/^\/preview\/[^/]+(?=\/|$)/, "") || "/"`).
+orso previews the site at the root of its own address, so links work as written. Leave
+root-relative links (`/about`, `src="/logo.svg"`, `url("/bg.png")`) alone, in components,
+Markdown, scripts and CSS. `orso()` sets the HMR connection itself when orso runs the dev server.
 
-### 3. Base-aware links
+Remove settings that only served an older orso:
 
-Search for root-relative links and assets in `.astro`, `.md(x)`, `.tsx` and `.ts`:
-`href="/`, `src="/`, `` `/${ ``, `url("/`. Route them through a helper:
+- a `base` read from `PUBLIC_BASE`;
+- a `vite.server.hmr` block read from `ORSO_DEV_PORT` or `ORSO_PROXY_PORT`;
+- an `href()` link helper that prefixes `import.meta.env.BASE_URL` (its links become plain paths);
+- code that strips a `/preview/{id}` prefix from `Astro.url` or generated URLs.
 
-```ts
-// src/lib/href.ts
-export const href = (value: string) => {
-  const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
-  if (value.startsWith("#")) return `${base}${value}`;
-  if (value.startsWith("/") && !value.startsWith("//")) return `${base}${value.slice(1)}`;
-  return value;
-};
-```
+If the live site itself needs a `base` (for example a project page on GitHub Pages), keep it
+and tell the user the preview opens at `/`, so they type the base path in the preview's address bar.
 
-External URLs, `mailto:` and `//cdn` links stay as they are. When there are many hits, fix
-navigation, header, footer and page links first, then report the rest.
-
-### 4. Content collections
+### 3. Content collections
 
 For each collection the user wants to edit in orso, switch its loader to `orsoGlob`:
 
@@ -155,7 +132,7 @@ const blog = defineCollection({
 Collections the user doesn't need in orso can stay on Astro's `glob()`; they show as
 read-only.
 
-### 5. `DESIGN.md` and `orso.json`
+### 4. `DESIGN.md` and `orso.json`
 
 - `DESIGN.md` at the repo root: YAML front matter for colours, fonts and spacing, then a short
   Markdown description of the look. If the site uses Tailwind v4, keep the same values in an
@@ -175,7 +152,7 @@ read-only.
 
   `root` is the folder holding `astro.config.*` (default `.`).
 
-### 6. Agent guide (only if asked)
+### 5. Agent guide (only if asked)
 
 If the user wants one and the repo has no `AGENTS.md`, add a short one: what the site is, the file map (pages,
 components, content folders, styles), and these orso rules:
@@ -222,12 +199,11 @@ Run these and fix what fails before reporting done:
 1. Install with the repo's package manager.
 2. `npx astro sync`, then confirm `.astro/orso-content.json` lists every collection you
    converted, with no `readOnlyReason` you didn't expect.
-3. Start the dev server the way orso does and confirm it prints a `Local` URL with the
-   preview prefix, then stop it:
-   `PUBLIC_BASE=/preview/test/ npm run dev -- --port 4399 --host 127.0.0.1`
+3. Start the dev server the way orso does, confirm it prints a `Local` URL and the home page
+   loads at `/`, then stop it:
+   `npm run dev -- --port 4399 --host 127.0.0.1`
 4. `npm run build`: it must pass. orso's page checks run at the end; **errors** fail the
    build and need fixing, warnings are fine to report.
-5. Search again for root-relative links you missed.
 
 ## Report
 

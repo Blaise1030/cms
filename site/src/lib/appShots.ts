@@ -1,7 +1,6 @@
 import { getImage } from "astro:assets";
 import type { ImageMetadata } from "astro";
 import type { AppShotData, AppShotSource } from "./appShotTypes";
-import { href } from "./href";
 
 export type { AppShotData } from "./appShotTypes";
 
@@ -26,7 +25,7 @@ async function variant(image: ImageMetadata): Promise<AppShotSource> {
   return { src: result.src, srcSet: result.srcSet.attribute };
 }
 
-/** Resolve an app shot pair (and its clip, if any) to optimized, base-aware URLs. */
+/** Resolve an app shot pair (and its clip, if any) to optimized, URLs. */
 export async function appShot(id: string): Promise<AppShotData> {
   const lightFile = file(id, "light");
   const [light, dark] = await Promise.all([variant(lightFile), variant(file(id, "dark"))]);
@@ -38,7 +37,7 @@ export async function appShot(id: string): Promise<AppShotData> {
     height: Math.round(lightFile.height / 2),
     light,
     dark,
-    ...(hasVideo ? { video: { light: href(`/app/${id}-light.webm`), dark: href(`/app/${id}-dark.webm`) } } : {}),
+    ...(hasVideo ? { video: { light: `/app/${id}-light.webm`, dark: `/app/${id}-dark.webm` } } : {}),
   };
 }
 

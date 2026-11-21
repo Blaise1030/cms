@@ -1,5 +1,4 @@
 ---
-import { href } from "../lib/href";
 import type { BlogCategory } from "../lib/blog";
 
 interface Props {
@@ -15,9 +14,9 @@ const item =
 
 {shown.length > 0 && (
   <nav class="flex gap-8 overflow-x-auto border-b border-line" aria-label="Blog categories">
-    <a class={item} href={href("/blog/")} aria-current={active ? undefined : "page"}>All posts</a>
+    <a class={item} href="/blog/" aria-current={active ? undefined : "page"}>All posts</a>
     {shown.map((category) => (
-      <a class={item} href={href(`/blog/categories/${category.id}/`)} aria-current={category.id === active ? "page" : undefined}>{category.title}</a>
+      <a class={item} href={`/blog/categories/${category.id}/`} aria-current={category.id === active ? "page" : undefined}>{category.title}</a>
     ))}
   </nav>
 )}

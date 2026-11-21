@@ -13,7 +13,7 @@ test("astro sync writes the orso content manifest", () => {
     for (const path of ["src", "public", "integrations", "astro.config.mjs", "package.json"]) cpSync(join(root, path), join(dir, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(dir, "node_modules"), "dir");
     const result = spawnSync(process.execPath, [join(root, "node_modules/astro/bin/astro.mjs"), "sync"], {
-      cwd: dir, encoding: "utf8", env: { ...process.env, PUBLIC_BASE: "/" },
+      cwd: dir, encoding: "utf8", env: process.env,
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
 
