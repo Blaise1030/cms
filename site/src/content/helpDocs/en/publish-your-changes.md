@@ -9,7 +9,7 @@ order: 3
 
 Once the change's pull request is approved, choose **Publish** in orso. orso merges the pull request into `main`. Your deploy then builds the site from `main` and puts it live.
 
-With the template's Cloudflare workflow, the live site usually updates within a few minutes. Choose **Open live site** to check it.
+With the template's [Cloudflare workflow](../publish-to-cloudflare/), the live site usually updates within a few minutes. Choose **Open live site** to check it.
 
 ## After publishing
 
@@ -17,6 +17,6 @@ Start a **New change** for your next piece of work. Keeping each change small an
 
 ## If Publish isn't available
 
-- The pull request may still need an approval, especially if `main` is protected.
+- The pull request may still need an approval, especially if `main` is protected. See [Protect your main branch](../protect-your-main-branch/).
 - Checks on the pull request may have failed. Open the pull request on GitHub to see why.
-- `main` may have moved on since you started. Use **Get latest** first. See **Get the latest changes**.
+- `main` may have moved on since you started. Use **Get latest** first. See [Get the latest changes](../get-latest-and-resolve-conflicts/).

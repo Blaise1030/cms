@@ -5,7 +5,7 @@ category: assistant
 order: 2
 ---
 
-The assistant works best when it knows what to change, where, and what "done" looks like.
+The assistant works best when it knows what to change, where, and what "done" looks like. When it's finished, [review what it changed](../review-agent-changes/).
 
 ## Be specific
 

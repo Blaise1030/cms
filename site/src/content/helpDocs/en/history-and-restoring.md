@@ -20,4 +20,4 @@ orso puts your change back to how it was at that point. Versions saved after it,
 
 ## Restore versus undo
 
-Restoring only affects your current change. It doesn't touch the live site or other people's changes. To undo something that is already live, make a new change that reverses it and publish that.
+Restoring only affects your current change. It doesn't touch the live site or other people's changes. To undo something that is already live, make a new change that reverses it and [publish that](../publish-your-changes/).

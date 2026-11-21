@@ -13,7 +13,7 @@ Open the pages the assistant touched in the **Preview** tab. Read the text, clic
 
 ## See which files changed
 
-The **History** tab shows each saved version and the files it changed. Open a version to see exactly what was added and removed.
+The **History** tab ([more about history](../history-and-restoring/)) shows each saved version and the files it changed. Open a version to see exactly what was added and removed.
 
 ## Undo
 
@@ -22,4 +22,4 @@ The **History** tab shows each saved version and the files it changed. Open a ve
 
 ## Before you share
 
-Read the change once from start to finish as a visitor would. When you are happy, choose **Share preview**.
+Read the change once from start to finish as a visitor would. When you are happy, choose **Share preview**. See [Share a preview](../share-a-preview/).

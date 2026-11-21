@@ -13,7 +13,7 @@ Put the cursor where you want the image, then do one of these:
 - **Drop** an image file into the editor.
 - **Upload** one with the editor's image button.
 
-orso saves the file in your project and adds it to the body.
+orso saves the file in your project and adds it to the body. For more on editing entries, see [Edit blog posts and other collections](../edit-blog-posts-and-collections/).
 
 ## In an image field
 

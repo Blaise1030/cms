@@ -14,7 +14,7 @@ orso downloads a fresh copy and checks it before using it.
 
 ## Check your account
 
-Claude Code, Codex and Cursor need an account with that provider. Make sure you are signed in and your plan includes access. If you don't have one, switch to **OpenCode**, which works without an account.
+Claude Code, Codex and Cursor need an account with that provider. Make sure you are signed in and your plan includes access. If you don't have one, switch to **OpenCode**, which works without an account. See [Choose an assistant](../choose-an-assistant/).
 
 ## Where orso keeps the tools
 

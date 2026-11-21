@@ -31,7 +31,7 @@ On a Mac, Homebrew is the better choice. A binary downloaded another way can be 
 `orso serve --open` opens orso in your browser at an address like `http://orso.localhost:<port>/?t=…`.
 
 - orso only listens on your own computer (`127.0.0.1`).
-- The `?t=` token in the link is what lets your browser in. If you lose the tab, run `orso serve --open` again to get a fresh link.
+- The `?t=` token in the link is what lets your browser in. If you lose the tab, run `orso serve --open` again to get a fresh link. See [orso says it can't reach the daemon](../daemon-unreachable/).
 - Keep the terminal open while you work. Press Ctrl-C to stop orso.
 
 ## Check your version
@@ -40,8 +40,8 @@ On a Mac, Homebrew is the better choice. A binary downloaded another way can be 
 orso --version
 ```
 
-Include this number when you report a problem.
+Include this number when you [report a problem](../report-a-problem/).
 
 ## Next step
 
-**Sign in with GitHub** so orso can open your repos and create pull requests.
+[Sign in with GitHub](../sign-in-with-github/) so orso can open your repos and create pull requests.
