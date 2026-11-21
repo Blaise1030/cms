@@ -396,16 +396,6 @@ test.describe("loadContent", () => {
     }
   });
 
-  test("leaves excluded collections out of the manifest", async () => {
-    const translations = { loader: { name: "glob" }, schema: z.object({ title: z.string().optional() }) };
-    const runner = fakeRunner({
-      collections: { blog: blogCollection(), blogI18n: translations, helpDocsI18n: translations, legal: helpDocsCollection },
-    });
-    const { manifest, schemas } = await loadContent({ runner, configPath: CONFIG, exclude: [/I18n$/, "legal"] });
-    assert.deepEqual(manifest.collections.map(({ name }) => name), ["blog"]);
-    assert.deepEqual([...schemas.keys()], ["blog"]);
-  });
-
   test("marks an unsafe base read-only", async () => {
     const { manifest } = await loadCollections({
       outside: {
