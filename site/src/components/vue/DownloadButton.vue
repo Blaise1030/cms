@@ -7,7 +7,7 @@ import UFieldGroup from "@nuxt/ui/components/FieldGroup.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 import { site } from "../../site";
 
-const { version, repo, coffeeUrl, downloads } = site.release;
+const { repo, coffeeUrl, downloads } = site.release;
 
 /** The button's copy, from `download` in src/i18n/messages (`{platform}` is filled in here). */
 export type DownloadLabels = {
@@ -25,7 +25,8 @@ export type DownloadLabels = {
 const props = defineProps<{ labels: DownloadLabels }>();
 type Download = (typeof downloads)[number];
 
-const assetUrl = (d: { target: string; ext: string }) => `${repo}/releases/download/${version}/orso-${version}-${d.target}.${d.ext}`;
+/** `releases/latest/download` redirects to the newest release's asset, so no version is in the URL. */
+const assetUrl = (d: { target: string; ext: string }) => `${repo}/releases/latest/download/orso-${d.target}.${d.ext}`;
 
 /** Picks the build for the visitor's OS after hydration; macOS Apple Silicon is the server-rendered default. */
 function detectDownload(): Download {

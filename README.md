@@ -188,7 +188,8 @@ just e2e     # Playwright (rebuilds the release daemon with the embedded UI)
 ### Releases
 
 GitHub Releases ship daemon tarballs (`orso-v*-{target}.tar.gz` + sha256) for macOS and Linux,
-and the Homebrew formula is updated from the same workflow.
+plus versionless aliases (`orso-{target}.tar.gz`) that `releases/latest/download` can serve. The
+Homebrew formula is updated from the same workflow.
 
 ## Licence
 

@@ -79,6 +79,10 @@ jobs:
           cp target/${{ matrix.target }}/release/orso README.md CHANGELOG.md "$name/"
           tar -czf "$name.tar.gz" "$name"
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          # Versionless alias for the site's /releases/latest/download links.
+          alias="orso-${{ matrix.target }}.tar.gz"
+          cp "$name.tar.gz" "$alias"
+          shasum -a 256 "$alias" > "$alias.sha256"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
