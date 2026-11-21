@@ -110,6 +110,12 @@ impl SyncSetup {
 
     /// A sync fixture whose site runs `build_script` for `npm run build`.
     async fn with_build(build_script: &str) -> Self {
+        Self::with_build_in(None, build_script).await
+    }
+
+    /// Like [`Self::with_build`], with the site (its `package.json`) in `folder` of the
+    /// repository and `orso.json` pointing there, the way many real projects are laid out.
+    async fn with_build_in(folder: Option<&str>, build_script: &str) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let projects = tmp.path().join("projects");
         std::fs::create_dir(&projects).unwrap();
@@ -131,12 +137,23 @@ impl SyncSetup {
         git(&dir, &["config", "user.name", "Ada"]);
         git(&dir, &["config", "user.email", "ada@example.com"]);
         std::fs::write(dir.join("page.md"), "old\n").unwrap();
+        let site = folder.map_or_else(|| dir.clone(), |f| dir.join(f));
+        std::fs::create_dir_all(&site).unwrap();
         std::fs::write(
-            dir.join("package.json"),
+            site.join("package.json"),
             json!({"name": "site", "private": true, "scripts": {"build": build_script}})
                 .to_string(),
         )
         .unwrap();
+        if let Some(f) = folder {
+            // orso.json's `root` must hold an Astro project.
+            std::fs::write(site.join("astro.config.mjs"), "export default {};\n").unwrap();
+            std::fs::write(
+                dir.join("orso.json"),
+                json!({ "root": f, "installDir": f }).to_string(),
+            )
+            .unwrap();
+        }
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-m", "base"]);
         git(&dir, &["checkout", "-b", "content/page"]);
@@ -1256,6 +1273,25 @@ async fn resolved_turn_builds_and_lands() {
     h.state.chats.shutdown().await;
 }
 
+/// A site in a folder of the repository (`orso.json` `root`) builds there: the check used to
+/// run `npm run build` at the top, where there is no site, and failed every combine.
+#[tokio::test]
+async fn site_in_a_folder_builds_there_and_lands() {
+    // Passes only in the site folder: `orso.json` sits one level up from there, nowhere else.
+    let h = SyncSetup::with_build_in(Some("site"), "test -f ../orso.json").await;
+    h.provider(
+        "fake-resolve-folder",
+        "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-folder")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "latest");
+    h.state.chats.shutdown().await;
+}
+
 /// The dependencies link lets the site build, but it must never enter the
 /// combine's result: only the conflicted page and its resolution are saved.
 #[tokio::test]
@@ -1318,6 +1354,42 @@ async fn build_failure_repairs_once() {
     );
     // The repair prompt and the build output are not the writer's words.
     assert_eq!(h.user_texts(&chat).len(), 1, "{:?}", h.user_texts(&chat));
+    h.state.chats.shutdown().await;
+}
+
+/// A site in a folder whose first build fails: the repair turn runs after the build linked
+/// `site/node_modules`, and the agent's `git add -A` stages that link. It must not count as a
+/// new file ("one file still needs another look"), or the combine never lands.
+#[tokio::test]
+async fn repair_in_a_site_folder_ignores_the_dependency_link() {
+    let h = SyncSetup::with_build_in(Some("site"), "test -f ok").await;
+    // Installed dependencies, so the build links them into the combine's site folder.
+    std::fs::create_dir_all(h.dir.join("site/node_modules/dep")).unwrap();
+    let runs = h._tmp.path().join("runs");
+    h.provider(
+        "fake-resolve-folder-once",
+        &format!(
+            "n=0\n[ -f {runs} ] && n=$(cat {runs})\nn=$((n+1))\necho $n > {runs}\n\
+             [ \"$n\" -ge 2 ] && touch site/ok\n\
+             paths=$(git diff --name-only --diff-filter=U)\n\
+             [ -n \"$paths\" ] && git checkout --theirs -- $paths\n\
+             git add -A\n",
+            runs = runs.display()
+        ),
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-folder-once")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    let tree = git(&h.dir, &["ls-tree", "-r", "--name-only", "content/page"]);
+    assert!(!tree.contains("node_modules"), "{tree}");
+    assert!(tree.contains("site/ok"), "{tree}");
+    assert!(
+        !h.notes(&chat).iter().any(|n| n == sync_chat::ONE_FILE),
+        "{:?}",
+        h.notes(&chat)
+    );
     h.state.chats.shutdown().await;
 }
 
