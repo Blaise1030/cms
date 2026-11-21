@@ -234,6 +234,11 @@ impl AppState {
         let watchers = Arc::new(WatchManager::new(events.clone()));
         let logins = Arc::new(LoginManager::new((*resolver).clone()));
         bridge_runtime_events(&runtimes, &events);
+        let conflict_previews = Arc::new(
+            ConflictPreviewManager::with_base(state_dir.join("conflict-previews"))
+                .with_config(config.clone())
+                .with_projects(projects.clone()),
+        );
         let state = Self {
             config: config.clone(),
             projects,
@@ -245,10 +250,7 @@ impl AppState {
             preview: client,
             preview_origins,
             conflicts: Arc::new(ConflictSessions::new()),
-            conflict_previews: Arc::new(
-                ConflictPreviewManager::with_base(state_dir.join("conflict-previews"))
-                    .with_config(config.clone()),
-            ),
+            conflict_previews,
             conflict_updates: Arc::new(Mutex::new(())),
             pending_latest: Arc::default(),
             runtimes: Arc::new(runtimes),

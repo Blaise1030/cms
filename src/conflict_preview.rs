@@ -84,6 +84,8 @@ pub struct ConflictPreviewManager {
     /// Auth and Host rules for the snapshot origins, and the app origins their pages report
     /// to. The default accepts only each origin's own token.
     config: Arc<Config>,
+    /// Ports to stay off when opening an origin (see [`Self::with_projects`]).
+    projects: Option<Arc<crate::projects::ProjectRegistry>>,
 }
 
 impl Default for ConflictPreviewManager {
@@ -107,10 +109,17 @@ impl ConflictPreviewManager {
             entries: Arc::default(),
             base,
             config: Arc::new(Config::default()),
+            projects: None,
         }
     }
 
     /// Serve snapshots under the daemon's auth and Host rules.
+    /// Keep conflict-preview origins off the ports projects have claimed.
+    pub fn with_projects(mut self, projects: Arc<crate::projects::ProjectRegistry>) -> Self {
+        self.projects = Some(projects);
+        self
+    }
+
     pub fn with_config(mut self, config: Arc<Config>) -> Self {
         self.config = config;
         self
@@ -177,7 +186,11 @@ impl ConflictPreviewManager {
             dir: dir.to_owned(),
         });
         let app = Router::new().fallback(serve_snapshot).with_state(site);
-        OriginServer::bind(self.config.clone(), app).await
+        let avoid = match &self.projects {
+            Some(projects) => projects.claimed_ports().await,
+            None => Default::default(),
+        };
+        OriginServer::bind(self.config.clone(), app, &avoid).await
     }
 
     pub async fn remove_session(&self, id: &str) {

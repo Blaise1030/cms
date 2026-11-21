@@ -19,7 +19,7 @@
 //! handshake is forwarded, and after the dev server answers `101` both connections are
 //! spliced together, so subprotocols, extensions and frames pass through exactly as sent.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -111,6 +111,26 @@ fn origin_of(url: &str) -> Option<String> {
 
 // --- One origin -------------------------------------------------------------------------------
 
+/// A loopback listener on a free port that isn't in `avoid`. The OS can hand out a port a
+/// project has claimed but isn't listening on yet (its dev server binds it only while it
+/// runs); taking it would push that project onto a new port. Rejected listeners stay open
+/// until a port is found, so the OS doesn't offer the same one again.
+async fn bind_outside(avoid: &HashSet<u16>) -> std::io::Result<(tokio::net::TcpListener, u16)> {
+    let mut rejected = Vec::new();
+    for _ in 0..32 {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+        let port = listener.local_addr()?.port();
+        if !avoid.contains(&port) {
+            return Ok((listener, port));
+        }
+        rejected.push(listener);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        "no free preview port outside the projects' ports",
+    ))
+}
+
 /// A loopback listener serving an app at the root of its own origin, behind the preview
 /// gate. Dropping it closes the listener and frees the port.
 pub struct OriginServer {
@@ -121,10 +141,14 @@ pub struct OriginServer {
 }
 
 impl OriginServer {
-    /// Bind `127.0.0.1` on a free port and serve `app` there behind the gate.
-    pub async fn bind(config: Arc<Config>, app: Router) -> std::io::Result<Self> {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
-        let port = listener.local_addr()?.port();
+    /// Bind `127.0.0.1` on a free port outside `avoid` (ports projects have claimed) and
+    /// serve `app` there behind the gate.
+    pub async fn bind(
+        config: Arc<Config>,
+        app: Router,
+        avoid: &HashSet<u16>,
+    ) -> std::io::Result<Self> {
+        let (listener, port) = bind_outside(avoid).await?;
         let token = crate::config::random_token();
         let gate = Arc::new(Gate {
             no_auth: config.no_auth,
@@ -340,7 +364,8 @@ impl PreviewOrigins {
             origin: self.config.origin.clone(),
         });
         let app = Router::new().fallback(forward).with_state(proxy);
-        let origin = OriginServer::bind(self.config.clone(), app)
+        let avoid = self.projects.claimed_ports().await;
+        let origin = OriginServer::bind(self.config.clone(), app, &avoid)
             .await
             .map_err(|e| ApiError::io(format!("cannot open a preview port: {e}")))?;
         let access = origin.access();
@@ -614,6 +639,24 @@ fn strip_credentials(headers: &mut HeaderMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn preview_ports_stay_off_the_ports_projects_claimed() {
+        // Claim whatever the OS would hand out next, many times over: the origin must still
+        // find a port, and never one in the claimed set.
+        let mut avoid = HashSet::new();
+        let mut held = Vec::new();
+        for _ in 0..8 {
+            let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            avoid.insert(l.local_addr().unwrap().port());
+            held.push(l);
+        }
+        drop(held); // claimed but not listening, like a stopped project's dev port
+        for _ in 0..20 {
+            let (_listener, port) = bind_outside(&avoid).await.unwrap();
+            assert!(!avoid.contains(&port), "took claimed port {port}");
+        }
+    }
 
     #[test]
     fn token_query_is_stripped() {
