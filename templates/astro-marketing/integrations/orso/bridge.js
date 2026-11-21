@@ -239,14 +239,25 @@
     root.classList.toggle("dark", !!next.dark || original.dark);
   }
 
+  /** The framing page's origin as the referrer names it, when it is one of the app origins. */
+  const referrerOrigin = (() => {
+    try {
+      const origin = new URL(document.referrer).origin;
+      return APP_ORIGINS.includes(origin) ? origin : null;
+    } catch {
+      return null;
+    }
+  })();
+
   /**
-   * Send to the app: to the origin that last spoke to us, else to each named app origin (the
-   * browser delivers only to the one that matches the parent). Never to `*`: a page that
-   * frames this one without being orso hears nothing.
+   * Send to the app: to the origin that last spoke to us, else to the app origin the referrer
+   * names, else to each named app origin (the browser delivers only to the one that matches the
+   * parent). Never to `*`: a page that frames this one without being orso hears nothing.
    */
   function post(op, extra) {
     const message = Object.assign({ type: TYPE, op }, extra);
-    for (const origin of parentOrigin ? [parentOrigin] : APP_ORIGINS) {
+    const targets = parentOrigin ? [parentOrigin] : referrerOrigin ? [referrerOrigin] : APP_ORIGINS;
+    for (const origin of targets) {
       try {
         parent.postMessage(message, origin);
       } catch {
