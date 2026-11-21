@@ -246,6 +246,14 @@ mod tests {
             assert!(!paths.iter().any(|p| p == gone), "still embeds {gone}");
         }
         assert!(orso_astro_paths().iter().any(|p| p == "index.js"));
+        // Content models belong to the site, not the integration.
+        assert!(paths.iter().any(|p| p == "src/content/collections.js"));
+        for gone in ["marketing.js", "marketing-preview-paths.js"] {
+            assert!(
+                !orso_astro_paths().iter().any(|p| p == gone),
+                "still embeds {gone}"
+            );
+        }
     }
 
     #[test]
@@ -332,13 +340,14 @@ mod tests {
     }
 
     #[test]
-    fn template_integrations_orso_matches_packages_astro_src() {
+    fn synced_integrations_orso_match_packages_astro_src() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let canonical_root = root.join("packages/astro/src");
-        let template_root = root.join("templates/astro-marketing/integrations/orso");
 
         let mut rel_paths = Vec::new();
         collect_js_relative_paths(&canonical_root, &canonical_root, &mut rel_paths).unwrap();
+        // Panel UI is owned by the CMS app; do not vendor minified bundles into sites.
+        rel_paths.retain(|p| !p.starts_with("panel"));
         rel_paths.sort();
 
         for must_have in ["checks/page.js", "checks/meta.js", "bridge.js"] {
@@ -348,17 +357,25 @@ mod tests {
             );
         }
 
-        for rel in &rel_paths {
-            let name = rel.to_string_lossy().replace('\\', "/");
-            // Panel UI is owned by the CMS app; do not vendor minified bundles into sites.
-            if name.starts_with("panel/") {
-                continue;
+        for site in ["templates/astro-marketing", "site"] {
+            let synced_root = root.join(site).join("integrations/orso");
+            for rel in &rel_paths {
+                let name = rel.to_string_lossy().replace('\\', "/");
+                let canonical = std::fs::read(canonical_root.join(rel)).unwrap();
+                let synced = std::fs::read(synced_root.join(rel));
+                assert!(
+                    synced.as_ref().ok() == Some(&canonical),
+                    "{site}: {name} missing or drifted; run: just sync-orso-integration"
+                );
             }
-            let canonical = std::fs::read(canonical_root.join(rel)).unwrap();
-            let templated = std::fs::read(template_root.join(rel));
-            assert!(
-                templated.as_ref().ok() == Some(&canonical),
-                "{name} missing or drifted; run: just sync-orso-integration"
+            // A file the package no longer ships (such as the old `marketing.js` models) must
+            // not linger in a synced copy.
+            let mut synced_paths = Vec::new();
+            collect_js_relative_paths(&synced_root, &synced_root, &mut synced_paths).unwrap();
+            synced_paths.sort();
+            assert_eq!(
+                synced_paths, rel_paths,
+                "{site}: stale files in integrations/orso; run: just sync-orso-integration"
             );
         }
     }

@@ -1,5 +1,6 @@
 /**
- * Test fixture mirroring the schemas in `packages/astro/src/marketing.js`.
+ * Test fixture mirroring the blog and help schemas in the marketing template
+ * (`templates/astro-marketing/src/content/collections.js`).
  *
  * It is intentionally a copy rather than an import so Node tests avoid Astro's module graph.
  */

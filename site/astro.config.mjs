@@ -4,7 +4,7 @@ import mdx from "@astrojs/mdx";
 import ui from "@nuxt/ui/vite";
 import { defineConfig, fontProviders } from "astro/config";
 import { orso } from "./integrations/orso/index.js";
-import { marketingCollections } from "./integrations/orso/marketing.js";
+import { collections } from "./src/content/collections.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
 import { legal } from "./integrations/legal.js";
 import { site } from "./src/site.ts";
@@ -48,10 +48,11 @@ export default defineConfig({
   ],
   integrations: [
     mdx(),
-    // The marketing collections plus the privacy policy and terms (see integrations/legal.js).
+    // The site's collections (src/content/collections.js) plus the privacy policy and terms
+    // (see integrations/legal.js).
     // Crowdin owns the translations (src/content.config.ts), so orso hides them on purpose.
     orso({
-      collections: { ...marketingCollections, legal },
+      collections: { ...collections, legal },
       hide: collectionsWithTranslations().map((name) => `${name}I18n`),
     }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.
