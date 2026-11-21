@@ -1,6 +1,6 @@
 /**
  * The address-bar path for a framed preview URL: the part after the project's base
- * (`/preview/{id}/about/?q=1#top` → `/about/?q=1#top`).
+ * (with base `/`, the URL's path, query and hash: `http://x/about/?q=1#top` → `/about/?q=1#top`).
  */
 export function framePath(href: string, base: string): string {
   const url = new URL(href, "http://frame.invalid");

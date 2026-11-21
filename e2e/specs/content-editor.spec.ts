@@ -293,7 +293,10 @@ test("welcome entry Open preview opens /blog/welcome/ in a new tab", async ({
     page.getByTestId("content-open-preview").click(),
   ]);
   await tab.waitForLoadState();
-  expect(new URL(tab.url()).pathname).toMatch(/\/preview\/.+\/blog\/welcome\/$/);
+  // At the root of the project's own preview origin; the first-load token is gone from the address.
+  const url = new URL(tab.url());
+  expect(url.pathname).toBe("/blog/welcome/");
+  expect(url.searchParams.has("t")).toBe(false);
   await expect(tab.getByRole("heading", { level: 1 })).toHaveText("Welcome to the blog", {
     timeout: 180_000,
   });
