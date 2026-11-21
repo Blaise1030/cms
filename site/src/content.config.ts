@@ -3,7 +3,7 @@ import { glob } from "astro/loaders";
 import { z } from "astro/zod";
 import { collections as sourceCollections } from "virtual:orso/collections";
 import { translatedLocales } from "./i18n/locales";
-import { hasTranslatedFiles } from "./lib/translatedFiles";
+import { collectionsWithTranslations } from "./lib/translatedFiles";
 
 /**
  * Translations of the English collections, written by Crowdin into sibling locale folders
@@ -13,7 +13,8 @@ import { hasTranslatedFiles } from "./lib/translatedFiles";
  * Only the text fields are read from a translation (see src/lib/localized.ts); dates,
  * categories and images always come from the English file. The schema is loose on purpose, so
  * a translator's slip in a locked field can't break the build. A collection with no translated
- * files yet isn't defined at all, so the build doesn't warn about empty folders.
+ * files yet isn't defined at all, so the build doesn't warn about empty folders. astro.config.mjs
+ * hides them from orso (`orso({ hide })`), so the app doesn't warn about them either.
  */
 const folders = translatedLocales.length === 1 ? translatedLocales[0] : `{${translatedLocales.join(",")}}`;
 const translations = (name: string) =>
@@ -33,11 +34,7 @@ const translations = (name: string) =>
       .passthrough(),
   });
 
-const hasTranslations = (name: string) => translatedLocales.some((locale) => hasTranslatedFiles(name, locale));
-
-const translated = ["blog", "blogCategories", "helpDocs", "helpCategories", "helpSubcategories", "helpDocsCategories", "legal"];
-
 export const collections = {
   ...sourceCollections,
-  ...Object.fromEntries(translated.filter(hasTranslations).map((name) => [`${name}I18n`, translations(name)])),
+  ...Object.fromEntries(collectionsWithTranslations().map((name) => [`${name}I18n`, translations(name)])),
 };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -193,6 +193,43 @@ for (const command of ["build", "preview"]) {
     }
   });
 }
+
+test("orso({ hide }) must be an array of collection names", () => {
+  assert.throws(() => orso({ hide: "blogI18n" }), /"hide" must be an array of collection names/);
+  assert.throws(() => orso({ hide: [""] }), /"hide" must be an array of collection names/);
+  assert.doesNotThrow(() => orso({ hide: ["blogI18n"] }));
+});
+
+test("astro dev writes hidden collections to the manifest and warns about unknown names", async () => {
+  const root = await mkdtemp(join(tmpdir(), "orso-integration-hide-"));
+  try {
+    await mkdir(join(root, "src"), { recursive: true });
+    const configPath = join(root, "src", "content.config.mjs");
+    await writeFile(configPath, "export const collections = {};\n");
+    const module = { collections: { blogI18n: { schema: null }, blog: { schema: null } } };
+    const runner = { import: async () => module };
+    const warnings = [];
+    const devLogger = { ...logger, warn: (message) => warnings.push(message) };
+
+    const { hooks } = orso({ hide: ["blogI18n", "helpDocsI18n"] });
+    hooks["astro:config:setup"]({ command: "dev", updateConfig: noop, logger: devLogger, injectScript: noop });
+    hooks["astro:config:done"]({ config: { root: pathToFileURL(`${root}/`), srcDir: pathToFileURL(join(root, "src/")) } });
+    await hooks["astro:server:setup"]({ server: { environments: { astro: { runner } }, middlewares: { use: noop } }, logger: devLogger });
+
+    const written = JSON.parse(await readFile(join(root, ".astro/orso-content.json"), "utf8"));
+    assert.deepEqual(
+      written.collections.map(({ name, hidden }) => ({ name, hidden })),
+      [
+        { name: "blogI18n", hidden: true },
+        { name: "blog", hidden: false },
+      ],
+    );
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /"helpDocsI18n", which is not a content collection/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 async function distWithBrokenLink() {
   const dir = await mkdtemp(join(tmpdir(), "orso-build-done-"));
