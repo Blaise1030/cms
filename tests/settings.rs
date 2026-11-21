@@ -281,6 +281,63 @@ async fn save_rejects_invalid() {
 }
 
 #[tokio::test]
+async fn get_reports_publishing_defaults_and_errors() {
+    let e = env(false).await;
+    let (_, v) = get(&e).await;
+    assert_eq!(v["defaults"]["mergeMethod"], "squash");
+    assert_eq!(v["defaults"]["prLabels"], json!(["orso"]));
+
+    std::fs::write(e.file(), r#"{"mergeMethod":"rebase","prLabels":"orso"}"#).unwrap();
+    let (s, v) = get(&e).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["errors"]["mergeMethod"], r#"must be "squash" or "merge""#);
+    assert!(v["errors"]["prLabels"].is_string(), "{v}");
+    assert!(v["errors"].get("_file").is_none(), "{v}");
+}
+
+#[tokio::test]
+async fn save_writes_publishing_fields_and_rejects_bad_ones() {
+    let e = env(true).await;
+    let b = branch(&e);
+    let (s, v) = put(
+        &e,
+        json!({"branch": b, "settings": {"mergeMethod": "rebase"}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"]["reason"], "invalid_settings");
+    assert_eq!(
+        v["error"]["details"][0]["path"],
+        json!(["mergeMethod"]),
+        "{v}"
+    );
+    assert!(!e.file().exists());
+
+    let (s, v) = put(
+        &e,
+        json!({"branch": b, "settings": {"mergeMethod": "merge", "prLabels": ["blog", "orso"]}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let parsed: Value = serde_json::from_str(&std::fs::read_to_string(e.file()).unwrap()).unwrap();
+    assert_eq!(
+        parsed,
+        json!({"mergeMethod": "merge", "prLabels": ["blog", "orso"]})
+    );
+
+    // An empty merge method means unset, like the other text fields.
+    let hash = v["hash"].clone();
+    let (s, v) = put(
+        &e,
+        json!({"branch": b, "hash": hash, "settings": {"mergeMethod": ""}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let parsed: Value = serde_json::from_str(&std::fs::read_to_string(e.file()).unwrap()).unwrap();
+    assert_eq!(parsed, json!({}));
+}
+
+#[tokio::test]
 async fn save_repairs_invalid_json() {
     let e = env(true).await;
     std::fs::write(e.file(), "nope").unwrap();

@@ -459,6 +459,69 @@ async fn diverged_main_is_kept_and_changes_get_github_main() {
     assert!(is_ancestor(&work, &remote_main, &branch));
 }
 
+/// What a squash Publish does on GitHub: `branch`'s work lands on the remote `main` as one new
+/// commit that does not contain the branch tip.
+fn squash_on_remote(tmp: &Path, branch: &str) -> String {
+    let push = tmp.join("push");
+    if !push.exists() {
+        git_cli(tmp, &["clone", "remote.git", "push"]);
+        git_cli(&push, &["config", "user.name", "Grace"]);
+        git_cli(&push, &["config", "user.email", "grace@example.com"]);
+    }
+    git_cli(&push, &["fetch", "origin"]);
+    git_cli(&push, &["checkout", "main"]);
+    git_cli(&push, &["merge", "--ff-only", "origin/main"]);
+    git_cli(&push, &["merge", "--squash", &format!("origin/{branch}")]);
+    git_cli(&push, &["commit", "-m", &format!("{branch} (#1)")]);
+    git_cli(&push, &["push", "origin", "main"]);
+    git_cli(&tmp.join("remote.git"), &["rev-parse", "refs/heads/main"])
+}
+
+#[tokio::test]
+async fn get_latest_brings_squash_merged_work_into_the_other_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let published = change_with_edit(&work, "Published", "published.md", "one\n").await;
+    // Several checkpoints, as an assistant's turns leave them.
+    commit_file(&work, "published.md", "one, edited\n", "checkpoint: edit");
+    changes::push(&work, &published, &[]).await.unwrap();
+    let open = change_with_edit(&work, "Open", "open.md", "two\n").await;
+    let open_before = rev(&work, &open);
+    let remote_main = squash_on_remote(tmp.path(), &published);
+
+    let update = changes::get_latest(&work, &[]).await.unwrap();
+
+    assert!(update.main_updated);
+    assert!(update.conflicts.is_empty(), "{:?}", update.conflicts);
+    assert_eq!(rev(&work, "main"), remote_main);
+    assert!(
+        !is_ancestor(&work, &published, "main"),
+        "a squash never contains the tip"
+    );
+    // The open change gets the squashed work through an ordinary merge.
+    assert!(branches(&update.updated).contains(&open));
+    assert!(is_ancestor(&work, &open_before, &open));
+    assert!(is_ancestor(&work, &remote_main, &open));
+    assert_eq!(
+        git_cli(&work, &["show", &format!("{open}:published.md")]),
+        "one, edited"
+    );
+    // The squashed change itself (not cleaned up yet) merges cleanly: both sides hold the
+    // same edits.
+    assert!(is_ancestor(&work, &remote_main, &published));
+    assert_eq!(
+        git_cli(&work, &["diff", "--stat", &published, "main"]),
+        "",
+        "nothing left on the published change that main lacks"
+    );
+
+    // A second run has nothing to do.
+    let again = changes::get_latest(&work, &[]).await.unwrap();
+    assert!(!again.main_updated);
+    assert!(again.updated.is_empty());
+    assert!(!changes::needs_latest(&work, Some(&remote_main)).await);
+}
+
 #[tokio::test]
 async fn needs_latest_is_false_when_nothing_would_move() {
     let tmp = tempfile::tempdir().unwrap();

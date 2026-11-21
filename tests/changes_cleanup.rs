@@ -187,6 +187,62 @@ async fn cleanup_trusts_a_merged_pr_for_squash_merges() {
 }
 
 #[tokio::test]
+async fn cleanup_after_get_latest_on_a_squash_merged_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let branch = shared_change(&work, "New post: Squashed", "squashed.md").await;
+    let pr_head = tip(&work, &branch);
+    merge_on_remote(tmp.path(), &branch, true);
+    // Get latest before Clean up: main (with the squash) is merged into the published change,
+    // so its tip is no longer the PR's head.
+    changes::get_latest(&work, &[]).await.unwrap();
+    assert_ne!(tip(&work, &branch), pr_head);
+    assert_eq!(
+        changes::list(&work)
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| c.branch.clone())
+            .collect::<Vec<_>>(),
+        vec![branch.clone()],
+        "listed until it is cleaned up: main never contains a squashed tip"
+    );
+
+    let done = changes::cleanup(&work, &branch, merged(&pr_head), &[])
+        .await
+        .unwrap();
+    assert!(done.main_updated);
+    assert!(!local_branch_exists(&work, &branch));
+    assert!(changes::list(&work).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cleanup_refuses_edits_after_get_latest_on_a_squash_merged_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = clone_with_origin(tmp.path());
+    let branch = shared_change(&work, "New post: Squashed", "squashed.md").await;
+    let pr_head = tip(&work, &branch);
+    merge_on_remote(tmp.path(), &branch, true);
+    changes::get_latest(&work, &[]).await.unwrap();
+    commit_file(&work, "later.md", "later\n");
+
+    let err = changes::cleanup(&work, &branch, merged(&pr_head), &[])
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("after it was published"),
+        "{}",
+        err.message
+    );
+    assert!(local_branch_exists(&work, &branch));
+    // Without the merged PR, matching files alone prove nothing.
+    let err = changes::cleanup(&work, &branch, PrMerge::NotMerged, &[])
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
+}
+
+#[tokio::test]
 async fn cleanup_keeps_the_branch_when_main_cannot_fast_forward() {
     let tmp = tempfile::tempdir().unwrap();
     let work = clone_with_origin(tmp.path());
@@ -722,4 +778,92 @@ async fn http_status_and_list_ignore_a_pr_for_other_commits() {
     assert_eq!(v["pr"]["state"], "merged", "{v}");
     let (_, v) = get_json(&p.app, &list_uri).await;
     assert_eq!(v["changes"][0]["prState"], "merged", "{v}");
+}
+
+/// A fake `gh`, logged in as ada, whose `api` answers one merged PR for any `pulls` query with
+/// the head SHA read from `gh.head` next to the script.
+fn fake_gh_with_merged_pr(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let path = dir.join("gh");
+    let script = r#"#!/bin/sh
+case "$*" in
+  "api user") printf '%s' '{"login":"ada","id":42,"name":"Ada","avatar_url":""}' ;;
+  "auth git-credential"*) cat >/dev/null ;;
+  *"/repos/acme/site/pulls"*)
+    printf '[{"number":7,"title":"t","html_url":"https://github.com/acme/site/pull/7","draft":false,"state":"closed","merged_at":"2026-10-04T00:00:00Z","head":{"ref":"content/launch","sha":"%s"}}]' "$(cat "$0.head")" ;;
+  *) echo "unexpected: $*" >&2; exit 2 ;;
+esac
+"#;
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+/// After a squash, `main` never contains the branch tip: a writer signed in only through the
+/// GitHub CLI still gets the change cleaned up, because cleanup asks GitHub through `gh` too.
+#[tokio::test]
+async fn http_cleanup_asks_github_through_the_cli_after_a_squash_merge() {
+    use orso::config::GithubConfig;
+    use orso::git::Identity;
+    use orso::projects::Source;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let projects = tmp.path().join("projects");
+    let git_root = tmp.path().join("git");
+    std::fs::create_dir_all(git_root.join("acme")).unwrap();
+    let src = git_root.join("src");
+    seed_repo(&src);
+    git_cli(
+        &git_root,
+        &["clone", "--bare", src.to_str().unwrap(), "acme/site.git"],
+    );
+    let gh = fake_gh_with_merged_pr(&tmp.path().join("bin"));
+    let cfg = Config {
+        projects_dir: projects.clone(),
+        no_auth: true,
+        github: GithubConfig {
+            client_id: None,
+            // Nothing here may reach a real GitHub: only the fake `gh` answers.
+            api_url: "http://127.0.0.1:1".into(),
+            web_url: "http://127.0.0.1:1".into(),
+            git_url: format!("file://{}", git_root.display()),
+            gh_path: gh,
+            git_global_config: Some(git_root.join("no-such-gitconfig")),
+            get_cache_ttl: std::time::Duration::ZERO,
+        },
+        ..Default::default()
+    };
+    let state = AppState::with_scaffold_install(cfg, false);
+    let info = state
+        .projects
+        .create_from(
+            "site",
+            Source::Clone {
+                repo: "acme/site".into(),
+                url: format!("file://{}", git_root.join("acme/site.git").display()),
+                env: vec![],
+            },
+            &Identity::orso(),
+        )
+        .await
+        .unwrap();
+    let dir = projects.join(&info.id);
+    let change = changes::create(&dir, "New post: Launch").await.unwrap();
+    commit_file(&dir, "launch.md", "launch\n");
+    changes::push(&dir, &change.branch, &[]).await.unwrap();
+    std::fs::write(tmp.path().join("bin/gh.head"), tip(&dir, &change.branch)).unwrap();
+    // Squash it on the remote, as Publish now does.
+    let remote = git_root.join("acme/site.git");
+    git_cli(tmp.path(), &["clone", remote.to_str().unwrap(), "reviewer"]);
+    let reviewer = tmp.path().join("reviewer");
+    git_cli(&reviewer, &["merge", "--squash", "origin/content/launch"]);
+    git_cli(&reviewer, &["commit", "-m", "New post: Launch (#7)"]);
+    git_cli(&reviewer, &["push", "origin", "main"]);
+
+    let app = http::router(state);
+    let (s, v) = post(&app, LAUNCH, json!({ "project": info.id })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(!local_branch_exists(&dir, "content/launch"));
+    assert!(dir.join("launch.md").exists(), "main has the squashed work");
 }

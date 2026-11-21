@@ -5,23 +5,41 @@ import UAlert from "@nuxt/ui/components/Alert.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UFormField from "@nuxt/ui/components/FormField.vue";
 import UInput from "@nuxt/ui/components/Input.vue";
+import UInputTags from "@nuxt/ui/components/InputTags.vue";
+import USelect from "@nuxt/ui/components/Select.vue";
 import { useDaemon } from "@/core/daemon";
 import NewChangeDialog from "@/modules/changes/NewChangeDialog.vue";
 import { useProjectsStore } from "@/modules/projects/store";
 import type { Change } from "@/core/types";
-import { useSettingsStore, type SettingsField } from "./store";
+import { PUBLISH_FIELDS, useSettingsStore, type SettingsField, type TextField } from "./store";
 
 const props = defineProps<{ projectId: string }>();
 const store = useSettingsStore();
 const projects = useProjectsStore();
 const showNewChange = ref(false);
 
-const FIELDS: { key: SettingsField; label: string }[] = [
+const FIELDS: { key: TextField; label: string }[] = [
   { key: "root", label: "Astro project folder" },
   { key: "installDir", label: "Install folder" },
   { key: "install", label: "Install command" },
   { key: "dev", label: "Dev command" },
 ];
+const MERGE_METHODS = [
+  { label: "Squash (recommended)", value: "squash" },
+  { label: "Merge commit", value: "merge" },
+];
+
+/** An unset method shows the default; picking the default keeps it unset, so the file only changes when it must. */
+const mergeMethod = computed(() => store.draft.mergeMethod || store.doc?.defaults.mergeMethod);
+function setMergeMethod(value: string) {
+  const unset = typeof store.doc?.settings.mergeMethod !== "string" || store.doc.settings.mergeMethod === "";
+  store.setField("mergeMethod", unset && value === store.doc?.defaults.mergeMethod ? "" : value);
+}
+/** No labels typed means the default ones; `[]` written in the file (labelling off) reads as "No labels". */
+function setPrLabels(labels: string[]) { store.setField("prLabels", labels.length ? labels : null); }
+const prLabelsPlaceholder = computed(() => store.draft.prLabels === null && store.doc?.defaults.prLabels.length
+  ? `${store.doc.defaults.prLabels.join(", ")} (default)`
+  : "No labels");
 
 /** Set once a save lands: the dev server restarts with the new settings, and its status is shown from then on. */
 const saved = ref(false);
@@ -40,7 +58,8 @@ watch(() => props.projectId, id => { saved.value = false; restarting.value = fal
 onBeforeRouteLeave(() => store.canLeave());
 onBeforeRouteUpdate(() => store.canLeave());
 
-const fileErrors = computed(() => store.doc ? Object.keys(store.doc.errors).length > 0 : false);
+/** Errors that stop the dev server; the publishing fields fall back to their defaults instead. */
+const fileErrors = computed(() => store.doc ? Object.keys(store.doc.errors).some(key => !PUBLISH_FIELDS.includes(key)) : false);
 const devMissingPort = computed(() => !!store.draft.dev && !store.draft.dev.includes("{port}"));
 const devHint = computed(() => /\bastro\s+dev\b/.test(store.draft.dev) && !store.draft.dev.includes("--ignore-lock"));
 function errorFor(key: SettingsField) {
@@ -169,6 +188,37 @@ onBeforeUnmount(() => { window.removeEventListener("beforeunload", beforeUnload)
                 </span>
               </template>
               <p v-if="errorFor(field.key)" role="alert" class="text-error mt-1 text-xs" :data-testid="`settings-error-${field.key}`">{{ errorFor(field.key) }}</p>
+            </UFormField>
+
+            <UFormField label="Merge method" name="mergeMethod" size="sm">
+              <USelect
+                id="settings-mergeMethod"
+                data-testid="settings-mergeMethod"
+                class="w-full"
+                :items="MERGE_METHODS"
+                :model-value="mergeMethod"
+                @update:model-value="setMergeMethod(String($event))"
+              />
+              <template #help>
+                <span class="block">How Publish adds a change to the live site. Squash adds it as one commit; a merge commit keeps every checkpoint.</span>
+              </template>
+              <p v-if="errorFor('mergeMethod')" role="alert" class="text-error mt-1 text-xs" data-testid="settings-error-mergeMethod">{{ errorFor("mergeMethod") }}</p>
+            </UFormField>
+
+            <UFormField label="Pull request labels" name="prLabels" size="sm">
+              <UInputTags
+                id="settings-prLabels"
+                data-testid="settings-prLabels"
+                class="w-full"
+                add-on-blur
+                :placeholder="prLabelsPlaceholder"
+                :model-value="store.draft.prLabels ?? []"
+                @update:model-value="setPrLabels($event.map(String))"
+              />
+              <template #help>
+                <span class="block">Added to the pull requests orso opens, so reviewers can find them. Type a label and press Enter.</span>
+              </template>
+              <p v-if="errorFor('prLabels')" role="alert" class="text-error mt-1 text-xs" data-testid="settings-error-prLabels">{{ errorFor("prLabels") }}</p>
             </UFormField>
           </form>
 

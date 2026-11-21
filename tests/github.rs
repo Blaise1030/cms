@@ -519,14 +519,16 @@ async fn publish_pushes_and_merges_the_change_without_cleaning_up() {
             "url": "https://github.com/acme/site/pull/4",
             "state": "merged",
             // The commit whose deploy ships the change, so the app can tell when it's live.
-            "mergeSha": "def"
+            "mergeSha": "def",
+            "squashUnavailable": false
         }})
     );
     let sent = merges.lock().unwrap().clone();
     assert_eq!(sent.len(), 2, "{sent:?}");
+    // No orso.json: a squash, titled like GitHub's own.
     assert!(
         sent.iter()
-            .all(|b| b == &json!({ "merge_method": "merge" })),
+            .all(|b| b == &json!({ "merge_method": "squash", "commit_title": "Launch week (#4)" })),
         "{sent:?}"
     );
     // Cleaning up is still the Clean up button's job: the local change is untouched.

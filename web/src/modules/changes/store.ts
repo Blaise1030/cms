@@ -48,6 +48,23 @@ const DEPLOY_UNVERIFIED = "Published. The site should update shortly.";
 /** One toast for the deploy being watched, so a later publish updates it instead of stacking. */
 const DEPLOY_TOAST_ID = "orso-deploy";
 
+export const SQUASH_UNAVAILABLE =
+  "This repository doesn't allow squash merging, so orso merged normally. Change it in the repository's settings or set mergeMethod in orso.json.";
+/** Projects already told that squash merging is off, kept in this browser so the note shows once. */
+export const SQUASH_NOTE_KEY = "orso.publish.squashNoted";
+
+/** Tell the writer once per project that GitHub refused the squash and orso fell back to a merge commit. */
+function noteSquashUnavailable(projectId: string) {
+  let noted: string[] = [];
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(SQUASH_NOTE_KEY) ?? "[]");
+    if (Array.isArray(saved)) noted = saved.filter((id): id is string => typeof id === "string");
+  } catch { /* unreadable storage: show the note */ }
+  if (noted.includes(projectId)) return;
+  toast.info(SQUASH_UNAVAILABLE);
+  try { localStorage.setItem(SQUASH_NOTE_KEY, JSON.stringify([...noted, projectId])); } catch { /* blocked: it may show again */ }
+}
+
 export const useChangesStore = defineStore("changes", () => {
   const daemon = useDaemon();
 
@@ -796,6 +813,8 @@ export const useChangesStore = defineStore("changes", () => {
         await startSyncChat(id, result.conflict.sessionId);
         return "combining";
       }
+      // The merge itself is done: say so even if the cleanup after it fails.
+      if (result?.squashUnavailable) noteSquashUnavailable(id);
       const { mainUpdated } = await cleanup(id, branch);
       if (!mainUpdated) {
         toast.warning(
