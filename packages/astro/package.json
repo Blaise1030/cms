@@ -5,8 +5,7 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.js",
-    "./marketing": "./src/marketing.js"
+    ".": "./src/index.js"
   },
   "files": ["src", "README.md"],
   "scripts": {
