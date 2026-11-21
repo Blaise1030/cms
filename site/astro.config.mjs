@@ -7,6 +7,9 @@ import { orso } from "./integrations/orso/index.js";
 import { collections } from "./src/content/collections.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
 import { legal } from "./integrations/legal.js";
+import { help } from "./integrations/help.js";
+import { satteri } from "@astrojs/markdown-satteri";
+import { baseLinks } from "./integrations/base-links.js";
 import { site } from "./src/site.ts";
 import { collectionsWithTranslations } from "./src/lib/translatedFiles.ts";
 
@@ -30,6 +33,9 @@ const nuxtUiComponents = realpathSync(fileURLToPath(new URL("./node_modules/@nux
 export default defineConfig({
   site: siteUrl,
   base,
+  // Writers link the plain way in Markdown (`/help/install-orso/`); this adds the base so those
+  // links still work under the /preview/{id}/ prefix (integrations/base-links.js).
+  markdown: { processor: satteri({ hastPlugins: [baseLinks({ base })] }) },
   // Geist ships with the site (no third-party font request). Astro writes the
   // @font-face rules, a preload and a metric-matched fallback so the swap causes no layout shift.
   fonts: [
@@ -58,11 +64,11 @@ export default defineConfig({
   ],
   integrations: [
     mdx(),
-    // The site's collections (src/content/collections.js) plus the privacy policy and terms
-    // (see integrations/legal.js).
-    // Crowdin owns the translations (src/content.config.ts), so orso hides them on purpose.
+    // The blog from the site's collections (src/content/collections.js), Orso's own help centre
+    // (integrations/help.js) and the privacy policy and terms (integrations/legal.js). Crowdin
+    // owns the translations (src/content.config.ts), so orso hides them on purpose.
     orso({
-      collections: { ...collections, legal },
+      collections: { blog: collections.blog, blogCategories: collections.blogCategories, ...help, legal },
       hide: collectionsWithTranslations().map((name) => `${name}I18n`),
     }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.

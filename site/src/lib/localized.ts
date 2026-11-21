@@ -3,7 +3,7 @@ import { defaultLocale, type Locale } from "../i18n/locales";
 import { hasTranslatedFiles } from "./translatedFiles";
 
 /** The orso collections that Crowdin translates; each has a `<name>I18n` twin in content.config.ts. */
-export type TranslatedCollection = "blog" | "blogCategories" | "helpDocs" | "helpCategories" | "helpSubcategories" | "helpDocsCategories" | "legal";
+export type TranslatedCollection = "blog" | "blogCategories" | "helpDocs" | "helpCategories" | "legal";
 
 /** Front-matter fields taken from a translation. Everything else stays as in the English file. */
 const TEXT_FIELDS = ["title", "description", "coverAlt"] as const;
