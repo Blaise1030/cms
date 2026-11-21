@@ -90,9 +90,11 @@ export const useCheckpointsStore = defineStore("checkpoints", () => {
       headByProject.value[e.projectId] = e.sha;
       if (list.some((c) => c.sha === e.sha)) return;
       byProject.value[e.projectId] = [
-        { sha: e.sha, summary: e.summary, author: e.author, ts: e.ts },
+        { sha: e.sha, summary: e.summary, author: e.author, ts: e.ts, avatarUrl: e.avatarUrl },
         ...list,
       ];
+      // Whether it went out depends on the branch; the daemon's timeline says.
+      if (list.some((c) => c.published !== undefined)) void load(e.projectId);
     }),
     daemon.onReconnected(resync),
     daemon.on("events.lagged", resync),

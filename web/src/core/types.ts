@@ -56,6 +56,10 @@ export interface Checkpoint {
   author: string;
   /** Unix seconds. */
   ts: number;
+  /** The author's GitHub picture, when their commit email names their account. */
+  avatarUrl?: string;
+  /** In the timeline: whether it is on `main` (it went out). Absent when that is unknown. */
+  published?: boolean;
 }
 
 /** A commit that touched one content entry's file, newest first. */
@@ -233,6 +237,8 @@ export interface DeployStatus {
 export interface PublishedPr extends PrStatus {
   /** The merge commit on the site's main line; absent when GitHub didn't report one. */
   mergeSha?: string | null;
+  /** Squash was asked for, but the repository doesn't allow it: merged with a merge commit. */
+  squashUnavailable?: boolean;
 }
 
 /** Push needed newer commits from this change's remote copy combined in first. */
@@ -368,6 +374,7 @@ export interface CheckpointCreatedEvent {
   author: string;
   /** Unix seconds. */
   ts: number;
+  avatarUrl?: string;
 }
 
 export interface FsChangeEvent {
@@ -704,6 +711,8 @@ export interface ContentCollection {
   supportedForEditing?: boolean;
   /** True when the live preview can resolve a path. Omitted means false. */
   hasPreviewPath?: boolean;
+  /** Hidden on purpose by the site (`orso({ hide })`): left out of the app without a warning. */
+  hidden?: boolean;
   reason: string | null;
   /** Field descriptors projected from the template schema. */
   fields?: FieldDescriptor;
@@ -757,7 +766,11 @@ export interface DesignDoc {
   starter?: { tokens: DesignTokens; body: string };
 }
 /** The fields of the repo-root `orso.json`; each one falls back to its default when unset. */
-export interface ProjectSettings { root: string; installDir: string; install: string; dev: string }
+/** `orso.json` defaults. `mergeMethod`: how Publish merges; `prLabels`: labels on the pull requests orso opens. */
+export interface ProjectSettings {
+  root: string; installDir: string; install: string; dev: string;
+  mergeMethod: "squash" | "merge"; prLabels: string[];
+}
 /** `settings` is the file as written (unknown keys included); `errors` is keyed by field, `_file` when it is not a JSON object. */
 export interface SettingsDoc {
   exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;

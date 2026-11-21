@@ -196,7 +196,8 @@ export const useContentStore = defineStore("content", () => {
       const nextCollections = await daemon.api.listContentCollections(id);
       const nextEntries = name ? await daemon.api.listContentEntries(id, name) : [];
       if (version !== refreshRequest) return;
-      collections.value = nextCollections;
+      // Hidden on purpose (`orso({ hide })`): not listed, and not reported as unsupported either.
+      collections.value = nextCollections.filter(c => !c.hidden);
       for (const target of Object.keys(referenceEntries.value)) void fetchReferenceEntries(target);
       // A refresh owns catalog loading; a user selection owns the detail view.
       if (selectionVersion !== selectionRequest) return;

@@ -23,6 +23,10 @@ pub struct ContentCollection {
     pub supported_for_editing: bool,
     #[serde(default)]
     pub reason: Option<String>,
+    /// Hidden on purpose by `orso({ hide })`: never edited, and the app leaves it out
+    /// without the warning an unsupported collection gets.
+    #[serde(default)]
+    pub hidden: bool,
     /// Manifest flag only; the `previewPath` function stays on the running preview.
     #[serde(default, rename = "hasPreviewPath")]
     pub has_preview_path: bool,
@@ -117,7 +121,8 @@ fn required_unsupported(field: &Value) -> bool {
 /// Apply editability, keeping the manifest's read-only reason when it gives one.
 fn finish(mut collections: Vec<ContentCollection>) -> Vec<ContentCollection> {
     for c in &mut collections {
-        c.editable = c.supported_for_editing
+        c.editable = !c.hidden
+            && c.supported_for_editing
             && supported(c)
             && !c.fields.is_null()
             && !required_unsupported(&c.fields);

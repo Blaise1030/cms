@@ -98,6 +98,7 @@ pub fn router(state: AppState) -> Router {
             post(projects::dismiss_protection_hint),
         )
         .route("/api/projects/{id}/deploy", get(changes::deploy))
+        .route("/api/projects/{id}/deploy-url", get(changes::deploy_url))
         .route("/api/projects/{id}/reviews", get(reviews::list))
         .route("/api/projects/{id}/reviews/assets", get(reviews::asset))
         .route("/api/projects/{id}/reviews/{n}", get(reviews::detail))
@@ -215,6 +216,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
+        .route("/api/changes/{branch}/edits", get(changes::edits))
         .route("/api/changes/sync", get(changes::sync))
         .route("/api/changes/live", get(changes::live))
         .route(

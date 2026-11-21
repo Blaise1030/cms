@@ -159,7 +159,7 @@ const macDesktop = isMacDesktop();
 
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto" data-testid="review-inbox">
-    <div class="flex min-h-full flex-col gap-3 p-3">
+    <div class="flex min-h-full flex-col gap-2 p-3">
       <!-- No project top bar here: on the macOS desktop app the header clears the traffic lights
            and is where the window is dragged from; its title centres on them (22px down). -->
       <header
@@ -201,10 +201,12 @@ const macDesktop = isMacDesktop();
         class="flex min-h-0 flex-1 flex-col"
         data-testid="review-list-card"
       >
-        <div class="flex shrink-0 flex-wrap items-center gap-1 py-1.5">
+        <!-- The shown tab is filled and outlined: a soft fill alone vanishes on white. -->
+        <div class="flex shrink-0 flex-wrap items-center gap-1">
           <UButton
             color="neutral"
-            :variant="query.state === 'open' ? 'soft' : 'ghost'"
+            :variant="query.state === 'open' ? 'subtle' : 'ghost'"
+            :class="query.state === 'open' ? 'text-highlighted' : 'text-muted'"
             size="sm"
             icon="i-hugeicons-git-pull-request"
             :aria-pressed="query.state === 'open'"
@@ -215,7 +217,8 @@ const macDesktop = isMacDesktop();
           </UButton>
           <UButton
             color="neutral"
-            :variant="query.state === 'closed' ? 'soft' : 'ghost'"
+            :variant="query.state === 'closed' ? 'subtle' : 'ghost'"
+            :class="query.state === 'closed' ? 'text-highlighted' : 'text-muted'"
             size="sm"
             icon="i-hugeicons-checkmark-circle-02"
             :aria-pressed="query.state === 'closed'"
@@ -241,12 +244,18 @@ const macDesktop = isMacDesktop();
                 :data-testid="`review-menu-${menu.id}`"
               />
               <template #item-leading="{ item }">
+                <!-- A text-line-high box, so the dot centres on the label's line. -->
                 <span
                   v-if="menu.id === 'label'"
-                  class="size-3 shrink-0 rounded-full"
-                  :style="{ backgroundColor: labelStyle(String(item.color)).backgroundColor }"
+                  class="flex size-5 shrink-0 items-center justify-center"
                   aria-hidden="true"
-                />
+                  data-testid="review-label-dot"
+                >
+                  <span
+                    class="size-2.5 rounded-full"
+                    :style="{ backgroundColor: labelStyle(String(item.color)).backgroundColor }"
+                  />
+                </span>
               </template>
             </UDropdownMenu>
             <UDropdownMenu :items="sortItems" :content="{ align: 'end', side: 'bottom' }">
@@ -297,7 +306,7 @@ const macDesktop = isMacDesktop();
           :title="query.state === 'closed' ? 'No closed changes.' : 'No changes waiting for review.'"
           data-testid="review-empty"
         />
-        <ul v-else class="m-0 flex list-none flex-col gap-2 overflow-y-auto p-0 pt-3">
+        <ul v-else class="m-0 flex list-none flex-col gap-2 overflow-y-auto p-0 pt-2">
           <li
             v-for="item in rows"
             :key="item.number"

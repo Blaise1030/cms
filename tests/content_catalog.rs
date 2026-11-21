@@ -162,6 +162,42 @@ async fn has_preview_path_defaults_false_and_passes_through_true() {
 }
 
 #[tokio::test]
+async fn hidden_defaults_false_and_a_hidden_collection_is_never_editable() {
+    let temp = tempfile::tempdir().unwrap();
+    let blog = common::manifest_collection(
+        "blog",
+        "src/content/blog/en",
+        "*.md",
+        "markdown",
+        blog_fields(),
+    );
+    // Even a manifest that still calls it supported cannot make a hidden collection editable.
+    let mut translations = common::manifest_collection(
+        "blogI18n",
+        "src/content/blog/zh",
+        "*.md",
+        "markdown",
+        blog_fields(),
+    );
+    translations["hidden"] = json!(true);
+    translations["reason"] = json!("Collection is hidden from orso");
+    manifest(temp.path(), vec![blog, translations]);
+
+    let collections = list_collections(temp.path()).await.unwrap();
+    assert!(!collections[0].hidden);
+    assert!(collections[0].editable);
+    assert!(collections[1].hidden);
+    assert!(!collections[1].editable);
+    assert_eq!(
+        collections[1].reason.as_deref(),
+        Some("Collection is hidden from orso")
+    );
+    let json = serde_json::to_value(&collections).unwrap();
+    assert_eq!(json[0]["hidden"], false);
+    assert_eq!(json[1]["hidden"], true);
+}
+
+#[tokio::test]
 async fn missing_manifest_lists_nothing() {
     let temp = tempfile::tempdir().unwrap();
     write(

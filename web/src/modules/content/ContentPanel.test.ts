@@ -274,6 +274,24 @@ it("keeps supported collections listed while the preview is down and hides only 
  expect(names).toContain("Blog"); expect(names).not.toContain("Legacy");
  w.unmount();
 });
+it("leaves collections hidden on purpose out of the list without a warning", async () => {
+ const { toast } = await import("@/lib/toast");
+ vi.mocked(toast.warning).mockClear();
+ const w = await setup({ listContentCollections: async () => [
+  blog,
+  { name: "blogI18n", kind: "markdown", editable: false, supportedForEditing: false, hidden: true, reason: "Collection is hidden from orso" },
+ ] }); await flushPromises();
+ expect(w.findAll('[data-collection-name]').map(c => c.attributes("data-collection-name"))).toEqual(["blog"]);
+ expect(toast.warning).not.toHaveBeenCalled();
+ w.unmount();
+ const mixed = await setup({ listContentCollections: async () => [
+  blog,
+  { name: "blogI18n", kind: "markdown", editable: false, supportedForEditing: false, hidden: true, reason: "Collection is hidden from orso" },
+  { name: "legacy", kind: "markdown", editable: false, supportedForEditing: false, reason: "Collection does not use orsoGlob" },
+ ] }); await flushPromises();
+ expect(toast.warning).toHaveBeenCalledWith("1 collection is hidden", { description: "legacy: Collection does not use orsoGlob" });
+ mixed.unmount();
+});
 it("explains an empty catalog: the site needs the orso-astro integration", async () => {
  const w = await setup({ listContentCollections: async () => [] }); await flushPromises();
  const empty = w.get('[data-testid="content-empty-catalog"]').text();
