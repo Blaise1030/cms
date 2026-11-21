@@ -35,7 +35,6 @@ import { useContentStore } from "./store";
 import { IMAGE_REGISTRY } from "./ImageDialog.vue";
 import { REFERENCE_ENTRIES } from "./references";
 import { useAgentOutboxStore } from "@/modules/chat/outbox";
-import { useHiddenCollectionsNotice } from "@/lib/hiddenCollectionsNotice";
 // Tiptap and CodeMirror load with the first Markdown/MDX entry, not with the app shell.
 const MarkdownBodyEditor = defineAsyncComponent(() => import("./MarkdownBodyEditor.vue"));
 const props = defineProps<{projectId: string; collection?: string; entry?: string}>();
@@ -187,13 +186,12 @@ function backToList() {
 }
 /** Unsupported collections are left out of the tree and reported once in a toast; ones waiting for the preview stay listed. */
 const unsupported = (c: ContentCollection) => c.supportedForEditing === false;
-const hiddenCollectionsNotice = useHiddenCollectionsNotice();
 const validCollections = computed(() => store.collections.filter(c => !unsupported(c)));
 let reportedInvalid = "";
 watch(() => store.collections, collections => {
   const invalid = collections.filter(unsupported);
   const key = `${props.projectId}:${invalid.map(c => c.name).join(",")}`;
-  if (invalid.length && key !== reportedInvalid && hiddenCollectionsNotice.enabled.value) {
+  if (invalid.length && key !== reportedInvalid) {
     toast.warning(`${invalid.length === 1 ? "1 collection is" : `${invalid.length} collections are`} hidden`, {
       description: `${invalid.map(c => c.name).join(", ")}: ${[...new Set(invalid.map(c => c.reason))].join(" ")}`,
     });
