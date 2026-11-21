@@ -35,6 +35,10 @@ orso shows **Open live site** (on main) and **Open deployed preview** (on a chan
 
 If you touch `.github/workflows/deploy.yml`, keep both. Skipping production deployments hides the live-site link until the next successful recorded deploy (orso may still derive a workers.dev URL from a preview as a fallback).
 
+## Links
+
+Write links as plain root-relative paths (`/pricing/`, `/#faq`, `src="/logo.svg"`) in components, Markdown, scripts and CSS. orso previews the site at the root of its own address, the same as the live site, so no link helper or base path is needed. Don't add one.
+
 ## Changes (drafts)
 
 A **change** is a draft: git branch `content/<kebab-case-slug>`; title via `git config branch.<branch>.description "<Title>"`.
@@ -60,7 +64,7 @@ Prints JSON. If `$ORSO_HOOK_EXE` is unset or the command says to run inside a or
 
 | Command | When |
 |---|---|
-| `preview-status` | After editing. `devserver`: `starting` \| `ready` \| `crashed`. On crash, `message` is the tail of server output. |
+| `preview-status` | After editing. `devserver`: `starting` \| `ready` \| `crashed`. On crash, `message` is the tail of server output. `port` is the dev server; pages are at its root (`previewPath` is `/`), so `http://127.0.0.1:<port>/pricing/` is the pricing page. |
 | `restart-preview` | Only when preview `crashed`: fix cause from `message`, restart **once**, re-check. Still crashed → tell them in plain words. |
 | `refresh-content` | After add/rename content, or Content sidebar looks stale (reloads collections / entry lists). |
 | `refresh-preview` | After `refresh-content`, or preview looks stale (remounts preview). |
