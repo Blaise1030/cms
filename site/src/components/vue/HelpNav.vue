@@ -5,8 +5,8 @@ import UCollapsible from "@nuxt/ui/components/Collapsible.vue";
 import UNavigationMenu from "@nuxt/ui/components/NavigationMenu.vue";
 
 /**
- * The Help navigation: every section, subsection and article. Desktop shows it as a sidebar
- * whose sections collapse (the one holding this page starts open); mobile folds it into one
+ * The Help navigation: every category and article. Desktop shows it as a sidebar
+ * whose categories collapse (the one holding this page starts open); mobile folds it into one
  * "Browse help" collapsible. Built from plain data so it can hydrate as an island. Collapsed
  * groups stay in the HTML (hidden) so every article link is crawlable.
  */

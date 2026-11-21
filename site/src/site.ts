@@ -56,7 +56,6 @@ export const site = {
       ],
       Resources: [
         { key: "blogTopics", href: "/blog/categories/" },
-        { key: "helpTopics", href: "/help/categories/" },
         { key: "llms", href: "/llms.txt" },
       ],
       More: [

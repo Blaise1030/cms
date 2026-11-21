@@ -36,7 +36,6 @@
       "download": "Download",
       "releases": "Releases",
       "blogTopics": "Blog topics",
-      "helpTopics": "Help topics",
       "llms": "llms.txt",
       "reportIssue": "Report an issue",
       "coffee": "Buy me a coffee",
@@ -274,10 +273,9 @@
   "help": {
     "title": "Help",
     "description": "Guides and answers for using Orso, from connecting a repo to drafts, previews and Publish.",
-    "intro": "Guides and answers for every step, from your first sign-in to your next invoice.",
+    "intro": "Guides and answers for using Orso, from connecting a repo to drafts, previews and Publish.",
     "empty": "No help docs yet. Check back soon for guides and answers.",
-    "browse": "Browse by section",
-    "topics": "Topics",
+    "browse": "Browse by category",
     "overview": "Overview",
     "search": "Search help",
     "browseHelp": "Browse help",
@@ -289,22 +287,10 @@
       "one": "{count} article",
       "other": "{count} articles"
     },
-    "section": {
+    "category": {
       "title": "Help: {title}",
       "description": "Help articles about {title}.",
-      "empty": "No articles in this section yet."
-    },
-    "topicsPage": {
-      "title": "Help topics",
-      "description": "Browse Orso help articles by topic, such as setup, collaboration and troubleshooting.",
-      "empty": "No help topics yet.",
-      "back": "Back to Help",
-      "all": "All topics"
-    },
-    "topic": {
-      "title": "Help topic: {title}",
-      "description": "Help articles about {title}.",
-      "empty": "No articles on this topic yet."
+      "empty": "No articles in this category yet."
     }
   },
   "common": {

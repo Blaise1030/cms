@@ -13,7 +13,7 @@ export function hasTranslatedFiles(collection: string, locale: string) {
 }
 
 /** The English collections Crowdin translates. */
-export const translatedCollections = ["blog", "blogCategories", "helpDocs", "helpCategories", "helpSubcategories", "helpDocsCategories", "legal"];
+export const translatedCollections = ["blog", "blogCategories", "helpDocs", "helpCategories", "legal"];
 
 /** The collections with translated files in some locale: each gets a `<name>I18n` collection. */
 export const collectionsWithTranslations = () =>

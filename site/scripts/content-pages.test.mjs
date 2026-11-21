@@ -25,14 +25,12 @@ function build(dir, base = "/preview/example/") {
 test("built sample Blog and Help articles render Markdown and navigation", () => {
   assert.match(html(root, "blog"), /Welcome to the blog/);
   assert.match(html(root, "blog/welcome"), /<h2[^>]*>.*Welcome/);
-  assert.match(html(root, "help"), /Getting started/);
-  assert.match(html(root, "help/getting-started"), /<h2[^>]*>.*First steps/);
   assert.match(html(root, ""), /href="\/blog\/"[^>]*>(?:<[^>]+>)*Blog/);
   assert.match(html(root, ""), /href="\/help\/"[^>]*>(?:<[^>]+>)*Help/);
   for (const id of ["hero", "logos", "features", "testimonials", "pricing", "faq", "cta"]) assert.match(html(root, ""), new RegExp(`id="${id}"`));
 });
 
-test("built sample categories, sections and topics link their articles", () => {
+test("built sample blog categories link their posts", () => {
   assert.match(html(root, "blog"), /href="\/blog\/categories\/guides\/"[^>]*>(?:<[^>]+>)*Guides/);
   assert.match(html(root, "blog/categories"), /<h1[^>]*>Blog categories/);
   const guides = html(root, "blog/categories/guides");
@@ -40,27 +38,19 @@ test("built sample categories, sections and topics link their articles", () => {
   assert.match(guides, /href="\/blog\/plan-a-launch-in-a-week\/"/);
   assert.doesNotMatch(guides, /href="\/blog\/welcome\/"/);
   assert.match(html(root, "blog/welcome"), /Keep reading/);
-  const help = html(root, "help");
-  assert.match(help, /href="\/help\/section\/projects\/"/);
-  assert.match(help, /href="\/help\/categories\/setup\/"/);
   // The search palette island points at its section's index.
-  assert.match(help, /bundlePath&quot;:\[0,&quot;\/pagefind-help\/&quot;\]/);
   assert.match(html(root, "blog"), /bundlePath&quot;:\[0,&quot;\/pagefind-blog\/&quot;\]/);
-  for (const bundle of ["blog", "help"]) assert.ok(existsSync(join(root, "dist", `pagefind-${bundle}`, "pagefind.js")), `pagefind-${bundle} index`);
-  const projects = html(root, "help/section/projects");
-  assert.match(projects, /<h2[^>]*>Planning/);
-  assert.ok(projects.indexOf("Create a project") < projects.indexOf("Share a project"));
-  assert.match(html(root, "help/categories/setup"), /href="\/help\/create-your-account\/"/);
-  assert.match(html(root, "help/share-a-project"), /On this page/);
+  assert.ok(existsSync(join(root, "dist", "pagefind-blog", "pagefind.js")), "pagefind-blog index");
 });
 
 // Fixtures vary filenames and dates/orders to catch sorting by filesystem order.
 test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
-  for (const name of ["blog", "helpDocs"]) mkdirSync(join(dir, "src/content", name, "en"), { recursive: true });
+  for (const name of ["blog", "helpDocs", "helpCategories"]) mkdirSync(join(dir, "src/content", name, "en"), { recursive: true });
+  writeFileSync(join(dir, "src/content/helpCategories/en/reference.md"), "---\ntitle: Reference\ndescription: Look things up\norder: 1\n---\n");
   writeFileSync(join(dir, "src/content/blog/en/a-new.md"), '---\ntitle: Newest article\ndescription: New article\npubDate: "2026-10-11"\n---\nNew **body**');
   writeFileSync(join(dir, "src/content/blog/en/z-old.md"), '---\ntitle: Oldest article\ndescription: Old article\npubDate: "2020-01-01"\n---\nOld body');
-  for (const [slug, title, section, order] of [["a-last", "Last guide", "Setup", 9], ["z-first", "First guide", "Setup", 1], ["b-tie", "Alpha guide", "Setup", 9], ["c-other", "Other guide", "Reference", 1]]) {
-    writeFileSync(join(dir, `src/content/helpDocs/en/${slug}.md`), `---\ntitle: ${title}\ndescription: Guide\nsection: ${section}\norder: ${order}\n---\nGuide body`);
+  for (const [slug, title, category, order] of [["a-last", "Last guide", "Setup", 9], ["z-first", "First guide", "Setup", 1], ["b-tie", "Alpha guide", "Setup", 9], ["c-other", "Other guide", "reference", 1]]) {
+    writeFileSync(join(dir, `src/content/helpDocs/en/${slug}.md`), `---\ntitle: ${title}\ndescription: Guide\ncategory: ${category}\norder: ${order}\n---\nGuide body\n\n## One\n\nText\n\n## Two\n\nText`);
   }
   build(dir);
   const blog = html(dir, "blog");
@@ -70,12 +60,20 @@ test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
   const help = html(dir, "help");
   assert.ok(help.indexOf("First guide") < help.indexOf("Alpha guide"));
   assert.ok(help.indexOf("Alpha guide") < help.indexOf("Last guide"));
+  // A category file sorts before free-text categories.
   assert.ok(help.indexOf("Reference") < help.indexOf("Other guide"));
+  assert.ok(help.indexOf("Other guide") < help.indexOf("First guide"));
+  assert.match(help, /bundlePath&quot;:\[0,&quot;\/preview\/example\/pagefind-help\/&quot;\]/);
+  assert.ok(existsSync(join(dir, "dist", "pagefind-help", "pagefind.js")), "pagefind-help index");
+  const reference = html(dir, "help/category/reference");
+  assert.match(reference, /<h1[^>]*>Reference/);
+  assert.match(reference, /href="\/preview\/example\/help\/c-other\/"/);
+  assert.match(html(dir, "help/z-first"), /On this page/);
   assert.match(help, /href="\/preview\/example\/help\/z-first\/"/);
   assert.match(html(dir, "blog/a-new"), /<strong>body<\/strong>/);
-  // Free-text sections (no section file) still get a section page.
-  assert.match(help, /href="\/preview\/example\/help\/section\/setup\/"/);
-  assert.match(html(dir, "help/section/setup"), /<h1[^>]*>Setup/);
+  // Free-text categories (no category file) still get a category page.
+  assert.match(help, /href="\/preview\/example\/help\/category\/setup\/"/);
+  assert.match(html(dir, "help/category/setup"), /<h1[^>]*>Setup/);
   // SEO files are base-aware and list the collections.
   const file = (path) => readFileSync(join(dir, "dist", path), "utf8");
   assert.match(file("robots.txt"), /^Sitemap: https:\/\/example\.com\/preview\/example\/sitemap\.xml$/m);
@@ -90,7 +88,7 @@ test("base-prefixed routes sort Blog and Help entries", () => fixture((dir) => {
 
 test("empty or missing collections retain useful Blog and Help indexes", () => fixture((dir) => {
   // Sites made before the category collections existed have no folders for them at all.
-  for (const name of ["blogCategories", "helpCategories", "helpSubcategories", "helpDocsCategories"]) {
+  for (const name of ["blogCategories", "helpCategories"]) {
     rmSync(join(dir, "src/content", name), { recursive: true, force: true });
   }
   for (const name of ["blog", "helpDocs"]) {
@@ -101,6 +99,5 @@ test("empty or missing collections retain useful Blog and Help indexes", () => f
   assert.match(html(dir, "blog"), /No blog posts yet/);
   assert.match(html(dir, "help"), /No help docs yet/);
   assert.match(html(dir, "blog/categories"), /No blog categories yet/);
-  assert.match(html(dir, "help/categories"), /No help topics yet/);
   assert.match(readFileSync(join(dir, "dist/sitemap.xml"), "utf8"), /<loc>https:\/\/example\.com\/preview\/example\/<\/loc>/);
 }));
