@@ -42,6 +42,8 @@ pub struct SetupStatus {
     projects_dir: PathBuf,
     /// True once the user skipped or finished onboarding on this machine.
     setup_dismissed: bool,
+    /// The user's assistant order, first choice first; `null` until they reorder.
+    assistant_order: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -153,6 +155,14 @@ pub struct VerifyResult {
     reason: Option<String>,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct AssistantOrder {
+    order: Vec<String>,
+}
+
+/// Longest order (and id) accepted; far beyond any real list of assistants.
+const MAX_ORDER_LEN: usize = 64;
+
 #[derive(Deserialize)]
 struct CodeBody {
     code: String,
@@ -172,7 +182,40 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatus>, 
         providers,
         projects_dir: state.config.projects_dir.clone(),
         setup_dismissed: crate::setup_prefs::is_dismissed(&crate::setup_prefs::prefs_dir()),
+        assistant_order: crate::setup_prefs::assistant_order(&crate::setup_prefs::prefs_dir()),
     }))
+}
+
+/// `PUT /api/setup/assistant-order` `{ order }` → `{ order }`. The first ready
+/// assistant in this order is the one new chats start with. Ids are kept as
+/// sent (repeats dropped) so an assistant that is missing today keeps its place.
+pub async fn save_assistant_order(body: Bytes) -> Result<Json<AssistantOrder>, ApiError> {
+    let AssistantOrder { order } = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("expected JSON body {{ order }}: {e}")))?;
+    let order = clean_order(order)?;
+    crate::setup_prefs::save_assistant_order(&crate::setup_prefs::prefs_dir(), &order)
+        .map_err(|e| ApiError::io(format!("could not save the assistant order: {e}")))?;
+    Ok(Json(AssistantOrder { order }))
+}
+
+/// Drop repeats and refuse anything that is not a short list of short ids.
+fn clean_order(order: Vec<String>) -> Result<Vec<String>, ApiError> {
+    if order.len() > MAX_ORDER_LEN {
+        return Err(ApiError::badreq("too many assistants in the order"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(order.len());
+    for id in order {
+        if id.is_empty() || id.len() > MAX_ORDER_LEN {
+            return Err(ApiError::badreq(
+                "each assistant id must be 1-64 characters",
+            ));
+        }
+        if seen.insert(id.clone()) {
+            out.push(id);
+        }
+    }
+    Ok(out)
 }
 
 /// `POST /api/setup/dismiss` → `{ dismissed: true }`. Hides onboarding across relaunches.
@@ -666,5 +709,28 @@ impl SetupProbes {
         self.entries
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_order_drops_repeats_and_keeps_order() {
+        let order = ["claude", "opencode", "claude", "codex"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            clean_order(order).unwrap(),
+            ["claude", "opencode", "codex"].map(String::from).to_vec()
+        );
+    }
+
+    #[test]
+    fn clean_order_refuses_bad_ids() {
+        assert!(clean_order(vec![String::new()]).is_err());
+        assert!(clean_order(vec!["x".repeat(65)]).is_err());
+        assert!(clean_order(vec!["a".into(); 65]).is_err());
     }
 }

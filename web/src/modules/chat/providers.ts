@@ -1,7 +1,11 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
+import { useAssistantStore } from "@/modules/assistant/store";
 import { readPref, writePref } from "@orso/utils";
+
+/** Assistants this UI can drive. */
+export const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
 
 const PROVIDER_KEY = "orso.chat.provider";
 /** The pick lived here when agents ran in Terminal; read it once so nobody loses their choice. */
@@ -21,9 +25,35 @@ export interface AgentModel {
 /** The agent CLIs the daemon offers, their models, and the user's picks. */
 export const useAgentProvidersStore = defineStore("agentProviders", () => {
   const daemon = useDaemon();
+  const assistant = useAssistantStore();
 
   const providers = ref<AgentProvider[]>([]);
   const provider = ref<string | null>(readPref(PROVIDER_KEY) ?? readPref(LEGACY_PROVIDER_KEY));
+
+  /**
+   * The assistants a chat can start with now, in the user's order. The setup
+   * snapshot says which are ready; until it lands, every provider the daemon lists.
+   */
+  const ready = computed(() =>
+    (assistant.snapshot
+      ? assistant.chatReadyProviders.map((p) => p.id)
+      : assistant.ordered(providers.value.map((p) => p.id))
+    ).filter((id) => CHAT_PROVIDERS.includes(id)),
+  );
+
+  /**
+   * The assistant a new chat (or a sync) starts with. Once the user has ordered
+   * the assistants in App settings, that is the first ready one in their order;
+   * before that, the remembered pick while it is ready, else the first ready one.
+   */
+  const preferred = computed<string | null>(() => {
+    // Nothing known yet: the remembered pick, as before.
+    if (!assistant.snapshot && !providers.value.length) return provider.value;
+    const ids = ready.value;
+    if (!assistant.order && provider.value && ids.includes(provider.value)) return provider.value;
+    return ids[0] ?? null;
+  });
+
   /** Per provider; absent until asked, empty when the daemon couldn't list them. */
   const models = ref<Record<string, AgentModel[]>>({});
   /** Model picks made this session, by provider; `null` is Default. */
@@ -76,5 +106,16 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
     writePref(modelKey(id), model);
   }
 
-  return { providers, provider, models, setProvider, loadProviders, loadModels, modelPick, setModel };
+  return {
+    providers,
+    provider,
+    ready,
+    preferred,
+    models,
+    setProvider,
+    loadProviders,
+    loadModels,
+    modelPick,
+    setModel,
+  };
 });

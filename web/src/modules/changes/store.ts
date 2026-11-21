@@ -391,7 +391,8 @@ export const useChangesStore = defineStore("changes", () => {
    * chat is the whole surface now: its transcript carries progress and questions.
    */
   async function startSyncChat(id: string, sessionId: string) {
-    const provider = useAgentProvidersStore().provider;
+    // The assistant new chats start with: the first ready one in the user's order.
+    const provider = useAgentProvidersStore().preferred;
     if (!provider) {
       syncError.value = SYNC_UNAVAILABLE;
       toast.error(SYNC_UNAVAILABLE);

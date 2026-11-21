@@ -20,6 +20,8 @@ const props = defineProps<{
   busy?: boolean;
   /** Hide the "Connect" button on a ready row where there is no chat to open (settings). */
   hideConnectedAction?: boolean;
+  /** The assistant new chats start with (settings shows it, so the order's effect is visible). */
+  isDefault?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -121,6 +123,8 @@ const actionAria = computed(() => {
     :data-action="row.action"
   >
     <div class="flex items-start gap-3">
+      <!-- A host that can reorder rows puts its drag handle here (settings). -->
+      <slot name="leading" />
       <div class="flex min-w-0 flex-1 flex-col gap-1">
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-highlighted text-sm font-medium">{{ row.name }}</span>
@@ -130,6 +134,13 @@ const actionAria = computed(() => {
             variant="subtle"
             label="Recommended"
             data-testid="assistant-recommended"
+          />
+          <UBadge
+            v-if="isDefault"
+            color="primary"
+            variant="subtle"
+            label="Default"
+            :data-testid="`assistant-default-${row.id}`"
           />
         </div>
         <p v-if="row.description" class="text-muted text-sm">{{ row.description }}</p>

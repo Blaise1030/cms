@@ -6,6 +6,7 @@ import { createFakeDaemon, type FakeDaemon } from "@/test/fakeDaemon";
 const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 
+import { useAssistantStore } from "@/modules/assistant/store";
 import { useAgentProvidersStore } from "./providers";
 
 const KEY = "orso.chat.provider";
@@ -96,5 +97,49 @@ describe("useAgentProvidersStore", () => {
     expect(fresh.modelPick("codex")).toBeNull();
     setActivePinia(createPinia());
     expect(useAgentProvidersStore().modelPick("codex")).toBeNull();
+  });
+
+  describe("preferred", () => {
+    const ready = (id: string, chatReady = true) => ({ id, name: id, chatReady });
+
+    it("is the remembered pick while it is ready and no order is saved", async () => {
+      localStorage.setItem(KEY, "codex");
+      const store = useAgentProvidersStore();
+      await store.loadProviders();
+      expect(store.preferred).toBe("codex");
+      useAssistantStore().snapshot = { node: null, providers: [ready("claude"), ready("codex")] };
+      expect(store.preferred).toBe("codex");
+    });
+
+    it("is the first ready assistant in the saved order", async () => {
+      localStorage.setItem(KEY, "codex");
+      const store = useAgentProvidersStore();
+      await store.loadProviders();
+      const assistant = useAssistantStore();
+      assistant.snapshot = {
+        node: null,
+        providers: [ready("opencode"), ready("claude", false), ready("codex"), ready("cursor")],
+      };
+      assistant.order = ["claude", "cursor", "codex"];
+      // Claude needs a sign-in, so the next one in the order starts new chats.
+      expect(store.ready).toEqual(["cursor", "codex", "opencode"]);
+      expect(store.preferred).toBe("cursor");
+    });
+
+    it("orders the daemon's list before readiness is known", async () => {
+      const store = useAgentProvidersStore();
+      await store.loadProviders();
+      useAssistantStore().order = ["codex"];
+      expect(store.ready).toEqual(["codex", "claude"]);
+      expect(store.preferred).toBe("codex");
+    });
+
+    it("is nothing when no assistant is ready", () => {
+      const store = useAgentProvidersStore();
+      const assistant = useAssistantStore();
+      assistant.snapshot = { node: null, providers: [ready("claude", false)] };
+      assistant.order = ["claude"];
+      expect(store.preferred).toBeNull();
+    });
   });
 });

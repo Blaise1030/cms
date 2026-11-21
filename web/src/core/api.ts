@@ -262,6 +262,9 @@ export function createApi(
     setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
     /** Persist onboarding dismissal across desktop relaunches. */
     dismissSetup: () => json<{ dismissed: true }>("POST", "/api/setup/dismiss"),
+    /** Save the assistant order app-wide (it lives with the daemon, not this browser). */
+    saveAssistantOrder: (order: string[]) =>
+      json<{ order: string[] }>("PUT", "/api/setup/assistant-order", { body: { order } }),
     /** The assistant + site-builder download snapshot. */
     setupRuntimes: () => json<SetupSnapshot>("GET", "/api/setup/runtimes"),
     downloadRuntime: (id: string) =>
