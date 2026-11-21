@@ -7,6 +7,7 @@ import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
 import { legal } from "./integrations/legal.js";
+import { help } from "./integrations/help.js";
 import { site } from "./src/site.ts";
 import { collectionsWithTranslations } from "./src/lib/translatedFiles.ts";
 
@@ -48,10 +49,11 @@ export default defineConfig({
   ],
   integrations: [
     mdx(),
-    // The marketing collections plus the privacy policy and terms (see integrations/legal.js).
-    // Crowdin owns the translations (src/content.config.ts), so orso hides them on purpose.
+    // The blog from the marketing preset, Orso's own help centre (integrations/help.js) and the
+    // privacy policy and terms (integrations/legal.js). Crowdin owns the translations
+    // (src/content.config.ts), so orso hides them on purpose.
     orso({
-      collections: { ...marketingCollections, legal },
+      collections: { blog: marketingCollections.blog, blogCategories: marketingCollections.blogCategories, ...help, legal },
       hide: collectionsWithTranslations().map((name) => `${name}I18n`),
     }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.

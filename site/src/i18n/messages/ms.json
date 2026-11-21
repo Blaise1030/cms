@@ -36,7 +36,6 @@
       "download": "Muat turun",
       "releases": "Keluaran",
       "blogTopics": "Topik blog",
-      "helpTopics": "Topik bantuan",
       "llms": "llms.txt",
       "reportIssue": "Laporkan isu",
       "coffee": "Belanja saya kopi",
@@ -277,7 +276,6 @@
     "intro": "Panduan dan jawapan untuk setiap langkah, daripada log masuk pertama hingga invois seterusnya.",
     "empty": "Belum ada dokumen bantuan. Kembali lagi nanti untuk panduan dan jawapan.",
     "browse": "Layari mengikut bahagian",
-    "topics": "Topik",
     "overview": "Gambaran keseluruhan",
     "search": "Cari bantuan",
     "browseHelp": "Layari bantuan",
@@ -289,22 +287,10 @@
       "one": "{count} artikel",
       "other": "{count} artikel"
     },
-    "section": {
+    "category": {
       "title": "Bantuan: {title}",
       "description": "Artikel bantuan tentang {title}.",
       "empty": "Belum ada artikel dalam bahagian ini."
-    },
-    "topicsPage": {
-      "title": "Topik bantuan",
-      "description": "Layari artikel bantuan Orso mengikut topik, seperti persediaan, kerjasama dan penyelesaian masalah.",
-      "empty": "Belum ada topik bantuan.",
-      "back": "Kembali ke Bantuan",
-      "all": "Semua topik"
-    },
-    "topic": {
-      "title": "Topik bantuan: {title}",
-      "description": "Artikel bantuan tentang {title}.",
-      "empty": "Belum ada artikel tentang topik ini."
     }
   },
   "common": {

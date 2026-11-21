@@ -26,8 +26,7 @@ test("astro sync writes the orso content manifest", () => {
       "blogCategories",
       "helpDocs",
       "helpCategories",
-      "helpSubcategories",
-      "helpDocsCategories",
+      "legal",
     ]);
     const byName = Object.fromEntries(manifest.collections.map((collection) => [collection.name, collection]));
     assert.deepEqual(byName.blog.loader, { base: "src/content/blog/en", pattern: "*.md" });
@@ -36,8 +35,7 @@ test("astro sync writes the orso content manifest", () => {
     assert.equal(byName.blog.fields.properties.pubDate.type, "date");
     assert.equal(byName.blog.fields.properties.coverImage.type, "image");
     assert.equal(byName.blog.fields.properties.categories.items.collection, "blogCategories");
-    assert.equal(byName.helpDocs.fields.properties.section.collection, "helpCategories");
-    assert.equal(byName.helpSubcategories.fields.properties.category.collection, "helpCategories");
+    assert.equal(byName.helpDocs.fields.properties.category.collection, "helpCategories");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

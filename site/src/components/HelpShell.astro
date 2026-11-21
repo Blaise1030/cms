@@ -1,6 +1,6 @@
 ---
-// Documentation layout for every Help page: section sidebar | centred content | optional rail.
-// Desktop: the sidebar (search + every section, subsection and article) stays in view on the
+// Documentation layout for every Help page: category sidebar | centred content | optional rail.
+// Desktop: the sidebar (search + every category and article) stays in view on the
 // left; the `rail` slot ("On this page") sits on the right from xl up. Mobile: search, then a
 // collapsible "Browse help" list, above the content.
 import type { BreadcrumbItem, NavigationMenuItem } from "@nuxt/ui";
@@ -19,27 +19,21 @@ interface Props {
 }
 const { current, crumbs = [] } = Astro.props;
 const { t, path, locale } = getI18n(Astro.url);
-const { sections, docs } = await loadHelp(locale);
-const shown = sections.filter((section) => section.docs.length > 0);
+const { categories, docs } = await loadHelp(locale);
+const shown = categories.filter((category) => category.docs.length > 0);
 const hasRail = Astro.slots.has("rail");
 
 const docPath = (doc: Doc) => `/help/${doc.id}/`;
 const link = (label: string, target: string): NavigationMenuItem => ({ label, to: path(target), active: target === current });
-/** Overview, then one collapsible group per section; every section starts open. */
+/** Overview, then one collapsible group per category; every category starts open. */
 const navItems: NavigationMenuItem[] = [
   link(t("help.overview"), "/help/"),
-  ...shown.map((section) => {
-    const sectionPath = `/help/section/${section.id}/`;
+  ...shown.map((category) => {
+    const categoryPath = `/help/category/${category.id}/`;
     return {
-      label: section.title,
+      label: category.title,
       defaultOpen: true,
-      children: [
-        link(t("help.overview"), sectionPath),
-        ...section.loose.map((doc) => link(doc.data.title, docPath(doc))),
-        ...section.subsections
-          .filter((sub) => sub.docs.length > 0)
-          .map((sub) => ({ label: sub.title, defaultOpen: true, children: sub.docs.map((doc) => link(doc.data.title, docPath(doc))) })),
-      ],
+      children: [link(t("help.overview"), categoryPath), ...category.docs.map((doc) => link(doc.data.title, docPath(doc)))],
     };
   }),
 ];

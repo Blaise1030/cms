@@ -1,0 +1,33 @@
+---
+import Base from "../../../../layouts/Base.astro";
+import DocList from "../../../../components/DocList.astro";
+import HelpShell from "../../../../components/HelpShell.astro";
+import { loadHelp } from "../../../../lib/help";
+import { breadcrumbs } from "../../../../lib/seo";
+import { getI18n, localizedStaticPaths } from "../../../../i18n";
+
+export const getStaticPaths = () =>
+  localizedStaticPaths(async (locale) => {
+    const { categories } = await loadHelp(locale);
+    return categories.map((category) => ({ params: { slug: category.id }, props: { category } }));
+  });
+const { category } = Astro.props;
+const { t, sitePath } = getI18n(Astro.url);
+const description = category.description ?? t("help.category.description", { title: category.title });
+const current = `/help/category/${category.id}/`;
+---
+<Base
+  title={t("help.category.title", { title: category.title })}
+  description={description}
+  jsonLd={[
+    { "@context": "https://schema.org", "@type": "WebPage", name: category.title, description },
+    breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("help.title"), path: sitePath("/help/") }, { name: category.title, path: sitePath(current) }]),
+  ]}
+>
+  <HelpShell current={current} crumbs={[{ label: t("help.title"), href: "/help/" }, { label: category.title }]}>
+    <h1 class="mt-4 text-title tracking-display text-ink">{category.title}</h1>
+    {category.description && <p class="mt-4 max-w-prose text-body text-muted">{category.description}</p>}
+    {category.docs.length === 0 && <p class="mt-12 text-muted">{t("help.category.empty")}</p>}
+    {category.docs.length > 0 && <section class="mt-10"><DocList docs={category.docs} /></section>}
+  </HelpShell>
+</Base>
