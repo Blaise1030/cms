@@ -2,8 +2,8 @@
 //!
 //! Each built side is served at the root of an origin of its own (see [`crate::preview`]),
 //! so it builds with base `/` like the live site and its root-relative links resolve. The
-//! app frames these cross-origin; every HTML page they serve tells the app whether the page
-//! exists through a one-line `postMessage` (the app cannot read the frame's document).
+//! app frames these cross-origin (and without scripts), so it cannot read the frame's
+//! document: it asks [`ConflictPreviewManager::has_page`] whether a page exists instead.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -175,7 +175,6 @@ impl ConflictPreviewManager {
     async fn open_origin(&self, dir: &Path) -> std::io::Result<OriginServer> {
         let site = Arc::new(SnapshotSite {
             dir: dir.to_owned(),
-            app_origins: crate::preview::app_origins(&self.config),
         });
         let app = Router::new().fallback(serve_snapshot).with_state(site);
         OriginServer::bind(self.config.clone(), app).await
@@ -244,14 +243,29 @@ impl ConflictPreviewManager {
             .dir
             .as_ref()
             .ok_or_else(|| ApiError::enoent("preview unavailable"))?;
-        serve_dir(dir, rest, section, &[]).await
+        serve_dir(dir, rest, section).await
+    }
+
+    /// Whether the built side has a page at `route` (what its origin would answer `200`).
+    pub async fn has_page(&self, session: &str, source: Source, route: &str) -> bool {
+        let dir = {
+            let entries = self.entries.lock().await;
+            match entries.get(&(session.to_owned(), source)) {
+                Some(Snapshot {
+                    state: PreviewState::Ready { .. },
+                    dir: Some(dir),
+                    ..
+                }) => dir.clone(),
+                _ => return false,
+            }
+        };
+        read_page(&dir, route.trim_start_matches('/')).await.is_ok()
     }
 }
 
 /// What one snapshot origin serves.
 struct SnapshotSite {
     dir: PathBuf,
-    app_origins: Vec<String>,
 }
 
 /// Router fallback of a snapshot origin: every path is a file of the built site.
@@ -262,10 +276,10 @@ async fn serve_snapshot(State(site): State<Arc<SnapshotSite>>, req: Request) -> 
         .query()
         .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("section=")))
         .map(str::to_owned);
-    match serve_dir(&site.dir, &rest, section.as_deref(), &site.app_origins).await {
+    match serve_dir(&site.dir, &rest, section.as_deref()).await {
         Ok(res) => res,
         Err(e) if e.code == crate::error::ErrorCode::Enoent && is_page_route(&rest) => {
-            missing_page(&site.app_origins)
+            missing_page()
         }
         Err(e) => e.into_response(),
     }
@@ -277,39 +291,18 @@ fn is_page_route(rest: &str) -> bool {
     !last.contains('.') || last.ends_with(".html")
 }
 
-/// The `<script>` an HTML page of a snapshot carries: it tells the framing app whether the page
-/// was found. Posted to each app origin by name, so no other parent hears it.
-fn page_report(found: bool, app_origins: &[String]) -> String {
-    let origins = serde_json::to_string(app_origins).unwrap_or_else(|_| "[]".into());
-    format!(
-        r#"<script data-orso-snapshot>(()=>{{const m={{type:"orso:snapshot",found:{found},url:location.href}};for(const o of {origins})try{{parent.postMessage(m,o)}}catch{{}}}})()</script>"#
-    )
-}
-
-/// A `404` page for a route the built site does not have.
-fn missing_page(app_origins: &[String]) -> Response {
-    let html = format!(
-        r#"<!doctype html><html><head><meta charset="utf-8">{}</head><body>This page is missing from the preview.</body></html>"#,
-        page_report(false, app_origins)
-    );
-    let mut res = page_response(Path::new("missing.html"), html.into_bytes());
+/// A readable `404` page for a route the built site does not have.
+fn missing_page() -> Response {
+    let html = r#"<!doctype html><html><head><meta charset="utf-8"></head><body>This page is missing from the preview.</body></html>"#;
+    let mut res = page_response(Path::new("missing.html"), html.as_bytes().to_vec());
     *res.status_mut() = StatusCode::NOT_FOUND;
     res
 }
 
-/// One file of the built site at `dir`; HTML pages get the conflict highlight for `section`
-/// and, when `app_origins` is set, the page report.
-async fn serve_dir(
-    dir: &Path,
-    rest: &str,
-    section: Option<&str>,
-    app_origins: &[String],
-) -> Result<Response, ApiError> {
+/// One file of the built site at `dir`; HTML pages get the conflict highlight for `section`.
+async fn serve_dir(dir: &Path, rest: &str, section: Option<&str>) -> Result<Response, ApiError> {
     let (file, mut bytes) = read_page(dir, rest).await?;
     if file.extension().is_some_and(|e| e == "html") {
-        if !app_origins.is_empty() {
-            bytes = inject_head(bytes, &page_report(true, app_origins));
-        }
         if let Some(id) = section.filter(|s| {
             !s.is_empty()
                 && s.bytes()

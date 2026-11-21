@@ -490,6 +490,28 @@ pub async fn conflict_previews(
 }
 
 #[derive(Deserialize)]
+pub struct PreviewPageQuery {
+    project: String,
+    source: String,
+    path: String,
+}
+
+/// `GET /api/changes/conflicts/{id}/previews/page?project=&source=&path=` → `{ found }`: whether
+/// a built side has that page. The app frames sides cross-origin and without scripts, so it
+/// cannot tell a page from the origin's "missing" page itself.
+pub async fn conflict_preview_page(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<PreviewPageQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    project_session(&state, &q.project, &id).await?;
+    let source = Source::parse(&q.source).ok_or_else(|| ApiError::badreq("unknown source"))?;
+    let found = state.conflict_previews.has_page(&id, source, &q.path).await;
+    Ok(Json(json!({ "found": found })))
+}
+
+#[derive(Deserialize)]
 struct ChoiceRequest {
     project: String,
     path: String,

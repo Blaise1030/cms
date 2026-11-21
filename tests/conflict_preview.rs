@@ -213,17 +213,16 @@ async fn each_snapshot_is_served_at_the_root_of_its_own_origin() {
         "links stay plain: {body}"
     );
     assert!(body.contains("data-conflict-highlight"), "{body}");
-    // The page tells the app (and only the app's origins) that it exists.
-    assert!(
-        body.contains(r#"type:"orso:snapshot",found:true"#),
-        "{body}"
-    );
-    assert!(body.contains("\"http://127.0.0.1:7800\""), "{body}");
-    assert!(!body.contains("\"*\""), "{body}");
+    assert!(manager.has_page("s", Source::Yours, "/").await);
 
     let (status, _, body) = get(port, "/missing/", &cookie).await;
     assert_eq!(status, 404);
-    assert!(body.contains("found:false"), "{body}");
+    assert!(body.contains("missing from the preview"), "{body}");
+    assert!(!manager.has_page("s", Source::Yours, "/missing/").await);
+    assert!(
+        !manager.has_page("s", Source::Latest, "/").await,
+        "not prepared"
+    );
     assert_eq!(get(port, "/missing.css", &cookie).await.0, 404);
 
     manager.remove_session("s").await;

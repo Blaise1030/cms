@@ -189,6 +189,10 @@ pub fn router(state: AppState) -> Router {
             get(changes::conflict_previews),
         )
         .route(
+            "/api/changes/conflicts/{id}/previews/page",
+            get(changes::conflict_preview_page),
+        )
+        .route(
             "/api/changes/conflicts/{id}/choice",
             post(changes::choose_conflict),
         )
