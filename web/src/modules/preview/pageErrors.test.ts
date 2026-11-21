@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi } from "vitest";
-import {
-  crashPrompt,
-  pageErrorPrompt,
-  readOverlay,
-  watchPageErrors,
-} from "./pageErrors";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+// The page side: the bridge the orso Astro integration injects into every preview page.
+import { readFileSync } from "node:fs";
+const bridgeSource = readFileSync(`${process.cwd()}/../packages/astro/src/bridge.js`, "utf8");
+import { isBridgeMessage } from "./frameBridge";
+import { crashPrompt, type PageError, pageErrorPrompt } from "./pageErrors";
 
 function astroOverlay(): HTMLElement {
   const el = document.createElement("vite-error-overlay");
@@ -19,100 +18,93 @@ function astroOverlay(): HTMLElement {
   return el;
 }
 
-describe("readOverlay", () => {
-  it("reads Astro's overlay", () => {
-    expect(readOverlay(astroOverlay())).toEqual({
-      kind: "build",
-      message: 'Expected "}" but found "<": Unexpected token in Hero.astro',
-      file: "/site/src/components/Hero.astro:12:4",
-      stack: "at parse (compiler.js:1:1)",
-      hint: "Check the closing brace.",
+const APP = "http://orso.localhost:7800";
+const settle = () => new Promise((r) => setTimeout(r));
+
+describe("the bridge reports page errors to the app", () => {
+  const posted: { message: unknown; origin: string }[] = [];
+  const last = () => posted.at(-1)!.message as Record<string, unknown>;
+
+  beforeAll(() => {
+    // A top-level window is its own parent: what the bridge posts to `parent` lands here.
+    vi.spyOn(window, "postMessage").mockImplementation(((message: unknown, origin: string) => {
+      posted.push({ message, origin });
+    }) as typeof window.postMessage);
+    new Function(`const __orsoAppOrigins = ${JSON.stringify([APP])};\n${bridgeSource}`)();
+  });
+  afterAll(() => vi.restoreAllMocks());
+
+  it("reads Astro's overlay when it appears and says when it goes away", async () => {
+    const overlay = astroOverlay();
+    document.body.append(overlay);
+    await settle();
+    expect(isBridgeMessage(last())).toBe(true);
+    expect(last()).toEqual({
+      type: "orso:preview",
+      op: "error",
+      error: {
+        kind: "build",
+        message: 'Expected "}" but found "<": Unexpected token in Hero.astro',
+        file: "/site/src/components/Hero.astro:12:4",
+        stack: "at parse (compiler.js:1:1)",
+        hint: "Check the closing brace.",
+      },
     });
+    expect(posted.at(-1)!.origin).toBe(APP);
+    overlay.remove();
+    await settle();
+    expect(last()).toEqual({ type: "orso:preview", op: "error-cleared" });
   });
 
-  it("reads Vite's overlay", () => {
+  it("reads Vite's overlay", async () => {
     const el = document.createElement("vite-error-overlay");
     el.attachShadow({ mode: "open" }).innerHTML = `
       <pre class="message-body">Failed to resolve import "./nope"</pre>
       <pre class="file">src/main.ts:3:8</pre>
       <pre class="stack"></pre>`;
-    expect(readOverlay(el)).toMatchObject({
+    document.body.append(el);
+    await settle();
+    expect((last().error as PageError)).toEqual({
+      kind: "build",
       message: 'Failed to resolve import "./nope"',
       file: "src/main.ts:3:8",
-      stack: undefined,
     });
-  });
-});
-
-describe("watchPageErrors", () => {
-  it("reports an overlay appearing and going away", async () => {
-    const onError = vi.fn();
-    const onOverlayCleared = vi.fn();
-    const detach = watchPageErrors(window, { onError, onOverlayCleared });
-    const overlay = astroOverlay();
-    document.body.append(overlay);
-    await new Promise((r) => setTimeout(r));
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "build" }),
-    );
-    overlay.remove();
-    await new Promise((r) => setTimeout(r));
-    expect(onOverlayCleared).toHaveBeenCalled();
-    detach();
+    el.remove();
+    await settle();
   });
 
-  it("reports an overlay already on the page", () => {
-    const overlay = astroOverlay();
-    document.body.append(overlay);
-    const onError = vi.fn();
-    const detach = watchPageErrors(window, {
-      onError,
-      onOverlayCleared: vi.fn(),
-    });
-    expect(onError).toHaveBeenCalledTimes(1);
-    detach();
-    overlay.remove();
-  });
-
-  it("reports uncaught errors and rejections until detached", () => {
-    const onError = vi.fn();
-    const detach = watchPageErrors(window, {
-      onError,
-      onOverlayCleared: vi.fn(),
-    });
+  it("reports uncaught errors and rejections", () => {
     const boom = new TypeError("x is undefined");
     window.dispatchEvent(
-      new ErrorEvent("error", {
-        error: boom,
-        message: boom.message,
-        filename: "/src/app.ts",
-        lineno: 4,
-        colno: 2,
-      }),
+      new ErrorEvent("error", { error: boom, message: boom.message, filename: "/src/app.ts", lineno: 4, colno: 2 }),
     );
-    expect(onError).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        kind: "runtime",
-        message: "TypeError: x is undefined",
-        file: "/src/app.ts:4:2",
-      }),
-    );
+    expect(isBridgeMessage(last())).toBe(true);
+    expect(last().error).toMatchObject({
+      kind: "runtime",
+      message: "TypeError: x is undefined",
+      file: "/src/app.ts:4:2",
+    });
     const rejection = new Event("unhandledrejection") as PromiseRejectionEvent;
     Object.defineProperty(rejection, "reason", { value: "nope" });
     window.dispatchEvent(rejection);
-    expect(onError).toHaveBeenLastCalledWith({
-      kind: "runtime",
-      message: "nope",
-    });
-    detach();
-    window.dispatchEvent(new ErrorEvent("error", { message: "late" }));
-    expect(onError).toHaveBeenCalledTimes(2);
+    expect(last().error).toEqual({ kind: "runtime", message: "nope" });
+    // Every report went to the app's origin by name.
+    expect(posted.every((p) => p.origin === APP)).toBe(true);
   });
 });
 
 describe("prompts", () => {
   it("describes a page error for the agent", () => {
-    const prompt = pageErrorPrompt(readOverlay(astroOverlay()), "/about/");
+    const prompt = pageErrorPrompt(
+      {
+        kind: "build",
+        message: 'Expected "}" but found "<": Unexpected token in Hero.astro',
+        file: "/site/src/components/Hero.astro:12:4",
+        stack: "at parse (compiler.js:1:1)",
+        hint: "Check the closing brace.",
+      },
+      "/about/",
+    );
     expect(prompt).toContain("The preview page /about/ fails to build:");
     expect(prompt).toContain("at /site/src/components/Hero.astro:12:4");
     expect(prompt).toContain("Hint: Check the closing brace.");

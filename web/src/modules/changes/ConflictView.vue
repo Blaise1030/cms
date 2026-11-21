@@ -8,6 +8,7 @@ import USplitter from "@nuxt/ui/components/Splitter.vue";
 import type { SplitterItem } from "@nuxt/ui";
 import type { ConflictChoice, ConflictPreviews, ConflictPreviewState } from "@/core/types";
 import { useDaemon } from "@/core/daemon";
+import { previewHref } from "@/core/previewOrigin";
 import { sectionIdForFile } from "@/modules/preview/conflictHighlight";
 import ConflictFile from "./ConflictFile.vue";
 import { CHOICE_LABEL, conflictLabel, conflictSubject } from "./conflictLabels";
@@ -30,6 +31,8 @@ const textOnly = ref(false);
 const viewport = ref<"desktop" | "mobile">("desktop");
 const route = ref("/");
 let previewRun = 0;
+/** Bumped whenever the frames change, so a late answer about an old frame is dropped. */
+let frameRun = 0;
 
 const SPLIT: SplitterItem[] = [
   { id: "conflict-list", slot: "list", defaultSize: 20, minSize: 12, maxSize: 40 },
@@ -40,6 +43,7 @@ const file = computed(() => session.value?.files.find((f) => f.path === selected
 
 watch(session, (value) => { selectedPath.value = value?.files[0]?.path ?? null; confirmAbandon.value = false; }, { immediate: true });
 watch([route, selectedPath, previews], (_value, _old, onCleanup) => {
+  frameRun++;
   frameErrors.value = {};
   resultFrameReady.value = false;
   resultFrameSettled.value = false;
@@ -66,29 +70,45 @@ watch(() => [session.value?.id, store.candidate?.tree] as const, async ([id]) =>
   finally { if (run === previewRun) previewLoading.value = false; }
 }, { immediate: true });
 
+/** The page the frames show, as a site path. */
+const framePage = computed(() => `/${route.value.trim().replace(/^\/+/, "")}`);
+
+/**
+ * Each built side is served at the root of an origin of its own (see `core/previewOrigin.ts`);
+ * the frame's first load carries that origin's token.
+ */
 function frameUrl(state: ConflictPreviewState): string {
   if (state.status !== "ready") return "";
-  const url = new URL(state.url, daemon.config.value.origin);
-  const cleanRoute = route.value.trim().replace(/^\/+/, "");
-  url.pathname = `${url.pathname}${cleanRoute}`;
+  const url = new URL(previewHref(state, daemon.config.value.origin, framePage.value, true));
   const section = file.value && sectionIdForFile(file.value.path);
   if (section) { url.searchParams.set("section", section); url.hash = section; }
   return url.toString();
 }
 
-function frameLoaded(event: Event, source: "yours" | "latest" | "result") {
-  const doc = (event.target as HTMLIFrameElement).contentDocument;
-  const missing = doc?.contentType === "application/json" || doc?.body?.textContent?.includes('"code":"ENOENT"');
+/**
+ * A frame finished loading. Its document is cross-origin (and script-free), so whether it shows
+ * the page or the origin's "missing" page comes from the daemon.
+ */
+async function frameLoaded(source: "yours" | "latest" | "result") {
+  const run = frameRun;
+  const id = session.value?.id;
+  const found = id
+    ? await daemon.api.conflictPreviewPage(props.projectId, id, source, framePage.value).then(
+        (r) => r.found,
+        // Can't tell: let the writer judge the frame themselves.
+        () => true,
+      )
+    : true;
+  if (run !== frameRun) return;
   if (source === "result") {
     resultFrameSettled.value = true;
-    resultFrameReady.value = !!doc && !missing;
-    textFallbackAvailable.value = !doc;
-    if (missing) textOnly.value = false;
+    resultFrameReady.value = found;
+    textFallbackAvailable.value = false;
+    if (!found) textOnly.value = false;
   }
   frameErrors.value = {
     ...frameErrors.value,
-    [source]: missing ? "This page is missing from the preview. Choose another page above."
-      : !doc ? "The preview didn't load. You can continue without it." : undefined,
+    [source]: found ? undefined : "This page is missing from the preview. Choose another page above.",
   };
 }
 
@@ -273,7 +293,7 @@ async function abandon() {
             />
             <div class="bg-muted flex flex-1 justify-center">
               <div v-if="previews?.[card.source].status === 'ready'" class="h-64 max-w-full" :style="{ width: viewport === 'mobile' ? '390px' : '100%' }">
-                <iframe :key="frameUrl(previews[card.source])" :src="frameUrl(previews[card.source])" :title="`${card.source} preview`" class="bg-default h-full w-full border-0" loading="lazy" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded($event, card.source)" />
+                <iframe :key="frameUrl(previews[card.source])" :src="frameUrl(previews[card.source])" :title="`${card.source} preview`" class="bg-default h-full w-full border-0" loading="lazy" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded(card.source)" />
               </div>
               <p v-else-if="previewLoading" class="text-muted self-center p-6 text-sm">Building preview…</p>
               <p v-else-if="previews" class="text-muted self-center p-6 text-sm">{{ previews[card.source].status === 'invalid' ? "This version doesn't build." : "No preview for this version." }}</p>
@@ -287,7 +307,7 @@ async function abandon() {
           <h4 class="text-highlighted text-sm font-medium">After you save</h4>
           <div v-if="previews.result.status === 'ready'" class="bg-muted flex justify-center overflow-hidden rounded-lg">
             <div class="h-64 max-w-full" :style="{ width: viewport === 'mobile' ? '390px' : '100%' }">
-              <iframe :key="frameUrl(previews.result)" :src="frameUrl(previews.result)" title="result preview" class="bg-default h-full w-full border-0" loading="eager" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded($event, 'result')" />
+              <iframe :key="frameUrl(previews.result)" :src="frameUrl(previews.result)" title="result preview" class="bg-default h-full w-full border-0" loading="eager" sandbox="allow-same-origin" referrerpolicy="no-referrer" @load="frameLoaded('result')" />
             </div>
           </div>
           <UAlert v-else :color="previews.result.status === 'invalid' ? 'error' : 'neutral'" variant="soft" :description="previews.result.status === 'invalid' ? previews.result.errors : previews.result.reason" />

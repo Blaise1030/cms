@@ -325,8 +325,11 @@ describe("BrowserFrame preview bridge", () => {
     Object.defineProperty(el, "contentWindow", { configurable: true, value: win });
     return win;
   }
-  const reply = (source: unknown, data: Record<string, unknown>) =>
-    window.dispatchEvent(new MessageEvent("message", { data: { type: "orso:preview", ...data }, source: source as Window }));
+  /** A bridge message, from the change side's origin unless `origin` says otherwise. */
+  const reply = (source: unknown, data: Record<string, unknown>, origin = "https://pr-7.site.test") =>
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { type: "orso:preview", ...data }, source: source as Window, origin }),
+    );
 
   it("says hello on load and learns which side can capture itself", async () => {
     const { w, bridge } = mountWithBridge();
@@ -334,10 +337,12 @@ describe("BrowserFrame preview bridge", () => {
     const win = fakeWindow(iframe.element);
     const posted = win.postMessage;
     await iframe.trigger("load");
-    expect(posted).toHaveBeenCalledWith({ type: "orso:preview", op: "hello" }, "*");
+    // Addressed to the framed site's origin, never to "*".
+    expect(posted).toHaveBeenCalledWith({ type: "orso:preview", op: "hello" }, "https://pr-7.site.test");
     expect(bridge().canCapture("change")).toBe(false);
-    // A message from some other window is ignored.
+    // A message from some other window, or from the frame after it left the site, is ignored.
     reply(window, { op: "ready", capture: true });
+    reply(win, { op: "ready", capture: true }, "https://evil.example");
     expect(bridge().canCapture("change")).toBe(false);
     reply(win, { op: "ready", capture: true });
     expect(bridge().canCapture("change")).toBe(true);
@@ -356,6 +361,7 @@ describe("BrowserFrame preview bridge", () => {
     Object.defineProperty(el, "offsetWidth", { configurable: true, value: 1440 });
     const shot = bridge().captureSide("change", { x: 110, y: 60, width: 100, height: 40 });
     const sent = posted.mock.calls.at(-1)![0] as { op: string; id: number; rect: unknown };
+    expect(posted.mock.calls.at(-1)![1]).toBe("https://pr-7.site.test");
     expect(sent.op).toBe("capture");
     expect(sent.rect).toEqual({ x: 20, y: 20, width: 200, height: 80 });
     reply(win, { op: "capture", id: sent.id, ok: true, dataUrl: "data:image/png;base64,AAA" });

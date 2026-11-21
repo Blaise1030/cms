@@ -9,7 +9,6 @@ import UEmpty from "@nuxt/ui/components/Empty.vue";
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import UTabs from "@nuxt/ui/components/Tabs.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
-import { useDaemon } from "@/core/daemon";
 import type { Finding } from "./checks/findings";
 import { DESCRIPTION_MAX, TITLE_MAX, type PageMeta } from "./checks/meta";
 import { previewMediaSrc } from "./checks/previewAsset";
@@ -24,7 +23,6 @@ const props = defineProps<{
   pageUrl: string;
 }>();
 
-const daemon = useDaemon();
 
 const emit = defineEmits<{
   close: [];
@@ -107,18 +105,12 @@ const faviconUrl = computed(() => display(props.meta?.favicon ?? ""));
 const ogImageUrl = computed(() => display(props.meta?.ogImage ?? ""));
 
 /**
- * Img src: map the site path onto the framed preview, then (when possible) serve it
- * same-origin via the UI `/preview` proxy — raw `127.0.0.1:<astro>` URLs break in the shell.
- * The visible label stays the path-only `faviconUrl` / `ogImageUrl`.
+ * Img src: the site path on the preview origin (which the app's image request authenticates
+ * with that origin's cookie). The visible label stays the path-only `faviconUrl` / `ogImageUrl`.
  */
 function mediaSrc(href: string | null): string | null {
   if (!href || !props.pageUrl) return href;
-  return (
-    previewMediaSrc(href, props.pageUrl, {
-      uiOrigin: window.location.origin,
-      token: daemon.config.value.token,
-    }) || null
-  );
+  return previewMediaSrc(href, props.pageUrl) || null;
 }
 
 const faviconSrc = computed(() => mediaSrc(faviconUrl.value));

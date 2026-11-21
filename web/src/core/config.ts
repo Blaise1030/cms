@@ -25,9 +25,10 @@ export function normalizeOrigin(input: string): string {
 }
 
 /**
- * Whether embedding the daemon in an iframe on `pageOrigin` is (probably) cross-site, in which
- * case the `SameSite=Lax` `wb_session` cookie is neither stored nor sent and the framed
- * `/preview/*` 401s. Ports are ignored (cookies are not port-scoped); scheme and host must match.
+ * Whether framing a daemon-served page (a preview origin shares the daemon's host) on
+ * `pageOrigin` is (probably) cross-site, in which case the preview origin's `SameSite=Lax`
+ * cookie is neither stored nor sent in the frame and its requests 401. Ports are ignored
+ * (cookies are not port-scoped); scheme and host must match.
  * Sibling subdomains are also same-site but indistinguishable from unrelated hosts without the
  * public-suffix list, so they are reported as cross-site (callers must not hard-block on this).
  */

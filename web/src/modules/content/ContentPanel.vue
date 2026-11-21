@@ -82,7 +82,8 @@ function previewEntry() {
     collection: e.collection,
     id: e.id,
     resolve: daemon.api.resolveContentPreviewPath,
-    previewBaseUrl: daemon.api.previewUrl(props.projectId),
+    access: daemon.api.previewAccess,
+    daemonOrigin: daemon.config.value.origin,
   });
 }
 const lifecycleOpen = computed({
