@@ -1237,11 +1237,12 @@ pub async fn verify(
     }
     conflicts::checked(
         worktree,
-        &["add", "-A", "--", ".", ":!node_modules"],
+        &["add", "-A", "--", ".", ":(exclude,glob)**/node_modules"],
         &[],
         None,
     )
     .await?;
+    unstage_dependency_links(worktree).await?;
     if let Some(markers) = marker_files(worktree, &state.files).await? {
         return Ok(Verdict::Markers(markers));
     }
@@ -1295,6 +1296,31 @@ async fn marker_files(worktree: &Path, files: &[String]) -> Result<Option<usize>
 }
 
 /// Whether the agent added a symlink the incoming side did not already have.
+/// Unstage the dependency link the build adds (`node_modules`, a symlink, wherever the site's
+/// `installDir` puts it). It is never the writer's content, but the agent's own `git add -A`
+/// can stage it, and a new symlink would then fail the combine ("one file still needs another
+/// look"). Only symlinks named `node_modules` are touched, so a vendored folder is left alone.
+async fn unstage_dependency_links(worktree: &Path) -> Result<(), ApiError> {
+    let staged = conflicts::checked(worktree, &["ls-files", "-s", "-z"], &[], None).await?;
+    let staged = String::from_utf8_lossy(&staged);
+    let links: Vec<&str> = staged
+        .split('\0')
+        .filter_map(|entry| entry.split_once('\t'))
+        .filter(|(meta, path)| {
+            meta.starts_with("120000 ")
+                && (*path == "node_modules" || path.ends_with("/node_modules"))
+        })
+        .map(|(_, path)| path)
+        .collect();
+    if links.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["--literal-pathspecs", "rm", "-q", "--cached", "--"];
+    args.extend(links);
+    conflicts::checked(worktree, &args, &[], None).await?;
+    Ok(())
+}
+
 async fn new_symlink(worktree: &Path, tip: &str, incoming: &str) -> Result<bool, ApiError> {
     let raw = conflicts::checked(
         worktree,

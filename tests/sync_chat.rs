@@ -1357,6 +1357,42 @@ async fn build_failure_repairs_once() {
     h.state.chats.shutdown().await;
 }
 
+/// A site in a folder whose first build fails: the repair turn runs after the build linked
+/// `site/node_modules`, and the agent's `git add -A` stages that link. It must not count as a
+/// new file ("one file still needs another look"), or the combine never lands.
+#[tokio::test]
+async fn repair_in_a_site_folder_ignores_the_dependency_link() {
+    let h = SyncSetup::with_build_in(Some("site"), "test -f ok").await;
+    // Installed dependencies, so the build links them into the combine's site folder.
+    std::fs::create_dir_all(h.dir.join("site/node_modules/dep")).unwrap();
+    let runs = h._tmp.path().join("runs");
+    h.provider(
+        "fake-resolve-folder-once",
+        &format!(
+            "n=0\n[ -f {runs} ] && n=$(cat {runs})\nn=$((n+1))\necho $n > {runs}\n\
+             [ \"$n\" -ge 2 ] && touch site/ok\n\
+             paths=$(git diff --name-only --diff-filter=U)\n\
+             [ -n \"$paths\" ] && git checkout --theirs -- $paths\n\
+             git add -A\n",
+            runs = runs.display()
+        ),
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-folder-once")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    let tree = git(&h.dir, &["ls-tree", "-r", "--name-only", "content/page"]);
+    assert!(!tree.contains("node_modules"), "{tree}");
+    assert!(tree.contains("site/ok"), "{tree}");
+    assert!(
+        !h.notes(&chat).iter().any(|n| n == sync_chat::ONE_FILE),
+        "{:?}",
+        h.notes(&chat)
+    );
+    h.state.chats.shutdown().await;
+}
+
 /// A second failed build ends the sync with the draft untouched.
 #[tokio::test]
 async fn second_build_failure_ends() {
