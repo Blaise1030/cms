@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({ daemon: null as unknown as FakeDaemon }));
 vi.mock("@/core/daemon", () => ({ useDaemon: () => h.daemon }));
 import { useSettingsStore } from "./store";
 
-const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock" };
+const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock", mergeMethod: "squash" as const, prLabels: ["orso"] };
 const doc = (over: Partial<SettingsDoc> = {}): SettingsDoc => ({
   exists: true, settings: { root: "apps/web", extra: { keep: true } }, defaults, hash: "h1", branch: "content/a", errors: {}, siteRoot: "apps/web", ...over,
 });
@@ -27,12 +27,12 @@ const checkpoint = { type: "checkpoint.created", projectId: "p", sha: "s", summa
 beforeEach(() => { vi.restoreAllMocks(); });
 
 describe("settings store", () => {
-  it("open loads the doc and drafts the four fields", async () => {
+  it("open loads the doc and drafts the known fields", async () => {
     const { store, fns } = setup();
     await store.open("p");
     expect(fns.settings).toHaveBeenCalledWith("p");
     expect(store.doc?.hash).toBe("h1");
-    expect(store.draft).toEqual({ root: "apps/web", installDir: "", install: "", dev: "" });
+    expect(store.draft).toEqual({ root: "apps/web", installDir: "", install: "", dev: "", mergeMethod: "", prLabels: null });
     expect(store.dirty).toBe(false);
   });
 
@@ -56,6 +56,31 @@ describe("settings store", () => {
     });
     expect(store.doc?.hash).toBe("h2");
     expect(store.dirty).toBe(false);
+  });
+
+  it("drafts and saves the publishing fields, keeping [] apart from unset labels", async () => {
+    const { store, fns } = setup({ settings: vi.fn(async () => doc({ settings: { mergeMethod: "merge", prLabels: [] } })) });
+    await store.open("p");
+    expect(store.draft.mergeMethod).toBe("merge");
+    expect(store.draft.prLabels).toEqual([]);
+    store.setField("install", "pnpm install");
+    await store.save();
+    expect(fns.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      settings: { mergeMethod: "merge", prLabels: [], install: "pnpm install" },
+    }));
+  });
+
+  it("labels set to unset are left out of the file; new labels are added", async () => {
+    const { store, fns } = setup({ settings: vi.fn(async () => doc({ settings: { prLabels: ["orso"] } })) });
+    await store.open("p");
+    store.setField("prLabels", ["orso", "blog"]);
+    expect(store.dirty).toBe(true);
+    store.setField("prLabels", ["orso"]);
+    expect(store.dirty).toBe(false);
+    store.setField("prLabels", null);
+    store.setField("mergeMethod", "merge");
+    await store.save();
+    expect(fns.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ settings: { mergeMethod: "merge" } }));
   });
 
   it("a clean draft has nothing to save for a valid file", async () => {
@@ -184,7 +209,7 @@ describe("settings store", () => {
     expect(store.draft.dev).toBe("x {port}");
     window.confirm = vi.fn(() => true);
     await store.reloadFromDisk();
-    expect(store.draft).toEqual({ root: "site", installDir: "", install: "", dev: "" });
+    expect(store.draft).toEqual({ root: "site", installDir: "", install: "", dev: "", mergeMethod: "", prLabels: null });
     expect(store.doc?.hash).toBe("h9");
   });
 

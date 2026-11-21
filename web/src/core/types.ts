@@ -237,6 +237,8 @@ export interface DeployStatus {
 export interface PublishedPr extends PrStatus {
   /** The merge commit on the site's main line; absent when GitHub didn't report one. */
   mergeSha?: string | null;
+  /** Squash was asked for, but the repository doesn't allow it: merged with a merge commit. */
+  squashUnavailable?: boolean;
 }
 
 /** Push needed newer commits from this change's remote copy combined in first. */
@@ -626,6 +628,8 @@ export interface SetupStatus {
   projectsDir: string;
   /** Daemon-backed dismiss flag (survives ephemeral UI origins). */
   setupDismissed?: boolean;
+  /** The user's assistant order, first choice first; `null` (or absent) until they reorder. */
+  assistantOrder?: string[] | null;
 }
 
 /** `GET /api/setup/runtimes`: the assistant and site-builder download snapshot. */
@@ -762,7 +766,11 @@ export interface DesignDoc {
   starter?: { tokens: DesignTokens; body: string };
 }
 /** The fields of the repo-root `orso.json`; each one falls back to its default when unset. */
-export interface ProjectSettings { root: string; installDir: string; install: string; dev: string }
+/** `orso.json` defaults. `mergeMethod`: how Publish merges; `prLabels`: labels on the pull requests orso opens. */
+export interface ProjectSettings {
+  root: string; installDir: string; install: string; dev: string;
+  mergeMethod: "squash" | "merge"; prLabels: string[];
+}
 /** `settings` is the file as written (unknown keys included); `errors` is keyed by field, `_file` when it is not a JSON object. */
 export interface SettingsDoc {
   exists: boolean; settings: Record<string, unknown>; defaults: ProjectSettings; hash?: string; branch: string;

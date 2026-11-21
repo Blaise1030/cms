@@ -321,6 +321,96 @@ describe("Assistant settings", () => {
   });
 });
 
+describe("Assistant order", () => {
+  const four = (assistantOrder?: string[]) =>
+    vi.fn(async (): Promise<SetupStatus> => ({
+      git: true,
+      gh: true,
+      githubSignedIn: false,
+      node: runtime({ version: "24.0.0" }),
+      providers: [
+        provider("opencode", { freeModels: true, signedIn: null }),
+        provider("codex", { signedIn: false, chatReady: false }),
+        provider("claude"),
+        provider("cursor"),
+      ],
+      projectsDir: "/Users/ada/orso-projects",
+      assistantOrder,
+    }));
+  const order = (w: Awaited<ReturnType<typeof mountPage>>["w"]) =>
+    w
+      .get("[data-testid='assistant-settings-rows']")
+      .findAll("[data-testid^='assistant-row-']")
+      .map((row) => row.attributes("data-testid")!.replace("assistant-row-", ""));
+
+  it("lists the saved order and marks the first connected assistant Default", async () => {
+    const { w } = await mountPage("/settings", { setupStatus: four(["codex", "claude"]) });
+    // Saved ids first, the rest after in the default order.
+    expect(order(w)).toEqual(["codex", "claude", "opencode", "cursor"]);
+    // Codex needs a sign-in, so Claude is the one new chats start with.
+    expect(w.findAll("[data-testid^='assistant-default-']").map((b) => b.attributes("data-testid"))).toEqual([
+      "assistant-default-claude",
+    ]);
+    expect(w.find("[data-testid='assistant-recommended']").exists()).toBe(true);
+    expect(w.find("[data-testid='assistant-handle-claude']").exists()).toBe(true);
+  });
+
+  it("marks the recommended assistant Default until the user reorders", async () => {
+    const { w } = await mountPage("/settings", { setupStatus: four() });
+    expect(order(w)).toEqual(["opencode", "codex", "claude", "cursor"]);
+    expect(w.find("[data-testid='assistant-default-opencode']").exists()).toBe(true);
+  });
+
+  it("moves a row with Alt+Up, saves the order and keeps focus on its handle", async () => {
+    const save = vi.fn(async (order: string[]) => ({ order }));
+    const { w } = await mountPage("/settings", { setupStatus: four(), saveAssistantOrder: save });
+    const handle = w.get("[data-testid='assistant-handle-claude']");
+    // Without Alt the arrows do nothing.
+    await handle.trigger("keydown", { key: "ArrowUp" });
+    expect(save).not.toHaveBeenCalled();
+    await handle.trigger("keydown", { key: "ArrowUp", altKey: true });
+    await handle.trigger("keydown", { key: "ArrowUp", altKey: true });
+    await flushPromises();
+    expect(save).toHaveBeenLastCalledWith(["claude", "opencode", "codex", "cursor"]);
+    expect(order(w)).toEqual(["claude", "opencode", "codex", "cursor"]);
+    expect(w.find("[data-testid='assistant-default-claude']").exists()).toBe(true);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("assistant-handle-claude");
+  });
+
+  it("reorders live while dragging, saves on drop and restores a cancelled drag", async () => {
+    const save = vi.fn(async (order: string[]) => ({ order }));
+    const { w } = await mountPage("/settings", { setupStatus: four(), saveAssistantOrder: save });
+    const transfer = (dropEffect: string) => ({ setData() {}, effectAllowed: "", dropEffect });
+
+    await w.get("[data-testid='assistant-row-cursor']").trigger("dragstart", { dataTransfer: transfer("move") });
+    await w.get("[data-testid='assistant-row-opencode']").trigger("dragover", { dataTransfer: transfer("move") });
+    expect(order(w)).toEqual(["cursor", "opencode", "codex", "claude"]);
+    await w.get("[data-testid='assistant-row-cursor']").trigger("dragend", { dataTransfer: transfer("none") });
+    expect(order(w)).toEqual(["opencode", "codex", "claude", "cursor"]);
+    expect(save).not.toHaveBeenCalled();
+
+    await w.get("[data-testid='assistant-row-cursor']").trigger("dragstart", { dataTransfer: transfer("move") });
+    await w.get("[data-testid='assistant-row-opencode']").trigger("dragover", { dataTransfer: transfer("move") });
+    await w.get("[data-testid='assistant-row-cursor']").trigger("dragend", { dataTransfer: transfer("move") });
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith(["cursor", "opencode", "codex", "claude"]);
+    expect(order(w)).toEqual(["cursor", "opencode", "codex", "claude"]);
+    expect(w.find("[data-testid='assistant-default-cursor']").exists()).toBe(true);
+  });
+
+  it("puts the order back when the daemon can't save it", async () => {
+    const save = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const { w } = await mountPage("/settings", { setupStatus: four(), saveAssistantOrder: save });
+    await w.get("[data-testid='assistant-handle-cursor']").trigger("keydown", { key: "ArrowUp", altKey: true });
+    await flushPromises();
+    expect(save).toHaveBeenCalled();
+    expect(order(w)).toEqual(["opencode", "codex", "claude", "cursor"]);
+  });
+});
+
 describe("Site builder settings", () => {
   it("shows the Package section and the Node row with its version", async () => {
     const { w } = await mountPage();

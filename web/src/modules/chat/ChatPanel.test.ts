@@ -715,6 +715,37 @@ describe("ChatPanel", () => {
       expect(picker.provider()).toBe("claude");
     });
 
+    it("starts a new chat with the first ready assistant in the user's order", async () => {
+      setupWith([
+        { id: "cursor", chatReady: false, signedIn: false },
+        { id: "claude", chatReady: true, signedIn: true },
+        { id: "codex", chatReady: true, signedIn: true },
+        { id: "opencode", chatReady: true, signedIn: null },
+      ]);
+      (setupStatus as { assistantOrder: string[] }).assistantOrder = ["cursor", "codex", "claude"];
+      const w = await mountPanel();
+      const picker = agentPicker(w);
+      // Cursor comes first but needs a sign-in, so Codex is the default.
+      expect(picker.provider()).toBe("codex");
+      await picker.open();
+      expect(picker.groups()).toEqual(["codex", "claude", "opencode"]);
+      await send(w, "hi");
+      expect(JSON.parse(String(createPosts()[0]!.init.body)).provider).toBe("codex");
+    });
+
+    it("keeps an existing chat's assistant whatever the order", async () => {
+      setupWith([
+        { id: "claude", chatReady: true, signedIn: true },
+        { id: "opencode", chatReady: true, signedIn: null },
+      ]);
+      (setupStatus as { assistantOrder: string[] }).assistantOrder = ["claude"];
+      chats = [{ id: "c1", provider: "opencode", model: null, title: "Old chat", updatedAt: 1, live: true, running: false }];
+      histories.c1 = { provider: "opencode", model: null, running: false, chunks: [] };
+      useChatStore().setActive("p1", "c1");
+      const w = await mountPanel();
+      expect(agentPicker(w).provider()).toBe("opencode");
+    });
+
     it("keeps the open chat's assistant even when it needs attention", async () => {
       setupWith([
         { id: "cursor", chatReady: false, signedIn: false },

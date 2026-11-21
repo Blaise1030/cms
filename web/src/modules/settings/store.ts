@@ -2,28 +2,44 @@ import { defineStore } from "pinia";
 import { computed, onScopeDispose, ref } from "vue";
 import { useDaemon } from "@/core/daemon";
 import { ApiError } from "@/core/api";
-import type { ProjectSettings, SettingsDoc } from "@/core/types";
+import type { SettingsDoc } from "@/core/types";
 import { errorMessage } from "@orso/utils";
 
 export interface SettingsConflict { reason: "stale_content" | "branch_changed"; message: string }
-export type SettingsField = keyof ProjectSettings;
+/** The known fields typed as text. */
+export type TextField = "root" | "installDir" | "install" | "dev";
+export type SettingsField = TextField | "mergeMethod" | "prLabels";
+/**
+ * The known fields as the form edits them. Text fields and `mergeMethod` use `""` for unset;
+ * `prLabels` uses `null` for unset, so `[]` (labelling turned off) stays distinct.
+ */
+export type SettingsDraft = Record<TextField, string> & { mergeMethod: string; prLabels: string[] | null };
 
 export const SETTINGS_FILE = "orso.json";
-export const SETTINGS_FIELDS: readonly SettingsField[] = ["root", "installDir", "install", "dev"];
+export const SETTINGS_FIELDS: readonly SettingsField[] = ["root", "installDir", "install", "dev", "mergeMethod", "prLabels"];
+/** Fields only Publish and Share read: a problem with them doesn't stop the dev server. */
+export const PUBLISH_FIELDS: readonly string[] = ["mergeMethod", "prLabels"];
 const isField = (key: string): key is SettingsField => (SETTINGS_FIELDS as readonly string[]).includes(key);
+const isSet = (value: SettingsDraft[SettingsField]) => Array.isArray(value) || !!value;
+const same = (a: SettingsDraft[SettingsField], b: SettingsDraft[SettingsField]) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The four known fields as the file sets them; `""` means unset (a non-string value reads as unset). */
-function draftOf(d: SettingsDoc | null): ProjectSettings {
-  const value = (key: SettingsField) => { const v = d?.settings[key]; return typeof v === "string" ? v : ""; };
-  return { root: value("root"), installDir: value("installDir"), install: value("install"), dev: value("dev") };
+/** The known fields as the file sets them; a value of the wrong type reads as unset. */
+function draftOf(d: SettingsDoc | null): SettingsDraft {
+  const value = (key: TextField | "mergeMethod") => { const v = d?.settings[key]; return typeof v === "string" ? v : ""; };
+  const labels = d?.settings.prLabels;
+  return {
+    root: value("root"), installDir: value("installDir"), install: value("install"), dev: value("dev"),
+    mergeMethod: value("mergeMethod"),
+    prLabels: Array.isArray(labels) && labels.every(l => typeof l === "string") ? [...labels] : null,
+  };
 }
 
-/** The repo-root `orso.json`: four known fields edited as strings, unknown keys kept as they are. */
+/** The repo-root `orso.json`: the known fields edited in a form, unknown keys kept as they are. */
 export const useSettingsStore = defineStore("settings", () => {
   const daemon = useDaemon();
   const projectId = ref("");
   const doc = ref<SettingsDoc | null>(null);
-  const draft = ref<ProjectSettings>(draftOf(null));
+  const draft = ref<SettingsDraft>(draftOf(null));
   const loading = ref(false);
   const saving = ref(false);
   const error = ref<string | null>(null);
@@ -40,7 +56,7 @@ export const useSettingsStore = defineStore("settings", () => {
     const d = doc.value;
     if (!d) return false;
     const base = draftOf(d);
-    return SETTINGS_FIELDS.some(key => draft.value[key] !== base[key]);
+    return SETTINGS_FIELDS.some(key => !same(draft.value[key], base[key]));
   });
   /** A broken file can be overwritten even when the draft shows only defaults. */
   const canSave = computed(() => dirty.value || (!!doc.value?.exists && Object.keys(doc.value.errors).length > 0));
@@ -63,16 +79,16 @@ export const useSettingsStore = defineStore("settings", () => {
     } else error.value = errorMessage(err);
   }
 
-  function setField(key: SettingsField, value: string) { draft.value = { ...draft.value, [key]: value }; }
+  function setField<K extends SettingsField>(key: K, value: SettingsDraft[K]) { draft.value = { ...draft.value, [key]: value }; }
 
   /** The file's keys in order with the draft's fields in place of the known ones; unset fields are left out. */
   function payload(d: SettingsDoc): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(d.settings)) {
       if (!isField(key)) out[key] = value;
-      else if (draft.value[key]) out[key] = draft.value[key];
+      else if (isSet(draft.value[key])) out[key] = draft.value[key];
     }
-    for (const key of SETTINGS_FIELDS) if (draft.value[key] && !(key in out)) out[key] = draft.value[key];
+    for (const key of SETTINGS_FIELDS) if (isSet(draft.value[key]) && !(key in out)) out[key] = draft.value[key];
     return out;
   }
 

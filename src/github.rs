@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use crate::config::GithubConfig;
 use crate::error::ApiError;
 use crate::git::Identity;
+use crate::settings::MergeMethod;
 
 const SESSION_FILE: &str = "github.json";
 /// `repo`: clone and push (private repos included). `read:user`: profile name for authorship.
@@ -342,6 +343,9 @@ pub struct PublishResult {
     /// The commit the merge produced on the base branch; the deploy that ships the change
     /// runs on it. `None` when GitHub's answer didn't include one.
     pub merge_sha: Option<String>,
+    /// Squash was asked for but the repository doesn't allow it, so the change was merged
+    /// with a merge commit instead; the app tells the writer once how to change that.
+    pub squash_unavailable: bool,
 }
 
 /// The parts of a pull request that decide its [`PrState`] (besides reviews).
@@ -1839,8 +1843,16 @@ impl GithubAuth {
     /// - no permission on the repo → ask an owner to add them;
     /// - not mergeable (including protection blocking the merge) → get latest first.
     ///
-    /// The merge method is `merge`: this codebase has no squash convention.
-    pub async fn merge_pr(&self, repo: &str, head_branch: &str) -> Result<PublishResult, ApiError> {
+    /// `method` comes from `orso.json` ([`crate::settings::merge_method`]). A squash is titled
+    /// like GitHub's own (`<PR title> (#<number>)`). When the repository doesn't allow squash
+    /// merging, the publish still goes through: it is retried once as a merge commit and
+    /// flagged in [`PublishResult::squash_unavailable`].
+    pub async fn merge_pr(
+        &self,
+        repo: &str,
+        head_branch: &str,
+        method: MergeMethod,
+    ) -> Result<PublishResult, ApiError> {
         let pull = self.find_pr(repo, head_branch).await?.ok_or_else(|| {
             ApiError::enoent("Couldn't publish. Share the draft first, then try again.")
         })?;
@@ -1852,13 +1864,25 @@ impl GithubAuth {
                 return Err(ApiError::conflict("A reviewer sent this change back."));
             }
         }
-        let (status, body) = self
-            .api_raw(
-                reqwest::Method::PUT,
-                &format!("/repos/{repo}/pulls/{}/merge", pull.number),
-                Some(&serde_json::json!({ "merge_method": "merge" })),
-            )
+        let path = format!("/repos/{repo}/pulls/{}/merge", pull.number);
+        let request = match method {
+            MergeMethod::Squash => serde_json::json!({
+                "merge_method": method.as_str(),
+                "commit_title": format!("{} (#{})", pull.title, pull.number),
+            }),
+            MergeMethod::Merge => serde_json::json!({ "merge_method": method.as_str() }),
+        };
+        let (mut status, mut body) = self
+            .api_raw(reqwest::Method::PUT, &path, Some(&request))
             .await?;
+        let squash_unavailable =
+            method == MergeMethod::Squash && merge_method_refused(status, &body);
+        if squash_unavailable {
+            let merge = serde_json::json!({ "merge_method": MergeMethod::Merge.as_str() });
+            (status, body) = self
+                .api_raw(reqwest::Method::PUT, &path, Some(&merge))
+                .await?;
+        }
         if !status.is_success() {
             return Err(publish_refused(status));
         }
@@ -1874,6 +1898,7 @@ impl GithubAuth {
             url: pull.html_url,
             state: PrState::Merged,
             merge_sha: merged.sha,
+            squash_unavailable,
         })
     }
 
@@ -3299,6 +3324,22 @@ fn publish_refused(status: reqwest::StatusCode) -> ApiError {
         return ApiError::conflict("Couldn't publish. Get latest, then try again.");
     }
     publish_failed()
+}
+
+/// GitHub refused the merge because the repository doesn't allow that merge method: a 405
+/// whose message names the method ("Squash merges are not allowed on this repository.",
+/// "Merge method squash is not allowed …"). A 405 is also how GitHub says a pull request isn't
+/// mergeable, so the status alone can't tell the two apart.
+fn merge_method_refused(status: reqwest::StatusCode, body: &[u8]) -> bool {
+    if status != reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        return false;
+    }
+    let message = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("message")?.as_str().map(str::to_lowercase))
+        .unwrap_or_default();
+    message.contains("not allowed")
+        && (message.contains("squash") || message.contains("merge method"))
 }
 
 /// A publish that GitHub accepted but did nothing with, or answered unexpectedly.
@@ -6807,7 +6848,7 @@ esac"#,
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "merge-sent-back");
         let err = auth
-            .merge_pr("acme/site", "content/launch-week")
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
             .await
             .unwrap_err();
         stop();
@@ -6834,7 +6875,7 @@ esac"#,
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "merge-ok");
         let merged = auth
-            .merge_pr("acme/site", "content/launch-week")
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
             .await
             .unwrap();
         stop();
@@ -6846,13 +6887,126 @@ esac"#,
                 url: "https://github.com/acme/site/pull/4".into(),
                 state: PrState::Merged,
                 merge_sha: Some("def".into()),
+                squash_unavailable: false,
             }
         );
-        // The merge is a PUT on the PR found by head, with an explicit merge method.
+        // The merge is a PUT on the PR found by head: a squash titled like GitHub's own.
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            vec![serde_json::json!({
+                "merge_method": "squash",
+                "commit_title": "Launch week (#4)",
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_pr_makes_a_merge_commit_when_orso_json_asks() {
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let routes = merge_endpoint(
+            axum::http::StatusCode::OK,
+            serde_json::json!({ "merged": true, "sha": "def" }),
+            seen.clone(),
+        );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-commit");
+        let merged = auth
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Merge)
+            .await
+            .unwrap();
+        stop();
+
+        assert!(!merged.squash_unavailable);
         assert_eq!(
             seen.lock().unwrap().clone(),
             vec![serde_json::json!({ "merge_method": "merge" })]
         );
+    }
+
+    #[tokio::test]
+    async fn merge_pr_falls_back_to_a_merge_commit_when_squash_is_not_allowed() {
+        use axum::extract::Json as AxJson;
+        use axum::routing::put;
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let routes = one_open_pull(false)
+            .route(
+                "/repos/acme/site/pulls/4/reviews",
+                axum::routing::get(|| async { axum::Json(serde_json::json!([])) }),
+            )
+            .route(
+                "/repos/acme/site/pulls/4/merge",
+                put(move |AxJson(body): AxJson<serde_json::Value>| {
+                    let recorded = recorded.clone();
+                    async move {
+                        let squash = body["merge_method"] == "squash";
+                        recorded.lock().unwrap().push(body);
+                        if squash {
+                            (
+                                axum::http::StatusCode::METHOD_NOT_ALLOWED,
+                                axum::Json(serde_json::json!({
+                                    "message": "Squash merges are not allowed on this repository.",
+                                })),
+                            )
+                        } else {
+                            (
+                                axum::http::StatusCode::OK,
+                                axum::Json(serde_json::json!({ "merged": true, "sha": "def" })),
+                            )
+                        }
+                    }
+                }),
+            );
+        let (base, stop) = mock_api(routes).await;
+        let auth = status_auth(base, "merge-no-squash");
+        let merged = auth
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
+            .await
+            .unwrap();
+        stop();
+
+        assert!(merged.squash_unavailable);
+        assert_eq!(merged.merge_sha.as_deref(), Some("def"));
+        let methods: Vec<serde_json::Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|b| b["merge_method"].clone())
+            .collect();
+        assert_eq!(methods, vec!["squash", "merge"], "retried exactly once");
+    }
+
+    #[test]
+    fn only_a_405_naming_the_merge_method_is_a_refused_method() {
+        let refused = |status: u16, message: &str| {
+            merge_method_refused(
+                reqwest::StatusCode::from_u16(status).unwrap(),
+                serde_json::json!({ "message": message })
+                    .to_string()
+                    .as_bytes(),
+            )
+        };
+        assert!(refused(
+            405,
+            "Squash merges are not allowed on this repository."
+        ));
+        assert!(refused(
+            405,
+            "Merge method squash is not allowed on this repository"
+        ));
+        assert!(!refused(405, "Pull Request is not mergeable"));
+        assert!(!refused(
+            405,
+            "Base branch was modified. Review and try the merge again."
+        ));
+        assert!(!refused(
+            422,
+            "Squash merges are not allowed on this repository."
+        ));
     }
 
     /// None of the words the spec keeps out of writer-facing copy.
@@ -6891,7 +7045,7 @@ esac"#,
             let (base, stop) = mock_api(routes).await;
             let auth = status_auth(base, &format!("merge-{status}"));
             let err = auth
-                .merge_pr("acme/site", "content/launch-week")
+                .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
                 .await
                 .unwrap_err();
             stop();
@@ -6920,7 +7074,7 @@ esac"#,
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "merge-403");
         let err = auth
-            .merge_pr("acme/site", "content/launch-week")
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
             .await
             .unwrap_err();
         stop();
@@ -6942,7 +7096,7 @@ esac"#,
         let (base, stop) = mock_api(routes).await;
         let auth = status_auth(base, "merge-none");
         let err = auth
-            .merge_pr("acme/site", "content/launch-week")
+            .merge_pr("acme/site", "content/launch-week", MergeMethod::Squash)
             .await
             .unwrap_err();
         stop();

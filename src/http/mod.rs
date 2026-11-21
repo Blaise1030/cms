@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{DefaultBodyLimit, Query};
 use axum::http::{header, HeaderName, HeaderValue, Method};
-use axum::routing::{any, delete, get, post};
+use axum::routing::{any, delete, get, post, put};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
 
@@ -63,6 +63,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/github/repos", get(github::repos))
         .route("/api/setup/status", get(setup::status))
         .route("/api/setup/dismiss", post(setup::dismiss))
+        .route(
+            "/api/setup/assistant-order",
+            put(setup::save_assistant_order),
+        )
         .route("/api/setup/runtimes", get(setup::runtimes))
         .route("/api/setup/runtimes/{id}/download", post(setup::download))
         .route("/api/setup/runtimes/{id}/cancel", post(setup::cancel))

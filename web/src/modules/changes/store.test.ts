@@ -25,7 +25,7 @@ vi.mock("@/lib/toast", () => ({
   },
 }));
 
-import { DEPLOY_POLL_MS, DEPLOY_TIMEOUT_MS, STATUS_POLL_MS, useChangesStore } from "./store";
+import { DEPLOY_POLL_MS, DEPLOY_TIMEOUT_MS, SQUASH_NOTE_KEY, SQUASH_UNAVAILABLE, STATUS_POLL_MS, useChangesStore } from "./store";
 import { useFilesStore } from "@/modules/files/store";
 import { usePreviewStore } from "@/modules/preview/store";
 import { useContentStore } from "@/modules/content/store";
@@ -1106,6 +1106,34 @@ describe("changes store publish", () => {
       expect(h.toastWarning).toHaveBeenCalledWith(
         "Cleaned up, but main couldn't be updated from GitHub — it may be out of date",
       );
+    } finally {
+      store.stopStatusPolling();
+    }
+  });
+
+  it("notes once per project when the repository refused the squash", async () => {
+    localStorage.removeItem(SQUASH_NOTE_KEY);
+    const store = publishStore({ publishChange: vi.fn(async () => ({ ...pr, squashUnavailable: true })) });
+    try {
+      await expect(store.publish("site", "content/lw")).resolves.toBe("published");
+      expect(h.toastInfo).toHaveBeenCalledWith(SQUASH_UNAVAILABLE);
+      h.toastInfo.mockClear();
+      await store.publish("site", "content/next");
+      expect(h.toastInfo).not.toHaveBeenCalledWith(SQUASH_UNAVAILABLE);
+      await store.publish("other", "content/lw");
+      expect(h.toastInfo).toHaveBeenCalledWith(SQUASH_UNAVAILABLE);
+    } finally {
+      store.stopStatusPolling();
+      localStorage.removeItem(SQUASH_NOTE_KEY);
+    }
+  });
+
+  it("has no squash note for an ordinary publish", async () => {
+    localStorage.removeItem(SQUASH_NOTE_KEY);
+    const store = publishStore();
+    try {
+      await store.publish("site", "content/lw");
+      expect(h.toastInfo).not.toHaveBeenCalledWith(SQUASH_UNAVAILABLE);
     } finally {
       store.stopStatusPolling();
     }

@@ -24,6 +24,39 @@ const DEFAULT_INSTALL: &str = "npm install --no-audit --no-fund --no-progress";
 const DEFAULT_DEV: &str = "npm run dev -- --port {port} --host {host} --ignore-lock";
 /// Labels on orso's pull requests when `orso.json` sets no `prLabels`.
 pub const DEFAULT_PR_LABELS: &[&str] = &["orso"];
+/// GitHub refuses label names longer than this.
+const MAX_LABEL_CHARS: usize = 50;
+
+/// How Publish merges a change's pull request (`orso.json` `mergeMethod`).
+///
+/// Squash is the default: orso checkpoints every assistant turn, so a merge commit would land
+/// each of those `checkpoint: …` commits on `main`. Rebase is deliberately not offered: it
+/// rewrites the change's commits, so they would never match what is on `main`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMethod {
+    #[default]
+    Squash,
+    Merge,
+}
+
+impl MergeMethod {
+    /// The `merge_method` value GitHub's merge endpoint takes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+        }
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "squash" => Some(Self::Squash),
+            "merge" => Some(Self::Merge),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +65,11 @@ pub struct ProjectSettings {
     pub install_dir: String,
     pub install: String,
     pub dev: String,
+    /// Read leniently (a bad value falls back to the default) so a publishing setting never
+    /// stops the dev server; [`publish_errors`] reports the bad value to the settings form.
+    pub merge_method: MergeMethod,
+    /// Read leniently, like [`pr_labels`].
+    pub pr_labels: Vec<String>,
 }
 
 impl ProjectSettings {
@@ -41,6 +79,8 @@ impl ProjectSettings {
             install_dir: ".".to_string(),
             install: DEFAULT_INSTALL.to_string(),
             dev: DEFAULT_DEV.to_string(),
+            merge_method: MergeMethod::default(),
+            pr_labels: default_pr_labels(),
         }
     }
 
@@ -227,7 +267,50 @@ pub fn validate(project: &Path, raw: &Map<String, Value>) -> Result<ProjectSetti
         install_dir: install_dir.unwrap_or(defaults.install_dir),
         install: install.unwrap_or(defaults.install),
         dev: dev.unwrap_or(defaults.dev),
+        merge_method: merge_method_of(raw),
+        pr_labels: pr_labels_of(raw),
     })
+}
+
+/// Problems with the publishing fields (`mergeMethod`, `prLabels`), for the settings form.
+/// Kept out of [`validate`]: the daemon reads these fields leniently and falls back to the
+/// defaults, so a bad value must not stop the dev server the way a bad `dev` does. A save
+/// still refuses it, and the form points at the field.
+pub fn publish_errors(raw: &Map<String, Value>) -> FieldErrors {
+    let mut errors = FieldErrors::new();
+    match raw.get("mergeMethod") {
+        None => {}
+        Some(Value::String(s)) if s.is_empty() || MergeMethod::parse(s).is_some() => {}
+        Some(_) => {
+            errors.insert(
+                "mergeMethod".to_string(),
+                r#"must be "squash" or "merge""#.to_string(),
+            );
+        }
+    }
+    let not_a_list = || "must be a list of label names".to_string();
+    match raw.get("prLabels") {
+        None => {}
+        Some(Value::Array(items)) if items.iter().any(|i| !i.is_string()) => {
+            errors.insert("prLabels".to_string(), not_a_list());
+        }
+        Some(Value::Array(items))
+            if items
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|l| l.trim().chars().count() > MAX_LABEL_CHARS) =>
+        {
+            errors.insert(
+                "prLabels".to_string(),
+                format!("labels must be {MAX_LABEL_CHARS} characters or fewer"),
+            );
+        }
+        Some(Value::Array(_)) => {}
+        Some(_) => {
+            errors.insert("prLabels".to_string(), not_a_list());
+        }
+    }
+    errors
 }
 
 pub fn load(project: &Path) -> Result<ProjectSettings, FieldErrors> {
@@ -303,13 +386,14 @@ pub async fn read(state: &AppState, project: &str) -> Result<SettingsDoc, ApiErr
     let mut site_root = ProjectSettings::defaults().root;
     let (settings, errors) = match serde_json::from_str::<Value>(&source) {
         Ok(Value::Object(map)) => {
-            let errors = match validate(&root, &map) {
+            let mut errors = match validate(&root, &map) {
                 Ok(valid) => {
                     site_root = valid.root;
                     FieldErrors::new()
                 }
                 Err(errors) => errors,
             };
+            errors.extend(publish_errors(&map));
             (map, errors)
         }
         Ok(_) => {
@@ -345,12 +429,16 @@ pub async fn save(state: &AppState, req: SaveSettings) -> Result<SettingsDoc, Ap
         .settings
         .iter()
         .filter(|(k, v)| {
-            !(matches!(k.as_str(), "root" | "installDir" | "install" | "dev")
-                && matches!(v, Value::String(s) if s.is_empty()))
+            !(matches!(
+                k.as_str(),
+                "root" | "installDir" | "install" | "dev" | "mergeMethod"
+            ) && matches!(v, Value::String(s) if s.is_empty()))
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    if let Err(errors) = validate(&root, &cleaned) {
+    let mut errors = validate(&root, &cleaned).err().unwrap_or_default();
+    errors.extend(publish_errors(&cleaned));
+    if !errors.is_empty() {
         let details: Vec<Value> = errors
             .iter()
             .map(|(field, message)| json!({ "path": [field], "message": message }))
@@ -443,26 +531,53 @@ pub fn install_dir_lenient(project: &Path) -> PathBuf {
 /// never blocks sharing: a missing or unreadable file or a non-array value gives the default,
 /// and entries GitHub would refuse (non-strings, blank, over 50 characters) are skipped.
 pub fn pr_labels(project: &Path) -> Vec<String> {
-    let default = || DEFAULT_PR_LABELS.iter().map(|l| l.to_string()).collect();
-    let Ok(content) = std::fs::read_to_string(project.join(SETTINGS_FILE)) else {
-        return default();
-    };
-    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&content) else {
-        return default();
-    };
-    let Some(Value::Array(items)) = map.get("prLabels") else {
-        return default();
+    raw_settings(project).map_or_else(default_pr_labels, |map| pr_labels_of(&map))
+}
+
+fn pr_labels_of(raw: &Map<String, Value>) -> Vec<String> {
+    let Some(Value::Array(items)) = raw.get("prLabels") else {
+        return default_pr_labels();
     };
     let mut labels: Vec<String> = Vec::new();
     for item in items {
         let Value::String(s) = item else { continue };
         let label = s.trim();
-        if label.is_empty() || label.chars().count() > 50 || labels.iter().any(|l| l == label) {
+        if label.is_empty()
+            || label.chars().count() > MAX_LABEL_CHARS
+            || labels.iter().any(|l| l == label)
+        {
             continue;
         }
         labels.push(label.to_string());
     }
     labels
+}
+
+fn default_pr_labels() -> Vec<String> {
+    DEFAULT_PR_LABELS.iter().map(|l| l.to_string()).collect()
+}
+
+/// How Publish merges: `orso.json` `mergeMethod`, else [`MergeMethod::Squash`]. Read leniently
+/// like [`pr_labels`]: a missing file, broken settings elsewhere in it or an unknown value (the
+/// settings form flags that one) must never stop a publish.
+pub fn merge_method(project: &Path) -> MergeMethod {
+    raw_settings(project).map_or_else(MergeMethod::default, |map| merge_method_of(&map))
+}
+
+fn merge_method_of(raw: &Map<String, Value>) -> MergeMethod {
+    raw.get("mergeMethod")
+        .and_then(Value::as_str)
+        .and_then(MergeMethod::parse)
+        .unwrap_or_default()
+}
+
+/// `orso.json` as a JSON object; `None` when it is missing, unreadable or not an object.
+fn raw_settings(project: &Path) -> Option<Map<String, Value>> {
+    let content = std::fs::read_to_string(project.join(SETTINGS_FILE)).ok()?;
+    match serde_json::from_str::<Value>(&content).ok()? {
+        Value::Object(map) => Some(map),
+        _ => None,
+    }
 }
 
 pub fn site_prefix(project: &Path) -> String {
@@ -514,6 +629,67 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write_settings(tmp.path(), r#"{"prLabels": []}"#);
         assert!(pr_labels(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn merge_method_defaults_to_squash() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(merge_method(tmp.path()), MergeMethod::Squash);
+        assert_eq!(
+            ProjectSettings::defaults().merge_method,
+            MergeMethod::Squash
+        );
+        for raw in [
+            r#"{"root": "."}"#,
+            r#"{"mergeMethod": ""}"#,
+            r#"{"mergeMethod": "rebase"}"#,
+            r#"{"mergeMethod": 1}"#,
+            "not json",
+        ] {
+            write_settings(tmp.path(), raw);
+            assert_eq!(merge_method(tmp.path()), MergeMethod::Squash, "{raw}");
+        }
+    }
+
+    #[test]
+    fn merge_method_comes_from_orso_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_settings(tmp.path(), r#"{"mergeMethod": "merge"}"#);
+        assert_eq!(merge_method(tmp.path()), MergeMethod::Merge);
+        write_settings(tmp.path(), r#"{"mergeMethod": "squash"}"#);
+        assert_eq!(merge_method(tmp.path()), MergeMethod::Squash);
+    }
+
+    #[test]
+    fn publish_errors_point_at_bad_publishing_fields() {
+        let errors = |raw: &str| {
+            let Value::Object(map) = serde_json::from_str::<Value>(raw).unwrap() else {
+                panic!("not an object");
+            };
+            publish_errors(&map)
+        };
+        assert!(errors(r#"{}"#).is_empty());
+        assert!(errors(r#"{"mergeMethod": "merge", "prLabels": ["orso", "blog"]}"#).is_empty());
+        assert!(errors(r#"{"mergeMethod": "", "prLabels": []}"#).is_empty());
+        assert_eq!(
+            errors(r#"{"mergeMethod": "rebase"}"#)
+                .get("mergeMethod")
+                .map(String::as_str),
+            Some(r#"must be "squash" or "merge""#)
+        );
+        assert!(errors(r#"{"mergeMethod": true}"#).contains_key("mergeMethod"));
+        assert!(errors(r#"{"prLabels": "orso"}"#).contains_key("prLabels"));
+        assert!(errors(r#"{"prLabels": ["orso", 3]}"#).contains_key("prLabels"));
+        let long = "x".repeat(51);
+        assert!(errors(&format!(r#"{{"prLabels": ["{long}"]}}"#)).contains_key("prLabels"));
+    }
+
+    #[test]
+    fn a_bad_merge_method_does_not_stop_the_dev_server() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_astro(tmp.path(), "astro.config.mjs");
+        write_settings(tmp.path(), r#"{"mergeMethod": "rebase"}"#);
+        assert_eq!(load(tmp.path()).unwrap().merge_method, MergeMethod::Squash);
     }
 
     #[test]

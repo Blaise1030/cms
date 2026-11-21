@@ -660,8 +660,11 @@ pub async fn cleanup(
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
     // Fail fast on what git can tell before asking GitHub.
     changes::check_cleanup(&project.dir, &branch).await?;
+    // Ask GitHub with either sign-in (the GitHub CLI too): after a squash merge, `main` never
+    // contains the branch tip, so only the merged pull request proves the change is published.
+    let signed_in = project.repo.is_some() && state.github.status().await.user.is_some();
     let (pr, env) = match project.repo.as_deref() {
-        Some(repo) if state.github.token().await.is_some() => {
+        Some(repo) if signed_in => {
             let pr =
                 match tokio::time::timeout(PR_STATE_TIMEOUT, state.github.pr_ref(repo, &branch))
                     .await
@@ -944,9 +947,10 @@ pub async fn publish(
             .await
             .map_err(|e| publish_step_error(e, false))?;
     }
+    let method = crate::settings::merge_method(&project.dir);
     let pr = state
         .github
-        .merge_pr(&repo, &branch)
+        .merge_pr(&repo, &branch, method)
         .await
         .map_err(|e| publish_step_error(e, false))?;
     // The published change's review images aren't needed any more.
