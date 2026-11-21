@@ -205,6 +205,10 @@ function loadedPath(href: string): string | null {
 }
 /** Where the frame starts when (re)mounted: a reload keeps the page the user was on. */
 const startHref = ref("");
+/** Remounts the frame to retry a navigation the page being left cancelled (see the bridge). */
+const retryNonce = ref(0);
+const MAX_NAV_RETRIES = 3;
+let retries = 0;
 const draft = ref<string | null>(null);
 
 watch(
@@ -245,6 +249,7 @@ watch(
     const leaving = history.entries.value.length ? history.current.value : loadedPath(startHref.value);
     history.reset();
     history.navigate(lastPath.value, leaving);
+    retries = 0;
     startHref.value = loadHref(lastPath.value);
   },
 );
@@ -270,8 +275,20 @@ function onFrameMessage(e: MessageEvent) {
       // The frame only reveals its page this way: it feeds the address bar and the reload
       // target, and it is the only way the back/forward stack learns where the reader went.
       const path = framePath(e.data.url, "/");
-      // A late report from the page the frame was sent away from is not where it is now.
-      if (!history.visit(path)) return;
+      if (!history.visit(path)) {
+        // The page the frame was sent away from reported in again: either late, or it reloaded
+        // itself and cancelled the navigation (the dev server tells open pages to reload after a
+        // save). Load the requested page again; a few tries, so a page that sends the frame
+        // straight back can't loop.
+        const want = history.awaiting();
+        if (want && retries < MAX_NAV_RETRIES) {
+          retries++;
+          retryNonce.value++;
+          startHref.value = loadHref(want);
+        }
+        return;
+      }
+      retries = 0;
       store.setFramePath(props.projectId, history.current.value);
       // Re-audit after client-side navigations reported by the bridge.
       refreshPageDetails();
@@ -467,6 +484,7 @@ function navigate() {
   // report of the same path is not a new entry.
   store.setFramePath(props.projectId, path);
   history.navigate(path, leaving);
+  retries = 0;
   startHref.value = loadHref(path);
 }
 
@@ -724,7 +742,7 @@ function openExternal() {
                      chosen preview scheme, not the app theme, so it keeps fixed colours on purpose. -->
                 <iframe
                   ref="frame"
-                  :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}`"
+                  :key="`${projectId}:${store.reloadNonce}:${store.navigateNonce}:${retryNonce}`"
                   :src="startHref"
                   title="Site preview"
                   class="h-full origin-top-left border-0"

@@ -90,6 +90,11 @@ export function useFrameHistory() {
     return entries.value[index.value + step] ?? null;
   }
 
+  /** The page the app sent the frame to that has not reported in yet, or null. */
+  function awaiting(): string | null {
+    return expected?.path ?? null;
+  }
+
   /** Where a back/forward step that has not landed yet is going, or null. */
   function destination(): string | null {
     if (pending === "back") return entries.value[index.value - 1] ?? null;
@@ -104,5 +109,5 @@ export function useFrameHistory() {
     expected = null;
   }
 
-  return { entries, index, current, canGoBack, canGoForward, visit, navigate, back, forward, target, destination, reset };
+  return { entries, index, current, canGoBack, canGoForward, visit, navigate, awaiting, back, forward, target, destination, reset };
 }

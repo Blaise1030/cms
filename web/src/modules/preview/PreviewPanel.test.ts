@@ -316,6 +316,33 @@ describe("PreviewPanel", () => {
     w.unmount();
   });
 
+  it("loads the requested page again when the page being left reloads and cancels it", async () => {
+    const w = await mountPanel("ready", {}, { attach: true });
+    await bridgeWindow(w);
+    fromFrame(w, { op: "path", url: `${ORIGIN()}/` });
+    await flushPromises();
+    await w.find("[data-testid='preview-address']").setValue("/blog/spring/");
+    await w.find("form").trigger("submit");
+    const sent = frameEl(w);
+    // The dev server told the old page to reload after a save: it reloads "/" and reports it.
+    fromFrame(w, { op: "path", url: `${ORIGIN()}/` });
+    await flushPromises();
+    expect(frameEl(w), "the frame is loaded again").not.toBe(sent);
+    expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/blog/spring/?t=${TOKEN}`);
+    expect(address(w)).toBe("/blog/spring/");
+    // A page that keeps sending the frame back is retried a few times, then left alone.
+    for (let i = 0; i < 5; i++) {
+      await flushPromises();
+      fromFrame(w, { op: "path", url: `${ORIGIN()}/` });
+      await flushPromises();
+    }
+    const settled = frameEl(w);
+    fromFrame(w, { op: "path", url: `${ORIGIN()}/` });
+    await flushPromises();
+    expect(frameEl(w)).toBe(settled);
+    w.unmount();
+  });
+
   it("keeps addresses typed while the preview origin is still being looked up", async () => {
     let release: (a: { port: number; token: string }) => void = () => {};
     const previewAccess = () => new Promise<{ port: number; token: string }>((r) => (release = r));
