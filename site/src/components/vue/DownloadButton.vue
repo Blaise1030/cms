@@ -6,6 +6,7 @@ import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
 import UFieldGroup from "@nuxt/ui/components/FieldGroup.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 import { site } from "../../site";
+import "@fontsource/cookie/latin-400.css";
 
 const { version, repo, coffeeUrl, downloads } = site.release;
 
@@ -105,7 +106,16 @@ const items = computed<DropdownMenuItem[][]>(() => [
     </template>
     <template #footer="{ close }">
       <div class="flex flex-wrap gap-3">
-        <UButton size="lg" icon="i-hugeicons-coffee-02" :label="props.labels.coffee" :to="coffeeUrl" target="_blank" rel="noopener noreferrer" />
+        <!-- Buy Me a Coffee's own button look; their embed script relies on document.write, so it can't render in a modal. -->
+        <a
+          :href="coffeeUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex h-11 items-center gap-2 rounded-lg border border-black bg-[#FFDD00] px-4 font-[Cookie] text-[1.6rem] leading-none text-black transition hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+        >
+          <img src="https://cdn.buymeacoffee.com/buttons/bmc-new-btn-logo.svg" alt="" width="20" height="28" class="h-7 w-auto" />
+          {{ props.labels.coffee }}
+        </a>
         <UButton size="lg" color="neutral" variant="outline" :label="props.labels.later" @click="close" />
       </div>
     </template>
