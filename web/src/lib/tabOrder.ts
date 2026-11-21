@@ -12,6 +12,7 @@ export const DEFAULT_TAB_ORDER: readonly ProjectTab[] = [
   "design",
   "code",
   "history",
+  "review",
   "settings",
 ];
 

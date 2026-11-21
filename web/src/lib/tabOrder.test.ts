@@ -14,7 +14,7 @@ describe("tab order", () => {
 
   it("keeps every tab once: saved first, unknown and repeated ids dropped, new tabs last", () => {
     localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(["code", "gone", "code", "history"]));
-    expect(loadTabOrder()).toEqual(["code", "history", "preview", "content", "design", "settings"]);
+    expect(loadTabOrder()).toEqual(["code", "history", "preview", "content", "design", "review", "settings"]);
   });
 
   it("falls back to the default on a corrupt value", () => {
