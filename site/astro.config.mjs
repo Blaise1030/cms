@@ -51,6 +51,16 @@ export default defineConfig({
         ],
       },
     },
+    // Buy Me a Coffee's button font, used only in the download thank-you dialog (not preloaded).
+    {
+      provider: fontProviders.local(),
+      name: "Cookie",
+      cssVariable: "--font-cookie",
+      fallbacks: ["cursive"],
+      options: {
+        variants: [{ src: ["@fontsource/cookie/files/cookie-latin-400-normal.woff2"], weight: "400", style: "normal", display: "swap" }],
+      },
+    },
   ],
   integrations: [
     mdx(),
