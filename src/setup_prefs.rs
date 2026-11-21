@@ -1,4 +1,5 @@
-//! Durable app-wide setup preferences: the first-run dismissal and the assistant order.
+//! Durable app-wide preferences: the first-run dismissal, the assistant order and the
+//! project rail's tab order.
 //!
 //! The desktop UI is served from an ephemeral `http://127.0.0.1:<port>` origin, so
 //! `localStorage` does not survive relaunch. Store these next to managed runtimes
@@ -12,6 +13,8 @@ use crate::config::default_runtime_dir;
 const DISMISS_FILE: &str = "setup-dismissed";
 /// The user's assistant order (App settings → Assistants), as a JSON array of ids.
 const ASSISTANT_ORDER_FILE: &str = "assistant-order.json";
+/// The user's project tab order (the rail's drag-to-reorder), as a JSON array of tab ids.
+const RAIL_ORDER_FILE: &str = "rail-order.json";
 
 /// Directory that holds app-wide prefs (parent of `runtimes/`).
 pub fn prefs_dir() -> PathBuf {
@@ -39,18 +42,35 @@ pub fn dismiss(dir: &Path) -> std::io::Result<()> {
 /// The saved assistant order, first choice first; `None` until the user reorders
 /// (or when the file is unreadable, which reads as "no order").
 pub fn assistant_order(dir: &Path) -> Option<Vec<String>> {
-    let bytes = std::fs::read(dir.join(ASSISTANT_ORDER_FILE)).ok()?;
+    read_list(dir, ASSISTANT_ORDER_FILE)
+}
+
+/// Persist the assistant order.
+pub fn save_assistant_order(dir: &Path, order: &[String]) -> std::io::Result<()> {
+    write_list(dir, ASSISTANT_ORDER_FILE, order)
+}
+
+/// The saved rail tab order; `None` until the user reorders (or when unreadable).
+pub fn rail_order(dir: &Path) -> Option<Vec<String>> {
+    read_list(dir, RAIL_ORDER_FILE)
+}
+
+/// Persist the rail tab order.
+pub fn save_rail_order(dir: &Path, order: &[String]) -> std::io::Result<()> {
+    write_list(dir, RAIL_ORDER_FILE, order)
+}
+
+fn read_list(dir: &Path, file: &str) -> Option<Vec<String>> {
+    let bytes = std::fs::read(dir.join(file)).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
-/// Persist the assistant order. Written to a temp file and renamed, so a crash
-/// never leaves half an order behind.
-pub fn save_assistant_order(dir: &Path, order: &[String]) -> std::io::Result<()> {
+/// Written to a temp file and renamed, so a crash never leaves half a list behind.
+fn write_list(dir: &Path, file: &str, list: &[String]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let path = dir.join(ASSISTANT_ORDER_FILE);
-    let tmp = dir.join(format!("{ASSISTANT_ORDER_FILE}.tmp"));
-    std::fs::write(&tmp, serde_json::to_vec(order)?)?;
-    std::fs::rename(tmp, path)
+    let tmp = dir.join(format!("{file}.tmp"));
+    std::fs::write(&tmp, serde_json::to_vec(list)?)?;
+    std::fs::rename(tmp, dir.join(file))
 }
 
 #[cfg(test)]
@@ -73,6 +93,16 @@ mod tests {
         let order = vec!["claude".to_string(), "opencode".to_string()];
         save_assistant_order(dir.path(), &order).unwrap();
         assert_eq!(assistant_order(dir.path()), Some(order));
+    }
+
+    #[test]
+    fn rail_order_round_trips_apart_from_the_assistant_order() {
+        let dir = tempdir().unwrap();
+        assert_eq!(rail_order(dir.path()), None);
+        let order = vec!["history".to_string(), "preview".to_string()];
+        save_rail_order(dir.path(), &order).unwrap();
+        assert_eq!(rail_order(dir.path()), Some(order));
+        assert_eq!(assistant_order(dir.path()), None);
     }
 
     #[test]

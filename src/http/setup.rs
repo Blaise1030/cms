@@ -198,18 +198,35 @@ pub async fn save_assistant_order(body: Bytes) -> Result<Json<AssistantOrder>, A
     Ok(Json(AssistantOrder { order }))
 }
 
+/// `GET /api/setup/rail-order` → `{ order }`: the project rail's tab order, `null` until
+/// the user reorders. Kept by the daemon because the desktop UI's origin (and so its
+/// `localStorage`) changes on every launch.
+pub async fn rail_order() -> Json<serde_json::Value> {
+    let order = crate::setup_prefs::rail_order(&crate::setup_prefs::prefs_dir());
+    Json(serde_json::json!({ "order": order }))
+}
+
+/// `PUT /api/setup/rail-order` `{ order }` → `{ order }`. Tab ids are kept as sent (repeats
+/// dropped); the app drops ones it doesn't know and adds new tabs at the end.
+pub async fn save_rail_order(body: Bytes) -> Result<Json<AssistantOrder>, ApiError> {
+    let AssistantOrder { order } = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::badreq(format!("expected JSON body {{ order }}: {e}")))?;
+    let order = clean_order(order)?;
+    crate::setup_prefs::save_rail_order(&crate::setup_prefs::prefs_dir(), &order)
+        .map_err(|e| ApiError::io(format!("could not save the tab order: {e}")))?;
+    Ok(Json(AssistantOrder { order }))
+}
+
 /// Drop repeats and refuse anything that is not a short list of short ids.
 fn clean_order(order: Vec<String>) -> Result<Vec<String>, ApiError> {
     if order.len() > MAX_ORDER_LEN {
-        return Err(ApiError::badreq("too many assistants in the order"));
+        return Err(ApiError::badreq("too many ids in the order"));
     }
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(order.len());
     for id in order {
         if id.is_empty() || id.len() > MAX_ORDER_LEN {
-            return Err(ApiError::badreq(
-                "each assistant id must be 1-64 characters",
-            ));
+            return Err(ApiError::badreq("each id must be 1-64 characters"));
         }
         if seen.insert(id.clone()) {
             out.push(id);
