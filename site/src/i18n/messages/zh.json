@@ -36,7 +36,6 @@
       "download": "下载",
       "releases": "版本发布",
       "blogTopics": "博客主题",
-      "helpTopics": "帮助主题",
       "llms": "llms.txt",
       "reportIssue": "报告问题",
       "coffee": "请我喝杯咖啡",
@@ -277,7 +276,6 @@
     "intro": "每一步都有指南和解答，从首次登录到下一张账单。",
     "empty": "暂无帮助文档。敬请期待指南和解答。",
     "browse": "按版块浏览",
-    "topics": "主题",
     "overview": "概览",
     "search": "搜索帮助",
     "browseHelp": "浏览帮助",
@@ -289,22 +287,10 @@
       "one": "{count} 篇文章",
       "other": "{count} 篇文章"
     },
-    "section": {
+    "category": {
       "title": "帮助：{title}",
       "description": "{title}相关的帮助文章。",
       "empty": "此版块暂无文章。"
-    },
-    "topicsPage": {
-      "title": "帮助主题",
-      "description": "按主题浏览 Orso 帮助文章，例如设置、协作和故障排除。",
-      "empty": "暂无帮助主题。",
-      "back": "返回帮助",
-      "all": "全部主题"
-    },
-    "topic": {
-      "title": "帮助主题：{title}",
-      "description": "{title}相关的帮助文章。",
-      "empty": "此主题下暂无文章。"
     }
   },
   "common": {

@@ -76,6 +76,9 @@ watch(open, (isOpen) => { if (!isOpen) term.value = ""; });
 
 const groups = computed<CommandPaletteGroup[]>(() => [{ id: "pages", items: items.value, ignoreFilter: true }]);
 
+/** The results area stays collapsed until there is a query, then slides open. */
+const expanded = computed(() => term.value.trim() !== "");
+
 defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !open.value; } } });
 </script>
 
@@ -103,7 +106,7 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
     v-model:open="open"
     :title="props.placeholder"
     :description="props.labels.hint"
-    :ui="{ overlay: 'z-50 bg-night/30 backdrop-blur-md', content: 'z-50 sm:max-w-xl' }"
+    :ui="{ overlay: 'z-50 bg-night/30 backdrop-blur-md', content: 'z-50 top-[12dvh] translate-y-0 sm:max-w-xl' }"
   >
     <template #content>
       <UCommandPalette
@@ -113,9 +116,14 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
         :loading="loading"
         icon="i-hugeicons-search-01"
         close
-        class="h-96"
         :ui="{
+          root: 'divide-y-0',
           input: '[&>input]:text-small',
+          content: [
+            'border-t transition-[max-height,opacity,border-color] duration-gentle ease-settle',
+            expanded ? 'max-h-96 opacity-100 border-default' : 'max-h-0 opacity-0 border-transparent',
+          ].join(' '),
+          viewport: 'min-h-0',
           item: 'items-start py-2',
           itemLabel: 'text-small font-medium text-ink whitespace-normal',
           itemDescription: 'line-clamp-2 text-label text-muted whitespace-normal',
@@ -125,8 +133,9 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
       >
         <template #empty>
           <span v-if="unavailable">{{ props.labels.unavailable }}</span>
-          <span v-else-if="term.trim() && !loading">{{ props.labels.noResults.replace("{term}", term.trim()) }}</span>
-          <span v-else>{{ props.labels.prompt }}</span>
+          <span v-else-if="!loading">{{ props.labels.noResults.replace("{term}", term.trim()) }}</span>
+          <!-- Always render something, or Nuxt UI falls back to its own "No matching data". -->
+          <span v-else aria-hidden="true">&nbsp;</span>
         </template>
       </UCommandPalette>
     </template>

@@ -7,6 +7,7 @@ import { orso } from "./integrations/orso/index.js";
 import { collections } from "./src/content/collections.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
 import { legal } from "./integrations/legal.js";
+import { help } from "./integrations/help.js";
 import { site } from "./src/site.ts";
 import { collectionsWithTranslations } from "./src/lib/translatedFiles.ts";
 
@@ -38,14 +39,24 @@ export default defineConfig({
         ],
       },
     },
+    // Buy Me a Coffee's button font, used only in the download thank-you dialog (not preloaded).
+    {
+      provider: fontProviders.local(),
+      name: "Cookie",
+      cssVariable: "--font-cookie",
+      fallbacks: ["cursive"],
+      options: {
+        variants: [{ src: ["@fontsource/cookie/files/cookie-latin-400-normal.woff2"], weight: "400", style: "normal", display: "swap" }],
+      },
+    },
   ],
   integrations: [
     mdx(),
-    // The site's collections (src/content/collections.js) plus the privacy policy and terms
-    // (see integrations/legal.js).
-    // Crowdin owns the translations (src/content.config.ts), so orso hides them on purpose.
+    // The blog from the site's collections (src/content/collections.js), Orso's own help centre
+    // (integrations/help.js) and the privacy policy and terms (integrations/legal.js). Crowdin
+    // owns the translations (src/content.config.ts), so orso hides them on purpose.
     orso({
-      collections: { ...collections, legal },
+      collections: { blog: collections.blog, blogCategories: collections.blogCategories, ...help, legal },
       hide: collectionsWithTranslations().map((name) => `${name}I18n`),
     }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.

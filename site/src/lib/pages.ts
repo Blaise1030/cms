@@ -20,18 +20,17 @@ const staticPaths = () =>
     .filter((route) => !/\[|\/_|^\/404$/.test(route))
     .map((route) => route.replace(/\/index$/, "/").replace(/^$/, "/").replace(/([^/])$/, "$1/"));
 
-/** Every page of the built site, in every language: static pages, blog posts and categories, help docs, sections and topics. */
+/** Every page of the built site, in every language: static pages, blog posts and categories, help docs and categories. */
 export async function sitePages(): Promise<SitePage[]> {
   const perLocale = await Promise.all(
     localeKeys.map(async (locale) => {
-      const [{ posts, categories }, { docs, sections, topics }] = await Promise.all([loadBlog(locale), loadHelp(locale)]);
+      const [{ posts, categories }, { docs, categories: helpCategories }] = await Promise.all([loadBlog(locale), loadHelp(locale)]);
       const pages: SitePage[] = [
         ...staticPaths().map((path) => ({ path })),
         ...posts.map((post) => ({ path: `/blog/${post.id}/`, lastmod: post.data.pubDate })),
         ...categories.map((category) => ({ path: `/blog/categories/${category.id}/`, lastmod: category.posts[0]?.data.pubDate })),
         ...docs.map((doc) => ({ path: `/help/${doc.id}/` })),
-        ...sections.map((section) => ({ path: `/help/section/${section.id}/` })),
-        ...topics.map((topic) => ({ path: `/help/categories/${topic.id}/` })),
+        ...helpCategories.map((category) => ({ path: `/help/category/${category.id}/` })),
       ];
       return pages.map((page) => ({ ...page, path: localePath(locale, page.path) }));
     }),

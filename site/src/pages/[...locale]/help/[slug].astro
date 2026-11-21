@@ -4,29 +4,26 @@ import Base from "../../../layouts/Base.astro";
 import BlogToc from "../../../components/BlogToc.astro";
 import HelpShell from "../../../components/HelpShell.astro";
 import Icon from "../../../components/Icon.astro";
-import UBadge from "@nuxt/ui/components/Badge.vue";
 import { loadHelp } from "../../../lib/help";
 import { absoluteUrl, breadcrumbs, organization } from "../../../lib/seo";
 import { getI18n, localizedStaticPaths } from "../../../i18n";
 
 export const getStaticPaths = () => localizedStaticPaths(async (locale) => {
-  const { docs, sectionOf, topics } = await loadHelp(locale);
+  const { docs, categoryOf } = await loadHelp(locale);
   return docs.map((entry, index) => {
-    const section = sectionOf(entry);
+    const category = categoryOf(entry);
     return {
       params: { slug: entry.id },
       props: {
         entry,
-        section: { id: section.id, title: section.title },
-        subsection: section.subsections.find((sub) => sub.id === entry.data.subcategory)?.title,
-        topic: topics.find((topic) => topic.id === entry.data.category),
+        category: { id: category.id, title: category.title },
         previous: docs[index - 1],
         next: docs[index + 1],
       },
     };
   });
 });
-const { entry, section, subsection, topic, previous, next } = Astro.props;
+const { entry, category, previous, next } = Astro.props;
 const { t, path: to, sitePath } = getI18n(Astro.url);
 const { Content, headings } = await render(entry);
 const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
@@ -40,21 +37,20 @@ const jsonLd = [
     description: entry.data.description,
     url: absoluteUrl(path),
     mainEntityOfPage: absoluteUrl(path),
-    articleSection: section.title,
+    articleSection: category.title,
     publisher: organization(),
   },
   breadcrumbs([
     { name: t("common.home"), path: sitePath("/") },
     { name: t("help.title"), path: sitePath("/help/") },
-    { name: section.title, path: sitePath(`/help/section/${section.id}/`) },
+    { name: category.title, path: sitePath(`/help/category/${category.id}/`) },
     { name: entry.data.title, path },
   ]),
 ];
 const navLink = "group flex h-full items-start gap-3 rounded-lg border border-line bg-surface-raised px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand";
 const crumbs = [
   { label: t("help.title"), href: "/help/" },
-  { label: section.title, href: `/help/section/${section.id}/` },
-  ...(subsection ? [{ label: subsection }] : []),
+  { label: category.title, href: `/help/category/${category.id}/` },
 ];
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
@@ -62,9 +58,8 @@ const crumbs = [
     <article data-pagefind-body>
       <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
       <p class="rise-2 mt-4 max-w-prose text-body text-muted">{entry.data.description}</p>
-      {topic && <p class="mt-4"><UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={to(`/help/categories/${topic.id}/`)} label={topic.title} /></p>}
       {toc.length > 1 && <BlogToc headings={toc} variant="inline" class="xl:hidden" />}
-      <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
+      <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md prose-table:block prose-table:max-w-full prose-table:overflow-x-auto"><Content /></div>
     </article>
     {(previous || next) && (
       <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label={t("help.moreArticles")} data-pagefind-ignore>
