@@ -54,7 +54,7 @@ Links that start with `/` skip the preview's base path and break in orso. Route 
 
 ## 4. Make collections editable
 
-See **Make your content collections editable**.
+See [Make your content collections editable](../make-collections-editable/).
 
 ## 5. Add `DESIGN.md` and, if needed, `orso.json`
 
