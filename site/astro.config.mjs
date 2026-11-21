@@ -58,7 +58,8 @@ export default defineConfig({
   integrations: [
     mdx(),
     // The marketing collections plus the privacy policy and terms (see integrations/legal.js).
-    orso({ collections: { ...marketingCollections, legal } }),
+    // Crowdin owns the translation collections (blogI18n, …); the editor only edits English.
+    orso({ collections: { ...marketingCollections, legal }, exclude: [/I18n$/] }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.
     vue({ appEntrypoint: "/src/vue-app.ts" }),
     // Search indexes for the blog and help search boxes (build only; see integrations/pagefind.js).

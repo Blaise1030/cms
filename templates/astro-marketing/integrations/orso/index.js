@@ -104,7 +104,7 @@ function runnerOf(server) {
  * Load the content config through the server's runner and write the manifest.
  * With `live`, also mount the content endpoint and reload on config changes.
  */
-async function setup({ config, server, logger, live, hasPreviewPath, previewPaths }) {
+async function setup({ config, server, logger, live, hasPreviewPath, previewPaths, exclude }) {
   const root = fileURLToPath(config.root);
   const configPath = findContentConfig(fileURLToPath(config.srcDir));
   const runner = runnerOf(server);
@@ -117,6 +117,7 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
         runner,
         configPath,
         ...(hasPreviewPath ? { hasPreviewPath } : {}),
+        exclude,
       });
       writeManifest(root, result.manifest);
       ({ manifest, schemas } = result);
@@ -162,11 +163,15 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
  * when `ORSO_CONTENT_TOKEN` is set. On `astro build`, runs preview checks over the
  * output directory, and injects the preview bridge only when `ORSO_PREVIEW=1` (a pull
  * request's preview deploy).
+ *
+ * `exclude` hides collections from the editor by name (strings or RegExps), for example
+ * `[/I18n$/]` for translation collections another tool writes.
  */
 export function orso(options = {}) {
   let config;
   let command;
   const collectionsOption = options.collections;
+  const exclude = Array.isArray(options.exclude) ? options.exclude : [];
   let astroCollections = null;
   let previewPaths = null;
   let hasPreviewPath = null;
@@ -207,6 +212,7 @@ export function orso(options = {}) {
                 live: false,
                 hasPreviewPath: hasPreviewPath ?? undefined,
                 previewPaths: previewPaths ?? undefined,
+                exclude,
               }),
           });
         }
@@ -227,6 +233,7 @@ export function orso(options = {}) {
           live: true,
           hasPreviewPath: hasPreviewPath ?? undefined,
           previewPaths: previewPaths ?? undefined,
+          exclude,
         });
       },
       "astro:build:done": async ({ dir, logger }) => {

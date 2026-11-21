@@ -151,14 +151,23 @@ async function describeCollection(name, definition, schemas, { hasPreviewPath = 
   return entry;
 }
 
+/** True when a collection name matches one of the `exclude` strings or RegExps. */
+export function isExcluded(name, exclude = []) {
+  // `search` ignores a RegExp's `g` flag and lastIndex, so a shared pattern always matches the same way.
+  return exclude.some((rule) => (rule instanceof RegExp ? name.search(rule) !== -1 : rule === name));
+}
+
 /**
  * Import a content config and build the manifest plus the live schema map.
  *
  * A missing `configPath` is an empty manifest (projects without collections).
  * A module that cannot be imported, or one that does not export a `collections`
  * object, throws so the caller can keep the previous manifest.
+ *
+ * `exclude` lists collection names (strings or RegExps) the editor never sees, such as
+ * translation collections another tool owns. They are left out of the manifest entirely.
  */
-export async function loadContent({ runner, configPath, hasPreviewPath = {} } = {}) {
+export async function loadContent({ runner, configPath, hasPreviewPath = {}, exclude = [] } = {}) {
   const schemas = new Map();
   if (!configPath) return { manifest: { version: 1, collections: [] }, schemas };
 
@@ -170,6 +179,7 @@ export async function loadContent({ runner, configPath, hasPreviewPath = {} } = 
 
   const entries = [];
   for (const [name, definition] of Object.entries(collections)) {
+    if (isExcluded(name, exclude)) continue;
     entries.push(
       await describeCollection(name, definition, schemas, {
         hasPreviewPath: hasPreviewPath[name] === true,

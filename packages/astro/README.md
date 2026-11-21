@@ -106,6 +106,16 @@ const blog = defineCollection({
 });
 ```
 
+### `orso({ exclude })`
+
+Collection names the editor should never list, as strings or RegExps. Excluded collections are
+left out of `.astro/orso-content.json`, so they get no entry in the content tree and no "hidden
+collection" warning. Use it for collections another tool owns, such as Crowdin translations:
+
+```js
+orso({ collections: marketingCollections, exclude: [/I18n$/] })
+```
+
 ### `orsoGlob({ base, pattern, kind?, singleton?, ...options })`
 
 Wraps Astro's `glob()` loader and records what Astro hides, under the non-enumerable,
