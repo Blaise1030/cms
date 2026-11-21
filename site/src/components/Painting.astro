@@ -1,6 +1,6 @@
 ---
 // Decorative painted backdrop: fills its positioned parent, behind a product preview.
-import { paintingUrl, type PaintingId } from "../lib/paintings";
+import { paintingSize, paintingUrl, type PaintingId } from "../lib/paintings";
 
 interface Props {
   id: PaintingId;
@@ -9,10 +9,13 @@ interface Props {
   eager?: boolean;
 }
 const { id, class: className, eager = false } = Astro.props;
+const { width, height } = paintingSize(id);
 ---
 
 <img
   src={paintingUrl(id)}
+  width={width}
+  height={height}
   alt=""
   aria-hidden="true"
   decoding="async"
