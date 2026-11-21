@@ -106,6 +106,23 @@ const blog = defineCollection({
 });
 ```
 
+### `orso({ hide })`
+
+Some collections are not meant to be edited in orso, such as translated copies another tool
+(Crowdin, for example) writes. List them in `hide` to keep them out of the editor on purpose:
+
+```js
+export default defineConfig({
+  integrations: [orso({ hide: ["blogI18n"] })],
+});
+```
+
+A hidden collection is still in the manifest, flagged `hidden: true` and read-only. The app
+leaves it out of the content list without the "collection is hidden" warning it shows for
+collections it cannot edit (such as ones that do not use `orsoGlob`). It can name any
+collection, `orsoGlob` or not. A name that is not a collection is ignored with a warning when
+the manifest is written; `hide` that is not an array of non-empty strings throws.
+
 ### `orsoGlob({ base, pattern, kind?, singleton?, ...options })`
 
 Wraps Astro's `glob()` loader and records what Astro hides, under the non-enumerable,
@@ -152,6 +169,7 @@ is gitignored with the rest of `.astro/`):
       "singleton": null,
       "supportedForEditing": true,
       "reason": null,
+      "hidden": false,
       "hasPreviewPath": true,
       "fields": { "type": "object", "required": true, "properties": {} }
     }
@@ -160,7 +178,9 @@ is gitignored with the rest of `.astro/`):
 ```
 
 A collection whose loader is not `orsoGlob` is listed with `loader: null` and is
-read-only, because its base and pattern cannot be recovered.
+read-only, because its base and pattern cannot be recovered. A collection named in
+`orso({ hide })` is listed with `hidden: true`, `supportedForEditing: false` and the reason
+`Collection is hidden from orso`.
 
 ## Dev-only endpoint
 

@@ -104,7 +104,7 @@ function runnerOf(server) {
  * Load the content config through the server's runner and write the manifest.
  * With `live`, also mount the content endpoint and reload on config changes.
  */
-async function setup({ config, server, logger, live, hasPreviewPath, previewPaths }) {
+async function setup({ config, server, logger, live, hasPreviewPath, previewPaths, hide = [] }) {
   const root = fileURLToPath(config.root);
   const configPath = findContentConfig(fileURLToPath(config.srcDir));
   const runner = runnerOf(server);
@@ -117,7 +117,11 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
         runner,
         configPath,
         ...(hasPreviewPath ? { hasPreviewPath } : {}),
+        hide,
       });
+      for (const name of result.unknownHidden) {
+        logger.warn(`orso({ hide }) names "${name}", which is not a content collection; ignoring it.`);
+      }
       writeManifest(root, result.manifest);
       ({ manifest, schemas } = result);
     } catch (error) {
@@ -154,6 +158,15 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
   }
 }
 
+/** `orso({ hide })`: an optional array of collection names. */
+function normalizeHideOption(input) {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.some((name) => typeof name !== "string" || name.trim() === "")) {
+    throw new TypeError('orso: "hide" must be an array of collection names');
+  }
+  return [...new Set(input.map((name) => name.trim()))];
+}
+
 /**
  * The Orso Astro integration.
  *
@@ -162,11 +175,16 @@ async function setup({ config, server, logger, live, hasPreviewPath, previewPath
  * when `ORSO_CONTENT_TOKEN` is set. On `astro build`, runs preview checks over the
  * output directory, and injects the preview bridge only when `ORSO_PREVIEW=1` (a pull
  * request's preview deploy).
+ *
+ * `hide` lists collections orso leaves out on purpose (for example translated copies
+ * another tool manages). The editor skips them without the warning an unsupported
+ * collection gets.
  */
 export function orso(options = {}) {
   let config;
   let command;
   const collectionsOption = options.collections;
+  const hide = normalizeHideOption(options.hide);
   let astroCollections = null;
   let previewPaths = null;
   let hasPreviewPath = null;
@@ -207,6 +225,7 @@ export function orso(options = {}) {
                 live: false,
                 hasPreviewPath: hasPreviewPath ?? undefined,
                 previewPaths: previewPaths ?? undefined,
+                hide,
               }),
           });
         }
@@ -227,6 +246,7 @@ export function orso(options = {}) {
           live: true,
           hasPreviewPath: hasPreviewPath ?? undefined,
           previewPaths: previewPaths ?? undefined,
+          hide,
         });
       },
       "astro:build:done": async ({ dir, logger }) => {

@@ -707,6 +707,8 @@ export interface ContentCollection {
   supportedForEditing?: boolean;
   /** True when the live preview can resolve a path. Omitted means false. */
   hasPreviewPath?: boolean;
+  /** Hidden on purpose by the site (`orso({ hide })`): left out of the app without a warning. */
+  hidden?: boolean;
   reason: string | null;
   /** Field descriptors projected from the template schema. */
   fields?: FieldDescriptor;
