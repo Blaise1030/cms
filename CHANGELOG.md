@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.12
+
+[compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.11...v0.1.12)
+
+### Fixes
+
+- **deps:** Patch security vulnerabilities across workspaces ([c769d54](https://github.com/Blaise1030/CMS/commit/c769d54))
+- **deps:** Clear remaining dependency vulnerabilities ([495dcd5](https://github.com/Blaise1030/CMS/commit/495dcd5))
+
 ## v0.1.11
 
 [compare changes](https://github.com/Blaise1030/CMS/compare/v0.1.10...v0.1.11)
