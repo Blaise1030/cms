@@ -7,6 +7,7 @@ import USelect from "@nuxt/ui/components/Select.vue";
 import USwitch from "@nuxt/ui/components/Switch.vue";
 import { useChatPanelLayout, type ChatPanelLayout } from "@/lib/chatPanelLayout";
 import { useChatSteps } from "@/lib/chatSteps";
+import { useHiddenCollectionsNotice } from "@/lib/hiddenCollectionsNotice";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 import {
   SOUND_PACKS,
@@ -21,6 +22,7 @@ import ThemePreview from "./ThemePreview.vue";
 const theme = useTheme();
 const typingSound = useTypingSound();
 const chatSteps = useChatSteps();
+const hiddenCollectionsNotice = useHiddenCollectionsNotice();
 const panelLayout = useChatPanelLayout();
 
 const LAYOUT_OPTIONS: { value: ChatPanelLayout; label: string }[] = [
@@ -162,6 +164,23 @@ function playSample() {
             aria-label="Show assistant steps"
             data-testid="appearance-show-steps"
             @update:model-value="chatSteps.set"
+          />
+        </template>
+      </SettingsRow>
+    </SettingsSection>
+
+    <SettingsSection label="Content" icon="i-hugeicons-file-02">
+      <SettingsRow
+        icon="i-hugeicons-view-off"
+        title="Warn about hidden collections"
+        description="Shows a notice when a collection can't be edited here, such as Crowdin translations. They stay hidden either way."
+      >
+        <template #actions>
+          <USwitch
+            :model-value="hiddenCollectionsNotice.enabled.value"
+            aria-label="Warn about hidden collections"
+            data-testid="appearance-hidden-collections-notice"
+            @update:model-value="hiddenCollectionsNotice.set"
           />
         </template>
       </SettingsRow>
