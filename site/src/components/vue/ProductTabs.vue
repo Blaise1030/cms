@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import UTabs from "@nuxt/ui/components/Tabs.vue";
 import type { AppShotData } from "../../lib/appShotTypes";
-import { paintingUrl } from "../../lib/paintings";
+import { paintingSize, paintingUrl } from "../../lib/paintings";
 import AppShot from "./AppShot.vue";
 
 const order = ["content", "preview", "publish", "agent", "history"] as const;
@@ -20,6 +20,7 @@ const paused = ref(false);
 const reducedMotion = ref(false);
 const activeIndex = computed(() => tabs.findIndex((tab) => tab.value === value.value));
 const stage = paintingUrl("danube");
+const stageSize = paintingSize("danube");
 
 let media: MediaQueryList | undefined;
 const syncMotion = () => (reducedMotion.value = !!media?.matches);
@@ -100,7 +101,16 @@ function onFocusOut(event: FocusEvent) {
     </template>
     <template #content="{ item, index }">
       <div class="relative aspect-video w-full overflow-hidden">
-        <img :src="stage" alt="" aria-hidden="true" loading="eager" decoding="async" class="absolute inset-0 size-full object-cover" />
+        <img
+          :src="stage"
+          :width="stageSize.width"
+          :height="stageSize.height"
+          alt=""
+          aria-hidden="true"
+          loading="eager"
+          decoding="async"
+          class="absolute inset-0 size-full object-cover"
+        />
         <div class="absolute inset-0 bg-night/25" aria-hidden="true" />
         <div class="relative flex size-full flex-col items-center justify-center p-1.5 sm:p-4 md:p-6">
           <AppShot

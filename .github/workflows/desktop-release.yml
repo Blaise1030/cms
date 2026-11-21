@@ -73,6 +73,10 @@ jobs:
           mkdir desktop
           cp "${dmgs[0]}" "desktop/$name"
           (cd desktop && shasum -a 256 "$name" > "$name.sha256")
+          # Versionless alias for the site's /releases/latest/download links.
+          alias="orso-${{ matrix.target }}.dmg"
+          cp "desktop/$name" "desktop/$alias"
+          (cd desktop && shasum -a 256 "$alias" > "$alias.sha256")
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}

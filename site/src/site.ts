@@ -28,9 +28,12 @@ export const site = {
   secondaryCta: { key: "github", href: "https://github.com/Blaise1030/cms" },
   /** Header call to action; set to `null` to hide it. */
   cta: { key: "getOrso", href: "#get-orso" },
-  /** Download button: bump `version` when a new GitHub release ships; asset names must match the release. */
+  /**
+   * Download button. Links use GitHub's `releases/latest/download` alias, so they always serve the
+   * newest release; every release must publish assets named `orso-<target>.<ext>` (see release.yml
+   * and desktop-release.yml).
+   */
   release: {
-    version: "v0.1.10",
     repo: "https://github.com/Blaise1030/cms",
     /** Shown in the thank-you popup after a download. */
     coffeeUrl: "https://buymeacoffee.com/blaisetionS",

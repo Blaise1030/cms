@@ -2,7 +2,7 @@
 import UCard from "@nuxt/ui/components/Card.vue";
 import UCarousel from "@nuxt/ui/components/Carousel.vue";
 import type { AppShotData } from "../../lib/appShotTypes";
-import { paintingUrl, type PaintingId } from "../../lib/paintings";
+import { paintingSize, paintingUrl, type PaintingId } from "../../lib/paintings";
 import AppShot from "./AppShot.vue";
 
 const paintings = {
@@ -17,7 +17,12 @@ type SlideCopy = { title: string; caption: string; alt: string };
 
 /** `copy` is `home.ops.slides` from src/i18n/messages, one entry per slide. */
 const props = defineProps<{ shots: Record<SlideKind, AppShotData>; copy: Record<SlideKind, SlideCopy> }>();
-const slides = (Object.keys(paintings) as SlideKind[]).map((kind) => ({ kind, painting: paintings[kind], ...props.copy[kind] }));
+const slides = (Object.keys(paintings) as SlideKind[]).map((kind) => ({
+  kind,
+  painting: paintings[kind],
+  ...paintingSize(paintings[kind]),
+  ...props.copy[kind],
+}));
 </script>
 
 <template>
@@ -49,6 +54,8 @@ const slides = (Object.keys(paintings) as SlideKind[]).map((kind) => ({ kind, pa
       <template #header>
         <img
           :src="paintingUrl(item.painting)"
+          :width="item.width"
+          :height="item.height"
           alt=""
           aria-hidden="true"
           loading="lazy"
