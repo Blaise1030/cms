@@ -1,0 +1,46 @@
+---
+import Base from "../../../layouts/Base.astro";
+import BlogCard from "../../../components/BlogCard.astro";
+import BlogFeatured from "../../../components/BlogFeatured.astro";
+import BlogFilters from "../../../components/BlogFilters.astro";
+import PagefindSearch from "../../../components/PagefindSearch.astro";
+import { loadBlog, searchText } from "../../../lib/blog";
+import { breadcrumbs } from "../../../lib/seo";
+import { getI18n, localeStaticPaths } from "../../../i18n";
+
+export const getStaticPaths = localeStaticPaths;
+const { t, locale, sitePath } = getI18n(Astro.url);
+const { posts, categories } = await loadBlog(locale);
+const [lead, ...rest] = posts;
+---
+<Base
+  title={t("blog.title")}
+  description={t("blog.description")}
+  jsonLd={[{ "@context": "https://schema.org", "@type": "WebPage", name: t("blog.title") }, breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("blog.title"), path: sitePath("/blog/") }])]}
+>
+  <h1 class="sr-only">{t("blog.title")}</h1>
+  <div class="mx-auto w-full max-w-7xl border-x border-line">
+    {posts.length === 0 ? (
+      <p class="page py-16 text-muted">{t("blog.empty")}</p>
+    ) : (
+      <>
+        <BlogFeatured post={lead} categories={categories} search={searchText(lead, categories)} />
+        <div class="border-y border-line">
+          <div class="page flex flex-col gap-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-6 lg:py-6">
+            <h2 class="text-heading tracking-tight text-ink">{t("blog.recent")}</h2>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <BlogFilters categories={categories} />
+              <span class="hidden h-4 w-px shrink-0 bg-line-strong sm:block" aria-hidden="true"></span>
+              <PagefindSearch bundle="blog" placeholder={t("blog.search")} class="w-full sm:w-72" />
+            </div>
+          </div>
+        </div>
+        {rest.length > 0 && (
+          <div class="grid sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3" data-blog-grid>
+            {rest.map((post) => <BlogCard post={post} categories={categories} search={searchText(post, categories)} class="border-b border-line sm:border-r" />)}
+          </div>
+        )}
+      </>
+    )}
+  </div>
+</Base>

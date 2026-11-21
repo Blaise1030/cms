@@ -3,7 +3,9 @@ import Painting from "../Painting.astro";
 import UButton from "@nuxt/ui/components/Button.vue";
 import AppShot from "../vue/AppShot.vue";
 import { appShot } from "../../lib/appShots";
-import { href } from "../../lib/href";
+import { getI18n } from "../../i18n";
+
+const { t, path } = getI18n(Astro.url);
 
 const shot = await appShot("agent-band");
 ---
@@ -12,12 +14,12 @@ const shot = await appShot("agent-band");
   <div class="grid gap-8 md:grid-cols-12 md:items-end md:gap-10">
     <div class="md:col-span-7">
       <h2 class="text-title tracking-display text-ink">
-        Ship pages faster with an agent on your repo
+        {t("home.agentBand.title")}
       </h2>
     </div>
     <div class="flex flex-wrap gap-2 md:col-span-5 md:justify-end">
-      <UButton color="neutral" variant="outline" size="lg" label="Agentic editing" to={href("#product")} />
-      <UButton color="neutral" variant="outline" size="lg" label="Which agents work" to={href("#faq")} />
+      <UButton color="neutral" variant="outline" size="lg" label={t("home.agentBand.editing")} to={path("#product")} />
+      <UButton color="neutral" variant="outline" size="lg" label={t("home.agentBand.agents")} to={path("#faq")} />
     </div>
   </div>
 
@@ -27,7 +29,7 @@ const shot = await appShot("agent-band");
     <div class="relative flex flex-col p-4 lg:size-full lg:items-center lg:justify-center lg:p-6">
       <AppShot
         shot={shot}
-        alt="Orso's agent panel beside the site preview, where a teammate asks for changes in plain English."
+        alt={t("home.agentBand.alt")}
         sizes="(min-width: 80rem) 76rem, 100vw"
         play
         class="w-full lg:h-full lg:w-auto lg:max-w-full"

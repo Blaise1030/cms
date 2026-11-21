@@ -1,39 +1,50 @@
 ---
-// Site footer: an inset sand panel. The brand statement sits on the left, the link columns on
-// the right, and the legal row underneath. Group and link data live in `src/site.ts`.
+// Site footer: an inset sand panel. The brand statement sits on the left and the link columns,
+// ending with Legal, on the right. Group and link data live in `src/site.ts`.
 import BearMark from "./BearMark.astro";
 import UButton from "@nuxt/ui/components/Button.vue";
-import { href } from "../lib/href";
-import { site } from "../site";
+import { getI18n } from "../i18n";
+import { site, type FooterLink } from "../site";
 
-const base = import.meta.env.BASE_URL;
+const { t, path } = getI18n(Astro.url);
 const external = (link: string) => /^https?:\/\//.test(link);
-const [lead, ...tail] = site.description.split(". ");
+// The description's first sentence is the headline; the rest sits under it. Chinese ends
+// sentences with "。" and no space.
+const description = t("site.description");
+const [lead, ...tail] = description.split(/(?<=[.。])\s*/).filter(Boolean);
+const navLink = (link: (typeof site.nav)[number]) => ({ label: t(`nav.${link.key}`), href: link.href });
+const footerLink = (link: FooterLink) => ({
+  label: t(`footer.links.${link.key}`),
+  href: link.href,
+});
 const groups = [
-  { title: "Product", links: site.nav.filter((link) => link.href.startsWith("#")) },
-  { title: "Resources", links: site.nav.filter((link) => !link.href.startsWith("#")) },
-  { title: "More", links: [site.footer.source, ...site.socials.filter((social) => social.href !== site.footer.source.href)] },
+  { title: "Product", links: site.nav.filter((link) => link.href.startsWith("#")).map(navLink) },
+  { title: "Resources", links: site.nav.filter((link) => !link.href.startsWith("#")).map(navLink) },
+  { title: "More", links: [site.footer.source, ...site.socials.filter((social) => social.href !== site.footer.source.href)].map(footerLink) },
+  { title: "Legal", links: [...site.footer.links, site.footer.license].map(footerLink) },
 ]
-  .map((group) => ({ ...group, links: [...group.links, ...(site.footer.extra[group.title] ?? [])] }))
+  .map((group) => ({
+    label: t(`footer.groups.${group.title as "Product" | "Resources" | "More" | "Legal"}`),
+    links: [...group.links, ...(site.footer.extra[group.title] ?? []).map(footerLink)],
+  }))
   .filter((group) => group.links.length > 0);
-const legal = [...site.footer.links, site.footer.license];
 ---
 
 <footer class="relative mx-auto -mt-px w-full max-w-7xl border-x border-t border-line" id="site-footer">
   <div class="px-5 py-10 md:px-10 md:py-12 lg:px-14 lg:py-16">
     <div class="grid gap-12 md:grid-cols-12 md:gap-10">
       <div class="md:col-span-5">
-        <a class="inline-flex items-center gap-2.5 text-ink" href={base} aria-label={`${site.name} home`}>
+        <a class="inline-flex items-center gap-2.5 text-ink" href={path("/")} aria-label={t("site.homeLabel", { name: site.name })}>
           <BearMark class="h-5 w-auto" />
           <span class="text-body font-medium tracking-tight">{site.name}</span>
         </a>
 
         <p class="mt-8 max-w-md text-heading leading-snug font-medium tracking-display text-ink md:mt-10">
-          {lead}.
+          {lead}
         </p>
         {tail.length > 0 && (
           <p class="mt-2 max-w-md text-heading leading-snug font-medium tracking-display text-muted">
-            {tail.join(". ")}
+            {tail.join(" ")}
           </p>
         )}
 
@@ -42,17 +53,17 @@ const legal = [...site.footer.links, site.footer.license];
           variant="outline"
           size="lg"
           class="mt-8"
-          label="Get Orso"
+          label={t("nav.getOrso")}
           trailing-icon="i-hugeicons-arrow-up-right-01"
-          to={href(site.cta.href)}
+          to={path(site.cta.href)}
           rel={/^https?:\/\//.test(site.cta.href) ? "noopener noreferrer" : undefined}
         />
       </div>
 
-      <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:col-span-7" aria-label="Footer">
+      <nav class="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:col-span-7" aria-label={t("footer.label")}>
         {groups.map((group) => (
           <div>
-            <p class="text-small font-medium text-ink">{group.title}</p>
+            <p class="text-small font-medium text-ink">{group.label}</p>
             <ul class="mt-4 -ml-2.5 space-y-1 text-small text-muted">
               {group.links.map((link) => (
                 <li>
@@ -61,7 +72,7 @@ const legal = [...site.footer.links, site.footer.license];
                     variant="ghost"
                     class="text-muted"
                     label={link.label}
-                    to={href(link.href)}
+                    to={path(link.href)}
                     rel={external(link.href) ? "noopener noreferrer" : undefined}
                   />
                 </li>
@@ -70,25 +81,6 @@ const legal = [...site.footer.links, site.footer.license];
           </div>
         ))}
       </nav>
-    </div>
-
-    <div class="mt-12 flex flex-col gap-4 border-t border-line pt-6 md:flex-row md:items-center md:justify-between md:gap-8">
-      <p class="text-label text-muted">{site.footer.text}</p>
-      <ul class="-mr-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-label text-muted">
-        {legal.map((link) => (
-          <li>
-            <UButton
-              color="neutral"
-              variant="ghost"
-              size="xs"
-              class="text-muted"
-              label={link.label}
-              to={href(link.href)}
-              rel={external(link.href) ? "noopener noreferrer" : undefined}
-            />
-          </li>
-        ))}
-      </ul>
     </div>
   </div>
 </footer>

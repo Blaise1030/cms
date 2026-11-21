@@ -1,0 +1,317 @@
+{
+  "site": {
+    "tagline": "Alat pembangun untuk pasukan kandungan",
+    "description": "Biar pasukan kandungan anda menyunting laman web dengan ejen. Draf, pratonton dan Publish — kandungan kekal dalam repo anda.",
+    "homeLabel": "Laman utama {name}",
+    "alpha": "Alpha",
+    "skipToContent": "Langkau ke kandungan",
+    "language": "Bahasa"
+  },
+  "nav": {
+    "product": "Produk",
+    "howItWorks": "Cara ia berfungsi",
+    "faq": "Soalan Lazim",
+    "blog": "Blog",
+    "help": "Bantuan",
+    "github": "GitHub",
+    "getOrso": "Dapatkan Orso",
+    "main": "Utama",
+    "menu": "Menu",
+    "openMenu": "Buka menu",
+    "close": "Tutup"
+  },
+  "footer": {
+    "label": "Pengaki",
+    "groups": {
+      "Product": "Produk",
+      "Resources": "Sumber",
+      "More": "Lagi",
+      "Legal": "Undang-undang"
+    },
+    "links": {
+      "privacy": "Privasi",
+      "terms": "Terma",
+      "openSource": "Sumber terbuka",
+      "licence": "Lesen MIT",
+      "download": "Muat turun",
+      "releases": "Keluaran",
+      "blogTopics": "Topik blog",
+      "helpTopics": "Topik bantuan",
+      "llms": "llms.txt",
+      "reportIssue": "Laporkan isu",
+      "coffee": "Belanja saya kopi",
+      "portfolio": "Portfolio",
+      "github": "GitHub"
+    }
+  },
+  "download": {
+    "button": "Muat turun untuk {platform}",
+    "otherPlatform": "Pilih platform lain",
+    "allReleases": "Semua keluaran di GitHub",
+    "thanksTitle": "Terima kasih kerana memuat turun Orso",
+    "thanksDescription": "Muat turun anda akan bermula sebentar lagi.",
+    "macSteps": "Buka DMG dan seret Orso ke Applications. Orso belum dinotarikan oleh Apple, jadi macOS akan menyekatnya pada kali pertama: buka System Settings → Privacy & Security dan klik Open Anyway, atau jalankan arahan ini sekali:",
+    "macCost": "Notarisasi berharga $99 setahun. Jika Orso berguna untuk anda, belanja kopi dapat membantu menampung kosnya.",
+    "otherNote": "Orso percuma dan dibina pada masa lapang saya. Jika ia berguna untuk anda, belanja kopi membantu memastikan ia terus berjalan.",
+    "coffee": "Belanja saya kopi",
+    "later": "Mungkin lain kali"
+  },
+  "search": {
+    "hint": "Taip untuk mencari halaman, kemudian tekan Enter untuk membukanya.",
+    "unavailable": "Carian berfungsi di laman yang telah diterbitkan.",
+    "noResults": "Tiada hasil untuk “{term}”.",
+    "prompt": "Taip untuk mencari."
+  },
+  "toc": {
+    "title": "Dalam halaman ini"
+  },
+  "home": {
+    "hero": {
+      "headline": "Biar pasukan kandungan anda menyunting laman web dengan ejen.",
+      "body": "Anda pemilik repo, jadi setiap “boleh tolong tukar harga?” akan jatuh ke tangan anda. Dengan Orso, pemasar, penulis dan pengasas boleh membuat perubahan itu sendiri, melalui borang atau dengan meminta ejen. Setiap perubahan ialah pull request yang anda semak sebelum ia disiarkan.",
+      "secondary": "Lihat apa yang ia boleh buat",
+      "note": "Percuma dan sumber terbuka. Kandungan kekal dalam repo anda.",
+      "tabs": {
+        "content": {
+          "label": "Kandungan",
+          "description": "Setiap koleksi dalam repo, sebagai senarai yang boleh anda gunakan.",
+          "alt": "Editor Orso membuka catatan blog: badan Markdown di sebelah tajuk, slug, tarikh dan tagnya."
+        },
+        "preview": {
+          "label": "Pratonton",
+          "description": "Lihat draf pada desktop dan mudah alih sebelum orang lain.",
+          "alt": "Orso memaparkan pratonton catatan blog yang sama pada laman draf, dengan panel ejen terbuka di sebelahnya."
+        },
+        "publish": {
+          "label": "Terbitkan",
+          "description": "Semakan dijalankan dahulu, kemudian satu butang menyiarkannya.",
+          "alt": "Menu perubahan Orso di atas pratonton, menyenaraikan laman langsung dan draf terbuka, di sebelah Review dan Publish."
+        },
+        "agent": {
+          "label": "Ejen",
+          "description": "Minta halaman, suntingan menyeluruh atau bahagian baharu sepenuhnya.",
+          "alt": "Panel ejen Orso di sebelah pratonton laman, sedia menerima permintaan."
+        },
+        "history": {
+          "label": "Sejarah",
+          "description": "Setiap simpanan ialah titik semak yang boleh anda kembali.",
+          "alt": "Sejarah Orso: garis masa titik semak dengan pengarang, commit dan masa."
+        }
+      }
+    },
+    "logos": {
+      "label": "Serasi dengan stack anda",
+      "intro": "Serasi dengan stack dan ejen yang sudah anda gunakan",
+      "outro": "Fail yang sama. Sejarah yang sama. Proses deploy yang sama — draf, titik semak dan Publish pada repo yang sudah anda miliki."
+    },
+    "ops": {
+      "title": "Urus kerja kandungan secara berskala",
+      "body": "Meja kerja pasukan anda untuk draf, pratonton, Publish dan sejarah, dibina di atas repo yang sudah anda sediakan.",
+      "slides": {
+        "content": {
+          "title": "Koleksi yang boleh dilayari",
+          "caption": "Setiap koleksi Markdown dalam repo, sebagai senarai berserta status.",
+          "alt": "Orso menyunting catatan blog: badan di sebelah kiri, medannya (slug, tajuk, tarikh, tag) dalam borang di sebelah kanan."
+        },
+        "preview": {
+          "title": "Pratonton desktop dan mudah alih",
+          "caption": "Kongsi pautan draf, tinggalkan komen, luluskan sebelum Publish.",
+          "alt": "Orso memaparkan pratonton draf laman, dengan panel ejen terbuka di sebelahnya."
+        },
+        "publish": {
+          "title": "Terbitkan dengan senarai semak",
+          "caption": "Build, pautan dan semakan dijalankan dahulu. Satu butang menyiarkannya.",
+          "alt": "Menu perubahan Orso yang menyenaraikan laman langsung dan draf terbuka."
+        },
+        "agent": {
+          "title": "Minta dalam bahasa biasa",
+          "caption": "Halaman penuh, suntingan Soalan Lazim, atau bahagian baharu — sebagai draf.",
+          "alt": "Panel ejen Orso di sebelah pratonton laman."
+        },
+        "history": {
+          "title": "Titik semak yang boleh dipulihkan",
+          "caption": "Setiap simpanan menjadi sejarah. Pemulihan mencipta draf baharu, bukan menulis semula.",
+          "alt": "Titik semak Orso yang dibuka daripada garis masa sejarah."
+        }
+      }
+    },
+    "features": {
+      "eyebrow": "Alat mereka, repo anda",
+      "title": "Manfaatkan sepenuhnya repo anda dengan alat yang benar-benar boleh digunakan oleh pasukan",
+      "body": "Fail yang sama yang sudah anda miliki, dengan draf, pratonton dan ejen di atasnya. Tiada CMS kedua yang perlu diselaraskan.",
+      "cards": {
+        "drafts": {
+          "title": "Draf dan titik semak",
+          "description": "Setiap suntingan masuk ke draf dengan titik semak yang boleh anda pulihkan. Tiada apa-apa sampai ke laman langsung sehingga seseorang menekan Publish.",
+          "alt": "Sejarah Orso: garis masa titik semak, terbaharu dahulu, dengan pengarang, commit dan masa."
+        },
+        "review": {
+          "title": "Pratonton dan semakan",
+          "description": "Kongsi pautan pratonton, tinggalkan komen pada halaman, dan luluskan perubahan sebelum ia disiarkan — pada desktop dan mudah alih.",
+          "alt": "Orso memaparkan pratonton draf, dengan panel butiran halaman menunjukkan tajuk, penerangan dan imej media sosialnya."
+        },
+        "agent": {
+          "title": "Ejen dalam bahasa biasa",
+          "description": "Minta halaman, suntingan Soalan Lazim, atau bahagian baharu sepenuhnya. Ejen menyunting repo; anda tetap mengawal Publish.",
+          "alt": "Panel ejen Orso di sebelah pratonton laman, sedia menerima permintaan."
+        }
+      }
+    },
+    "agentBand": {
+      "title": "Siarkan halaman lebih pantas dengan ejen pada repo anda",
+      "editing": "Penyuntingan dengan ejen",
+      "agents": "Ejen yang disokong",
+      "alt": "Panel ejen Orso di sebelah pratonton laman, tempat rakan sepasukan meminta perubahan dalam bahasa biasa."
+    },
+    "proof": {
+      "eyebrow": "Pasukan sedang membuang CMS mereka. Orso membawa semua orang lain bersama.",
+      "quote": "“Dengan AI dan ejen pengekodan, kos sesuatu abstraksi tidak pernah setinggi ini.”",
+      "source": "Coding Agents & Complexity Budgets",
+      "noteTitle": "Nota daripada pembuatnya",
+      "note": "Langkah itu berkesan apabila orang yang menyunting laman sudah bekerja seperti pembangun. Kebanyakan pasukan pemasaran tidak begitu. Buang CMS, dan seminggu kemudian masih ada yang bertanya, “boleh tolong tukar harga?” Saya membina Orso supaya mereka boleh melakukannya sendiri, dengan borang, draf dan butang Publish yang selamat seperti yang diberikan oleh CMS, sementara kandungan kekal dalam repo. Jika ia belum cukup mudah untuk rakan sepasukan saya yang bukan teknikal, ia belum siap."
+    },
+    "faq": {
+      "title": "Soalan, terjawab.",
+      "intro": "Ada soalan lain? Tulis kepada pasukan kami. Manusia yang akan membalas, bukan bot tiket. {link} mempunyai panduan langkah demi langkah.",
+      "introLink": "Pusat bantuan",
+      "items": {
+        "who": {
+          "question": "Untuk siapa Project Orso?",
+          "answer": "Pasukan yang repo dimiliki oleh pembangun, tetapi kata-katanya dimiliki oleh pemasar, penulis dan pengasas. Ia memberi kumpulan kedua alat yang sudah digunakan oleh kumpulan pertama — draf, pratonton, semakan dan ejen pengekodan — tanpa perlu mempelajari semua itu."
+        },
+        "git": {
+          "question": "Adakah pasukan saya perlu tahu Git atau kod?",
+          "answer": "Tidak. Teks, catatan dan artikel bantuan mempunyai borang, dan apa-apa yang lebih besar boleh diserahkan kepada ejen dalam bahasa biasa. Mereka nampak draf, pratonton dan butang Publish, bukan branch atau commit."
+        },
+        "github": {
+          "question": "Adakah semua orang perlukan akaun GitHub?",
+          "answer": "Ya, dan itu sahaja bahagian GitHub yang akan mereka sentuh. Akses ditentukan oleh pasukan GitHub anda, jadi tiada log masuk kedua untuk diurus dan tiada senarai berasingan tentang siapa yang boleh menerbitkan."
+        },
+        "migrate": {
+          "question": "Perlukah saya memindahkan kandungan saya?",
+          "answer": "Tidak. Orso membaca Markdown yang sudah ada dalam repo anda. Buka repo dan catatan serta dokumen anda akan muncul sebagai koleksi."
+        },
+        "sites": {
+          "question": "Laman apakah yang disokong, dan apakah yang ditambah pada repo saya?",
+          "answer": "Laman Astro 7 dengan branch main. Laman baharu bermula daripada templat Orso. Untuk laman sedia ada, Orso menambah integrasi kecil dan memuatkan koleksi anda melaluinya. Skil persediaan akan membuat perubahan itu pada satu branch untuk anda semak."
+        },
+        "live": {
+          "question": "Siapa yang menentukan apa yang disiarkan?",
+          "answer": "Anda, melalui GitHub. Setiap perubahan ialah pull request ke main, dan Publish menggabungkannya setelah diluluskan. Hidupkan perlindungan branch dan tiada apa-apa akan digabungkan tanpa semakan."
+        },
+        "cms": {
+          "question": "Apakah bezanya dengan CMS yang dihoskan atau berasaskan Git?",
+          "answer": "CMS yang dihoskan menyimpan kandungan anda dalam pangkalan datanya sendiri. CMS berasaskan Git menyimpannya dalam repo anda dan memberi editor borang untuk medan yang anda konfigurasikan. Orso juga menyimpannya dalam repo anda, kemudian menambah pratonton langsung laman sebenar, semakan pull request dan ejen pengekodan untuk perubahan yang tidak boleh dibuat melalui borang."
+        },
+        "break": {
+          "question": "Bolehkah seseorang merosakkan laman langsung?",
+          "answer": "Tidak secara tidak sengaja. Setiap perubahan masuk ke draf dengan pratontonnya sendiri, tiada apa-apa disiarkan sehingga seseorang menekan Publish, dan setiap simpanan ialah titik semak yang boleh anda kembalikan dengan satu klik."
+        },
+        "agent": {
+          "question": "Ejen AI manakah yang saya perlukan?",
+          "answer": "Claude, Cursor, Codex atau OpenCode. Jika pasukan anda sudah melanggan salah satu daripada tiga yang pertama, itu sahaja yang Orso perlukan. OpenCode menjalankan model percuma dan tidak memerlukan akaun."
+        },
+        "free": {
+          "question": "Bagaimana ia boleh percuma?",
+          "answer": "Project Orso ialah projek sumber terbuka, bukan produk dengan pelan langganan. Baca kodnya, fork, jalankan secara setempat — tiada peringkat berbayar dan tiada apa-apa di sebalik paywall."
+        },
+        "stop": {
+          "question": "Apa yang berlaku jika kami berhenti menggunakan Orso?",
+          "answer": "Tiada apa-apa yang berubah. Kandungan anda sentiasa dalam bentuk Markdown di repo anda sendiri, setiap perubahan sudah ada dalam sejarahnya, dan laman itu hanyalah fail statik biasa."
+        }
+      }
+    },
+    "cta": {
+      "title": "Bersedia untuk membiarkan pasukan anda mengurus laman?",
+      "body": "Anda pasang Orso dan sambungkan repo sekali sahaja. Selepas itu, pasukan anda menyunting dengan draf, pratonton dan Publish.",
+      "github": "Lihat di GitHub",
+      "platforms": "macOS dan Linux.",
+      "facts": {
+        "free": {
+          "title": "Percuma dan sumber terbuka",
+          "detail": "Lesen MIT, tiada peringkat berbayar."
+        },
+        "repo": {
+          "title": "Kandungan kekal dalam repo anda",
+          "detail": "Markdown biasa yang sudah anda miliki."
+        },
+        "static": {
+          "title": "Fail statik, mana-mana hos",
+          "detail": "Tiada runtime dan tiada penguncian vendor."
+        }
+      }
+    }
+  },
+  "blog": {
+    "title": "Blog",
+    "description": "Berita produk, panduan praktikal dan cerita daripada pasukan di sebalik Orso.",
+    "empty": "Belum ada catatan blog. Kembali lagi nanti untuk berita dan cerita.",
+    "recent": "Catatan terkini",
+    "search": "Cari catatan",
+    "allPosts": "Semua catatan",
+    "categoriesLabel": "Kategori blog",
+    "tags": "Tag",
+    "keepReading": "Teruskan membaca",
+    "posts": "Catatan",
+    "postCount": {
+      "one": "{count} catatan",
+      "other": "{count} catatan"
+    },
+    "categories": {
+      "title": "Kategori blog",
+      "description": "Layari catatan blog Orso mengikut topik: berita produk, panduan praktikal dan cerita syarikat.",
+      "empty": "Belum ada kategori blog.",
+      "back": "Kembali ke Blog",
+      "all": "Semua kategori",
+      "crumb": "Kategori"
+    },
+    "category": {
+      "title": "Blog: {title}",
+      "description": "Catatan blog tentang {title}.",
+      "empty": "Belum ada catatan dalam kategori ini."
+    }
+  },
+  "help": {
+    "title": "Bantuan",
+    "description": "Panduan dan jawapan untuk menggunakan Orso, daripada menyambungkan repo hingga draf, pratonton dan Publish.",
+    "intro": "Panduan dan jawapan untuk setiap langkah, daripada log masuk pertama hingga invois seterusnya.",
+    "empty": "Belum ada dokumen bantuan. Kembali lagi nanti untuk panduan dan jawapan.",
+    "browse": "Layari mengikut bahagian",
+    "topics": "Topik",
+    "overview": "Gambaran keseluruhan",
+    "search": "Cari bantuan",
+    "browseHelp": "Layari bantuan",
+    "navLabel": "Navigasi bantuan",
+    "moreArticles": "Lagi artikel",
+    "previous": "Sebelumnya",
+    "next": "Seterusnya",
+    "articleCount": {
+      "one": "{count} artikel",
+      "other": "{count} artikel"
+    },
+    "section": {
+      "title": "Bantuan: {title}",
+      "description": "Artikel bantuan tentang {title}.",
+      "empty": "Belum ada artikel dalam bahagian ini."
+    },
+    "topicsPage": {
+      "title": "Topik bantuan",
+      "description": "Layari artikel bantuan Orso mengikut topik, seperti persediaan, kerjasama dan penyelesaian masalah.",
+      "empty": "Belum ada topik bantuan.",
+      "back": "Kembali ke Bantuan",
+      "all": "Semua topik"
+    },
+    "topic": {
+      "title": "Topik bantuan: {title}",
+      "description": "Artikel bantuan tentang {title}.",
+      "empty": "Belum ada artikel tentang topik ini."
+    }
+  },
+  "common": {
+    "home": "Laman Utama"
+  },
+  "legal": {
+    "lastUpdated": "Kemas kini terakhir",
+    "placeholder": "Teks pemegang tempat. Gantikan halaman ini dengan polisi anda sendiri, disemak oleh orang yang berkelayakan, sebelum anda melancarkan."
+  }
+}

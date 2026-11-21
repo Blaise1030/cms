@@ -20,6 +20,8 @@ const props = defineProps<{
   /** Site base URL, so result links include it. */
   baseUrl: string;
   placeholder: string;
+  /** Translated palette copy, from `search` in src/i18n/messages (`{term}` is filled in here). */
+  labels: { hint: string; unavailable: string; noResults: string; prompt: string };
 }>();
 
 type Pagefind = {
@@ -106,7 +108,7 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
   <UModal
     v-model:open="open"
     :title="props.placeholder"
-    description="Type to find a page, then press Enter to open it."
+    :description="props.labels.hint"
     :ui="{ overlay: 'z-50 bg-night/30 backdrop-blur-md', content: 'z-50 sm:max-w-xl' }"
   >
     <template #content>
@@ -128,9 +130,9 @@ defineShortcuts({ meta_k: { usingInput: true, handler: () => { open.value = !ope
         @update:open="open = $event"
       >
         <template #empty>
-          <span v-if="unavailable">Search works on the published site.</span>
-          <span v-else-if="term.trim() && !loading">No results for “{{ term.trim() }}”.</span>
-          <span v-else>Type to search.</span>
+          <span v-if="unavailable">{{ props.labels.unavailable }}</span>
+          <span v-else-if="term.trim() && !loading">{{ props.labels.noResults.replace("{term}", term.trim()) }}</span>
+          <span v-else>{{ props.labels.prompt }}</span>
         </template>
       </UCommandPalette>
     </template>

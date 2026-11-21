@@ -4,6 +4,7 @@
 // (UCommandPalette in a UModal); type to list matching pages, pick one to open it. The index
 // only exists in a build, so under `astro dev` the palette says search is unavailable.
 import SiteSearch from "./vue/SiteSearch.vue";
+import { getI18n } from "../i18n";
 
 interface Props {
   /** Index name from astro.config.mjs, e.g. "blog" → `<base>pagefind-blog/`. */
@@ -14,8 +15,9 @@ interface Props {
 }
 const { bundle, placeholder, class: className } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+const { group } = getI18n(Astro.url);
 ---
 
 <div class:list={[className]}>
-  <SiteSearch client:idle bundlePath={`${base}pagefind-${bundle}/`} baseUrl={base} placeholder={placeholder} />
+  <SiteSearch client:idle bundlePath={`${base}pagefind-${bundle}/`} baseUrl={base} placeholder={placeholder} labels={group("search")} />
 </div>

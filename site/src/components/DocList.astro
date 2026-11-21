@@ -1,13 +1,14 @@
 ---
 // A list of help articles as cards: title and one-line description, the whole card a link.
 import UPageCard from "@nuxt/ui/components/PageCard.vue";
-import { href } from "../lib/href";
+import { getI18n } from "../i18n";
 import type { Doc } from "../lib/help";
 
 interface Props {
   docs: Doc[];
 }
 const { docs } = Astro.props;
+const { path } = getI18n(Astro.url);
 ---
 
 <ul class="grid gap-3 sm:grid-cols-2">
@@ -17,7 +18,7 @@ const { docs } = Astro.props;
         variant="outline"
         title={doc.data.title}
         description={doc.data.description}
-        to={href(`/help/${doc.id}/`)}
+        to={path(`/help/${doc.id}/`)}
         class="w-full rounded-lg bg-surface-raised transition-colors duration-gentle ease-gentle hover:bg-sand"
         ui={{
           container: "p-4 sm:p-4",

@@ -1,6 +1,7 @@
 ---
 import type { MarkdownHeading } from "astro";
 import TocCollapsible from "./vue/TocCollapsible.vue";
+import { getI18n } from "../i18n";
 
 interface Props {
   headings: MarkdownHeading[];
@@ -10,14 +11,15 @@ interface Props {
   class?: string;
 }
 const { headings, variant, class: className } = Astro.props;
+const { t } = getI18n(Astro.url);
 const railLink =
   "block text-muted transition-colors duration-quick ease-gentle hover:text-ink aria-[current=true]:text-ink";
 ---
 
 {variant === "rail" ? (
   <aside class:list={["hidden lg:block", className]}>
-    <nav class="lg:sticky lg:top-28" aria-label="On this page" data-toc>
-      <p class="text-small font-medium text-ink">On this page</p>
+    <nav class="lg:sticky lg:top-28" aria-label={t("toc.title")} data-toc>
+      <p class="text-small font-medium text-ink">{t("toc.title")}</p>
       <ul class="mt-3 flex flex-col gap-2 text-small">
         {headings.map((heading) => (
           <li>
@@ -28,5 +30,5 @@ const railLink =
     </nav>
   </aside>
 ) : (
-  <TocCollapsible client:idle class={className ?? "lg:hidden"} headings={headings.map(({ depth, slug, text }) => ({ depth, slug, text }))} />
+  <TocCollapsible client:idle class={className ?? "lg:hidden"} title={t("toc.title")} headings={headings.map(({ depth, slug, text }) => ({ depth, slug, text }))} />
 )}

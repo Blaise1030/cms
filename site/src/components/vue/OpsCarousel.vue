@@ -5,46 +5,19 @@ import type { AppShotData } from "../../lib/appShotTypes";
 import { paintingUrl, type PaintingId } from "../../lib/paintings";
 import AppShot from "./AppShot.vue";
 
-const slides = [
-  {
-    title: "Collections you can browse",
-    caption: "Every Markdown collection in the repo, as a list with status.",
-    kind: "content",
-    painting: "danube",
-    alt: "Orso editing a blog post: the body on the left, its fields (slug, title, date, tags) in a form on the right.",
-  },
-  {
-    title: "Desktop and mobile preview",
-    caption: "Share a draft link, leave comments, approve before Publish.",
-    kind: "preview",
-    painting: "bridge",
-    alt: "Orso previewing a draft of the site, with the agent panel open beside it.",
-  },
-  {
-    title: "Publish with a checklist",
-    caption: "Build, links and review run first. One button puts it live.",
-    kind: "publish",
-    painting: "toledo",
-    alt: "Orso's changes menu listing the live site and open drafts.",
-  },
-  {
-    title: "Ask in plain English",
-    caption: "Whole pages, a pass on the FAQ, or a new section — as a draft.",
-    kind: "agent",
-    painting: "alps",
-    alt: "Orso's agent panel beside the site preview.",
-  },
-  {
-    title: "Checkpoints you can restore",
-    caption: "Every save is history. Restoring makes a new draft, never a rewrite.",
-    kind: "history",
-    painting: "rocks",
-    alt: "An Orso checkpoint opened from the history timeline.",
-  },
-] as const satisfies readonly { kind: string; painting: PaintingId }[];
-type SlideKind = (typeof slides)[number]["kind"];
+const paintings = {
+  content: "danube",
+  preview: "bridge",
+  publish: "toledo",
+  agent: "alps",
+  history: "rocks",
+} as const satisfies Record<string, PaintingId>;
+type SlideKind = keyof typeof paintings;
+type SlideCopy = { title: string; caption: string; alt: string };
 
-defineProps<{ shots: Record<SlideKind, AppShotData> }>();
+/** `copy` is `home.ops.slides` from src/i18n/messages, one entry per slide. */
+const props = defineProps<{ shots: Record<SlideKind, AppShotData>; copy: Record<SlideKind, SlideCopy> }>();
+const slides = (Object.keys(paintings) as SlideKind[]).map((kind) => ({ kind, painting: paintings[kind], ...props.copy[kind] }));
 </script>
 
 <template>
@@ -85,7 +58,7 @@ defineProps<{ shots: Record<SlideKind, AppShotData> }>();
         <div class="absolute inset-0 bg-night/20" aria-hidden="true" />
         <div class="relative p-2 md:p-3">
           <AppShot
-            :shot="shots[item.kind]"
+            :shot="props.shots[item.kind]"
             :alt="item.alt"
             sizes="(min-width: 64rem) 32rem, (min-width: 48rem) 50vw, 80vw"
             class="aspect-3/2 w-full"

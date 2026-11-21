@@ -1,31 +1,33 @@
 ---
 import { render } from "astro:content";
 import { Image } from "astro:assets";
-import Base from "../../layouts/Base.astro";
-import Painting from "../../components/Painting.astro";
-import { paintingFor } from "../../lib/paintings";
-import BlogCard from "../../components/BlogCard.astro";
-import BlogToc from "../../components/BlogToc.astro";
-import CtaBand from "../../components/sections/CtaBand.astro";
-import { href } from "../../lib/href";
+import Base from "../../../layouts/Base.astro";
+import Painting from "../../../components/Painting.astro";
+import { paintingFor } from "../../../lib/paintings";
+import BlogCard from "../../../components/BlogCard.astro";
+import BlogToc from "../../../components/BlogToc.astro";
+import CtaBand from "../../../components/sections/CtaBand.astro";
 import UBadge from "@nuxt/ui/components/Badge.vue";
 import UButton from "@nuxt/ui/components/Button.vue";
-import { categoriesOf, formatDate, loadBlog, morePosts } from "../../lib/blog";
-import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
-import { site } from "../../site";
+import { categoriesOf, formatDate, loadBlog, morePosts } from "../../../lib/blog";
+import { absoluteUrl, breadcrumbs, organization } from "../../../lib/seo";
+import { site } from "../../../site";
+import { getI18n, localizedStaticPaths } from "../../../i18n";
 
-export async function getStaticPaths() {
-  const { posts, categories } = await loadBlog();
-  return posts.map((entry, index) => ({
-    params: { slug: entry.id },
-    props: { entry, categories, more: morePosts(entry, posts) },
-  }));
-}
+export const getStaticPaths = () =>
+  localizedStaticPaths(async (locale) => {
+    const { posts, categories } = await loadBlog(locale);
+    return posts.map((entry) => ({
+      params: { slug: entry.id },
+      props: { entry, categories, more: morePosts(entry, posts) },
+    }));
+  });
+const { t, path: to, sitePath, locale } = getI18n(Astro.url);
 const { entry, categories, more } = Astro.props;
 const { Content, headings } = await render(entry);
 const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
 const postCategories = categoriesOf(entry, categories);
-const path = `/blog/${entry.id}/`;
+const path = sitePath(`/blog/${entry.id}/`);
 const cover = entry.data.coverImage?.src;
 const jsonLd = [
   {
@@ -39,10 +41,10 @@ const jsonLd = [
     mainEntityOfPage: absoluteUrl(path),
     image: absoluteUrl(cover ?? site.ogImage),
     keywords: entry.data.tags.length > 0 ? entry.data.tags.join(", ") : undefined,
-    author: { "@type": "Organization", name: site.name, url: absoluteUrl("/") },
+    author: { "@type": "Organization", name: site.name, url: absoluteUrl(sitePath("/")) },
     publisher: organization(),
   },
-  breadcrumbs([{ name: "Home", path: "/" }, { name: "Blog", path: "/blog/" }, { name: entry.data.title, path }]),
+  breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("blog.title"), path: sitePath("/blog/") }, { name: entry.data.title, path }]),
 ];
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" published={entry.data.pubDate} image={cover} imageAlt={entry.data.coverAlt} jsonLd={jsonLd}>
@@ -51,13 +53,13 @@ const jsonLd = [
       <!-- Three columns on desktop: back link | centred article | "On this page". -->
       <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,42rem)_minmax(0,1fr)] lg:gap-12">
         <div data-pagefind-ignore>
-          <UButton color="neutral" variant="outline" size="sm" class="rounded-full lg:sticky lg:top-28" icon="i-hugeicons-arrow-left-02" label="Blog" to={href("/blog/")} />
+          <UButton color="neutral" variant="outline" size="sm" class="rounded-full lg:sticky lg:top-28" icon="i-hugeicons-arrow-left-02" label={t("blog.title")} to={to("/blog/")} />
         </div>
         <div class="min-w-0">
           <div class="rise flex flex-wrap items-center gap-x-4 gap-y-1">
-            <time class="label" datetime={entry.data.pubDate}>{formatDate(entry.data.pubDate)}</time>
+            <time class="label" datetime={entry.data.pubDate}>{formatDate(entry.data.pubDate, locale)}</time>
             {postCategories.map((category) => (
-              <UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={href(`/blog/categories/${category.id}/`)} label={category.title} />
+              <UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={to(`/blog/categories/${category.id}/`)} label={category.title} />
             ))}
           </div>
           <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
@@ -77,7 +79,7 @@ const jsonLd = [
             ]}
           ><Content /></div>
           {entry.data.tags.length > 0 && (
-            <ul class="mt-10 flex max-w-prose flex-wrap gap-2" aria-label="Tags">
+            <ul class="mt-10 flex max-w-prose flex-wrap gap-2" aria-label={t("blog.tags")}>
               {entry.data.tags.map((tag) => <li><UBadge color="neutral" variant="soft" class="text-muted" label={`#${tag}`} /></li>)}
             </ul>
           )}
@@ -87,7 +89,7 @@ const jsonLd = [
     </article>
     {more.length > 0 && (
       <section class="mt-section" aria-labelledby="keep-reading">
-        <div class="border-t border-line"><h2 class="px-gutter pt-12 md:px-gutter-wide text-title tracking-display text-ink" id="keep-reading">Keep reading</h2></div>
+        <div class="border-t border-line"><h2 class="px-gutter pt-12 md:px-gutter-wide text-title tracking-display text-ink" id="keep-reading">{t("blog.keepReading")}</h2></div>
         <div class="mt-12 grid border-t border-line sm:max-lg:[&>*:nth-child(2n)]:border-r-0 sm:grid-cols-2 lg:[&>*:nth-child(3n)]:border-r-0 lg:grid-cols-3">{more.map((post) => <BlogCard post={post} categories={categories} level={3} class="border-b border-line sm:border-r" />)}</div>
       </section>
     )}

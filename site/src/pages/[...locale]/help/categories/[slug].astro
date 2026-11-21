@@ -1,0 +1,42 @@
+---
+import Base from "../../../../layouts/Base.astro";
+import CtaBand from "../../../../components/sections/CtaBand.astro";
+import PageHeader from "../../../../components/PageHeader.astro";
+import { loadHelp } from "../../../../lib/help";
+import { breadcrumbs } from "../../../../lib/seo";
+import { getI18n, localizedStaticPaths } from "../../../../i18n";
+
+export const getStaticPaths = () =>
+  localizedStaticPaths(async (locale) => {
+    const { topics } = await loadHelp(locale);
+    return topics.map((topic) => ({ params: { slug: topic.id }, props: { topic } }));
+  });
+const { topic } = Astro.props;
+const { t, path, sitePath } = getI18n(Astro.url);
+const description = topic.description ?? t("help.topic.description", { title: topic.title });
+---
+<Base
+  title={t("help.topic.title", { title: topic.title })}
+  description={description}
+  jsonLd={[
+    { "@context": "https://schema.org", "@type": "WebPage", name: topic.title, description },
+    breadcrumbs([{ name: t("common.home"), path: sitePath("/") }, { name: t("help.title"), path: sitePath("/help/") }, { name: t("help.topics"), path: sitePath("/help/categories/") }, { name: topic.title, path: sitePath(`/help/categories/${topic.id}/`) }]),
+  ]}
+>
+  <div class="mx-auto w-full max-w-7xl border-x border-b border-line">
+    <PageHeader title={topic.title} description={topic.description} back={{ label: t("help.topicsPage.all"), href: "/help/categories/" }} />
+    <div class="page mt-12">
+      {topic.docs.length === 0 ? <p class="text-muted">{t("help.topic.empty")}</p> : (
+        <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-6">{topic.docs.map((doc) => (
+          <li class="group relative flex flex-col gap-2 rounded-lg border border-line bg-surface-raised p-6 transition-colors duration-gentle ease-gentle hover:bg-sand">
+            <h2 class="text-heading tracking-tight text-ink">
+              <a class="after:absolute after:inset-0" href={path(`/help/${doc.id}/`)}>{doc.data.title}</a>
+            </h2>
+            {doc.data.description && <p class="text-muted">{doc.data.description}</p>}
+          </li>
+        ))}</ul>
+      )}
+    </div>
+    <CtaBand class="mt-section border-t border-line" />
+  </div>
+</Base>

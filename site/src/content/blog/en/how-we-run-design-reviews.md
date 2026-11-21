@@ -9,9 +9,9 @@ tags: [design, process]
 
 The designer shares the work a day ahead. Reviewers leave written comments before the meeting, so the call is for decisions, not first impressions.
 
-## One decision per review
+## End with one decision
 
-Every review ends with a single outcome: ship it, change it, or try another direction. If we cannot decide, we name who will and by when.
+Each review closes with a clear call: ship it, revise it, or explore a different direction. If the room can't agree, we name an owner and a deadline for the decision.
 
 ## Keep it short
 

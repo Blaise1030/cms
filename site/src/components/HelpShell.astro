@@ -8,7 +8,7 @@ import UBreadcrumb from "@nuxt/ui/components/Breadcrumb.vue";
 import PagefindSearch from "./PagefindSearch.astro";
 import CtaBand from "./sections/CtaBand.astro";
 import HelpNav from "./vue/HelpNav.vue";
-import { href } from "../lib/href";
+import { getI18n } from "../i18n";
 import { loadHelp, type Doc } from "../lib/help";
 
 interface Props {
@@ -18,22 +18,23 @@ interface Props {
   crumbs?: { label: string; href?: string }[];
 }
 const { current, crumbs = [] } = Astro.props;
-const { sections, docs } = await loadHelp();
+const { t, path, locale } = getI18n(Astro.url);
+const { sections, docs } = await loadHelp(locale);
 const shown = sections.filter((section) => section.docs.length > 0);
 const hasRail = Astro.slots.has("rail");
 
 const docPath = (doc: Doc) => `/help/${doc.id}/`;
-const link = (label: string, path: string): NavigationMenuItem => ({ label, to: href(path), active: path === current });
+const link = (label: string, target: string): NavigationMenuItem => ({ label, to: path(target), active: target === current });
 /** Overview, then one collapsible group per section; every section starts open. */
 const navItems: NavigationMenuItem[] = [
-  link("Overview", "/help/"),
+  link(t("help.overview"), "/help/"),
   ...shown.map((section) => {
     const sectionPath = `/help/section/${section.id}/`;
     return {
       label: section.title,
       defaultOpen: true,
       children: [
-        link("Overview", sectionPath),
+        link(t("help.overview"), sectionPath),
         ...section.loose.map((doc) => link(doc.data.title, docPath(doc))),
         ...section.subsections
           .filter((sub) => sub.docs.length > 0)
@@ -42,7 +43,7 @@ const navItems: NavigationMenuItem[] = [
     };
   }),
 ];
-const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label, to: crumb.href ? href(crumb.href) : undefined }));
+const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label, to: crumb.href ? path(crumb.href) : undefined }));
 ---
 
 <div
@@ -51,11 +52,11 @@ const breadcrumb: BreadcrumbItem[] = crumbs.map((crumb) => ({ label: crumb.label
     hasRail && "xl:grid-cols-[16rem_minmax(0,1fr)_14rem]",
   ]}
 >
-  <aside class="border-b border-line lg:border-r lg:border-b-0" aria-label="Help navigation" data-pagefind-ignore>
+  <aside class="border-b border-line lg:border-r lg:border-b-0" aria-label={t("help.navLabel")} data-pagefind-ignore>
     <div class="flex flex-col gap-4 px-gutter py-4 lg:sticky lg:top-header lg:max-h-[calc(100dvh-var(--spacing-header))] lg:overflow-y-auto lg:px-4 lg:py-6">
-      {docs.length > 0 && <PagefindSearch bundle="help" placeholder="Search help" />}
+      {docs.length > 0 && <PagefindSearch bundle="help" placeholder={t("help.search")} />}
 
-      <HelpNav client:load items={navItems} />
+      <HelpNav client:load items={navItems} labels={{ browse: t("help.browseHelp"), nav: t("help.title") }} />
     </div>
   </aside>
 

@@ -15,7 +15,8 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 ## File map
 
-- `src/site.ts` — site name, tagline, `description` (the default meta description), `url` (placeholder live address; `PUBLIC_SITE_URL` overrides it at build), default `ogImage`, header `nav` and `cta`, footer text/links and socials.
+- `src/site.ts` — site name, `url` (placeholder live address; `PUBLIC_SITE_URL` overrides it at build), default `ogImage`, header `nav` and `cta`, footer links and socials. Links name their label by `key`; the labels, tagline and description are in `src/i18n/messages/en.json`.
+- `src/i18n/` — translations. `locales.ts` lists the languages (`en` is the source with no URL prefix; `zh` Simplified Chinese and `ms` Malay are served under `/zh/` and `/ms/`). Every visitor-facing string in the templates is in `messages/en.json` and read with `const { t, path } = getI18n(Astro.url)`; `path()` turns a site path into a link in the current language. `zh.json` and `ms.json`, and the Markdown under `src/content/<collection>/zh|ms/`, are written by Crowdin (`crowdin.yml`, `.github/workflows/crowdin.yml`): never edit them by hand. Missing keys and untranslated entries fall back to English. Pages live in `src/pages/[...locale]/` so each one is built once per language; legal pages, `llms.txt`, robots and the sitemap stay at the root.
 - `src/pages/index.astro` — the landing page: renders the section components in order.
 - `src/components/sections/*.astro` — one component per landing-page section (`Hero`, `Logos`, `Ops`, `Features`, `AgentBand`, `Proof`, `Faq`, `Cta`). UI comes from Nuxt UI (Vue): import components directly (`import UButton from "@nuxt/ui/components/Button.vue"`) and use them in `.astro` files, where they render to static HTML, or inside the Vue islands in `src/components/vue/` (hydrated with `client:*`). Do not hand-build buttons, badges, menus, dialogs, tabs, accordions or carousels. Icons are Hugeicons by full literal name (`i-hugeicons-…`, or `Icon.astro` by role) so Nuxt UI bundles them at build time. Nuxt UI's colours follow the tokens through the `--ui-*` bridge at the end of `src/styles/global.css`; its options (no router, no colour-mode switch, type roles for class merging) are in `astro.config.mjs`.
 - `src/pages/blog/` — `/blog/` (all posts), `/blog/{id}/` (post), `/blog/categories/` and `/blog/categories/{id}/`.
@@ -32,7 +33,7 @@ Static Astro site. The landing page, navigation and footer are written directly 
 
 ## Conventions
 
-- Landing-page copy: edit the section component directly. Nav, footer and socials: edit `src/site.ts`.
+- Landing-page and template copy: edit `src/i18n/messages/en.json` (the component shows which key with `t("…")`); add a key there for any new visitor-facing text instead of writing it in the component. Nav, footer and socials links: edit `src/site.ts`.
 - New landing-page section: add a component in `src/components/sections/` and render it in `src/pages/index.astro`.
 - New page: add an `.astro` route in `src/pages/` wrapped in `Base`.
 - Blog posts and help docs: add or edit Markdown under `src/content/blog/en/` and `src/content/helpDocs/en/`. Categories, sections and topics are Markdown files too (frontmatter only), in their own folders under `src/content/`.

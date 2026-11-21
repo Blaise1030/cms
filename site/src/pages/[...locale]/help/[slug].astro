@@ -1,16 +1,16 @@
 ---
 import { render } from "astro:content";
-import Base from "../../layouts/Base.astro";
-import BlogToc from "../../components/BlogToc.astro";
-import HelpShell from "../../components/HelpShell.astro";
-import Icon from "../../components/Icon.astro";
-import { href } from "../../lib/href";
+import Base from "../../../layouts/Base.astro";
+import BlogToc from "../../../components/BlogToc.astro";
+import HelpShell from "../../../components/HelpShell.astro";
+import Icon from "../../../components/Icon.astro";
 import UBadge from "@nuxt/ui/components/Badge.vue";
-import { loadHelp } from "../../lib/help";
-import { absoluteUrl, breadcrumbs, organization } from "../../lib/seo";
+import { loadHelp } from "../../../lib/help";
+import { absoluteUrl, breadcrumbs, organization } from "../../../lib/seo";
+import { getI18n, localizedStaticPaths } from "../../../i18n";
 
-export async function getStaticPaths() {
-  const { docs, sectionOf, topics } = await loadHelp();
+export const getStaticPaths = () => localizedStaticPaths(async (locale) => {
+  const { docs, sectionOf, topics } = await loadHelp(locale);
   return docs.map((entry, index) => {
     const section = sectionOf(entry);
     return {
@@ -25,11 +25,13 @@ export async function getStaticPaths() {
       },
     };
   });
-}
+});
 const { entry, section, subsection, topic, previous, next } = Astro.props;
+const { t, path: to, sitePath } = getI18n(Astro.url);
 const { Content, headings } = await render(entry);
 const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
-const path = `/help/${entry.id}/`;
+const current = `/help/${entry.id}/`;
+const path = sitePath(current);
 const jsonLd = [
   {
     "@context": "https://schema.org",
@@ -42,47 +44,47 @@ const jsonLd = [
     publisher: organization(),
   },
   breadcrumbs([
-    { name: "Home", path: "/" },
-    { name: "Help", path: "/help/" },
-    { name: section.title, path: `/help/section/${section.id}/` },
+    { name: t("common.home"), path: sitePath("/") },
+    { name: t("help.title"), path: sitePath("/help/") },
+    { name: section.title, path: sitePath(`/help/section/${section.id}/`) },
     { name: entry.data.title, path },
   ]),
 ];
 const navLink = "group flex h-full items-start gap-3 rounded-lg border border-line bg-surface-raised px-4 py-3 transition-colors duration-gentle ease-gentle hover:bg-sand";
 const crumbs = [
-  { label: "Help", href: "/help/" },
+  { label: t("help.title"), href: "/help/" },
   { label: section.title, href: `/help/section/${section.id}/` },
   ...(subsection ? [{ label: subsection }] : []),
 ];
 ---
 <Base title={entry.data.title} description={entry.data.description} type="article" jsonLd={jsonLd}>
-  <HelpShell current={path} crumbs={crumbs}>
+  <HelpShell current={current} crumbs={crumbs}>
     <article data-pagefind-body>
       <h1 class="rise mt-4 text-title tracking-display text-ink">{entry.data.title}</h1>
       <p class="rise-2 mt-4 max-w-prose text-body text-muted">{entry.data.description}</p>
-      {topic && <p class="mt-4"><UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={href(`/help/categories/${topic.id}/`)} label={topic.title} /></p>}
+      {topic && <p class="mt-4"><UBadge as="a" color="neutral" variant="outline" class="relative z-10" href={to(`/help/categories/${topic.id}/`)} label={topic.title} /></p>}
       {toc.length > 1 && <BlogToc headings={toc} variant="inline" class="xl:hidden" />}
       <div class="prose mt-10 max-w-prose prose-img:h-auto prose-img:max-w-full prose-img:rounded-md"><Content /></div>
     </article>
     {(previous || next) && (
-      <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label="More articles" data-pagefind-ignore>
+      <nav class="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label={t("help.moreArticles")} data-pagefind-ignore>
         <div>{previous && (
-          <a class={navLink} href={href(`/help/${previous.id}/`)}>
+          <a class={navLink} href={to(`/help/${previous.id}/`)}>
             <Icon name="chevron-left" class="mt-0.5 size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:-translate-x-0.5" />
-            <span class="min-w-0"><span class="block text-small text-muted">Previous</span><span class="mt-0.5 block font-medium text-ink">{previous.data.title}</span></span>
+            <span class="min-w-0"><span class="block text-small text-muted">{t("help.previous")}</span><span class="mt-0.5 block font-medium text-ink">{previous.data.title}</span></span>
           </a>
         )}</div>
         <div>{next && (
-          <a class:list={[navLink, "justify-end text-right"]} href={href(`/help/${next.id}/`)}>
-            <span class="min-w-0"><span class="block text-small text-muted">Next</span><span class="mt-0.5 block font-medium text-ink">{next.data.title}</span></span>
+          <a class:list={[navLink, "justify-end text-right"]} href={to(`/help/${next.id}/`)}>
+            <span class="min-w-0"><span class="block text-small text-muted">{t("help.next")}</span><span class="mt-0.5 block font-medium text-ink">{next.data.title}</span></span>
             <Icon name="chevron-right" class="mt-0.5 size-4 shrink-0 text-muted transition-transform duration-quick ease-gentle group-hover:translate-x-0.5" />
           </a>
         )}</div>
       </nav>
     )}
     {toc.length > 1 && (
-      <nav slot="rail" aria-label="On this page" data-toc>
-        <p class="text-small font-medium text-ink">On this page</p>
+      <nav slot="rail" aria-label={t("toc.title")} data-toc>
+        <p class="text-small font-medium text-ink">{t("toc.title")}</p>
         <ul class="mt-3 flex flex-col gap-2 text-small">
           {toc.map((heading) => (
             <li>

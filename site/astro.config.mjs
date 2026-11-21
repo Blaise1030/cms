@@ -6,6 +6,7 @@ import { defineConfig, fontProviders } from "astro/config";
 import { orso } from "./integrations/orso/index.js";
 import { marketingCollections } from "./integrations/orso/marketing.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
+import { legal } from "./integrations/legal.js";
 import { site } from "./src/site.ts";
 
 import vue from "@astrojs/vue";
@@ -46,14 +47,17 @@ export default defineConfig({
   ],
   integrations: [
     mdx(),
-    orso({ collections: marketingCollections }),
+    // The marketing collections plus the privacy policy and terms (see integrations/legal.js).
+    orso({ collections: { ...marketingCollections, legal } }),
     // Nuxt UI components (Vue), rendered to static HTML in .astro files and hydrated as islands.
     vue({ appEntrypoint: "/src/vue-app.ts" }),
     // Search indexes for the blog and help search boxes (build only; see integrations/pagefind.js).
     pagefindIndex({
       sections: [
-        { name: "blog", glob: "blog/**/*.html" },
-        { name: "help", glob: "help/**/*.html" },
+        // Translated pages (zh/blog/…) join the same index; Pagefind splits it by <html lang>, so
+        // each language only searches its own pages.
+        { name: "blog", glob: "{blog,*/blog}/**/*.html" },
+        { name: "help", glob: "{help,*/help}/**/*.html" },
       ],
     }),
   ],
@@ -68,12 +72,19 @@ export default defineConfig({
         components: false,
         ui: {
           colors: { primary: "blue", neutral: "zinc" },
+          // Outlined neutral buttons and badges draw their edge in the site's border gray.
+          button: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
+          badge: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
+          kbd: { compoundVariants: [{ color: "neutral", variant: "outline", class: "ring-line" }] },
           // Teach Nuxt UI's class merging the site's type roles, so `text-body` on a component
           // replaces its `text-sm` instead of being mistaken for a colour.
           tv: {
             twMergeConfig: {
               extend: {
-                classGroups: { "font-size": [{ text: ["label", "small", "body", "heading", "title", "display", "watermark"] }] },
+                classGroups: {
+                  "font-size": [{ text: ["label", "small", "body", "heading", "title", "display", "watermark"] }],
+                  "ring-color": [{ ring: ["line", "line-strong"] }],
+                },
               },
             },
           },

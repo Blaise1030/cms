@@ -10,7 +10,11 @@ import UNavigationMenu from "@nuxt/ui/components/NavigationMenu.vue";
  * "Browse help" collapsible. Built from plain data so it can hydrate as an island. Collapsed
  * groups stay in the HTML (hidden) so every article link is crawlable.
  */
-const props = defineProps<{ items: NavigationMenuItem[] }>();
+const props = defineProps<{
+  items: NavigationMenuItem[];
+  /** Translated "Browse help" button and the sidebar's accessible name. */
+  labels: { browse: string; nav: string };
+}>();
 
 const navUi = {
   list: "gap-0.5",
@@ -28,7 +32,7 @@ const navUi = {
       color="neutral"
       variant="ghost"
       block
-      label="Browse help"
+:label="props.labels.browse"
       trailing-icon="i-hugeicons-arrow-down-01"
       class="group justify-between px-0 text-small font-medium text-ink hover:bg-transparent"
       :ui="{ trailingIcon: 'size-4 text-muted transition-transform group-data-[state=open]:rotate-180' }"
@@ -43,7 +47,7 @@ const navUi = {
     orientation="vertical"
     color="neutral"
     :unmount-on-hide="false"
-    aria-label="Help"
+    :aria-label="props.labels.nav"
     class="hidden lg:flex"
     :ui="navUi"
   />
