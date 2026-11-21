@@ -53,7 +53,11 @@ fn clone_with_origin(tmp: &Path) -> PathBuf {
         &["clone", "--bare", src.to_str().unwrap(), "remote.git"],
     );
     git_cli(tmp, &["clone", "remote.git", "work"]);
-    tmp.join("work")
+    let work = tmp.join("work");
+    // Get latest commits merges with the repository's identity: a CI machine has no global one.
+    git_cli(&work, &["config", "user.name", "Ada"]);
+    git_cli(&work, &["config", "user.email", "ada@example.com"]);
+    work
 }
 
 fn commit_file(dir: &Path, name: &str, content: &str) {
