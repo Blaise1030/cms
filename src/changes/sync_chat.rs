@@ -646,8 +646,12 @@ fn repair_prompt(tail: &str) -> String {
 
 /// Builds the sync's worktree as the writer's site: dependencies linked in,
 /// `npm run build` with a 300 s cap, and the output appended to the chat's log.
+///
+/// The site may live in a folder of the repository (`orso.json` `root`, with its dependencies
+/// in `installDir`): the build runs there, not at the top, the way snapshot builds do. Settings
+/// come from the writer's own checkout, so a combine can't point the build elsewhere.
 pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), BuildFail> {
-    let Some(site) = record.cwd.clone() else {
+    let Some(worktree) = record.cwd.clone() else {
         return Err(BuildFail::Failed);
     };
     let Some(project) = project_of(&state_dir(state), &record.id) else {
@@ -660,8 +664,14 @@ pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), Build
             return Err(BuildFail::Failed);
         }
     };
+    let settings = crate::settings::load(&project_dir)
+        .unwrap_or_else(|_| crate::settings::ProjectSettings::defaults());
+    let site = settings.site_dir(&worktree);
     // A repair build finds the link already there.
-    match crate::conflict_preview::link_node_modules(&project_dir, &site) {
+    match crate::conflict_preview::link_node_modules(
+        &settings.install_path(&project_dir),
+        &settings.install_path(&worktree),
+    ) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => {
@@ -1227,11 +1237,12 @@ pub async fn verify(
     }
     conflicts::checked(
         worktree,
-        &["add", "-A", "--", ".", ":!node_modules"],
+        &["add", "-A", "--", ".", ":(exclude,glob)**/node_modules"],
         &[],
         None,
     )
     .await?;
+    unstage_dependency_links(worktree).await?;
     if let Some(markers) = marker_files(worktree, &state.files).await? {
         return Ok(Verdict::Markers(markers));
     }
@@ -1285,6 +1296,31 @@ async fn marker_files(worktree: &Path, files: &[String]) -> Result<Option<usize>
 }
 
 /// Whether the agent added a symlink the incoming side did not already have.
+/// Unstage the dependency link the build adds (`node_modules`, a symlink, wherever the site's
+/// `installDir` puts it). It is never the writer's content, but the agent's own `git add -A`
+/// can stage it, and a new symlink would then fail the combine ("one file still needs another
+/// look"). Only symlinks named `node_modules` are touched, so a vendored folder is left alone.
+async fn unstage_dependency_links(worktree: &Path) -> Result<(), ApiError> {
+    let staged = conflicts::checked(worktree, &["ls-files", "-s", "-z"], &[], None).await?;
+    let staged = String::from_utf8_lossy(&staged);
+    let links: Vec<&str> = staged
+        .split('\0')
+        .filter_map(|entry| entry.split_once('\t'))
+        .filter(|(meta, path)| {
+            meta.starts_with("120000 ")
+                && (*path == "node_modules" || path.ends_with("/node_modules"))
+        })
+        .map(|(_, path)| path)
+        .collect();
+    if links.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["--literal-pathspecs", "rm", "-q", "--cached", "--"];
+    args.extend(links);
+    conflicts::checked(worktree, &args, &[], None).await?;
+    Ok(())
+}
+
 async fn new_symlink(worktree: &Path, tip: &str, incoming: &str) -> Result<bool, ApiError> {
     let raw = conflicts::checked(
         worktree,
