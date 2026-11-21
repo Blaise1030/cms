@@ -5,7 +5,7 @@ category: assistant
 order: 1
 ---
 
-The assistant is a coding agent that edits your project for you. You describe what you want, and it changes the files on your current change. Once it's set up, see [Write good requests](../write-good-requests/).
+The assistant is a coding agent that edits your project for you. You describe what you want, and it changes the files on your current change. Once it's set up, see [Write good requests](/help/write-good-requests/).
 
 ## Providers
 
@@ -23,7 +23,7 @@ The assistant is a coding agent that edits your project for you. You describe wh
 3. orso downloads and checks the tool for you. You don't need to run any installer.
 4. If the provider needs an account, sign in when asked.
 
-orso keeps its own pinned copy of each tool and checks it every time it starts, so an update elsewhere on your computer won't break it. If it won't start, see [The assistant won't start](../assistant-wont-start/).
+orso keeps its own pinned copy of each tool and checks it every time it starts, so an update elsewhere on your computer won't break it. If it won't start, see [The assistant won't start](/help/assistant-wont-start/).
 
 ## Switch providers
 

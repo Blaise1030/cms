@@ -11,7 +11,7 @@ Reviews happen on the change's pull request, so reviewers can use orso or GitHub
 
 1. Open the preview link and click through the changed pages.
 2. Leave comments on anything that needs fixing. Be specific: say which page, what's wrong and what you expected.
-3. When it looks right, approve the pull request. The author can then [publish it](../publish-your-changes/).
+3. When it looks right, approve the pull request. The author can then [publish it](/help/publish-your-changes/).
 
 ## Screenshots in comments
 

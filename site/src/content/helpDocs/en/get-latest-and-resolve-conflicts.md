@@ -11,7 +11,7 @@ When other people publish to the same site, your change can fall behind `main`. 
 
 Choose **Get latest**. orso pulls in everything published to `main` since you started your change. Most of the time this happens without any questions.
 
-Do this before you [share a preview](../share-a-preview/), and before you [publish](../publish-your-changes/), so you are testing your change against the current site.
+Do this before you [share a preview](/help/share-a-preview/), and before you [publish](/help/publish-your-changes/), so you are testing your change against the current site.
 
 ## Conflicts
 

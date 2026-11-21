@@ -15,7 +15,7 @@ The **Content** tab lists your site's content collections, such as blog posts, b
 
 ![A blog post open in the Content tab: the body in the rich-text editor, and its fields, such as slug, title, date and cover image, on the right](../../../assets/helpDocs/edit-blog-posts-and-collections/content-entry.png)
 
-If you haven't started a change yet, orso asks you to start one first. See [Edit your first page](../edit-your-first-page/).
+If you haven't started a change yet, orso asks you to start one first. See [Edit your first page](/help/edit-your-first-page/).
 
 ## Fields
 
@@ -25,7 +25,7 @@ The form is built from the collection's schema, so each field gets the right kin
 - **Dates** for publish dates
 - **References** for fields that point to another entry, such as a post's categories
 - **Lists** for things like tags
-- **Images** for covers and other pictures (see [Add images](../add-images/))
+- **Images** for covers and other pictures (see [Add images](/help/add-images/))
 
 Required fields are marked, and orso tells you if a value doesn't fit the schema.
 
@@ -39,4 +39,4 @@ Use the collection's controls to add a new entry or delete one. The entry's ID i
 
 ## Read-only collections
 
-A collection marked read-only isn't loaded with `orsoGlob`. You can still view it, and you can ask the assistant to edit its files. See [Make your content collections editable](../make-collections-editable/).
+A collection marked read-only isn't loaded with `orsoGlob`. You can still view it, and you can ask the assistant to edit its files. See [Make your content collections editable](/help/make-collections-editable/).

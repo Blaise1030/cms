@@ -21,6 +21,6 @@ Each time orso starts, it creates a new link with a new `?t=` token. An old tab 
 
 ## Still stuck
 
-- Run `orso --version` to check orso is installed ([Install orso](../install-orso/)) and on your `PATH`.
+- Run `orso --version` to check orso is installed ([Install orso](/help/install-orso/)) and on your `PATH`.
 - Make sure nothing else is using orso's port.
-- See [Report a problem](../report-a-problem/).
+- See [Report a problem](/help/report-a-problem/).

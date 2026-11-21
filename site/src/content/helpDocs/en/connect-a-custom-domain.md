@@ -5,7 +5,7 @@ category: new-site
 order: 4
 ---
 
-Your site first goes live on a `workers.dev` address (see [Publish your site to Cloudflare](../publish-to-cloudflare/)). To use your own domain:
+Your site first goes live on a `workers.dev` address (see [Publish your site to Cloudflare](/help/publish-to-cloudflare/)). To use your own domain:
 
 1. Add the domain to your Cloudflare account, if it isn't there already, and follow Cloudflare's steps to point its nameservers at Cloudflare.
 2. In the Cloudflare dashboard, open **Workers & Pages** and choose your site's Worker.
@@ -18,4 +18,4 @@ Cloudflare creates the DNS record and certificate for you. It can take a few min
 
 Set your site's public address so links, the sitemap and social cards use the new domain. In the template, that is the `url` in `src/site.ts`. You can ask the assistant to "change the site URL to https://www.example.com".
 
-[Publish the change](../publish-your-changes/), and **Open live site** will use the new address after the next deploy.
+[Publish the change](/help/publish-your-changes/), and **Open live site** will use the new address after the next deploy.

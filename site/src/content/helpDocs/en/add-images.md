@@ -14,7 +14,7 @@ Put the cursor where you want the image, then do one of these:
 
 ![The image dialog that opens from the editor's image button, reading "Choose an image or drop it here"](../../../assets/helpDocs/add-images/screenshot-2026-11-21-at-11-54-14-am.png)
 
-orso saves the file in your project and adds it to the body. For more on editing entries, see [Edit blog posts and other collections](../edit-blog-posts-and-collections/).
+orso saves the file in your project and adds it to the body. For more on editing entries, see [Edit blog posts and other collections](/help/edit-blog-posts-and-collections/).
 
 ## In an image field
 

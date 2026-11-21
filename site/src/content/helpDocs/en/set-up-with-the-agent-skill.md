@@ -24,12 +24,12 @@ Open your coding agent (such as Claude Code, Codex or Cursor) in the repo and as
 
 ## What the skill does
 
-1. **Checks the repo** against every requirement in [Is my site compatible?](../is-my-site-compatible/) and reports each one as passing, failing or not applicable.
+1. **Checks the repo** against every requirement in [Is my site compatible?](/help/is-my-site-compatible/) and reports each one as passing, failing or not applicable.
 2. **Wires everything in on a new branch,** with a separate commit for each step so you can review them:
    - copies orso's integration into `integrations/orso/` and adds its dependencies
    - routes `base` and the HMR socket through orso's settings
    - makes links base-aware
-   - switches the collections you want to edit to `orsoGlob` ([see how](../make-collections-editable/))
+   - switches the collections you want to edit to `orsoGlob` ([see how](/help/make-collections-editable/))
    - adds `DESIGN.md` and, if needed, `orso.json`
 3. **Migrates older sites** that still use the `orso-astro` package.
 4. **Verifies** that the dev server starts and the content manifest builds before it reports back.

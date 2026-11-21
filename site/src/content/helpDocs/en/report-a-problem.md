@@ -5,7 +5,7 @@ category: troubleshooting
 order: 5
 ---
 
-If none of the troubleshooting articles help, such as [The preview is blank or broken](../preview-not-loading/) or [The assistant won't start](../assistant-wont-start/), open an issue on GitHub at github.com/Blaise1030/cms/issues.
+If none of the troubleshooting articles help, such as [The preview is blank or broken](/help/preview-not-loading/) or [The assistant won't start](/help/assistant-wont-start/), open an issue on GitHub at github.com/Blaise1030/cms/issues.
 
 ## What to include
 

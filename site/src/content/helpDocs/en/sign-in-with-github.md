@@ -5,7 +5,7 @@ category: getting-started
 order: 3
 ---
 
-orso uses GitHub to clone your site, push your changes and open pull requests. There are two ways to sign in. If something goes wrong, see [GitHub sign-in fails or repos are missing](../github-sign-in-problems/).
+orso uses GitHub to clone your site, push your changes and open pull requests. There are two ways to sign in. If something goes wrong, see [GitHub sign-in fails or repos are missing](/help/github-sign-in-problems/).
 
 ## Easiest: the GitHub CLI
 

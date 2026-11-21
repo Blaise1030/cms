@@ -22,10 +22,10 @@ orso works best with sites made from its template, but an existing Astro site wo
 | Requirement | Unlocks |
 | --- | --- |
 | orso's integration in `integrations/orso/`, `orso()` in the config, and the `yaml`, `js-yaml`, `jsonc-parser` and `linkedom` packages | The Content tab and page checks |
-| Collections loaded with `orsoGlob` ([how](../make-collections-editable/)) (`*.md`, `*.mdx` or `*.json`, with a schema) | Editable content |
+| Collections loaded with `orsoGlob` ([how](/help/make-collections-editable/)) (`*.md`, `*.mdx` or `*.json`, with a schema) | Editable content |
 | A `DESIGN.md` at the repo root | The Design tab |
 | A deploy that records GitHub deployments with an `environment_url` | Preview and **Open live site** links |
-| An `orso.json` ([how](../configure-orso-json/)), if you use pnpm or yarn or the site isn't at the repo root | The right install and dev commands |
+| An `orso.json` ([how](/help/configure-orso-json/)), if you use pnpm or yarn or the site isn't at the repo root | The right install and dev commands |
 
 ## Optional
 
@@ -39,4 +39,4 @@ If your site uses Next.js, Hugo or another framework, only the live preview can 
 
 ## Next step
 
-The easiest way to meet these requirements is [Set up your site with the agent skill](../set-up-with-the-agent-skill/). If you would rather make the changes yourself, see [Set up your site by hand](../set-up-by-hand/).
+The easiest way to meet these requirements is [Set up your site with the agent skill](/help/set-up-with-the-agent-skill/). If you would rather make the changes yourself, see [Set up your site by hand](/help/set-up-by-hand/).

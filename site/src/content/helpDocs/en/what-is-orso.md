@@ -12,7 +12,7 @@ orso is a site builder you run on your own computer. You edit your site's pages 
 - **Your site is a plain Astro project.** It lives in a Git repo on GitHub that you own. If you stop using orso, the site still builds and deploys without it.
 - **orso runs locally.** It is a single program, `orso`, that serves its editor in your browser. It only listens on your own computer.
 - **Every edit happens on a change.** A change is a Git branch with a readable title. Your live site never changes until you publish.
-- **Publishing is a pull request.** You [share a preview](../share-a-preview/), someone [reviews it](../review-a-change/), and [publishing](../publish-your-changes/) merges it into `main`, which deploys your live site.
+- **Publishing is a pull request.** You [share a preview](/help/share-a-preview/), someone [reviews it](/help/review-a-change/), and [publishing](/help/publish-your-changes/) merges it into `main`, which deploys your live site.
 
 ## What you need
 
@@ -23,8 +23,8 @@ orso downloads its own copy of Node and the assistant tools the first time it ru
 
 ## Where to go next
 
-- [Install orso](../install-orso/) to get set up.
-- [Create your first site](../create-your-first-site/) if you are starting from scratch.
-- [Is my site compatible?](../is-my-site-compatible/) if you already have an Astro site.
+- [Install orso](/help/install-orso/) to get set up.
+- [Create your first site](/help/create-your-first-site/) if you are starting from scratch.
+- [Is my site compatible?](/help/is-my-site-compatible/) if you already have an Astro site.
 
 orso is free and open source under the MIT licence.

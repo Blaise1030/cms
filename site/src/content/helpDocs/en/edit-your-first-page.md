@@ -17,8 +17,8 @@ You can see the current change, switch to another one or start a **New change** 
 
 You can edit in three ways:
 
-- **In the Content tab.** Open a blog post or help article, edit its fields and body, and the preview updates as you type. See [Edit blog posts and other collections](../edit-blog-posts-and-collections/).
-- **With the assistant.** Describe what you want, such as "make the hero headline shorter and friendlier", and the agent edits the files for you. See [Write good requests](../write-good-requests/).
+- **In the Content tab.** Open a blog post or help article, edit its fields and body, and the preview updates as you type. See [Edit blog posts and other collections](/help/edit-blog-posts-and-collections/).
+- **With the assistant.** Describe what you want, such as "make the hero headline shorter and friendlier", and the agent edits the files for you. See [Write good requests](/help/write-good-requests/).
 - **In the Code tab.** Edit the files directly if you are comfortable with Astro.
 
 ## Check the preview
@@ -27,8 +27,8 @@ The **Preview** tab shows your site with your change applied. Click through the 
 
 ## Save your work
 
-orso saves versions of your work as you go. You can see them in the **History** tab and restore an earlier one if you change your mind. See [Use history to restore earlier versions](../history-and-restoring/).
+orso saves versions of your work as you go. You can see them in the **History** tab and restore an earlier one if you change your mind. See [Use history to restore earlier versions](/help/history-and-restoring/).
 
 ## When you are happy
 
-Choose **Share preview** to push the change and open a pull request. See [Share a preview](../share-a-preview/) for what happens next.
+Choose **Share preview** to push the change and open a pull request. See [Share a preview](/help/share-a-preview/) for what happens next.

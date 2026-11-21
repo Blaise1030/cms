@@ -19,6 +19,6 @@ orso never changes this for you. A repo admin sets it up once on GitHub.
 
 ## orso's hint
 
-After **Share preview** (see [Share a preview](../share-a-preview/)), orso checks whether `main` requires a pull request. If it doesn't, orso shows a hint. The hint only appears for repo admins, and disappears once the rule is in place.
+After **Share preview** (see [Share a preview](/help/share-a-preview/)), orso checks whether `main` requires a pull request. If it doesn't, orso shows a hint. The hint only appears for repo admins, and disappears once the rule is in place.
 
 Choose **Dismiss** to hide the hint for that project permanently. Other projects still show it.

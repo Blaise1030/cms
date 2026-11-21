@@ -13,7 +13,7 @@ The **Design** tab holds settings that apply to the whole site, such as colours,
 2. Change a colour, font or other value.
 3. Check the result in the **Preview**, in both light and dark mode if your site has both.
 
-Like every edit, design changes go onto your current change and only reach the live site when you [publish](../publish-your-changes/).
+Like every edit, design changes go onto your current change and only reach the live site when you [publish](/help/publish-your-changes/).
 
 ## Keep things readable
 
@@ -22,7 +22,7 @@ Like every edit, design changes go onto your current change and only reach the l
 
 ## Bigger redesigns
 
-For larger changes, such as a new layout or a new section style, describe what you want to the assistant. See [Write good requests](../write-good-requests/). For example: "make the header sticky and use the accent colour for the active link".
+For larger changes, such as a new layout or a new section style, describe what you want to the assistant. See [Write good requests](/help/write-good-requests/). For example: "make the header sticky and use the accent colour for the active link".
 
 ## Sites with Tailwind
 

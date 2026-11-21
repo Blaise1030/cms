@@ -5,7 +5,7 @@ category: existing-site
 order: 3
 ---
 
-If you prefer not to use [the agent skill](../set-up-with-the-agent-skill/), these are the steps it would take. Do them on a new branch.
+If you prefer not to use [the agent skill](/help/set-up-with-the-agent-skill/), these are the steps it would take. Do them on a new branch.
 
 ## 1. Copy the integration
 
@@ -54,13 +54,13 @@ Links that start with `/` skip the preview's base path and break in orso. Route 
 
 ## 4. Make collections editable
 
-See [Make your content collections editable](../make-collections-editable/).
+See [Make your content collections editable](/help/make-collections-editable/).
 
 ## 5. Add `DESIGN.md` and, if needed, `orso.json`
 
 - Put a `DESIGN.md` at the repo root. It holds your colours, fonts and spacing in YAML front matter, followed by a short description of the look.
-- Add `orso.json` only when the defaults don't fit. See [Configure orso.json](../configure-orso-json/).
+- Add `orso.json` only when the defaults don't fit. See [Configure orso.json](/help/configure-orso-json/).
 
 ## 6. Check it
 
-Run the dev server, then open the repo in orso. The preview should load, and the Content tab should list your collections. If it doesn't, see [The preview is blank or broken](../preview-not-loading/).
+Run the dev server, then open the repo in orso. The preview should load, and the Content tab should list your collections. If it doesn't, see [The preview is blank or broken](/help/preview-not-loading/).

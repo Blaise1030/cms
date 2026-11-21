@@ -5,7 +5,7 @@ category: troubleshooting
 order: 2
 ---
 
-For the setup steps, see [Sign in with GitHub](../sign-in-with-github/).
+For the setup steps, see [Sign in with GitHub](/help/sign-in-with-github/).
 
 ## Using the GitHub CLI
 

@@ -5,7 +5,7 @@ category: existing-site
 order: 4
 ---
 
-orso can edit a content collection when it is loaded with `orsoGlob` and has a schema. Collections loaded another way still show in the Content tab, but as read-only. For editing entries, see [Edit blog posts and other collections](../edit-blog-posts-and-collections/).
+orso can edit a content collection when it is loaded with `orsoGlob` and has a schema. Collections loaded another way still show in the Content tab, but as read-only. For editing entries, see [Edit blog posts and other collections](/help/edit-blog-posts-and-collections/).
 
 ## Switch the loader
 

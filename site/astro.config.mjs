@@ -8,6 +8,8 @@ import { marketingCollections } from "./integrations/orso/marketing.js";
 import { pagefindIndex } from "./integrations/pagefind.js";
 import { legal } from "./integrations/legal.js";
 import { help } from "./integrations/help.js";
+import { satteri } from "@astrojs/markdown-satteri";
+import { baseLinks } from "./integrations/base-links.js";
 import { site } from "./src/site.ts";
 import { collectionsWithTranslations } from "./src/lib/translatedFiles.ts";
 
@@ -31,6 +33,9 @@ const nuxtUiComponents = realpathSync(fileURLToPath(new URL("./node_modules/@nux
 export default defineConfig({
   site: siteUrl,
   base,
+  // Writers link the plain way in Markdown (`/help/install-orso/`); this adds the base so those
+  // links still work under the /preview/{id}/ prefix (integrations/base-links.js).
+  markdown: { processor: satteri({ hastPlugins: [baseLinks({ base })] }) },
   // Geist ships with the site (no third-party font request). Astro writes the
   // @font-face rules, a preload and a metric-matched fallback so the swap causes no layout shift.
   fonts: [

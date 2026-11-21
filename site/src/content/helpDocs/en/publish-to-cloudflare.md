@@ -27,11 +27,11 @@ In your site's repo on GitHub, go to **Settings → Secrets and variables → Ac
 
 ## 3. Deploy
 
-[Publish a change](../publish-your-changes/), or re-run the **Deploy Cloudflare Workers** workflow from the repo's **Actions** tab. When it finishes, **Open live site** in orso takes you to your site.
+[Publish a change](/help/publish-your-changes/), or re-run the **Deploy Cloudflare Workers** workflow from the repo's **Actions** tab. When it finishes, **Open live site** in orso takes you to your site.
 
 ## How orso finds your links
 
-The workflow records each deploy as a GitHub deployment with its URL. orso reads those deployments to show **Open live site** and each change's preview link. If the links are missing, check that the workflow ran successfully. To use your own domain, see [Connect a custom domain](../connect-a-custom-domain/).
+The workflow records each deploy as a GitHub deployment with its URL. orso reads those deployments to show **Open live site** and each change's preview link. If the links are missing, check that the workflow ran successfully. To use your own domain, see [Connect a custom domain](/help/connect-a-custom-domain/).
 
 ## Using another host
 
