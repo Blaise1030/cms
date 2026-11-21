@@ -1,10 +1,17 @@
 import { createRequire } from "node:module";
 
-import { orsoGlob } from "./index.js";
-import { attachMarketingPreviewPaths } from "./marketing-preview-paths.js";
+import { orsoGlob } from "../../integrations/orso/index.js";
 
 const require = createRequire(import.meta.url);
 const getZod = () => require("astro/zod").z;
+
+/*
+ * The site's content models: one Astro collection per folder under `src/content/`, each loaded
+ * with `orsoGlob` so Orso can edit its entries. This file belongs to the site; edit it to add a
+ * collection or change a field. `astro.config.mjs` passes `collections` to
+ * `orso({ collections })`, and `src/content.config.ts` re-exports them from
+ * `virtual:orso/collections`.
+ */
 
 /** @param {{ loader: unknown, schema: unknown }} config */
 function contentCollection(config) {
@@ -126,14 +133,16 @@ const helpDocsCategories = contentCollection({
   },
 });
 
-/** Marketing-site collection preset for `orso({ collections: marketingCollections })`. */
-export const marketingCollections = attachMarketingPreviewPaths({
-  blog,
-  blogCategories,
-  helpDocs,
-  helpCategories,
-  helpSubcategories,
-  helpDocsCategories,
-});
-
-export { attachMarketingPreviewPaths, marketingPreviewPaths } from "./marketing-preview-paths.js";
+/**
+ * `orso({ collections })` entries, in sidebar order. `previewPath` is the page an entry is shown
+ * on (`slug` is the entry id, the Markdown filename without extension); a collection without a
+ * page of its own (`helpSubcategories`) has none.
+ */
+export const collections = {
+  blog: { collection: blog, previewPath: ({ slug }) => `/blog/${slug}/` },
+  blogCategories: { collection: blogCategories, previewPath: ({ slug }) => `/blog/categories/${slug}/` },
+  helpDocs: { collection: helpDocs, previewPath: ({ slug }) => `/help/${slug}/` },
+  helpCategories: { collection: helpCategories, previewPath: ({ slug }) => `/help/section/${slug}/` },
+  helpSubcategories: { collection: helpSubcategories },
+  helpDocsCategories: { collection: helpDocsCategories, previewPath: ({ slug }) => `/help/categories/${slug}/` },
+};

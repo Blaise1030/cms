@@ -131,6 +131,12 @@ export default defineConfig({
     }),
     VitePWA(pwaOptions),
   ],
+  build: {
+    // The chunks above Vite's 500 kB default are all loaded on demand: Shiki grammars (cpp,
+    // emacs-lisp, its wasm) when a file in that language is opened, and the rich editor with an
+    // entry. Start-up size is guarded by scripts/check-pwa.mjs (the shell's byte budget) instead.
+    chunkSizeWarningLimit: 800,
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

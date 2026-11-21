@@ -27,8 +27,9 @@ import { orsoGlob } from "../integrations/orso/index.js";
 `orso-astro` dependency and no `file:packages/astro` path.
 
 Canonical sources stay in `packages/astro/src/` (top-level modules plus `checks/` and
-`panel/`). `just sync-orso-integration` copies the full `.js` tree into
-`templates/astro-marketing/integrations/orso/` for in-repo template work. To vendor the same
+`panel/`). `just sync-orso-integration` replaces `integrations/orso/` in
+`templates/astro-marketing/` and `site/` with the full `.js` tree, so files removed here do not
+linger there. To vendor the same
 files into an existing site, sparse-checkout `packages/astro/src` and copy those `.js`
 files (including subfolders) into `integrations/orso/`. The marketing template needs
 `linkedom` as a dependency for build-time preview checks.
@@ -57,14 +58,49 @@ export default defineConfig({
 
 ### `orso({ collections })` and `virtual:orso/collections`
 
-Pass collection definitions (and optional `previewPath` handlers) from `astro.config.mjs`:
+The package ships no content models: each site defines its own collections, loads them with
+`orsoGlob`, and passes them to `orso()`. Keep them in a file the site owns (the marketing
+template and orso's own site use `src/content/collections.js`), not in `integrations/orso/`,
+which scaffolding overwrites.
+
+`src/content/collections.js`:
+
+```js
+import { z } from "astro/zod";
+import { orsoGlob } from "../../integrations/orso/index.js";
+
+const blog = {
+  type: "content_layer",
+  loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
+  schema: ({ image }) =>
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      coverImage: image().meta({ editor: { type: "image" } }).optional(),
+    }),
+};
+
+const authors = {
+  type: "content_layer",
+  loader: orsoGlob({ base: "./src/content/authors", pattern: "*.json" }),
+  schema: z.object({ name: z.string() }),
+};
+
+/** `orso({ collections })` entries, in sidebar order. */
+export const collections = {
+  blog: { collection: blog, previewPath: ({ slug }) => `/blog/${slug}/` },
+  authors: { collection: authors },
+};
+```
+
+`astro.config.mjs`:
 
 ```js
 import { orso } from "./integrations/orso/index.js";
-import { marketingCollections } from "./integrations/orso/marketing.js";
+import { collections } from "./src/content/collections.js";
 
 export default defineConfig({
-  integrations: [orso({ collections: marketingCollections })],
+  integrations: [orso({ collections })],
 });
 ```
 
@@ -74,13 +110,11 @@ export default defineConfig({
 export { collections } from "virtual:orso/collections";
 ```
 
-`integrations/orso/marketing.js` (synced from this package) exports `marketingCollections` for
-the Astro marketing template: `blog` and `helpDocs`, plus `blogCategories`, `helpCategories`
-(Help sections), `helpSubcategories` and `helpDocsCategories` (Help topics) that they reference.
-Every routed collection gets a site-relative `previewPath` helper; `helpSubcategories` has no page.
-`attachMarketingPreviewPaths(collections)` wraps any subset of these names the same way.
-Custom sites can define their own `collections` object with the same `{ collection, previewPath? }`
-shape.
+Each value is `{ collection, previewPath? }`: `collection` is an Astro collection definition
+(`astro:content` cannot be imported from `astro.config.mjs`, so write the object
+`defineCollection` would return, with `type: "content_layer"`), and the key is the collection
+name. The editor lists collections in this order. Collections whose loader is not `orsoGlob`
+are allowed but read-only in the editor.
 
 `previewPath(ctx)` receives one object and must return a site-relative path with a leading `/`
 (for example `/blog/welcome/`):
@@ -91,20 +125,6 @@ shape.
 
 Collections that define `previewPath` are flagged `hasPreviewPath: true` on the manifest.
 The editor can open those entries in preview even when the collection is read-only.
-
-For ad-hoc collections without the preset, define them inline and pass them to `orso()`:
-
-```ts
-import { defineCollection } from "astro:content";
-import { orsoGlob } from "../integrations/orso/index.js";
-import { z } from "astro/zod";
-
-// astro.config.mjs — orso({ collections: { blog: { collection: blog, previewPath: ... } } })
-const blog = defineCollection({
-  loader: orsoGlob({ base: "./src/content/blog/en", pattern: "*.md" }),
-  schema: z.object({ title: z.string() }),
-});
-```
 
 ### `orso({ hide })`
 

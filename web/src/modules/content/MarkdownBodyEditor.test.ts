@@ -234,7 +234,7 @@ describe("MarkdownBodyEditor", () => {
   it("slash link with no selection asks for the link text too", async () => {
     const w = await render("Hi ");
     editorOf(w).chain().focus().setTextSelection(4).insertContent("/").run(); await flushPromises();
-    slashItems(w)[3]!.element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    slashItems(w).find(i => i.text().includes("Link"))!.element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await flushPromises();
     await fillLink("url", "https://x.test");
     await fillLink("text", "docs");
@@ -287,8 +287,12 @@ describe("MarkdownBodyEditor", () => {
   });
 
   it.each([
-    ["Heading", "## Title"],
+    ["Heading 1", "# Title"],
+    ["Heading 2", "## Title"],
+    ["Heading 4", "#### Title"],
+    ["Heading 6", "###### Title"],
     ["Bullet list", "- Title"],
+    ["Checklist", "- [ ] Title"],
     ["Numbered list", "1. Title"],
     ["Quote", "> Title"],
     ["Code block", "```\nTitle\n```"],
@@ -300,6 +304,21 @@ describe("MarkdownBodyEditor", () => {
     await item!.trigger("mousedown"); await flushPromises();
     editorOf(w).commands.insertContent("Title"); await flushPromises();
     expect(last(w)?.body).toBe(expected);
+  });
+
+  it("h3 finds Heading 3 in the slash menu", async () => {
+    const w = await render("");
+    editorOf(w).chain().focus().insertContent("/").run(); await flushPromises();
+    editorOf(w).commands.insertContent("h3"); await flushPromises();
+    expect(slashItems(w).map(i => i.text())).toEqual([expect.stringContaining("Heading 3")]);
+  });
+
+  it("slash Divider adds a rule between blocks", async () => {
+    const w = await render("Intro");
+    // The menu opens at the start of a line: begin a new paragraph after Intro.
+    editorOf(w).chain().focus("end").splitBlock().insertContent("/").run(); await flushPromises();
+    await slashItems(w).find(i => i.text().includes("Divider"))!.trigger("mousedown"); await flushPromises();
+    expect(last(w)?.body).toMatch(/^Intro\n\n(---|\*\*\*)/);
   });
 
   describe("tables", () => {
@@ -359,7 +378,7 @@ describe("MarkdownBodyEditor", () => {
     const w = await render("");
     editorOf(w).chain().focus().insertContent("/").run(); await flushPromises();
     const labels = slashItems(w).map(i => i.text());
-    for (const label of ["Heading", "Bullet list", "Numbered list", "Link", "Quote", "Code block", "Image"])
+    for (const label of ["Heading 1", "Heading 6", "Bullet list", "Numbered list", "Checklist", "Link", "Quote", "Code block", "Divider", "Image"])
       expect(labels.some(l => l.includes(label))).toBe(true);
     editorOf(w).commands.insertContent("ima"); await flushPromises();
     expect(slashItems(w).map(i => i.text())).toEqual([expect.stringContaining("Image")]);
