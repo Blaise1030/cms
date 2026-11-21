@@ -36,11 +36,17 @@ files (including subfolders) into `integrations/orso/`. The marketing template n
 
 ## Preview bridge
 
-During `astro dev`, `orso()` injects a small inline script into every page. The Orso dev UI
-frames the project's dev server directly (so Astro islands and other client modules hydrate);
-the script lets that cross-origin frame pick elements and apply the app's appearance
-overrides over `postMessage`. It does nothing unless the app posts an `orso:preview` message,
-and it is not part of a build.
+orso serves each preview at the root of an origin of its own (a loopback port the daemon
+proxies), so the site runs with base `/` as in production and needs no orso-specific link or
+HMR settings. When the daemon runs `astro dev` it sets `ORSO_PREVIEW_PORT`, and `orso()`
+points Vite's HMR client at that port (`server.hmr.clientPort`); outside orso nothing changes.
+
+During `astro dev`, `orso()` also injects a small inline script into every page. The app's
+frame is cross-origin, so this script is its only way into the page: it picks elements (with a
+screenshot), applies the app's appearance overrides, and reports the page's address, errors
+and HTML over `postMessage`. It talks only to the app origins the daemon names in
+`ORSO_APP_ORIGINS`, checking the sender of every message and addressing every reply, and it is
+not part of a production build.
 
 ## Usage
 
