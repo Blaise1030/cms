@@ -1,8 +1,7 @@
 ---
 title: Invite your team
 description: Add teammates to your workspace and choose what each person can do.
-section: basics
-category: collaboration
+category: basics
 order: 3
 ---
 

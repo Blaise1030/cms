@@ -30,9 +30,7 @@ export function createCollectionSchemas({ z, image = () => z.string() }) {
   const helpDocs = z.object({
     title: z.string(),
     description: z.string(),
-    section: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
-    category: z.string().meta({ editor: { type: "reference", collection: "helpDocsCategories" } }).optional(),
-    subcategory: z.string().meta({ editor: { type: "reference", collection: "helpSubcategories" } }).optional(),
+    category: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
     order: z.number(),
   });
   return { blog, helpDocs };

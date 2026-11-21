@@ -1,8 +1,7 @@
 ---
 title: Getting started
 description: Learn the basics and make your first changes.
-section: basics
-category: setup
+category: basics
 order: 1
 ---
 

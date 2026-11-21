@@ -61,11 +61,7 @@ const blogCategories = contentCollection({
   },
 });
 
-/**
- * Help articles. `section` names the help section the article belongs to (a `helpCategories`
- * entry id; free text such as "Getting started" still validates, for sites made before sections
- * were a collection). `category` and `subcategory` are optional.
- */
+/** Help articles, served at `/help/{id}/`. `category` names the help category they are listed under. */
 const helpDocs = contentCollection({
   loader: orsoGlob({ base: "./src/content/helpDocs/en", pattern: "*.md" }),
   schema: () => {
@@ -73,49 +69,18 @@ const helpDocs = contentCollection({
     return z.object({
       title: z.string(),
       description: z.string(),
-      section: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
-      category: z
-        .string()
-        .meta({ editor: { type: "reference", collection: "helpDocsCategories" } })
-        .optional(),
-      subcategory: z
-        .string()
-        .meta({ editor: { type: "reference", collection: "helpSubcategories" } })
-        .optional(),
-      order: z.number(),
-    });
-  },
-});
-
-/** Help sections, the top-level groups on the Help home. Routed at `/help/section/{id}/`. */
-const helpCategories = contentCollection({
-  loader: orsoGlob({ base: "./src/content/helpCategories/en", pattern: "*.md" }),
-  schema: () => {
-    const z = getZod();
-    return z.object({
-      title: z.string(),
-      description: z.string().optional(),
-      order: z.number().default(0),
-    });
-  },
-});
-
-/** Groups of articles inside one help section; listed on that section's page. */
-const helpSubcategories = contentCollection({
-  loader: orsoGlob({ base: "./src/content/helpSubcategories/en", pattern: "*.md" }),
-  schema: () => {
-    const z = getZod();
-    return z.object({
-      title: z.string(),
       category: z.string().meta({ editor: { type: "reference", collection: "helpCategories" } }),
       order: z.number().default(0),
     });
   },
 });
 
-/** Cross-cutting help topics (`helpDocs.category`). Routed at `/help/categories/{id}/`. */
-const helpDocsCategories = contentCollection({
-  loader: orsoGlob({ base: "./src/content/helpDocsCategories/en", pattern: "*.md" }),
+/**
+ * Help categories, the groups on the Help home. Served at `/help/category/{id}/`. An article
+ * whose `category` names no category file still gets a category of that name.
+ */
+const helpCategories = contentCollection({
+  loader: orsoGlob({ base: "./src/content/helpCategories/en", pattern: "*.md" }),
   schema: () => {
     const z = getZod();
     return z.object({
@@ -132,8 +97,6 @@ export const marketingCollections = attachMarketingPreviewPaths({
   blogCategories,
   helpDocs,
   helpCategories,
-  helpSubcategories,
-  helpDocsCategories,
 });
 
 export { attachMarketingPreviewPaths, marketingPreviewPaths } from "./marketing-preview-paths.js";

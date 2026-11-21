@@ -1,7 +1,7 @@
 ---
 title: Choose a plan
 description: Compare plans and change yours whenever your team grows.
-section: billing
+category: billing
 order: 1
 ---
 
