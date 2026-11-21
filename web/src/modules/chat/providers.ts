@@ -32,14 +32,18 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
 
   /**
    * The assistants a chat can start with now, in the user's order. The setup
-   * snapshot says which are ready; until it lands, every provider the daemon lists.
+   * snapshot says which built-in ones are ready; until it lands, every provider the
+   * daemon lists. Providers the setup check doesn't know (custom ones from the agents
+   * config) follow, in the daemon's order, so choosing one still works.
    */
-  const ready = computed(() =>
-    (assistant.snapshot
-      ? assistant.chatReadyProviders.map((p) => p.id)
-      : assistant.ordered(providers.value.map((p) => p.id))
-    ).filter((id) => CHAT_PROVIDERS.includes(id)),
-  );
+  const ready = computed(() => {
+    const listed = providers.value.map((p) => p.id);
+    const builtIn = assistant.snapshot
+      ? assistant.chatReadyProviders.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id))
+      : assistant.ordered(listed.filter((id) => CHAT_PROVIDERS.includes(id)));
+    const custom = listed.filter((id) => !CHAT_PROVIDERS.includes(id));
+    return [...builtIn, ...custom];
+  });
 
   /**
    * The assistant a new chat (or a sync) starts with. Once the user has ordered
