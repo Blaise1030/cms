@@ -159,13 +159,28 @@ type Action = { id: string; label: string; icon: string; run: (editor: Editor) =
 const block = (fn: (c: ReturnType<Editor["chain"]>) => ReturnType<Editor["chain"]>) => (editor: Editor) => {
   fn(editor.chain().focus()).run();
 };
-const blockActions: Action[] = [
-  { id: "heading", label: "Heading", icon: "i-hugeicons-heading", run: block(c => c.toggleHeading({ level: 2 })) },
+type Level = 1 | 2 | 3 | 4 | 5 | 6;
+const LEVELS: Level[] = [1, 2, 3, 4, 5, 6];
+/** Every heading level Markdown has (`#` to `######`). */
+const headingActions: (Action & { search: string })[] = LEVELS.map(level => ({
+  id: `h${level}`,
+  label: `Heading ${level}`,
+  icon: `i-hugeicons-heading-0${level}`,
+  // "h2" finds Heading 2 too.
+  search: `Heading ${level} h${level}`,
+  run: block(c => c.toggleHeading({ level })),
+}));
+const blockActions: (Action & { search?: string })[] = [
+  ...headingActions,
   { id: "bullet-list", label: "Bullet list", icon: "i-hugeicons-left-to-right-list-bullet", run: block(c => c.toggleBulletList()) },
   { id: "ordered-list", label: "Numbered list", icon: "i-hugeicons-left-to-right-list-number", run: block(c => c.toggleOrderedList()) },
-  { id: "link", label: "Link", icon: "i-hugeicons-link-01", run: insertLink },
+  // GFM task list: `- [ ] item`.
+  { id: "task-list", label: "Checklist", icon: "i-hugeicons-check-list", search: "Checklist task todo", run: block(c => c.toggleTaskList()) },
   { id: "quote", label: "Quote", icon: "i-hugeicons-quote-down", run: block(c => c.toggleBlockquote()) },
   { id: "code-block", label: "Code block", icon: "i-hugeicons-code-square", run: block(c => c.toggleCodeBlock()) },
+  // `---` between sections.
+  { id: "divider", label: "Divider", icon: "i-hugeicons-separator-horizontal", search: "Divider horizontal rule line separator", run: block(c => c.setHorizontalRule()) },
+  { id: "link", label: "Link", icon: "i-hugeicons-link-01", run: insertLink },
   { id: "image", label: "Image", icon: "i-hugeicons-image-add-01", run: insertImage },
   // GFM tables need a header row, so a new table always starts with one.
   { id: "table", label: "Table", icon: "i-hugeicons-table", run: block(c => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true })) },
@@ -173,6 +188,7 @@ const blockActions: Action[] = [
 const inlineActions: (Action & { mark?: string })[] = [
   { id: "bold", label: "Bold", icon: "i-hugeicons-text-bold", mark: "bold", run: block(c => c.toggleBold()) },
   { id: "italic", label: "Italic", icon: "i-hugeicons-text-italic", mark: "italic", run: block(c => c.toggleItalic()) },
+  { id: "strike", label: "Strikethrough", icon: "i-hugeicons-text-strikethrough", mark: "strike", run: block(c => c.toggleStrike()) },
   { id: "code", label: "Inline code", icon: "i-hugeicons-source-code", mark: "code", run: block(c => c.toggleCode()) },
   { id: "clear", label: "Clear formatting", icon: "i-hugeicons-remove-formatting", run: block(c => c.unsetAllMarks()) },
   { id: "link", label: "Link", icon: "i-hugeicons-link-01", mark: "link", run: insertLink },
@@ -191,7 +207,7 @@ const handlers = {
     execute: (editor: Editor, item: { id: string }) => ({ run: () => { blockActions.find(a => a.id === item.id)?.run(editor); return true; } }),
   },
 } satisfies EditorCustomHandlers;
-const slashItems: EditorSuggestionMenuItem<typeof handlers>[] = blockActions.map(a => ({ kind: "slash", id: a.id, label: a.label, icon: a.icon, search: `·${a.label}` }));
+const slashItems: EditorSuggestionMenuItem<typeof handlers>[] = blockActions.map(a => ({ kind: "slash", id: a.id, label: a.label, icon: a.icon, search: `·${a.search ?? a.label}` }));
 
 // ---- Selection toolbar ---------------------------------------------------------------------
 type BlockType = { id: string; label: string; active: (e: Editor) => boolean };
@@ -199,14 +215,13 @@ type BlockType = { id: string; label: string; active: (e: Editor) => boolean };
 const blockTypes: BlockType[] = [
   { id: "code-block", label: "Code block", active: e => e.isActive("codeBlock") },
   { id: "bullet-list", label: "Bullet list", active: e => e.isActive("bulletList") },
+  { id: "task-list", label: "Checklist", active: e => e.isActive("taskList") },
   { id: "ordered-list", label: "Numbered list", active: e => e.isActive("orderedList") },
   { id: "quote", label: "Quote", active: e => e.isActive("blockquote") },
-  { id: "h1", label: "Heading 1", active: e => e.isActive("heading", { level: 1 }) },
-  { id: "h2", label: "Heading 2", active: e => e.isActive("heading", { level: 2 }) },
-  { id: "h3", label: "Heading 3", active: e => e.isActive("heading", { level: 3 }) },
+  ...LEVELS.map(level => ({ id: `h${level}`, label: `Heading ${level}`, active: (e: Editor) => e.isActive("heading", { level }) })),
   { id: "text", label: "Text", active: () => true },
 ];
-const blockMenu = ["text", "h1", "h2", "h3", "bullet-list", "ordered-list", "quote", "code-block"]
+const blockMenu = ["text", "h1", "h2", "h3", "h4", "h5", "h6", "bullet-list", "ordered-list", "task-list", "quote", "code-block"]
   .map(id => blockTypes.find(b => b.id === id)!)
   .map(b => ({ label: b.label, value: b.id }));
 /** Bumped on every editor transaction so the toolbar re-reads active marks and blocks. */
@@ -226,9 +241,11 @@ function setBlock(id: string) {
   if (e.isActive("codeBlock") && id !== "code-block") c.toggleCodeBlock();
   if (e.isActive("bulletList") && id !== "bullet-list") c.toggleBulletList();
   if (e.isActive("orderedList") && id !== "ordered-list") c.toggleOrderedList();
+  if (e.isActive("taskList") && id !== "task-list") c.toggleTaskList();
   if (e.isActive("blockquote") && id !== "quote") c.toggleBlockquote();
   if (id === "text") c.setParagraph();
-  else if (id === "h1" || id === "h2" || id === "h3") c.setHeading({ level: Number(id[1]) as 1 | 2 | 3 });
+  else if (/^h[1-6]$/.test(id)) c.setHeading({ level: Number(id[1]) as Level });
+  else if (id === "task-list" && !e.isActive("taskList")) c.toggleTaskList();
   else if (id === "bullet-list" && !e.isActive("bulletList")) c.toggleBulletList();
   else if (id === "ordered-list" && !e.isActive("orderedList")) c.toggleOrderedList();
   else if (id === "quote" && !e.isActive("blockquote")) c.toggleBlockquote();
