@@ -32,18 +32,14 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
 
   /**
    * The assistants a chat can start with now, in the user's order. The setup
-   * snapshot says which built-in ones are ready; until it lands, every provider the
-   * daemon lists. Providers the setup check doesn't know (custom ones from the agents
-   * config) follow, in the daemon's order, so choosing one still works.
+   * snapshot says which are ready; until it lands, every provider the daemon lists.
    */
-  const ready = computed(() => {
-    const listed = providers.value.map((p) => p.id);
-    const builtIn = assistant.snapshot
-      ? assistant.chatReadyProviders.map((p) => p.id).filter((id) => CHAT_PROVIDERS.includes(id))
-      : assistant.ordered(listed.filter((id) => CHAT_PROVIDERS.includes(id)));
-    const custom = listed.filter((id) => !CHAT_PROVIDERS.includes(id));
-    return [...builtIn, ...custom];
-  });
+  const ready = computed(() =>
+    (assistant.snapshot
+      ? assistant.chatReadyProviders.map((p) => p.id)
+      : assistant.ordered(providers.value.map((p) => p.id))
+    ).filter((id) => CHAT_PROVIDERS.includes(id)),
+  );
 
   /**
    * The assistant a new chat (or a sync) starts with. Once the user has ordered
@@ -53,6 +49,10 @@ export const useAgentProvidersStore = defineStore("agentProviders", () => {
   const preferred = computed<string | null>(() => {
     // Nothing known yet: the remembered pick, as before.
     if (!assistant.snapshot && !providers.value.length) return provider.value;
+    // A custom assistant (from the agents config) the daemon offers, picked on purpose:
+    // the setup check and the order don't know it, so keep it, as before the order existed.
+    const pick = provider.value;
+    if (pick && !CHAT_PROVIDERS.includes(pick) && providers.value.some((p) => p.id === pick)) return pick;
     const ids = ready.value;
     if (!assistant.order && provider.value && ids.includes(provider.value)) return provider.value;
     return ids[0] ?? null;

@@ -134,17 +134,19 @@ describe("useAgentProvidersStore", () => {
       expect(store.preferred).toBe("codex");
     });
 
-    it("keeps custom assistants the daemon offers, after the built-in ones", async () => {
+    it("keeps a custom assistant the daemon offers when it was picked", async () => {
       // Custom agents (from the agents config, like the e2e fakes) aren't in the setup check.
       api.chatProviders.mockResolvedValueOnce([
-        { id: "codex", name: "Codex" },
-        { id: "fake-sync", name: "Fake" },
+        { id: "codex", command: ["codex"], acp: ["codex"] },
+        { id: "fake-sync", command: ["fake"], acp: ["fake"] },
       ]);
       localStorage.setItem(KEY, "fake-sync");
       const store = useAgentProvidersStore();
       await store.loadProviders();
-      useAssistantStore().snapshot = { node: null, providers: [ready("codex")] };
-      expect(store.ready).toEqual(["codex", "fake-sync"]);
+      const assistant = useAssistantStore();
+      assistant.snapshot = { node: null, providers: [ready("codex")] };
+      assistant.order = ["codex"];
+      expect(store.ready).toEqual(["codex"]);
       expect(store.preferred).toBe("fake-sync");
     });
 
