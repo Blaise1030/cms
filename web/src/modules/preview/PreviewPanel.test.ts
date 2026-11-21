@@ -307,6 +307,33 @@ describe("PreviewPanel", () => {
     await w.find("form").trigger("submit");
     expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/about/?t=${TOKEN}`);
     expect(address(w)).toBe("/about/");
+    // What was typed is on the back stack even before the page reports in.
+    await w.find("[data-testid='preview-address']").setValue("/help/");
+    await w.find("form").trigger("submit");
+    expect(w.find("[aria-label='Back']").attributes("disabled")).toBeUndefined();
+    await w.find("[aria-label='Back']").trigger("click");
+    expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/about/?t=${TOKEN}`);
+    w.unmount();
+  });
+
+  it("keeps addresses typed while the preview origin is still being looked up", async () => {
+    let release: (a: { port: number; token: string }) => void = () => {};
+    const previewAccess = () => new Promise<{ port: number; token: string }>((r) => (release = r));
+    const w = await mountPanel("ready", { previewAccess });
+    expect(w.find("iframe").exists()).toBe(false);
+    await w.find("[data-testid='preview-address']").setValue("/blog");
+    await w.find("form").trigger("submit");
+    await w.find("[data-testid='preview-address']").setValue("/help");
+    await w.find("form").trigger("submit");
+    release({ port: PORT, token: TOKEN });
+    await flushPromises();
+    expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/help?t=${TOKEN}`);
+    await w.find("[aria-label='Back']").trigger("click");
+    expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/blog?t=${TOKEN}`);
+    // A reload before the step lands (the dev server coming up) keeps its destination.
+    usePreviewStore().reload();
+    await flushPromises();
+    expect(w.find("iframe").attributes("src")).toBe(`${ORIGIN()}/blog?t=${TOKEN}`);
     w.unmount();
   });
 

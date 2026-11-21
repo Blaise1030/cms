@@ -46,6 +46,20 @@ describe("useFrameHistory", () => {
     expect(h.canGoForward.value).toBe(false);
   });
 
+  it("ignores a late report from the page being left while a step is on its way", () => {
+    const h = useFrameHistory();
+    h.visit("/");
+    h.visit("/a");
+    h.visit("/b");
+    expect(h.back()).toBe(true);
+    // The old page answers a handshake after Back was pressed.
+    h.visit("/b");
+    expect(h.current.value).toBe("/b");
+    h.visit("/a");
+    expect(h.entries.value).toEqual(["/", "/a", "/b"]);
+    expect(h.current.value).toBe("/a");
+  });
+
   it("refuses to go back past the first frame page", () => {
     const h = useFrameHistory();
     h.visit("/");

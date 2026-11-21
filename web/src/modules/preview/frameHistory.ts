@@ -16,6 +16,9 @@ export function useFrameHistory() {
 
   /** Record that the frame is now showing `path` (after a load or same-document navigation). */
   function visit(path: string) {
+    // A late report from the page being left (the frame is cross-origin, so reports arrive
+    // asynchronously) is not the step's destination: keep waiting for that.
+    if (pending && entries.value[index.value] === path) return;
     const step = pending;
     pending = null;
     if (step === "back" && index.value > 0) {
@@ -52,11 +55,18 @@ export function useFrameHistory() {
     return entries.value[index.value + step] ?? null;
   }
 
+  /** Where a back/forward step that has not landed yet is going, or null. */
+  function destination(): string | null {
+    if (pending === "back") return entries.value[index.value - 1] ?? null;
+    if (pending === "forward") return entries.value[index.value + 1] ?? null;
+    return null;
+  }
+
   function reset() {
     entries.value = [];
     index.value = -1;
     pending = null;
   }
 
-  return { entries, index, current, canGoBack, canGoForward, visit, back, forward, target, reset };
+  return { entries, index, current, canGoBack, canGoForward, visit, back, forward, target, destination, reset };
 }

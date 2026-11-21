@@ -16,7 +16,7 @@ import { useDaemon } from "@/core/daemon";
 import { type PreviewAccess, previewHref, previewOrigin } from "@/core/previewOrigin";
 import type { DevserverState } from "@/core/types";
 import CleanupChangeButton from "@/modules/changes/CleanupChangeButton.vue";
-import { framePath } from "@orso/utils";
+import { frameHref, framePath } from "@orso/utils";
 import { type PickedElement, relativeFile } from "./elementPicker";
 import { BRIDGE_TYPE, dataUrlToBlob, isBridgeMessage } from "./frameBridge";
 import { useChatPanelLayout } from "@/lib/chatPanelLayout";
@@ -202,9 +202,11 @@ const draft = ref<string | null>(null);
 
 watch(
   frameOrigin,
-  () => {
-    history.reset();
-    startHref.value = loadHref(lastPath.value);
+  (_now, before) => {
+    // A different origin is a different site: start its history afresh. The first origin to
+    // arrive keeps what the reader already did (typed an address while the preview opened).
+    if (before) history.reset();
+    startHref.value = loadHref(before ? lastPath.value : (history.destination() ?? currentPath.value));
   },
   { immediate: true },
 );
@@ -221,7 +223,9 @@ watch(
   () => {
     // The frame's page is only known from what the bridge reported; without it a reload would
     // return the reader to the address it started at.
-    startHref.value = loadHref(currentPath.value);
+    // A back/forward step still on its way (the dev server came up, the agent checkpointed)
+    // must still land where the reader asked.
+    startHref.value = loadHref(history.destination() ?? currentPath.value);
   },
 );
 
@@ -442,13 +446,14 @@ function goForward() { step("forward"); }
 
 function navigate() {
   if (draft.value === null) return;
-  const typed = pageHref(draft.value);
+  // Resolved on its own, so typing works before the preview origin is known.
+  const path = framePath(new URL(frameHref(draft.value, "/"), "http://frame.invalid").href, "/");
   draft.value = null;
-  if (!typed) return;
-  // The frame hides its path: remember the one we asked for, so a reload or a pick session
-  // reopens the same page.
-  const path = framePath(typed, "/");
+  // The frame hides its path: remember the one we asked for, so a reload, a pick session and
+  // the back button know it even before (or without) the page's bridge reporting in. Its later
+  // report of the same path is not a new entry.
   store.setFramePath(props.projectId, path);
+  history.visit(path);
   startHref.value = loadHref(path);
 }
 

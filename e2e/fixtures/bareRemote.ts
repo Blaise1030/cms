@@ -50,8 +50,9 @@ http
     const file = path.join(process.cwd(), path.normalize(p));
     fs.readFile(file, (err, data) => {
       if (err) {
-        res.writeHead(404, { "content-type": "text/plain" });
-        res.end("Not found");
+        // An HTML 404, as a dev server answers, so the bridge still reports the page.
+        res.writeHead(404, { "content-type": "text/html; charset=utf-8" });
+        res.end(bridge + "Not found");
         return;
       }
       const html = file.endsWith(".html");
