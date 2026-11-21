@@ -196,6 +196,13 @@ const pageHref = (path: string) =>
  */
 const loadHref = (path: string) =>
   access.value ? previewHref(access.value, daemonOrigin.value, path, true) : "";
+/** The page a load address points at, without the first-load token it carries. */
+function loadedPath(href: string): string | null {
+  if (!href) return null;
+  const url = new URL(href);
+  url.searchParams.delete("t");
+  return framePath(url.href, "/");
+}
 /** Where the frame starts when (re)mounted: a reload keeps the page the user was on. */
 const startHref = ref("");
 const draft = ref<string | null>(null);
@@ -234,7 +241,10 @@ watch(
   () => {
     // A content "open in preview" must win over the frame's back stack. `setFramePath` alone is
     // also how the bridge reports the page the frame is already on, so it must not navigate.
+    // Where the frame is: its reported page, else the page it was loaded with.
+    const leaving = history.entries.value.length ? history.current.value : loadedPath(startHref.value);
     history.reset();
+    history.navigate(lastPath.value, leaving);
     startHref.value = loadHref(lastPath.value);
   },
 );
@@ -260,8 +270,9 @@ function onFrameMessage(e: MessageEvent) {
       // The frame only reveals its page this way: it feeds the address bar and the reload
       // target, and it is the only way the back/forward stack learns where the reader went.
       const path = framePath(e.data.url, "/");
-      store.setFramePath(props.projectId, path);
-      history.visit(path);
+      // A late report from the page the frame was sent away from is not where it is now.
+      if (!history.visit(path)) return;
+      store.setFramePath(props.projectId, history.current.value);
       // Re-audit after client-side navigations reported by the bridge.
       refreshPageDetails();
       return;
@@ -449,11 +460,13 @@ function navigate() {
   // Resolved on its own, so typing works before the preview origin is known.
   const path = framePath(new URL(frameHref(draft.value, "/"), "http://frame.invalid").href, "/");
   draft.value = null;
+  // The page the frame is showing or still loading: its report may arrive after this one.
+  const leaving = currentPath.value;
   // The frame hides its path: remember the one we asked for, so a reload, a pick session and
   // the back button know it even before (or without) the page's bridge reporting in. Its later
   // report of the same path is not a new entry.
   store.setFramePath(props.projectId, path);
-  history.visit(path);
+  history.navigate(path, leaving);
   startHref.value = loadHref(path);
 }
 
