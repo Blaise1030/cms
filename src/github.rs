@@ -2232,20 +2232,23 @@ impl GithubAuth {
         files: &[(String, Vec<u8>)],
     ) -> Result<String, ApiError> {
         use base64::Engine;
-        let mut blobs = Vec::with_capacity(files.len());
-        for (path, bytes) in files {
-            let blob: ApiSha = self
-                .git_post(
-                    repo,
-                    "blobs",
-                    serde_json::json!({
-                        "content": base64::engine::general_purpose::STANDARD.encode(bytes),
-                        "encoding": "base64",
-                    }),
-                )
-                .await?;
-            blobs.push((path.clone(), blob.sha));
-        }
+        // The blobs are independent, so they upload at once (at most `review_shots::MAX_ITEMS`);
+        // the first failure fails the whole commit, as before.
+        let blobs =
+            futures_util::future::try_join_all(files.iter().map(|(path, bytes)| async move {
+                let blob: ApiSha = self
+                    .git_post(
+                        repo,
+                        "blobs",
+                        serde_json::json!({
+                            "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+                            "encoding": "base64",
+                        }),
+                    )
+                    .await?;
+                Ok::<_, ApiError>((path.clone(), blob.sha))
+            }))
+            .await?;
         let mut last = None;
         for _ in 0..2 {
             match self.commit_blobs(repo, branch, message, &blobs).await? {
