@@ -207,6 +207,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
+        .route("/api/changes/{branch}/edits", get(changes::edits))
         .route("/api/changes/sync", get(changes::sync))
         .route("/api/changes/live", get(changes::live))
         .route(

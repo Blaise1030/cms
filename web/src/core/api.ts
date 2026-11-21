@@ -387,6 +387,13 @@ export function createApi(
       json<{ branch: string; mainUpdated?: boolean }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
         body: { project },
       }),
+    /** Whether a change differs from `main` at all (local; GitHub opens no PR without edits). */
+    changeHasEdits: async (project: string, branch: string): Promise<boolean> =>
+      (
+        await json<{ hasEdits: boolean }>("GET", `/api/changes/${enc(branch)}/edits`, {
+          query: { project },
+        })
+      ).hasEdits,
     /** PR state / checks / preview URL of a change; null when it has no PR. */
     changeStatus: async (project: string, branch: string): Promise<PrStatus | null> =>
       (
