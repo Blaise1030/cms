@@ -352,6 +352,7 @@ pub(crate) fn emit_checkpoint(state: &AppState, project: &str, cp: Option<git::C
                 "summary": cp.summary,
                 "author": cp.author,
                 "ts": cp.ts,
+                "avatarUrl": cp.avatar_url,
             }),
         );
     }

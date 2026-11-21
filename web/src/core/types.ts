@@ -56,6 +56,10 @@ export interface Checkpoint {
   author: string;
   /** Unix seconds. */
   ts: number;
+  /** The author's GitHub picture, when their commit email names their account. */
+  avatarUrl?: string;
+  /** In the timeline: whether it is on `main` (it went out). Absent when that is unknown. */
+  published?: boolean;
 }
 
 /** A commit that touched one content entry's file, newest first. */
@@ -368,6 +372,7 @@ export interface CheckpointCreatedEvent {
   author: string;
   /** Unix seconds. */
   ts: number;
+  avatarUrl?: string;
 }
 
 export interface FsChangeEvent {

@@ -775,3 +775,34 @@ async fn finish_turn_blocked_on_main_with_remote() {
     }
     assert!(blocked);
 }
+
+#[tokio::test]
+async fn log_marks_published_checkpoints_and_github_avatars() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git_cli(dir, &["init", "-q", "-b", "main"]);
+    git_cli(dir, &["config", "user.name", "Ada"]);
+    git_cli(
+        dir,
+        &["config", "user.email", "42+ada@users.noreply.github.com"],
+    );
+    std::fs::write(dir.join("a.md"), "a\n").unwrap();
+    git_cli(dir, &["add", "-A"]);
+    git_cli(dir, &["commit", "-q", "-m", "live"]);
+    git_cli(dir, &["checkout", "-q", "-b", "content/draft"]);
+    git_cli(dir, &["config", "user.email", "bob@example.com"]);
+    std::fs::write(dir.join("b.md"), "b\n").unwrap();
+    git_cli(dir, &["add", "-A"]);
+    git_cli(dir, &["commit", "-q", "-m", "checkpoint: draft"]);
+
+    let log = git::log(dir, ".").await.unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].summary, "draft");
+    assert_eq!(log[0].published, Some(false));
+    assert_eq!(log[0].avatar_url, None);
+    assert_eq!(log[1].published, Some(true));
+    assert_eq!(
+        log[1].avatar_url.as_deref(),
+        Some("https://avatars.githubusercontent.com/u/42?v=4")
+    );
+}

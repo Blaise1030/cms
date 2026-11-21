@@ -39,6 +39,7 @@ vi.mock("./ChangedFilesTree.vue", async () => {
 
 import CheckpointsPanel from "./CheckpointsPanel.vue";
 import { useCheckpointsStore } from "./store";
+import UAvatar from "@nuxt/ui/components/Avatar.vue";
 
 const DIFF = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-x\n+y\n";
 let api: Record<string, ReturnType<typeof vi.fn>>;
@@ -50,12 +51,15 @@ const CHECKPOINTS = [
 
 async function mountPanel(
   start = "/p/p/history",
-  log: { root: string; head: string | null } = { root: ".", head: "bbbbbbb222" },
+  log: { root: string; head: string | null; checkpoints?: unknown[] } = { root: ".", head: "bbbbbbb222" },
+  extra: Record<string, unknown> = {},
 ) {
   api = {
     listCheckpoints: vi.fn(async () => ({ checkpoints: CHECKPOINTS, ...log })),
     checkpointDiff: vi.fn(async () => DIFF),
     restoreCheckpoint: vi.fn(async () => ({ restored: "aaaaaaa111" })),
+    deployLink: vi.fn(async () => ({ url: null, state: "unknown" })),
+    ...extra,
   };
   h.daemon = createFakeDaemon(api);
   setActivePinia(createPinia());
@@ -89,6 +93,7 @@ describe("CheckpointsPanel", () => {
   it("shows the timeline newest first", async () => {
     const w = await mountPanel();
     await flushPromises();
+    expect(w.get("h1").text()).toBe("History");
     expect(w.find("[data-testid='history-scope']").exists()).toBe(false);
     const items = w.findAll("[data-testid='checkpoint-item']");
     expect(items.map((i) => i.text())).toEqual([
@@ -209,13 +214,115 @@ describe("CheckpointsPanel", () => {
     w.unmount();
   });
 
+  it("searches by summary, author or sha", async () => {
+    const w = await mountPanel();
+    await flushPromises();
+    const input = w.get("[data-testid='history-search']");
+    await input.setValue("ada");
+    expect(w.findAll("[data-testid='checkpoint-author']").map((a) => a.text())).toEqual(["Ada"]);
+    await input.setValue("bbbbbbb");
+    expect(w.findAll("[data-testid='checkpoint-author']").map((a) => a.text())).toEqual(["orso"]);
+    await input.setValue("nothing like it");
+    expect(w.find("[data-testid='history-no-match']").exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("filters by what went out once the daemon says, and shows authors' avatars", async () => {
+    const w = await mountPanel("/p/p/history", {
+      root: ".",
+      head: "bbbbbbb222",
+      checkpoints: [
+        { ...CHECKPOINTS[0], published: true, avatarUrl: "https://avatars.githubusercontent.com/u/42?v=4" },
+        { ...CHECKPOINTS[1], published: false },
+      ],
+    });
+    await flushPromises();
+    const authors = () => w.findAll("[data-testid='checkpoint-author']").map((a) => a.text());
+    expect(authors()).toEqual(["orso", "Ada"]);
+    // The picture loads lazily (no image in happy-dom); the avatar is given it, or initials.
+    const avatars = w
+      .findAllComponents(UAvatar)
+      .filter((a) => a.props("alt") !== undefined);
+    expect(avatars.map((a) => a.props("src"))).toEqual([undefined, "https://avatars.githubusercontent.com/u/42?v=4"]);
+    expect(w.findAll("[data-testid^='history-filter-']").map((b) => b.text())).toEqual(["All", "In this change", "Live"]);
+    await w.get("[data-testid='history-filter-published']").trigger("click");
+    expect(authors()).toEqual(["Ada"]);
+    await w.get("[data-testid='history-filter-unpublished']").trigger("click");
+    expect(authors()).toEqual(["orso"]);
+    w.unmount();
+  });
+
+  it("links published checkpoints to their deployed site, and shows a deploy still building", async () => {
+    vi.useFakeTimers();
+    const live = "c".repeat(40);
+    const building = "d".repeat(40);
+    const failed = "f".repeat(40);
+    const draft = "e".repeat(40);
+    let buildingDone = false;
+    const deployLink = vi.fn(async (_p: string, sha: string) => {
+      if (sha === live) return { url: "https://live.example.com", state: "live" };
+      if (sha === building)
+        return buildingDone ? { url: "https://new.example.com", state: "live" } : { url: null, state: "building" };
+      if (sha === failed) return { url: null, state: "failed" };
+      return { url: null, state: "unknown" };
+    });
+    const w = await mountPanel(
+      "/p/p/history",
+      {
+        root: ".",
+        head: draft,
+        checkpoints: [
+          { sha: live, summary: "Launch", author: "Ada", ts: 100, published: true },
+          { sha: failed, summary: "Broken", author: "Ada", ts: 150, published: true },
+          { sha: building, summary: "Just published", author: "Ada", ts: 200, published: true },
+          { sha: draft, summary: "Draft", author: "Ada", ts: 300, published: false },
+        ],
+      },
+      { deployLink },
+    );
+    await flushPromises();
+    // Only published checkpoints are looked up.
+    expect(deployLink.mock.calls.map((c) => c[1]).sort()).toEqual([building, failed, live].sort());
+    const links = () => w.findAll("[data-testid='checkpoint-row-deploy']").map((l) => l.attributes("href"));
+    expect(links()).toEqual(["https://live.example.com"]);
+    expect(w.findAll("[data-testid='checkpoint-row-deploy-building']")).toHaveLength(1);
+    expect(w.findAll("[data-testid='checkpoint-row-deploy-failed']")).toHaveLength(1);
+
+    // Published before its site deployed: asked again until it is live.
+    buildingDone = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await flushPromises();
+    expect(links()).toEqual(["https://new.example.com", "https://live.example.com"]);
+    expect(w.find("[data-testid='checkpoint-row-deploy-building']").exists()).toBe(false);
+    w.unmount();
+    vi.useRealTimers();
+  });
+
+  it("offers no publish filter on main, where everything is live", async () => {
+    const w = await mountPanel("/p/p/history", {
+      root: ".",
+      head: "bbbbbbb222",
+      checkpoints: CHECKPOINTS.map((c) => ({ ...c, published: true })),
+    });
+    await flushPromises();
+    expect(w.find("[data-testid='history-filter-published']").exists()).toBe(false);
+    w.unmount();
+  });
+
+  it("offers no publish filter when the daemon doesn't say", async () => {
+    const w = await mountPanel();
+    await flushPromises();
+    expect(w.find("[data-testid='history-filter-published']").exists()).toBe(false);
+    w.unmount();
+  });
+
   describe("with a site folder set", () => {
     const scoped = { root: "site", head: "fffffff999" };
 
     it("labels the timeline and marks no checkpoint current when HEAD is outside the site", async () => {
       const w = await mountPanel("/p/p/history", scoped);
       await flushPromises();
-      expect(w.find("[data-testid='history-scope']").text()).toBe("Changes to site/");
+      expect(w.get("[data-testid='history-scope']").text()).toBe("Changes to site/");
       expect(w.findAll("[data-testid='checkpoint-item']")).toHaveLength(2);
       expect(w.text()).not.toContain("Current");
       await w.findAll("[data-testid='checkpoint-item']")[0]!.trigger("click");
@@ -230,7 +337,7 @@ describe("CheckpointsPanel", () => {
     it("marks the newest checkpoint current when it is HEAD", async () => {
       const w = await mountPanel("/p/p/history", { root: "site", head: "bbbbbbb222" });
       await flushPromises();
-      expect(w.findAll("[data-testid='checkpoint-item']")[0]!.text()).toContain("Current");
+      expect(w.findAll("[data-testid='checkpoint-item']")[0]!.element.parentElement!.textContent).toContain("Current");
       w.unmount();
     });
 

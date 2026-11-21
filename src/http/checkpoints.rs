@@ -174,6 +174,7 @@ pub async fn finish_turn(
                     "summary": cp.summary,
                     "author": cp.author,
                     "ts": cp.ts,
+                    "avatarUrl": cp.avatar_url,
                 }),
             );
             TurnOutcome::Committed {
