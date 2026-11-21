@@ -110,6 +110,12 @@ impl SyncSetup {
 
     /// A sync fixture whose site runs `build_script` for `npm run build`.
     async fn with_build(build_script: &str) -> Self {
+        Self::with_build_in(None, build_script).await
+    }
+
+    /// Like [`Self::with_build`], with the site (its `package.json`) in `folder` of the
+    /// repository and `orso.json` pointing there, the way many real projects are laid out.
+    async fn with_build_in(folder: Option<&str>, build_script: &str) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let projects = tmp.path().join("projects");
         std::fs::create_dir(&projects).unwrap();
@@ -131,12 +137,23 @@ impl SyncSetup {
         git(&dir, &["config", "user.name", "Ada"]);
         git(&dir, &["config", "user.email", "ada@example.com"]);
         std::fs::write(dir.join("page.md"), "old\n").unwrap();
+        let site = folder.map_or_else(|| dir.clone(), |f| dir.join(f));
+        std::fs::create_dir_all(&site).unwrap();
         std::fs::write(
-            dir.join("package.json"),
+            site.join("package.json"),
             json!({"name": "site", "private": true, "scripts": {"build": build_script}})
                 .to_string(),
         )
         .unwrap();
+        if let Some(f) = folder {
+            // orso.json's `root` must hold an Astro project.
+            std::fs::write(site.join("astro.config.mjs"), "export default {};\n").unwrap();
+            std::fs::write(
+                dir.join("orso.json"),
+                json!({ "root": f, "installDir": f }).to_string(),
+            )
+            .unwrap();
+        }
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-m", "base"]);
         git(&dir, &["checkout", "-b", "content/page"]);
@@ -1253,6 +1270,25 @@ async fn resolved_turn_builds_and_lands() {
             if phase == "combined" && text == sync_chat::DONE),
         "{chunks:?}"
     );
+    h.state.chats.shutdown().await;
+}
+
+/// A site in a folder of the repository (`orso.json` `root`) builds there: the check used to
+/// run `npm run build` at the top, where there is no site, and failed every combine.
+#[tokio::test]
+async fn site_in_a_folder_builds_there_and_lands() {
+    // Passes only in the site folder: `orso.json` sits one level up from there, nowhere else.
+    let h = SyncSetup::with_build_in(Some("site"), "test -f ../orso.json").await;
+    h.provider(
+        "fake-resolve-folder",
+        "git checkout --theirs -- $(git diff --name-only --diff-filter=U) && git add -A\n",
+    );
+
+    let chat = sync_chat::start(&h.state, &h.project, &h.session, "fake-resolve-folder")
+        .await
+        .unwrap();
+    h.wait_for_phase(&chat, SyncPhase::Combined).await;
+    assert_eq!(git(&h.dir, &["show", "content/page:page.md"]), "latest");
     h.state.chats.shutdown().await;
 }
 

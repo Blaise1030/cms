@@ -646,8 +646,12 @@ fn repair_prompt(tail: &str) -> String {
 
 /// Builds the sync's worktree as the writer's site: dependencies linked in,
 /// `npm run build` with a 300 s cap, and the output appended to the chat's log.
+///
+/// The site may live in a folder of the repository (`orso.json` `root`, with its dependencies
+/// in `installDir`): the build runs there, not at the top, the way snapshot builds do. Settings
+/// come from the writer's own checkout, so a combine can't point the build elsewhere.
 pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), BuildFail> {
-    let Some(site) = record.cwd.clone() else {
+    let Some(worktree) = record.cwd.clone() else {
         return Err(BuildFail::Failed);
     };
     let Some(project) = project_of(&state_dir(state), &record.id) else {
@@ -660,8 +664,14 @@ pub async fn build(state: &AppState, record: &SessionRecord) -> Result<(), Build
             return Err(BuildFail::Failed);
         }
     };
+    let settings = crate::settings::load(&project_dir)
+        .unwrap_or_else(|_| crate::settings::ProjectSettings::defaults());
+    let site = settings.site_dir(&worktree);
     // A repair build finds the link already there.
-    match crate::conflict_preview::link_node_modules(&project_dir, &site) {
+    match crate::conflict_preview::link_node_modules(
+        &settings.install_path(&project_dir),
+        &settings.install_path(&worktree),
+    ) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => {
