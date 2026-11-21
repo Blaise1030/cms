@@ -628,6 +628,8 @@ export interface SetupStatus {
   projectsDir: string;
   /** Daemon-backed dismiss flag (survives ephemeral UI origins). */
   setupDismissed?: boolean;
+  /** The user's assistant order, first choice first; `null` (or absent) until they reorder. */
+  assistantOrder?: string[] | null;
 }
 
 /** `GET /api/setup/runtimes`: the assistant and site-builder download snapshot. */

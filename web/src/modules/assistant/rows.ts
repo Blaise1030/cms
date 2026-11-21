@@ -6,7 +6,10 @@
 
 import type { RuntimePhase, RuntimeSource, RuntimeStatus, SetupProvider } from "@/core/types";
 
-/** Fixed order: the recommendation first, then the plan-backed assistants. */
+/**
+ * The default order: the recommendation first, then the plan-backed assistants.
+ * The user can drag their own order in App settings → Assistants (`orderIds`).
+ */
 export const PROVIDER_ORDER = ["opencode", "codex", "claude", "cursor"] as const;
 
 /** Fallback names when a daemon (or a test) does not send one. */
@@ -111,11 +114,28 @@ function rank(id: string): number {
   return index < 0 ? PROVIDER_ORDER.length : index;
 }
 
-export function orderProviders(providers: readonly SetupProvider[]): SetupProvider[] {
-  return providers
-    .map((provider, index) => ({ provider, index }))
-    .sort((a, b) => rank(a.provider.id) - rank(b.provider.id) || a.index - b.index)
-    .map(({ provider }) => provider);
+/**
+ * Every id exactly once, in the user's order: saved ids first (ones not offered
+ * now dropped), then any assistant added since, in the default order. With no
+ * saved order this is the default order, unknown ids after the known ones.
+ */
+export function orderIds(ids: readonly string[], saved?: readonly string[] | null): string[] {
+  const byDefault = ids
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => rank(a.id) - rank(b.id) || a.index - b.index)
+    .map(({ id }) => id);
+  if (!saved?.length) return byDefault;
+  const known = new Set(byDefault);
+  const ordered = saved.filter((id) => known.delete(id));
+  return [...ordered, ...byDefault.filter((id) => known.has(id))];
+}
+
+export function orderProviders(
+  providers: readonly SetupProvider[],
+  saved?: readonly string[] | null,
+): SetupProvider[] {
+  const byId = new Map(providers.map((p) => [p.id, p] as const));
+  return orderIds(providers.map((p) => p.id), saved).map((id) => byId.get(id)!);
 }
 
 /** Derive one row's phase, labels and action. */
@@ -201,9 +221,12 @@ export function deriveRow(provider: SetupProvider): AssistantRow {
   }
 }
 
-/** The assistant rows, in the fixed order. */
-export function buildRows(providers: readonly SetupProvider[]): AssistantRow[] {
-  return orderProviders(providers).map(deriveRow);
+/** The assistant rows, in the user's order (the default order until they reorder). */
+export function buildRows(
+  providers: readonly SetupProvider[],
+  saved?: readonly string[] | null,
+): AssistantRow[] {
+  return orderProviders(providers, saved).map(deriveRow);
 }
 
 /** The separate "Site builder" row for the Node download. */

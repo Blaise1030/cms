@@ -442,4 +442,45 @@ describe("assistant store", () => {
 
     expect(h.daemon.subscriberCount()).toBe(0);
   });
+
+  it("reads the saved order and lists rows and ready assistants in it", async () => {
+    const store = setup({
+      setupStatus: vi.fn(async () =>
+        status({
+          providers: [provider("opencode"), provider("codex", { chatReady: false }), provider("claude")],
+          assistantOrder: ["codex", "claude"],
+        }),
+      ),
+      setupRuntimes: vi.fn(async () => {
+        throw new Error("old daemon");
+      }),
+    });
+    await store.load();
+    expect(store.order).toEqual(["codex", "claude"]);
+    expect(store.rows.map((r) => r.id)).toEqual(["codex", "claude", "opencode"]);
+    expect(store.chatReadyProviders.map((p) => p.id)).toEqual(["claude", "opencode"]);
+    expect(store.ordered(["opencode", "claude"])).toEqual(["claude", "opencode"]);
+  });
+
+  it("keeps lists as given while no order is saved", async () => {
+    const store = setup({
+      setupStatus: vi.fn(async () => status({ assistantOrder: null })),
+      setupRuntimes: vi.fn(async () => snapshot()),
+    });
+    await store.load();
+    expect(store.order).toBeNull();
+    expect(store.ordered(["cursor", "opencode"])).toEqual(["cursor", "opencode"]);
+  });
+
+  it("saves a new order, and puts the old one back when the daemon refuses", async () => {
+    const save = vi.fn(async (order: string[]) => ({ order }));
+    const store = setup({ saveAssistantOrder: save });
+    await store.setOrder(["claude", "opencode"]);
+    expect(save).toHaveBeenCalledWith(["claude", "opencode"]);
+    expect(store.order).toEqual(["claude", "opencode"]);
+
+    save.mockRejectedValueOnce(new Error("disk full"));
+    await store.setOrder(["opencode", "claude"]);
+    expect(store.order).toEqual(["claude", "opencode"]);
+  });
 });
