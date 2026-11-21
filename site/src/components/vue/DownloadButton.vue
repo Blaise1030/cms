@@ -6,7 +6,6 @@ import UDropdownMenu from "@nuxt/ui/components/DropdownMenu.vue";
 import UFieldGroup from "@nuxt/ui/components/FieldGroup.vue";
 import UModal from "@nuxt/ui/components/Modal.vue";
 import { site } from "../../site";
-import "@fontsource/cookie/latin-400.css";
 
 const { version, repo, coffeeUrl, downloads } = site.release;
 
@@ -111,9 +110,15 @@ const items = computed<DropdownMenuItem[][]>(() => [
           :href="coffeeUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex h-11 items-center gap-2 rounded-lg border border-black bg-[#FFDD00] px-4 font-[Cookie] text-[1.6rem] leading-none text-black transition hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+          class="inline-flex h-11 items-center gap-2 rounded-lg border border-black bg-[#FFDD00] px-4 font-(family-name:--font-cookie) text-[1.6rem] leading-none text-black transition hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
         >
-          <img src="https://cdn.buymeacoffee.com/buttons/bmc-new-btn-logo.svg" alt="" width="20" height="28" class="h-7 w-auto" />
+          <!-- Cup drawn inline (white coffee, black outline) so it never depends on a third-party image. -->
+          <svg viewBox="0 0 24 32" width="18" height="24" aria-hidden="true" fill="none" stroke="#000" stroke-width="1.5" stroke-linejoin="round">
+            <path d="M2 7h20l-1 3H3z" fill="#fff" />
+            <path d="M4 4h16l1.5 3h-19z" fill="#fff" />
+            <path d="M3.5 10h17L18 30H6z" fill="#fff" />
+            <path d="M4.6 15h14.8l-.9 7H5.5z" fill="#FFDD00" />
+          </svg>
           {{ props.labels.coffee }}
         </a>
         <UButton size="lg" color="neutral" variant="outline" :label="props.labels.later" @click="close" />

@@ -103,6 +103,7 @@ const languages = localeKeys.map((key) => ({
     <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
     <link rel="sitemap" href={`${base}sitemap.xml`} />
     <Font cssVariable="--font-geist" preload={[{ style: "normal" }]} />
+    <Font cssVariable="--font-cookie" />
     {jsonLd.map((data) => <script type="application/ld+json" is:inline set:html={JSON.stringify(data).replace(/</g, "\\u003c")} />)}
     <ClientRouter fallback="swap" />
   </head>
