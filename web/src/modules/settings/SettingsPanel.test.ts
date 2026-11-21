@@ -28,7 +28,7 @@ import SettingsPanel from "./SettingsPanel.vue";
 import { useSettingsStore } from "./store";
 import { useProjectsStore } from "@/modules/projects/store";
 
-const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock" };
+const defaults = { root: ".", installDir: ".", install: "npm install --no-audit --no-fund --no-progress", dev: "npm run dev -- --port {port} --host {host} --ignore-lock", mergeMethod: "squash" as const, prLabels: ["orso"] };
 const doc = (over: Partial<SettingsDoc> = {}): SettingsDoc => ({
   exists: true, settings: { root: "apps/web" }, defaults, hash: "h1", branch: "content/a", errors: {}, siteRoot: "apps/web", ...over,
 });
@@ -67,6 +67,34 @@ describe("SettingsPanel", () => {
     expect(input(w, "dev").placeholder).toBe("npm run dev -- --port {port} --host {host} --ignore-lock");
     expect(input(w, "root").value).toBe("apps/web");
     expect(input(w, "dev").value).toBe("");
+    w.unmount();
+  });
+
+  it("shows merge method and pull request labels with their defaults", async () => {
+    const { w } = await setup();
+    expect(el(w, "settings-mergeMethod").text()).toContain("Squash (recommended)");
+    expect(w.text()).toContain("Merge method");
+    expect(w.text()).toContain("Pull request labels");
+    expect(input(w, "prLabels").placeholder).toBe("orso (default)");
+    w.unmount();
+  });
+
+  it("shows labels from the file, and No labels when the file turns them off", async () => {
+    const { w } = await setup({ settings: vi.fn(async () => doc({ settings: { prLabels: [] } })) });
+    expect(input(w, "prLabels").placeholder).toBe("No labels");
+    w.unmount();
+    const again = await setup({ settings: vi.fn(async () => doc({ settings: { prLabels: ["blog"], mergeMethod: "merge" } })) });
+    expect(input(again.w, "prLabels").parentElement?.textContent).toContain("blog");
+    expect(el(again.w, "settings-mergeMethod").text()).toContain("Merge commit");
+    again.w.unmount();
+  });
+
+  it("a bad merge method is a field error, not a dev server error", async () => {
+    const { w } = await setup({ settings: vi.fn(async () => doc({
+      settings: { mergeMethod: "rebase" }, errors: { mergeMethod: 'must be "squash" or "merge"' },
+    })) });
+    expect(el(w, "settings-error-mergeMethod").text()).toBe('must be "squash" or "merge"');
+    expect(w.find('[data-testid="settings-file-errors"]').exists()).toBe(false);
     w.unmount();
   });
 
