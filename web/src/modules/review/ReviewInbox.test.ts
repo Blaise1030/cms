@@ -40,12 +40,18 @@ import { reviewKeys } from "./queries";
 import { useProjectsStore } from "@/modules/projects/store";
 import { queryPlugin } from "@/test/queryClient";
 
+/**
+ * One timestamp for every item: stamping each with its own `Date.now()` gave them times a few
+ * milliseconds apart on a busy machine, and the newest-first sort then reordered them.
+ */
+const THREE_HOURS_AGO = new Date(Date.now() - 3 * 3600_000).toISOString();
+
 const item = (over: Partial<ReviewItem>): ReviewItem => ({
   number: 7,
   title: "Fresh homepage hero",
   author: "Ada",
   url: "https://example.test/7",
-  updatedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+  updatedAt: THREE_HOURS_AGO,
   headSha: "abc",
   checks: "passing",
   myState: "new",
