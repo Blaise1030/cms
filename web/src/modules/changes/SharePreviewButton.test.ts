@@ -36,16 +36,17 @@ function mountWith(repo: string | null = "acme/site") {
 }
 
 describe("SharePreviewButton", () => {
-  it("groups Share preview and Publish in one button group", () => {
+  it("shows Publish as its own button beside the share group", () => {
     const { wrapper } = mountWith();
-    const group = wrapper.get('[data-testid="share-publish-group"]');
+    const group = wrapper.get('[data-testid="share-group"]');
     expect(group.find('[data-testid="share-preview"]').exists()).toBe(true);
-    expect(group.find('[data-testid="publish-change"]').exists()).toBe(true);
+    expect(group.find('[data-testid="publish-change"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="publish-change"]').exists()).toBe(true);
   });
 
   it("omits Publish from the group for local projects", () => {
     const { wrapper } = mountWith(null);
-    expect(wrapper.find('[data-testid="share-publish-group"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="share-group"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="share-preview"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="publish-change"]').exists()).toBe(false);
   });
@@ -119,6 +120,9 @@ describe("SharePreviewButton", () => {
     store.prUrl = "https://github.com/acme/site/pull/1";
     store.hasEdits = false;
     await flushPromises();
-    expect(wrapper.get('[data-testid="share-preview"]').attributes("disabled")).toBeUndefined();
+    const share = wrapper.get('[data-testid="share-preview"]');
+    expect(share.attributes("disabled")).toBeUndefined();
+    // A direct child of the group, so its corners join Review's.
+    expect(share.element.parentElement?.dataset.testid).toBe("share-group");
   });
 });

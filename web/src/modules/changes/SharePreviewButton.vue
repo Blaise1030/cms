@@ -35,7 +35,7 @@ const showShare = computed(() => changes.active !== null && !changes.status?.upT
 const shareBlocked = computed(() => !changes.prUrl && !changes.hasEdits);
 const blockedReason = "Make an edit first: there's nothing in this change to share yet.";
 
-/** Publish sits in the same group when this is a GitHub-backed draft that isn't live. */
+/** Publish sits beside the group when this is a GitHub-backed draft that isn't live. */
 const showPublish = computed(
   () =>
     props.repo != null &&
@@ -79,41 +79,46 @@ async function onShare() {
 
 <template>
   <div class="relative flex items-center gap-2">
-    <UFieldGroup v-if="showGroup" data-testid="share-publish-group">
-      <UTooltip v-if="showShare" :text="blockedReason" :disabled="!shareBlocked" :delay-duration="300">
-        <!-- A disabled button gets no pointer events; the span keeps the tooltip working. -->
-        <span class="inline-flex" data-testid="share-preview-wrap">
+    <UFieldGroup v-if="showShare || changes.prUrl" data-testid="share-group">
+      <!--
+        Blocked only before a pull request exists, so the button is alone in the group then.
+        A disabled button gets no pointer events; the span keeps the tooltip working. Unblocked,
+        it stays a direct child so the group can join its corners to Review's.
+      -->
+      <UTooltip v-if="showShare && shareBlocked" :text="blockedReason" :delay-duration="300">
+        <span class="inline-flex">
           <UButton
-            :color="variant === 'default' ? 'primary' : 'neutral'"
-            :variant="variant === 'default' ? 'solid' : 'outline'"
+            color="primary"
             size="sm"
             :icon="shareIcon"
-            :loading="changes.sharing"
             :label="label"
             data-testid="share-preview"
-            :aria-description="shareBlocked ? blockedReason : undefined"
-            :disabled="changes.sharing || shareBlocked"
-            @click="onShare"
+            :aria-description="blockedReason"
+            disabled
           />
         </span>
       </UTooltip>
-      <span
-        v-if="showShare && (changes.prUrl || showPublish)"
-        aria-hidden="true"
-        class="w-px self-stretch"
-        :class="changes.prUrl ? 'bg-accented' : 'bg-default/25'"
+      <UButton
+        v-else-if="showShare"
+        :color="variant === 'default' ? 'primary' : 'neutral'"
+        :variant="variant === 'default' ? 'solid' : 'outline'"
+        size="sm"
+        :icon="shareIcon"
+        :loading="changes.sharing"
+        :label="label"
+        data-testid="share-preview"
+        :disabled="changes.sharing"
+        @click="onShare"
       />
+      <span v-if="showShare && changes.prUrl" aria-hidden="true" class="bg-accented w-px self-stretch" />
       <PrMenu v-if="changes.prUrl" :variant="variant" />
-      <span v-if="changes.prUrl && showPublish" aria-hidden="true" class="bg-accented w-px self-stretch" />
-      <PublishButton
-        v-if="showPublish"
-        :project-id="projectId"
-        :repo="repo ?? null"
-      />
     </UFieldGroup>
 
+    <!-- Its own button: publishing is a separate step from sharing and reviewing. -->
+    <PublishButton v-if="showPublish" :project-id="projectId" :repo="repo ?? null" />
+
     <UButton
-      v-else-if="liveHref"
+      v-if="!showGroup && liveHref"
       color="neutral"
       variant="outline"
       size="sm"
