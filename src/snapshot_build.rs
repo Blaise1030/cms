@@ -27,7 +27,9 @@ pub enum BuildError {
     Invalid(String),
 }
 
-/// Builds `revision` with `PUBLIC_BASE=base_url` and moves its `dist` to `out`.
+/// Builds `revision` and moves its `dist` to `out`. The site builds with its own base (`/`
+/// for a site made for orso), as it would for production: the snapshot is served at the root
+/// of an origin of its own.
 ///
 /// The project's `orso.json` — read from the checkout at `repo`, not from
 /// `revision` — decides where the site builds (`root`) and whose `node_modules`
@@ -35,7 +37,6 @@ pub enum BuildError {
 pub async fn build(
     repo: &Path,
     revision: &str,
-    base_url: &str,
     out: &Path,
     timeout: Duration,
 ) -> Result<(), BuildError> {
@@ -61,7 +62,7 @@ pub async fn build(
         repo: repo.to_owned(),
         dir: tmp.clone(),
     };
-    let result = build_in(repo, revision, base_url, out, timeout, &settings, &tmp).await;
+    let result = build_in(repo, revision, out, timeout, &settings, &tmp).await;
     worktree.remove().await;
     result
 }
@@ -70,7 +71,6 @@ pub async fn build(
 async fn build_in(
     repo: &Path,
     revision: &str,
-    base_url: &str,
     out: &Path,
     timeout: Duration,
     settings: &ProjectSettings,
@@ -100,7 +100,6 @@ async fn build_in(
     command.args(["run", "build"]);
     scrub_secrets(&mut command);
     command
-        .env("PUBLIC_BASE", base_url)
         .current_dir(&site)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -331,7 +330,7 @@ mod tests {
 
     const WRITES_DIST: &str = "const fs = require('fs');\n\
         fs.mkdirSync('dist', { recursive: true });\n\
-        fs.writeFileSync('dist/index.html', '<h1>' + process.env.PUBLIC_BASE + '</h1>');\n";
+        fs.writeFileSync('dist/index.html', '<h1>' + (process.env.PUBLIC_BASE || '/') + '</h1>');\n";
 
     fn worktrees(repo: &Path) -> usize {
         git(repo, &["worktree", "list", "--porcelain"])
@@ -356,12 +355,13 @@ mod tests {
         let rev = fixture(&repo, ".", WRITES_DIST);
         let base = temp.path().join("previews");
         let out = base.join("out");
-        build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60))
+        build(&repo, &rev, &out, Duration::from_secs(60))
             .await
             .unwrap_or_else(|e| panic!("{e:?}"));
         assert_eq!(
             fs::read_to_string(out.join("index.html")).unwrap(),
-            "<h1>/p/x/</h1>"
+            // No base is passed: the snapshot builds for the root of its own origin.
+            "<h1>/</h1>"
         );
         assert_eq!(worktrees(&repo), 1);
         assert!(
@@ -378,7 +378,7 @@ mod tests {
         let rev = fixture(&repo, ".", "process.exit(1);\n");
         let base = temp.path().join("previews");
         let out = base.join("out");
-        let result = build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60)).await;
+        let result = build(&repo, &rev, &out, Duration::from_secs(60)).await;
         assert!(
             matches!(result, Err(BuildError::Unavailable(ref m)) if m.starts_with("Preview build could not complete")),
             "{result:?}"
@@ -408,7 +408,7 @@ mod tests {
         let rev = fixture(&repo, ".", &script);
         let base = temp.path().join("previews");
         let out = base.join("out");
-        let result = build(&repo, &rev, "/p/x/", &out, Duration::from_secs(6)).await;
+        let result = build(&repo, &rev, &out, Duration::from_secs(6)).await;
         assert!(
             matches!(result, Err(BuildError::Unavailable(ref m)) if m == "Preview build timed out"),
             "{result:?}"
@@ -448,7 +448,7 @@ mod tests {
         fs::create_dir_all(repo.join("site/node_modules/marker")).unwrap();
         let base = temp.path().join("previews");
         let out = base.join("out");
-        build(&repo, &rev, "/p/y/", &out, Duration::from_secs(60))
+        build(&repo, &rev, &out, Duration::from_secs(60))
             .await
             .unwrap_or_else(|e| panic!("{e:?}"));
         assert!(out.join("index.html").is_file());
@@ -516,7 +516,7 @@ mod tests {
             fs.writeFileSync('dist/index.html', String(process.env.ORSO_SCRUB_TEST_TOKEN) + ' ' + process.env.ORSO_SCRUB_TEST_VISIBLE);\n";
         let rev = fixture(&repo, ".", script);
         let out = temp.path().join("previews/out");
-        build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60))
+        build(&repo, &rev, &out, Duration::from_secs(60))
             .await
             .unwrap_or_else(|e| panic!("{e:?}"));
         assert_eq!(
@@ -539,7 +539,7 @@ mod tests {
             fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let out = temp.path().join("previews/out");
-        build(&repo, &rev, "/p/x/", &out, Duration::from_secs(60))
+        build(&repo, &rev, &out, Duration::from_secs(60))
             .await
             .unwrap_or_else(|e| panic!("{e:?}"));
         assert!(out.join("index.html").is_file());

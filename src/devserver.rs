@@ -1,8 +1,9 @@
 //! Dev-server supervision: one dev server per project, run from the `dev`
 //! command in `orso.json` (default `npm run dev`) in the configured root.
 //!
-//! A supervisor task per project spawns the dev server on the project's port with
-//! `PUBLIC_BASE=/preview/{id}/`, marks it ready when stdout prints its local URL, restarts
+//! A supervisor task per project spawns the dev server on the project's port, opens the
+//! project's preview origin (see [`crate::preview`]) so the site is framed at its root,
+//! marks it ready when stdout prints its local URL, restarts
 //! it after crashes (at most [`MAX_RESTARTS`] times, with exponential backoff), and
 //! publishes every transition as a `devserver.status` event. An invalid `orso.json`
 //! parks it as `crashed` until the file loads again; a spent crash budget parks it
@@ -10,7 +11,8 @@
 //!
 //! The server runs in its own process group so the package manager's node grandchild dies with it.
 //! Lifecycle: it runs from project creation (or daemon start for existing projects) until
-//! the project is deleted or the daemon shuts down, plus manual restarts.
+//! the project is deleted or the daemon shuts down, plus manual restarts. The preview origin
+//! lives as long and keeps its port across restarts.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -129,11 +131,12 @@ pub struct LaunchSpec {
     pub project_id: String,
     pub dir: PathBuf,
     pub port: u16,
-    /// Value of `PUBLIC_BASE`: `/preview/{id}/`.
-    pub public_base: String,
+    /// Port of the project's preview origin (0 when none is open); the browser's HMR socket
+    /// connects there.
+    pub preview_port: u16,
 }
 
-/// Builds the program and arguments. The supervisor adds `PUBLIC_BASE`, the working
+/// Builds the program and arguments. The supervisor adds the orso environment, the working
 /// directory, stdio and the process group itself.
 pub type CommandFactory = Arc<dyn Fn(&LaunchSpec) -> Command + Send + Sync>;
 
@@ -152,34 +155,40 @@ pub struct DevServerOptions {
     pub launcher: Launcher,
     pub backoff_base: Duration,
     pub stable_after: Duration,
-    /// Daemon listen port; exposed to Astro as `ORSO_PROXY_PORT` so Vite HMR
-    /// connects through the preview proxy instead of the raw Astro port.
-    pub proxy_port: u16,
+    /// App origins the preview bridge may talk to ([`crate::preview::app_origins`]),
+    /// exposed to the site as `ORSO_APP_ORIGINS`.
+    pub app_origins: Vec<String>,
     /// `PATH` for npm: managed Node first, then the login shell and daemon paths.
     pub path: Option<std::ffi::OsString>,
 }
 
 impl DevServerOptions {
-    pub fn configured(proxy_port: u16) -> Self {
-        Self::with_launcher(Launcher::Configured, proxy_port)
+    pub fn configured() -> Self {
+        Self::with_launcher(Launcher::Configured)
     }
 
     pub fn disabled() -> Self {
-        Self::with_launcher(Launcher::Disabled, 0)
+        Self::with_launcher(Launcher::Disabled)
     }
 
     pub fn custom(factory: impl Fn(&LaunchSpec) -> Command + Send + Sync + 'static) -> Self {
-        Self::with_launcher(Launcher::Custom(Arc::new(factory)), 0)
+        Self::with_launcher(Launcher::Custom(Arc::new(factory)))
     }
 
-    fn with_launcher(launcher: Launcher, proxy_port: u16) -> Self {
+    fn with_launcher(launcher: Launcher) -> Self {
         Self {
             launcher,
             backoff_base: BACKOFF_BASE,
             stable_after: STABLE_AFTER,
-            proxy_port,
+            app_origins: Vec::new(),
             path: None,
         }
+    }
+
+    /// Let the preview bridge talk to these app origins.
+    pub fn with_app_origins(mut self, origins: Vec<String>) -> Self {
+        self.app_origins = origins;
+        self
     }
 
     /// Use this `PATH` for the dev server's package manager.
@@ -218,6 +227,9 @@ pub struct DevServerManager {
     running: Mutex<HashMap<String, Running>>,
     /// `ORSO_CONTENT_TOKEN` of each supervised project, fresh per `start`.
     content_tokens: std::sync::Mutex<HashMap<String, String>>,
+    /// Opened before a dev server starts (its port goes into the environment) and closed
+    /// when supervision stops for good.
+    preview_origins: Option<Arc<crate::preview::PreviewOrigins>>,
 }
 
 impl DevServerManager {
@@ -233,7 +245,14 @@ impl DevServerManager {
             }),
             running: Mutex::new(HashMap::new()),
             content_tokens: Default::default(),
+            preview_origins: None,
         }
+    }
+
+    /// Open a preview origin for every project this manager starts.
+    pub fn with_preview_origins(mut self, origins: Arc<crate::preview::PreviewOrigins>) -> Self {
+        self.preview_origins = Some(origins);
+        self
     }
 
     /// Replace the package-manager `PATH` (after a managed Node download finishes).
@@ -299,6 +318,18 @@ impl DevServerManager {
                 return Err(e);
             }
         };
+        // Without an origin the dev server still runs (and is reachable directly); the
+        // preview just has nowhere to be framed until the next start.
+        let preview_port = match &self.preview_origins {
+            Some(origins) => match origins.ensure(id).await {
+                Ok(access) => access.port,
+                Err(e) => {
+                    eprintln!("orso: no preview origin for {id}: {e}");
+                    0
+                }
+            },
+            None => 0,
+        };
         self.shared
             .set_state(id, DevserverStatus::Starting, port, None)
             .await;
@@ -309,7 +340,10 @@ impl DevServerManager {
             self.shared.clone(),
             id.to_string(),
             stop_rx,
-            token,
+            Session {
+                token,
+                preview_port,
+            },
         ));
         running.insert(id.to_string(), Running { stop, task });
         Ok(())
@@ -325,6 +359,9 @@ impl DevServerManager {
         };
         if let Some(old) = old {
             old.stop().await;
+        }
+        if let Some(origins) = &self.preview_origins {
+            origins.release(id).await;
         }
     }
 
@@ -351,6 +388,9 @@ impl DevServerManager {
         }
         for t in stopping {
             let _ = t.await;
+        }
+        if let Some(origins) = &self.preview_origins {
+            origins.shutdown().await;
         }
     }
 }
@@ -404,11 +444,19 @@ enum Outcome {
     Died { message: String, stable: bool },
 }
 
+/// What one `start` hands every run of its dev server.
+struct Session {
+    /// `ORSO_CONTENT_TOKEN`.
+    token: String,
+    /// The project's preview origin (0 when none could be opened).
+    preview_port: u16,
+}
+
 async fn supervise(
     shared: Arc<Shared>,
     id: String,
     mut stop: oneshot::Receiver<()>,
-    token: String,
+    session: Session,
 ) {
     let mut crashes = 0u32;
     let mut port = 0u16;
@@ -474,7 +522,7 @@ async fn supervise(
                                     port,
                                     &mut stop,
                                     settings.as_ref(),
-                                    &token,
+                                    &session,
                                 )
                                 .await
                             }
@@ -492,7 +540,7 @@ async fn supervise(
                             port,
                             &mut stop,
                             settings.as_ref(),
-                            &token,
+                            &session,
                         )
                         .await
                     }
@@ -608,15 +656,17 @@ impl Drop for GroupGuard {
     }
 }
 
-/// Environment a supervised dev server needs: its preview base and content token, the
-/// dev-server port (a directly framed preview opens HMR straight at it) and, when proxied,
-/// the daemon port Vite routes HMR to instead.
-fn launch_env(cmd: &mut Command, spec: &LaunchSpec, token: &str, proxy_port: u16) {
-    cmd.env("PUBLIC_BASE", &spec.public_base)
-        .env("ORSO_CONTENT_TOKEN", token)
-        .env("ORSO_DEV_PORT", spec.port.to_string());
-    if proxy_port > 0 {
-        cmd.env("ORSO_PROXY_PORT", proxy_port.to_string());
+/// Environment a supervised dev server needs: its content token, and for the `orso()`
+/// integration the preview origin's port (the browser opens HMR there, through the proxy) and
+/// the app origins its preview bridge answers. The site runs with base `/`: nothing here
+/// changes its URLs.
+fn launch_env(cmd: &mut Command, spec: &LaunchSpec, token: &str, app_origins: &[String]) {
+    cmd.env("ORSO_CONTENT_TOKEN", token);
+    if spec.preview_port > 0 {
+        cmd.env("ORSO_PREVIEW_PORT", spec.preview_port.to_string());
+    }
+    if !app_origins.is_empty() {
+        cmd.env("ORSO_APP_ORIGINS", app_origins.join(","));
     }
 }
 
@@ -627,13 +677,13 @@ async fn run_once(
     port: u16,
     stop: &mut oneshot::Receiver<()>,
     settings: Option<&crate::settings::ProjectSettings>,
-    token: &str,
+    session: &Session,
 ) -> Outcome {
     let spec = LaunchSpec {
         project_id: id.to_string(),
         dir: dir.clone(),
         port,
-        public_base: format!("/preview/{id}/"),
+        preview_port: session.preview_port,
     };
     let path = shared
         .path
@@ -666,7 +716,7 @@ async fn run_once(
     if let Some(path) = &path {
         cmd.env("PATH", path);
     }
-    launch_env(&mut cmd, &spec, token, shared.opts.proxy_port);
+    launch_env(&mut cmd, &spec, &session.token, &shared.opts.app_origins);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -858,7 +908,7 @@ mod tests {
     #[test]
     fn ready_line_detection() {
         assert_eq!(
-            ready_port("\u{1b}[2m ┃ \u{1b}[22mLocal    \u{1b}[1mhttp://localhost:4321/preview/x/\u{1b}[22m"),
+            ready_port("\u{1b}[2m ┃ \u{1b}[22mLocal    \u{1b}[1mhttp://localhost:4321/\u{1b}[22m"),
             Some(4321)
         );
         assert_eq!(
@@ -879,49 +929,62 @@ mod tests {
     }
 
     #[test]
-    fn dev_server_env_names_the_preview_base_and_ports() {
+    fn dev_server_env_names_the_preview_origin_and_app_origins() {
         let spec = LaunchSpec {
             project_id: "site".into(),
             dir: PathBuf::from("/tmp/site"),
             port: 4567,
-            public_base: "/preview/site/".into(),
+            preview_port: 4999,
+        };
+        let envs = |cmd: &Command| -> HashMap<String, Option<String>> {
+            cmd.as_std()
+                .get_envs()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.map(|v| v.to_string_lossy().into_owned()),
+                    )
+                })
+                .collect()
         };
         let mut cmd = Command::new("true");
-        launch_env(&mut cmd, &spec, "tok", 7800);
-        let envs: HashMap<_, _> = cmd
-            .as_std()
-            .get_envs()
-            .map(|(k, v)| {
-                (
-                    k.to_string_lossy().into_owned(),
-                    v.map(|v| v.to_string_lossy().into_owned()),
-                )
-            })
-            .collect();
+        let origins = [
+            "http://127.0.0.1:7800".to_string(),
+            "http://localhost:5173".to_string(),
+        ];
+        launch_env(&mut cmd, &spec, "tok", &origins);
+        let env = envs(&cmd);
         assert_eq!(
-            envs.get("PUBLIC_BASE").cloned().flatten().as_deref(),
-            Some("/preview/site/")
-        );
-        assert_eq!(
-            envs.get("ORSO_CONTENT_TOKEN").cloned().flatten().as_deref(),
+            env.get("ORSO_CONTENT_TOKEN").cloned().flatten().as_deref(),
             Some("tok")
         );
-        // The browser opens HMR straight at the dev server, not only through the daemon.
+        // The browser opens HMR on the preview origin, which tunnels it to the dev server.
         assert_eq!(
-            envs.get("ORSO_DEV_PORT").cloned().flatten().as_deref(),
-            Some("4567")
+            env.get("ORSO_PREVIEW_PORT").cloned().flatten().as_deref(),
+            Some("4999")
         );
         assert_eq!(
-            envs.get("ORSO_PROXY_PORT").cloned().flatten().as_deref(),
-            Some("7800")
+            env.get("ORSO_APP_ORIGINS").cloned().flatten().as_deref(),
+            Some("http://127.0.0.1:7800,http://localhost:5173")
         );
+        // The site runs at the root of its origin: no base, no port juggling.
+        for gone in ["PUBLIC_BASE", "ORSO_DEV_PORT", "ORSO_PROXY_PORT"] {
+            assert!(!env.contains_key(gone), "{gone}");
+        }
 
-        let mut no_proxy = Command::new("true");
-        launch_env(&mut no_proxy, &spec, "tok", 0);
-        assert!(!no_proxy
-            .as_std()
-            .get_envs()
-            .any(|(k, _)| k == "ORSO_PROXY_PORT"));
+        let mut bare = Command::new("true");
+        launch_env(
+            &mut bare,
+            &LaunchSpec {
+                preview_port: 0,
+                ..spec
+            },
+            "tok",
+            &[],
+        );
+        let env = envs(&bare);
+        assert!(!env.contains_key("ORSO_PREVIEW_PORT"));
+        assert!(!env.contains_key("ORSO_APP_ORIGINS"));
     }
 
     #[test]
@@ -930,7 +993,7 @@ mod tests {
             project_id: "site".into(),
             dir: PathBuf::from("/tmp/site"),
             port: 4567,
-            public_base: "/preview/site/".into(),
+            preview_port: 0,
         };
         let settings = crate::settings::ProjectSettings::defaults();
         let cmd = configured_command(&settings, &spec);

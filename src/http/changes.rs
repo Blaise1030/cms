@@ -463,23 +463,17 @@ pub async fn conflict_previews(
     .await?;
     let yours = state
         .conflict_previews
-        .prepare(&session.dir, &q.project, &id, Source::Yours, &session.tip)
+        .prepare(&session.dir, &id, Source::Yours, &session.tip)
         .await;
     let latest = state
         .conflict_previews
-        .prepare(
-            &session.dir,
-            &q.project,
-            &id,
-            Source::Latest,
-            &session.incoming,
-        )
+        .prepare(&session.dir, &id, Source::Latest, &session.incoming)
         .await;
     let result = if candidate.complete {
         let commit = conflicts::preview_commit(&session.dir, &candidate.tree, &session.tip).await?;
         state
             .conflict_previews
-            .prepare(&session.dir, &q.project, &id, Source::Result, &commit)
+            .prepare(&session.dir, &id, Source::Result, &commit)
             .await
     } else {
         state

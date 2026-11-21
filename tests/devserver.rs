@@ -33,7 +33,7 @@ fn config(dir: &Path) -> Config {
 }
 
 /// A stand-in dev server: `sh -c script`, run in the project dir with `$PORT` and
-/// `$PUBLIC_BASE` set. Backoff is shrunk so crash loops finish quickly.
+/// the orso environment set. Backoff is shrunk so crash loops finish quickly.
 fn script(body: &'static str) -> DevServerOptions {
     let mut opts = DevServerOptions::custom(move |spec| {
         let mut c = Command::new("sh");
@@ -46,15 +46,15 @@ fn script(body: &'static str) -> DevServerOptions {
 
 /// The configured launcher (`orso.json`), with a shrunk crash backoff.
 fn configured() -> DevServerOptions {
-    let mut opts = DevServerOptions::configured(0);
+    let mut opts = DevServerOptions::configured();
     opts.backoff_base = Duration::from_millis(50);
     opts
 }
 
 const READY: &str = r#"
 echo $$ >> spawns.log
-echo "$PUBLIC_BASE $PORT" > env.txt
-echo "  ➜  Local:   http://127.0.0.1:$PORT$PUBLIC_BASE"
+echo "${PUBLIC_BASE:-no-base} $ORSO_PREVIEW_PORT $PORT" > env.txt
+echo "  ➜  Local:   http://127.0.0.1:$PORT/"
 exec sleep 300
 "#;
 
@@ -67,7 +67,7 @@ exit 1
 const FLAKY: &str = r#"
 echo x >> spawns.log
 if [ -f ok ]; then
-  echo "  Local  http://127.0.0.1:$PORT$PUBLIC_BASE"
+  echo "  Local  http://127.0.0.1:$PORT/"
   exec sleep 300
 fi
 echo "not yet"
@@ -78,13 +78,13 @@ const TREE: &str = r#"
 echo $$ > pid
 sleep 300 &
 echo $! > childpid
-echo "  Local  http://127.0.0.1:$PORT$PUBLIC_BASE"
+echo "  Local  http://127.0.0.1:$PORT/"
 wait
 "#;
 
 const SHORT_LIVED: &str = r#"
 echo x >> spawns.log
-echo "  Local  http://127.0.0.1:$PORT$PUBLIC_BASE"
+echo "  Local  http://127.0.0.1:$PORT/"
 sleep 0.4
 exit 1
 "#;
@@ -226,7 +226,7 @@ fn read_pid(path: &Path) -> i32 {
 }
 
 #[tokio::test]
-async fn create_supervises_dev_server_with_public_base_and_reports_ready() {
+async fn create_supervises_dev_server_with_a_preview_origin_and_reports_ready() {
     let env = env_with(script(READY));
     let mut events = env.events();
     let info = env.create("Site").await;
@@ -237,12 +237,41 @@ async fn create_supervises_dev_server_with_public_base_and_reports_ready() {
     let ready = events.status("site", "ready").await;
     assert_eq!(ready["port"].as_u64().unwrap(), port);
     assert_eq!(env.devserver_state("site").await, "ready");
-    // The process saw the preview prefix and its port.
+    // The process saw its port and its preview origin's port, and no base.
+    let preview_port = env.state.preview_origins.port("site").await.unwrap();
     assert_eq!(
         lines(&env.file("site", "env.txt")),
-        [format!("/preview/site/ {port}")]
+        [format!("no-base {preview_port} {port}")]
+    );
+    // The preview origin answers the same port to the app, and keeps it across a restart.
+    let (s, v) = env.call("GET", "/api/projects/site/preview", None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v, json!({ "port": preview_port, "token": null }));
+    env.state.devservers.start("site").await.unwrap();
+    assert_eq!(
+        env.state.preview_origins.port("site").await,
+        Some(preview_port)
     );
     env.state.devservers.shutdown().await;
+    assert_eq!(env.state.preview_origins.port("site").await, None);
+}
+
+#[tokio::test]
+async fn stopping_a_dev_server_for_good_frees_its_preview_port() {
+    let env = env_with(script(READY));
+    let mut events = env.events();
+    env.create("Site").await;
+    events.status("site", "ready").await;
+    let preview_port = env.state.preview_origins.port("site").await.unwrap();
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", preview_port))
+        .await
+        .is_ok());
+
+    env.state.devservers.stop("site").await;
+    assert_eq!(env.state.preview_origins.port("site").await, None);
+    // The listener is gone: the port can be bound again.
+    let rebound = tokio::net::TcpListener::bind(("127.0.0.1", preview_port)).await;
+    assert!(rebound.is_ok(), "{rebound:?}");
 }
 
 #[tokio::test]
@@ -559,9 +588,10 @@ async fn daemon_restart_resumes_projects_and_reallocates_a_busy_port() {
     assert_eq!(ready["beta"], free_port, "free port is kept");
     // The process really ran on the new port, and it was persisted.
     let env_txt = std::fs::read_to_string(root.join("alpha/env.txt")).unwrap();
+    let preview_port = state.preview_origins.port("alpha").await.unwrap();
     assert_eq!(
         env_txt.trim(),
-        format!("/preview/alpha/ {}", ready["alpha"])
+        format!("no-base {preview_port} {}", ready["alpha"])
     );
     let persisted: Value =
         serde_json::from_slice(&std::fs::read(root.join(".orso/projects.json")).unwrap()).unwrap();
@@ -748,11 +778,12 @@ async fn disabled_supervision_leaves_projects_starting_and_restart_is_a_noop() {
 }
 
 /// Real npm + Astro: create a project (network for `npm install`), wait for the dev server,
-/// fetch the site through the preview proxy, and check nothing lingers after shutdown.
+/// fetch the site through its preview origin (HMR included), and check nothing lingers after
+/// shutdown.
 /// Run with `cargo test -- --ignored`.
 #[tokio::test]
 #[ignore = "needs network + npm"]
-async fn real_astro_dev_server_is_served_through_the_preview_proxy() {
+async fn real_astro_dev_server_is_served_through_its_preview_origin() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let tmp = tempfile::tempdir().unwrap();
@@ -792,25 +823,46 @@ async fn real_astro_dev_server_is_served_through_the_preview_proxy() {
         }
     }
 
-    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
-    s.write_all(
-        b"GET /preview/real-site/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-    )
-    .await
-    .unwrap();
-    let mut out = String::new();
-    s.read_to_string(&mut out).await.unwrap();
+    let preview = state.preview_origins.port("real-site").await.unwrap();
+    let get = |path: &'static str| async move {
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", preview))
+            .await
+            .unwrap();
+        s.write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        out
+    };
+    // The site is served at the root of its own origin, links and assets unprefixed.
+    let out = get("/").await;
     assert!(out.starts_with("HTTP/1.1 200"), "{out}");
-    assert!(out.contains("/preview/real-site/"), "assets are prefixed");
+    assert!(out.contains("src=\"/@vite/client\""), "{out}");
+    assert!(!out.contains("/preview/"), "no preview prefix: {out}");
 
-    // The template pins Vite's HMR socket under the prefix (`vite-hmr` subprotocol).
+    // Vite's HMR socket lives at the origin's root too, behind the client's token.
+    let client = get("/@vite/client").await;
+    let token = client
+        .split("const wsToken = \"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("vite client names its HMR token")
+        .to_string();
     use futures_util::StreamExt;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    let mut req = format!("ws://{addr}/preview/real-site/vite-hmr")
+    let mut req = format!("ws://127.0.0.1:{preview}/?token={token}")
         .into_client_request()
         .unwrap();
     req.headers_mut()
         .insert("sec-websocket-protocol", "vite-hmr".parse().unwrap());
+    req.headers_mut().insert(
+        "origin",
+        format!("http://127.0.0.1:{preview}").parse().unwrap(),
+    );
     let (mut ws, res) = tokio_tungstenite::connect_async(req).await.unwrap();
     assert_eq!(res.headers()["sec-websocket-protocol"], "vite-hmr");
     let first = ws.next().await.unwrap().unwrap().into_text().unwrap();
