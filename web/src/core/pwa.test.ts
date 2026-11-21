@@ -34,13 +34,14 @@ describe("pwa config", () => {
       <link rel="stylesheet" crossorigin href="/assets/index-C.css">
       <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>`;
 
-    it("finds the entry script and its modulepreload deps", () => {
-      expect([...shellScripts(html)].sort()).toEqual(["assets/index-A.js", "assets/vendor-B.js"]);
+    it("finds the entry script, its modulepreload deps and its stylesheet", () => {
+      expect([...shellScripts(html)].sort()).toEqual(["assets/index-A.js", "assets/index-C.css", "assets/vendor-B.js"]);
     });
 
     it("drops lazy chunks (shiki grammars/themes/wasm) but keeps shell files", () => {
       const shell = shellScripts(html);
-      for (const lazy of ["assets/cpp-X.js", "assets/emacs-lisp-X.js", "assets/wasm-X.js", "assets/dist-X.js"]) {
+      // A tab's panel loads on demand, and so does the CSS that comes with it.
+      for (const lazy of ["assets/cpp-X.js", "assets/emacs-lisp-X.js", "assets/wasm-X.js", "assets/dist-X.js", "assets/ContentPanel-X.js", "assets/ContentPanel-X.css"]) {
         expect(isShellEntry(lazy, shell), lazy).toBe(false);
       }
       for (const kept of ["assets/index-A.js", "assets/vendor-B.js", "assets/index-C.css", "index.html", "icons/icon-192.png", "manifest.webmanifest", "registerSW.js"]) {
