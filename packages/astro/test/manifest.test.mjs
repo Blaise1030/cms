@@ -45,11 +45,12 @@ const helpDocsCollection = {
 
 async function loadCollections(collections, extra = {}) {
   const runner = fakeRunner({ collections });
-  const { hasPreviewPath, ...loadOpts } = extra;
+  const { hasPreviewPath, hide } = extra;
   const result = await loadContent({
     runner,
     configPath: CONFIG,
     ...(hasPreviewPath !== undefined ? { hasPreviewPath } : {}),
+    ...(hide !== undefined ? { hide } : {}),
   });
   return { ...result, runner, ...extra };
 }
@@ -297,6 +298,7 @@ test.describe("loadContent", () => {
       singleton: "home",
       supportedForEditing: true,
       reason: null,
+      hidden: false,
       hasPreviewPath: false,
       fields: {
         type: "object",
@@ -321,6 +323,7 @@ test.describe("loadContent", () => {
       singleton: null,
       supportedForEditing: false,
       reason: "Collection does not use orsoGlob",
+      hidden: false,
       hasPreviewPath: false,
       fields: {
         type: "object",
@@ -328,6 +331,44 @@ test.describe("loadContent", () => {
         properties: { title: { type: "string", required: true } },
       },
     });
+  });
+
+  test("marks hidden collections read-only with their own reason, whatever their loader", async () => {
+    const { manifest, unknownHidden } = await loadCollections(
+      {
+        blog: blogCollection(),
+        blogI18n: {
+          loader: glob({ base: "src/content/blog", pattern: "zh/*.md" }),
+          schema: z.object({ title: z.string().optional() }),
+        },
+        pages: {
+          loader: glob({ base: "src/content/pages", pattern: "*.md" }),
+          schema: z.object({ title: z.string() }),
+        },
+      },
+      { hide: ["blogI18n"] },
+    );
+    assert.deepEqual(
+      manifest.collections.map(({ name, hidden, supportedForEditing, reason }) => ({ name, hidden, supportedForEditing, reason })),
+      [
+        { name: "blog", hidden: false, supportedForEditing: true, reason: null },
+        { name: "blogI18n", hidden: true, supportedForEditing: false, reason: "Collection is hidden from orso" },
+        { name: "pages", hidden: false, supportedForEditing: false, reason: "Collection does not use orsoGlob" },
+      ],
+    );
+    assert.deepEqual(unknownHidden, []);
+  });
+
+  test("hides an orsoGlob collection too, so it cannot be edited", async () => {
+    const { manifest } = await loadCollections({ blog: blogCollection() }, { hide: ["blog"] });
+    assert.equal(manifest.collections[0].hidden, true);
+    assert.equal(manifest.collections[0].supportedForEditing, false);
+  });
+
+  test("returns hidden names that are not collections instead of failing", async () => {
+    const { manifest, unknownHidden } = await loadCollections({ blog: blogCollection() }, { hide: ["blogI18n", "blog"] });
+    assert.deepEqual(manifest.collections.map(({ name }) => name), ["blog"]);
+    assert.deepEqual(unknownHidden, ["blogI18n"]);
   });
 
   test("sets hasPreviewPath from loadContent options and serializes in writeManifest", async () => {
@@ -435,10 +476,12 @@ test.describe("loadContent", () => {
     assert.deepEqual(await loadContent({ runner }), {
       manifest: { version: 1, collections: [] },
       schemas: new Map(),
+      unknownHidden: [],
     });
     assert.deepEqual(await loadContent(), {
       manifest: { version: 1, collections: [] },
       schemas: new Map(),
+      unknownHidden: [],
     });
   });
 

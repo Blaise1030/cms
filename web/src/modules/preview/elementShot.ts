@@ -1,4 +1,5 @@
-import { domToBlob } from "modern-screenshot";
+// Loaded on first use: picking an element is rare, and the library is 44 kB of the start-up chunk.
+const loadScreenshot = () => import("modern-screenshot");
 
 /** Longest side of a screenshot, in pixels: enough to read, small enough for the agent. */
 const MAX_SIDE = 2000;
@@ -14,6 +15,7 @@ export async function captureElement(el: Element): Promise<Blob | null> {
   const { width, height } = el.getBoundingClientRect();
   if (width < 1 || height < 1) return null;
   const win = el.ownerDocument.defaultView;
+  const { domToBlob } = await loadScreenshot();
   return domToBlob(el, {
     scale: shotScale(width, height, win?.devicePixelRatio ?? 1),
     type: "image/png",

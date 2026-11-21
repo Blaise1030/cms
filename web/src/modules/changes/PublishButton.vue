@@ -15,6 +15,8 @@ const visible = computed(
 
 /** GitHub's answer: conflicts, branch protection, or being behind `main` stop a merge. */
 const canMerge = computed(() => {
+  // GitHub opens no pull request for a change without edits: nothing to publish yet.
+  if (!store.prUrl && !store.hasEdits) return false;
   const status = store.status;
   if (!status) return true;
   if (status.state === "closed") return false;
@@ -28,6 +30,7 @@ const canMerge = computed(() => {
 
 /** Explained on hover, so a disabled Publish still says why. */
 const disabledReason = computed(() => {
+  if (!store.prUrl && !store.hasEdits) return "Make an edit first: there's nothing in this change to publish yet.";
   if (store.status?.state === "closed") return "This change was closed without publishing.";
   if (store.status?.state === "changes_requested") return "A reviewer sent this change back.";
   return "This change can't be published yet.";

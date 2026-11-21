@@ -29,6 +29,7 @@ import {
   type PendingCombine,
   type PublishResult,
   type PublishedPr,
+  type DeployState,
   type DeployStatus,
   type PrStatus,
   type CheckpointLog,
@@ -262,6 +263,15 @@ export function createApi(
     setupStatus: () => json<SetupStatus>("GET", "/api/setup/status"),
     /** Persist onboarding dismissal across desktop relaunches. */
     dismissSetup: () => json<{ dismissed: true }>("POST", "/api/setup/dismiss"),
+    /** The project rail's tab order, kept by the daemon; null until the user reorders. */
+    railOrder: async (): Promise<string[] | null> =>
+      (await json<{ order: string[] | null }>("GET", "/api/setup/rail-order")).order,
+    /** Save the rail's tab order app-wide (the desktop UI's localStorage doesn't survive relaunch). */
+    saveRailOrder: (order: string[]) =>
+      json<{ order: string[] }>("PUT", "/api/setup/rail-order", { body: { order } }),
+    /** Save the assistant order app-wide (it lives with the daemon, not this browser). */
+    saveAssistantOrder: (order: string[]) =>
+      json<{ order: string[] }>("PUT", "/api/setup/assistant-order", { body: { order } }),
     /** The assistant + site-builder download snapshot. */
     setupRuntimes: () => json<SetupSnapshot>("GET", "/api/setup/runtimes"),
     downloadRuntime: (id: string) =>
@@ -387,6 +397,13 @@ export function createApi(
       json<{ branch: string; mainUpdated?: boolean }>("POST", `/api/changes/${enc(branch)}/cleanup`, {
         body: { project },
       }),
+    /** Whether a change differs from `main` at all (local; GitHub opens no PR without edits). */
+    changeHasEdits: async (project: string, branch: string): Promise<boolean> =>
+      (
+        await json<{ hasEdits: boolean }>("GET", `/api/changes/${enc(branch)}/edits`, {
+          query: { project },
+        })
+      ).hasEdits,
     /** PR state / checks / preview URL of a change; null when it has no PR. */
     changeStatus: async (project: string, branch: string): Promise<PrStatus | null> =>
       (
@@ -416,6 +433,14 @@ export function createApi(
       return conflict ? { conflict } : pr;
     },
 
+    /**
+     * Where the newest successful GitHub deployment of `sha` lives (`live`), or, without one,
+     * whether its deploy is still `building`, `failed`, or `unknown` (none, or GitHub can't say).
+     */
+    deployLink: (project: string, sha: string) =>
+      json<{ url: string | null; state: DeployState }>("GET", `/api/projects/${enc(project)}/deploy-url`, {
+        query: { sha },
+      }),
     /** Whether the deploy of a published change's merge commit has shipped. */
     deployStatus: (project: string, sha: string): Promise<DeployStatus> =>
       json<DeployStatus>("GET", `/api/projects/${enc(project)}/deploy`, { query: { sha } }),

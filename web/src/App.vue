@@ -10,6 +10,7 @@ import { SETUP_WAIT_MS, dismissSetup, setupDismissed, setupIncomplete } from "@/
 import UIcon from "@nuxt/ui/components/Icon.vue";
 import { useToast } from "@nuxt/ui/composables/useToast";
 import { useDaemon } from "@/core/daemon";
+import { connectTabOrder } from "@/lib/tabOrder";
 import type { SetupStatus } from "@/core/types";
 import { useTheme } from "@/lib/theme";
 import { installToast } from "@/lib/toast";
@@ -84,7 +85,11 @@ function connect(link: string) {
   retrying.value = daemon.connectTo(link);
 }
 
-onMounted(() => daemon.start());
+onMounted(() => {
+  daemon.start();
+  // The rail's tab order lives with the daemon; bring it into this (possibly fresh) origin.
+  void connectTabOrder({ load: daemon.api.railOrder, save: daemon.api.saveRailOrder });
+});
 onBeforeUnmount(() => {
   clearTimeout(setupTimer);
   daemon.stop();

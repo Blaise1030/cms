@@ -1,14 +1,17 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import HomePage from "@/app/HomePage.vue";
 import ProjectPage from "@/app/ProjectPage.vue";
-import CheckpointsPanel from "@/modules/checkpoints/CheckpointsPanel.vue";
-import ContentPanel from "@/modules/content/ContentPanel.vue";
-import DesignPanel from "@/modules/design/DesignPanel.vue";
-import FilesPanel from "@/modules/files/FilesPanel.vue";
-import ReviewPanel from "@/modules/review/ReviewPanel.vue";
-import AppSettingsPage from "@/modules/settings/AppSettingsPage.vue";
-import SettingsPanel from "@/modules/settings/SettingsPanel.vue";
 import { firstTab } from "@/lib/tabOrder";
+
+// Each tab's panel loads when it is first opened, so start-up doesn't pay for the editor,
+// the file trees and every other panel at once. The shell and the home page stay in the app chunk.
+const CheckpointsPanel = () => import("@/modules/checkpoints/CheckpointsPanel.vue");
+const ContentPanel = () => import("@/modules/content/ContentPanel.vue");
+const DesignPanel = () => import("@/modules/design/DesignPanel.vue");
+const FilesPanel = () => import("@/modules/files/FilesPanel.vue");
+const ReviewPanel = () => import("@/modules/review/ReviewPanel.vue");
+const AppSettingsPage = () => import("@/modules/settings/AppSettingsPage.vue");
+const SettingsPanel = () => import("@/modules/settings/SettingsPanel.vue");
 
 /** URL segment for a project workspace page (matches the tab labels). */
 export type ProjectTab = "preview" | "content" | "design" | "code" | "history" | "review" | "settings";

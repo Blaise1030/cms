@@ -65,7 +65,7 @@ export function usePaletteGroups(ui: { showChanges(): void; showNewChange(): voi
 
   async function loadContent(id: string) {
     try {
-      const collections = await daemon.api.listContentCollections(id);
+      const collections = (await daemon.api.listContentCollections(id)).filter((c) => !c.hidden);
       const lists = await Promise.all(
         collections.map((c) => daemon.api.listContentEntries(id, c.name).catch(() => [] as ContentEntrySummary[])),
       );

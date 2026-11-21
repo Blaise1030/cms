@@ -315,6 +315,7 @@ The person you are helping is usually not technical. Do the git work for them an
 
 A "change" (a draft) is a git branch named `content/<kebab-case-slug>`; its human title is stored with `git config branch.<branch>.description "<Title>"`. The app lists these as the user's changes.
 
+- Work right here, in this project folder, on the current change. Never create or use a git worktree (`git worktree add`), a clone, or a copy of the project to work in: the app's preview, saves, history and changes only see this folder, so work done elsewhere is invisible to the person and gets lost.
 - Only the person switches changes, in the app's change picker. Never switch to a different change yourself — do not run `git checkout <branch>` or `git switch` to move to another change (the app blocks this). Stay on the current change.
 - If the work needs a new change, do not create or switch to one yourself. Propose it in plain words ("I'd start a new draft called …") and ask the person to create it in the app, then continue.
 - Do a new, unrelated request in a new change; keep follow-ups on the current one.
@@ -618,6 +619,12 @@ fn write_opencode_json(dir: &Path, allow_all: bool) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn git_guide_keeps_the_agent_in_this_folder() {
+        assert!(GIT_GUIDE.contains("Never create or use a git worktree"));
+        assert!(agent_guide().contains("`git worktree add`"));
+    }
+
     #[test]
     fn agent_guide_adds_the_orso_layer_to_the_git_guide() {
         let g = agent_guide();

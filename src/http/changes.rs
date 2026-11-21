@@ -102,6 +102,7 @@ async fn save_edits(
                 "summary": cp.summary,
                 "author": cp.author,
                 "ts": cp.ts,
+                "avatarUrl": cp.avatar_url,
             }),
         );
     }
@@ -659,8 +660,11 @@ pub async fn cleanup(
         .ok_or_else(|| ApiError::enoent(format!("no such project: {}", req.project)))?;
     // Fail fast on what git can tell before asking GitHub.
     changes::check_cleanup(&project.dir, &branch).await?;
+    // Ask GitHub with either sign-in (the GitHub CLI too): after a squash merge, `main` never
+    // contains the branch tip, so only the merged pull request proves the change is published.
+    let signed_in = project.repo.is_some() && state.github.status().await.user.is_some();
     let (pr, env) = match project.repo.as_deref() {
-        Some(repo) if state.github.token().await.is_some() => {
+        Some(repo) if signed_in => {
             let pr =
                 match tokio::time::timeout(PR_STATE_TIMEOUT, state.github.pr_ref(repo, &branch))
                     .await
@@ -689,6 +693,26 @@ pub async fn cleanup(
     Ok(Json(
         json!({ "branch": "main", "mainUpdated": done.main_updated }),
     ))
+}
+
+/// `GET /api/changes/{branch}/edits?project=` → `{ hasEdits }`: whether the change differs
+/// from `main` at all. Local only (no GitHub call), so the app can ask after every save; a
+/// change without edits has nothing GitHub would open a pull request for.
+pub async fn edits(
+    State(state): State<AppState>,
+    Path(branch): Path<String>,
+    q: Result<Query<ProjectQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    let project = state
+        .projects
+        .get(&q.project)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {}", q.project)))?;
+    // Only this project's own changes.
+    changes::get(&project.dir, &branch).await?;
+    let has_edits = changes::has_edits(&project.dir, &branch).await;
+    Ok(Json(json!({ "hasEdits": has_edits })))
 }
 
 /// `GET /api/changes/{branch}/status?project=` → `{ pr: { number, url, state, checks,
@@ -749,6 +773,38 @@ pub async fn deploy(
         None => DeployState::Unknown,
     };
     Ok(Json(json!({ "state": deployed })))
+}
+
+/// `GET /api/projects/{id}/deploy-url?sha=` → `{ url, state }`: where the newest successful
+/// GitHub deployment of `sha` lives (a published checkpoint's site, or a pushed commit's
+/// preview), and the deploy's state. With a `url` the state is `live`; without one it is the
+/// state of the deploy running on `sha` (`building`, `failed`, or `unknown` when there is none
+/// or GitHub can't say), so a change published before its site deployed shows as building
+/// rather than as having no site. Never an error: the link is a convenience.
+pub async fn deploy_url(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    q: Result<Query<DeployQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query_or_badreq(q)?;
+    if !is_full_sha(&q.sha) {
+        return Err(ApiError::badreq("expected a full commit sha"));
+    }
+    let project = state
+        .projects
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::enoent(format!("no such project: {id}")))?;
+    let Some(repo) = project.repo else {
+        return Ok(Json(json!({ "url": null, "state": DeployState::Unknown })));
+    };
+    let url = state.github.preview_url(&repo, &q.sha).await.ok().flatten();
+    let deployed = if url.is_some() {
+        DeployState::Live
+    } else {
+        state.github.deploy_state(&repo, &q.sha).await
+    };
+    Ok(Json(json!({ "url": url, "state": deployed })))
 }
 
 /// GitHub commit shas are 40 hex characters; anything else can't name a deploy.
@@ -891,9 +947,10 @@ pub async fn publish(
             .await
             .map_err(|e| publish_step_error(e, false))?;
     }
+    let method = crate::settings::merge_method(&project.dir);
     let pr = state
         .github
-        .merge_pr(&repo, &branch)
+        .merge_pr(&repo, &branch, method)
         .await
         .map_err(|e| publish_step_error(e, false))?;
     // The published change's review images aren't needed any more.

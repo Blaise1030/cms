@@ -67,7 +67,8 @@ const talk = useConversation(
 const STATES = {
   open: { label: "Open", color: "success", icon: "i-hugeicons-git-pull-request" },
   draft: { label: "Draft", color: "neutral", icon: "i-hugeicons-git-pull-request-draft" },
-  merged: { label: "Merged", color: "secondary", icon: "i-hugeicons-git-merge" },
+  // GitHub's purple, as in the inbox. The theme's `secondary` is near-white in light mode.
+  merged: { label: "Merged", color: "neutral", icon: "i-hugeicons-git-merge", class: "bg-violet-600 text-white" },
   closed: { label: "Closed", color: "error", icon: "i-hugeicons-git-pull-request-closed" },
 } as const;
 const prState = computed(() => {
@@ -301,6 +302,7 @@ const macDesktop = isMacDesktop();
             variant="solid"
             :icon="prState.icon"
             :label="prState.label"
+            :class="'class' in prState ? prState.class : undefined"
             data-testid="review-state"
           />
           <UBadge color="neutral" variant="soft" class="max-w-40 truncate" :label="change.author" />

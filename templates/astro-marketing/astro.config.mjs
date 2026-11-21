@@ -2,7 +2,7 @@ import mdx from "@astrojs/mdx";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, fontProviders } from "astro/config";
 import { orso } from "./integrations/orso/index.js";
-import { marketingCollections } from "./integrations/orso/marketing.js";
+import { collections } from "./src/content/collections.js";
 import { site } from "./src/site.ts";
 
 // The orso dev server proxies the site under /preview/{id}/.
@@ -34,7 +34,7 @@ export default defineConfig({
       },
     },
   ],
-  integrations: [mdx(), orso({ collections: marketingCollections })],
+  integrations: [mdx(), orso({ collections })],
   vite: {
     plugins: [tailwindcss()],
     // Orso's conflict preview and the template tests run the site with node_modules symlinked

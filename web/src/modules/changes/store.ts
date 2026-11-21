@@ -48,6 +48,23 @@ const DEPLOY_UNVERIFIED = "Published. The site should update shortly.";
 /** One toast for the deploy being watched, so a later publish updates it instead of stacking. */
 const DEPLOY_TOAST_ID = "orso-deploy";
 
+export const SQUASH_UNAVAILABLE =
+  "This repository doesn't allow squash merging, so orso merged normally. Change it in the repository's settings or set mergeMethod in orso.json.";
+/** Projects already told that squash merging is off, kept in this browser so the note shows once. */
+export const SQUASH_NOTE_KEY = "orso.publish.squashNoted";
+
+/** Tell the writer once per project that GitHub refused the squash and orso fell back to a merge commit. */
+function noteSquashUnavailable(projectId: string) {
+  let noted: string[] = [];
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(SQUASH_NOTE_KEY) ?? "[]");
+    if (Array.isArray(saved)) noted = saved.filter((id): id is string => typeof id === "string");
+  } catch { /* unreadable storage: show the note */ }
+  if (noted.includes(projectId)) return;
+  toast.info(SQUASH_UNAVAILABLE);
+  try { localStorage.setItem(SQUASH_NOTE_KEY, JSON.stringify([...noted, projectId])); } catch { /* blocked: it may show again */ }
+}
+
 export const useChangesStore = defineStore("changes", () => {
   const daemon = useDaemon();
 
@@ -73,6 +90,11 @@ export const useChangesStore = defineStore("changes", () => {
   const needsSignIn = ref(false);
   /** PR state / checks / preview URL of the active change; null without a PR. */
   const status = ref<PrStatus | null>(null);
+  /**
+   * Whether the active change differs from `main`. GitHub opens no pull request for a change
+   * without edits, so sharing waits for one. Unknown counts as true, leaving sharing open.
+   */
+  const hasEdits = ref(true);
   /** The deploy a publish set off; null when none is being watched. */
   const deploy = ref<DeployState | null>(null);
   /** Production site URL while on `main`; null on a change or when unknown. */
@@ -116,8 +138,10 @@ export const useChangesStore = defineStore("changes", () => {
     const branch = active.value?.branch;
     if (!id || !branch) {
       status.value = null;
+      hasEdits.value = true;
       return;
     }
+    void refreshEdits();
     try {
       const pr = await daemon.api.changeStatus(id, branch);
       if (run !== statusRun) return;
@@ -130,6 +154,19 @@ export const useChangesStore = defineStore("changes", () => {
     if (run !== statusRun) return;
     if (status.value) {
       pollTimer = setTimeout(() => void refreshStatus(), STATUS_POLL_MS);
+    }
+  }
+
+  /** Re-read whether the active change has edits; a failure leaves the last answer. */
+  async function refreshEdits() {
+    const id = projectId.value;
+    const branch = active.value?.branch;
+    if (!id || !branch) return;
+    try {
+      const edits = await daemon.api.changeHasEdits(id, branch);
+      if (projectId.value === id && active.value?.branch === branch) hasEdits.value = edits;
+    } catch {
+      // Keep the last answer; sharing reports its own errors.
     }
   }
 
@@ -391,7 +428,8 @@ export const useChangesStore = defineStore("changes", () => {
    * chat is the whole surface now: its transcript carries progress and questions.
    */
   async function startSyncChat(id: string, sessionId: string) {
-    const provider = useAgentProvidersStore().provider;
+    // The assistant new chats start with: the first ready one in the user's order.
+    const provider = useAgentProvidersStore().preferred;
     if (!provider) {
       syncError.value = SYNC_UNAVAILABLE;
       toast.error(SYNC_UNAVAILABLE);
@@ -744,9 +782,14 @@ export const useChangesStore = defineStore("changes", () => {
     installPending = false;
     void refreshTreeAndPreview(active.value?.branch ?? "main");
   });
+  // A save (or an agent's turn) committed to the change: it may have its first edit now.
+  const offCheckpoint = daemon.on("checkpoint.created", (e) => {
+    if (e.projectId === projectId.value && active.value) void refreshEdits();
+  });
   onScopeDispose(() => {
     offDepsInstalling();
     offDevserverStatus();
+    offCheckpoint();
   });
 
   /**
@@ -796,6 +839,8 @@ export const useChangesStore = defineStore("changes", () => {
         await startSyncChat(id, result.conflict.sessionId);
         return "combining";
       }
+      // The merge itself is done: say so even if the cleanup after it fails.
+      if (result?.squashUnavailable) noteSquashUnavailable(id);
       const { mainUpdated } = await cleanup(id, branch);
       if (!mainUpdated) {
         toast.warning(
@@ -826,6 +871,7 @@ export const useChangesStore = defineStore("changes", () => {
     creating,
     sharing,
     markingReady,
+    hasEdits,
     publishing,
     switching,
     updating,

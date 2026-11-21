@@ -5,6 +5,7 @@ import {
   clampProgress,
   deriveRow,
   LABELS,
+  orderIds,
   orderProviders,
   PROVIDER_DESCRIPTIONS,
   PROVIDER_NAMES,
@@ -68,6 +69,36 @@ describe("row ordering", () => {
     ]);
     expect(after.map((r) => r.id)).toEqual(before.map((r) => r.id));
     expect(after.map((r) => r.id)).toEqual(["opencode", "codex", "claude", "cursor"]);
+  });
+});
+
+describe("the user's order", () => {
+  const ids = ["cursor", "claude", "codex", "opencode"];
+
+  it("is the default order until one is saved", () => {
+    expect(orderIds(ids)).toEqual(["opencode", "codex", "claude", "cursor"]);
+    expect(orderIds(ids, null)).toEqual(["opencode", "codex", "claude", "cursor"]);
+    expect(orderIds(ids, [])).toEqual(["opencode", "codex", "claude", "cursor"]);
+  });
+
+  it("puts saved ids first, drops ones not offered and appends new ones", () => {
+    expect(orderIds(ids, ["claude", "gone", "cursor"])).toEqual([
+      "claude",
+      "cursor",
+      "opencode",
+      "codex",
+    ]);
+  });
+
+  it("orders the rows, whatever their state", () => {
+    const rows = buildRows(
+      [provider("opencode"), provider("claude", { signedIn: false }), provider("codex")],
+      ["claude", "codex"],
+    );
+    expect(rows.map((r) => r.id)).toEqual(["claude", "codex", "opencode"]);
+    expect(
+      orderProviders([provider("opencode"), provider("claude")], ["claude"]).map((p) => p.id),
+    ).toEqual(["claude", "opencode"]);
   });
 });
 

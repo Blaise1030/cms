@@ -849,6 +849,21 @@ pub async fn pr_matches(dir: &Path, branch: &str, head_sha: &str) -> bool {
     !head_sha.is_empty() && is_ancestor(dir, head_sha, &format!("refs/heads/{branch}")).await
 }
 
+/// Whether `branch` has saved work that `main` lacks (GitHub's `main` as last fetched, else the
+/// local one): its files differ from where it and `main` meet. A change just created, or one
+/// whose only commits are merges of `main`, has none, so there is nothing to open a pull
+/// request for. Unknown (no `main`, git failing) counts as having edits, so sharing stays open.
+pub async fn has_edits(dir: &Path, branch: &str) -> bool {
+    let base = if rev_parse(dir, "refs/remotes/origin/main").await.is_ok() {
+        "refs/remotes/origin/main"
+    } else {
+        "refs/heads/main"
+    };
+    let range = format!("{base}...refs/heads/{branch}");
+    // `git diff --quiet` exits 0 for no difference, 1 for a difference, >1 on errors.
+    run(dir, &["diff", "--quiet", &range]).await.is_err()
+}
+
 /// Whether `branch`'s tip is exactly `sha` (there is nothing local to push).
 pub async fn tip_is(dir: &Path, branch: &str, sha: &str) -> bool {
     !sha.is_empty()
@@ -891,8 +906,10 @@ async fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> bool {
 /// local `branch` (the remote branch is left alone).
 ///
 /// The branch counts as merged when its tip is exactly the head its merged PR merged (covers
-/// squash merges), or when it has commits of its own and the latest `main` contains them.
-/// Anything else is refused — including edits checkpointed after the merge — and nothing is
+/// squash merges), or when it has commits of its own and the latest `main` contains them, or
+/// when it was merged before its tip and its files are exactly the latest `main`'s (Get latest
+/// ran on a squash-merged change). Anything else is refused — including edits checkpointed
+/// after the merge — and nothing is
 /// deleted unless `main` fast-forwarded first. If `origin` can't be reached, cleanup still
 /// goes ahead when the PR proves the merge, leaving `main` as it was ([`Cleaned::main_updated`]).
 pub async fn cleanup(
@@ -949,16 +966,21 @@ pub async fn cleanup(
                 PrMerge::Merged { head_sha } => pr_matches(dir, branch, head_sha).await,
                 _ => false,
             };
-        if merged_before_tip {
+        if !merged_before_tip {
+            return Err(match pr {
+                PrMerge::Unknown(e) => e,
+                _ => ApiError::conflict("This change isn't published yet — publish it first"),
+            });
+        }
+        // Commits after a squash merge are usually only Get latest bringing `main` (and with
+        // it the squashed change) back in. When the branch's files are exactly the latest
+        // `main`'s, deleting it loses nothing.
+        if !same_files(dir, &tip, latest).await {
             return Err(ApiError::conflict(
                 "This change has edits made after it was published — \
                  share them before cleaning up",
             ));
         }
-        return Err(match pr {
-            PrMerge::Unknown(e) => e,
-            _ => ApiError::conflict("This change isn't published yet — publish it first"),
-        });
     }
 
     // Make sure main can fast-forward before touching the working tree.
@@ -985,6 +1007,15 @@ pub async fn cleanup(
     Ok(Cleaned {
         main_updated: fetched || !remote,
     })
+}
+
+/// Whether commits `a` and `b` hold the same files (identical trees).
+async fn same_files(dir: &Path, a: &str, b: &str) -> bool {
+    let (a, b) = (
+        rev_parse(dir, &format!("{a}^{{tree}}")).await,
+        rev_parse(dir, &format!("{b}^{{tree}}")).await,
+    );
+    matches!((a, b), (Ok(a), Ok(b)) if a == b)
 }
 
 /// `tip` is in `main_ref` and is not on its first-parent line — i.e. the branch had commits of

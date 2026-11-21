@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{DefaultBodyLimit, Query};
 use axum::http::{header, HeaderName, HeaderValue, Method};
-use axum::routing::{any, delete, get, post};
+use axum::routing::{any, delete, get, post, put};
 use axum::{middleware, Router};
 use tower_http::cors::CorsLayer;
 
@@ -63,6 +63,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/github/repos", get(github::repos))
         .route("/api/setup/status", get(setup::status))
         .route("/api/setup/dismiss", post(setup::dismiss))
+        .route(
+            "/api/setup/assistant-order",
+            put(setup::save_assistant_order),
+        )
+        .route(
+            "/api/setup/rail-order",
+            get(setup::rail_order).put(setup::save_rail_order),
+        )
         .route("/api/setup/runtimes", get(setup::runtimes))
         .route("/api/setup/runtimes/{id}/download", post(setup::download))
         .route("/api/setup/runtimes/{id}/cancel", post(setup::cancel))
@@ -90,6 +98,7 @@ pub fn router(state: AppState) -> Router {
             post(projects::dismiss_protection_hint),
         )
         .route("/api/projects/{id}/deploy", get(changes::deploy))
+        .route("/api/projects/{id}/deploy-url", get(changes::deploy_url))
         .route("/api/projects/{id}/reviews", get(reviews::list))
         .route("/api/projects/{id}/reviews/assets", get(reviews::asset))
         .route("/api/projects/{id}/reviews/{n}", get(reviews::detail))
@@ -207,6 +216,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/changes/{branch}/switch", post(changes::switch))
         .route("/api/changes/{branch}/share", post(changes::share))
         .route("/api/changes/{branch}/status", get(changes::status))
+        .route("/api/changes/{branch}/edits", get(changes::edits))
         .route("/api/changes/sync", get(changes::sync))
         .route("/api/changes/live", get(changes::live))
         .route(

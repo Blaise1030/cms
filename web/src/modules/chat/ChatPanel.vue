@@ -58,8 +58,6 @@ const emit = defineEmits<{ minimize: []; close: [] }>();
 const route = useRoute();
 const preview = usePreviewStore();
 
-/** Assistants this UI can drive. */
-const CHAT_PROVIDERS = ["cursor", "claude", "codex", "opencode"];
 const SUGGESTIONS = [
   "Write a new blog post about our latest update",
   "Make the homepage headline punchier",
@@ -193,11 +191,9 @@ async function attach(files: File[]) {
 
 const providers = computed(() => {
   // Once the assistant snapshot is known it is the only source of truth: a
-  // provider is offered only when chat can start with it now.
-  const ids = (assistant.snapshot
-    ? assistant.chatReadyProviders.map((p) => p.id)
-    : agentProviders.providers.map((p) => p.id)
-  ).filter((id) => CHAT_PROVIDERS.includes(id));
+  // provider is offered only when chat can start with it now. Either way they
+  // come in the user's order from App settings → Assistants.
+  const ids = [...agentProviders.ready];
   // An open chat keeps its assistant so its transcript, model and send target
   // still resolve even if it needs a sign-in or an update right now.
   if (chatProvider.value && !ids.includes(chatProvider.value)) ids.push(chatProvider.value);
@@ -206,7 +202,8 @@ const providers = computed(() => {
 const provider = computed({
   get: () => {
     if (chatProvider.value) return chatProvider.value;
-    const pick = chosen.value ?? agentProviders.provider;
+    // A pick made for this draft, else the preferred assistant (first ready in the user's order).
+    const pick = chosen.value ?? agentProviders.preferred;
     if (pick && providers.value.includes(pick)) return pick;
     return providers.value[0] ?? null;
   },

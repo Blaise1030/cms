@@ -11,7 +11,8 @@ import type {
   SetupStatus,
 } from "@/core/types";
 import { errorMessage } from "@orso/utils";
-import { buildRows, orderProviders, siteBuilderRow } from "./rows";
+import { toast } from "@/lib/toast";
+import { buildRows, orderIds, orderProviders, siteBuilderRow } from "./rows";
 
 const PHASES: readonly RuntimePhase[] = [
   "notDownloaded",
@@ -97,12 +98,21 @@ export const useAssistantStore = defineStore("assistant", () => {
   const error = ref<string | null>(null);
   /** Sign-in flows started this session, by provider id. */
   const signIns = ref<Record<string, ProviderSignInState | null>>({});
+  /**
+   * The user's assistant order (App settings → Assistants), first choice first;
+   * `null` until they reorder. The daemon keeps it, so it holds across browsers
+   * and desktop relaunches; the first ready assistant in it starts new chats.
+   */
+  const order = ref<string[] | null>(null);
 
   const node = computed<RuntimeStatus | null>(() => snapshot.value?.node ?? null);
   const providers = computed<SetupProvider[]>(() => snapshot.value?.providers ?? []);
-  /** Providers that can open a chat right now, in display order. */
+  /** Providers that can open a chat right now, in the user's order. */
   const chatReadyProviders = computed(() =>
-    orderProviders(providers.value.filter((p) => p.chatReady === true)),
+    orderProviders(
+      providers.value.filter((p) => p.chatReady === true),
+      order.value,
+    ),
   );
   /** OpenCode is the recommendation; fall back to the first ready assistant. */
   const recommended = computed<SetupProvider | null>(
@@ -112,7 +122,7 @@ export const useAssistantStore = defineStore("assistant", () => {
       providers.value[0] ??
       null,
   );
-  const rows = computed(() => buildRows(providers.value));
+  const rows = computed(() => buildRows(providers.value, order.value));
   const siteBuilder = computed(() => siteBuilderRow(node.value));
 
   function runtimeFor(id: string): RuntimeStatus | null {
@@ -172,10 +182,31 @@ export const useAssistantStore = defineStore("assistant", () => {
           .catch(() => null as SetupSnapshot | null),
       ]);
       snapshot.value = mergeSnapshot(status, runtimes);
+      order.value = status.assistantOrder?.length ? status.assistantOrder : null;
     } catch (e) {
       error.value = errorMessage(e);
     } finally {
       loading.value = false;
+    }
+  }
+
+  /** Sort ids (any provider list) into the user's order; with none saved they stay as given. */
+  function ordered(ids: readonly string[]): string[] {
+    return order.value ? orderIds(ids, order.value) : [...ids];
+  }
+
+  /**
+   * Save a new assistant order. The list reorders at once; if the daemon refuses,
+   * it goes back to the order it had and says so.
+   */
+  async function setOrder(ids: string[]) {
+    const before = order.value;
+    order.value = [...ids];
+    try {
+      await daemon.api.saveAssistantOrder(ids);
+    } catch (e) {
+      order.value = before;
+      toast.error(`Couldn't save the assistant order: ${errorMessage(e)}`);
     }
   }
 
@@ -315,6 +346,7 @@ export const useAssistantStore = defineStore("assistant", () => {
     loading,
     error,
     signIns,
+    order,
     node,
     providers,
     chatReadyProviders,
@@ -322,6 +354,8 @@ export const useAssistantStore = defineStore("assistant", () => {
     rows,
     siteBuilder,
     load,
+    ordered,
+    setOrder,
     download,
     retry,
     cancel,

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { TooltipProvider } from "reka-ui";
 import UButton from "@nuxt/ui/components/Button.vue";
 import UTooltip from "@nuxt/ui/components/Tooltip.vue";
 import { isMacDesktop } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
-import { loadTabOrder, saveTabOrder } from "@/lib/tabOrder";
+import { loadTabOrder, saveTabOrder, tabOrderChanged } from "@/lib/tabOrder";
 import { useInbox } from "@/modules/review/queries";
 import { projectPath, projectTabFromRoute, type ProjectTab } from "@/router";
 
@@ -24,12 +24,17 @@ const defaultTabs: { id: ProjectTab; label: string; icon: string }[] = [
   { id: "design", label: "Design", icon: "i-hugeicons-paint-board" },
   { id: "code", label: "Code", icon: "i-hugeicons-source-code" },
   { id: "history", label: "History", icon: "i-hugeicons-clock-04" },
+  { id: "review", label: "Review", icon: "i-hugeicons-task-done-01" },
   { id: "settings", label: "Settings", icon: "i-hugeicons-settings-01" },
 ];
 
 // Tabs can be dragged (or moved with Alt+Up/Down) into the viewer's own order; see
 // lib/tabOrder.ts, which also makes opening a project land on the first tab.
 const order = ref<ProjectTab[]>(loadTabOrder());
+// The daemon's saved order arrived after this rail was drawn (a fresh desktop launch).
+watch(tabOrderChanged, () => {
+  if (dragging.value === null) order.value = loadTabOrder();
+});
 const byId = new Map(defaultTabs.map((t) => [t.id, t]));
 const tabs = computed(() => order.value.map((id) => byId.get(id)!));
 
@@ -141,40 +146,23 @@ const tooltipContent = { side: "right" } as const;
           :aria-label="tab.label"
           :aria-current="active === tab.id ? 'page' : undefined"
           :data-testid="`workspace-tab-${tab.id}`"
-          :ui="ui"
+          :ui="tab.id === 'review' ? { ...ui, base: cn(ui.base, 'relative') } : ui"
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
           draggable="false"
           @keydown.up="onKeyMove($event, tab.id, -1)"
           @keydown.down="onKeyMove($event, tab.id, 1)"
-        />
+        >
+          <!-- Review counts the changes waiting on you. -->
+          <span
+            v-if="tab.id === 'review' && review.waitingCount > 0"
+            class="bg-primary text-inverted absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-medium"
+            data-testid="review-badge"
+          >{{ review.waitingCount }}</span>
+        </UButton>
       </UTooltip>
       </div>
 
       <div class="mt-auto flex flex-col items-center gap-1">
-        <!-- Review sits with the app-level buttons, above App settings, keeping its count. -->
-        <UTooltip text="Review" :content="tooltipContent">
-          <UButton
-            :to="projectPath(props.projectId, 'review')"
-            color="neutral"
-            variant="ghost"
-            active-color="primary"
-            active-variant="soft"
-            square
-            icon="i-hugeicons-task-done-01"
-            :active="active === 'review'"
-            :class="cn(active === 'review' && current)"
-            aria-label="Review"
-            :aria-current="active === 'review' ? 'page' : undefined"
-            data-testid="workspace-tab-review"
-            :ui="{ ...ui, base: cn(ui.base, 'relative') }"
-          >
-            <span
-              v-if="review.waitingCount > 0"
-              class="bg-primary text-inverted absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-medium"
-              data-testid="review-badge"
-            >{{ review.waitingCount }}</span>
-          </UButton>
-        </UTooltip>
         <UTooltip text="App settings" :content="tooltipContent">
           <UButton
             to="/settings"
