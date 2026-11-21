@@ -4,7 +4,6 @@ description: Paste, drop or upload images into your content.
 category: editing-content
 order: 2
 ---
-
 ## In the body
 
 Put the cursor where you want the image, then do one of these:
@@ -27,3 +26,5 @@ Describe every image for people who can't see it. Blog covers have their own alt
 
 - Use images at a sensible size. Very large photos slow your pages down.
 - Use clear file names, such as `pricing-table.png` rather than `IMG_2041.png`.
+
+![Test](../../../assets/helpDocs/add-images/screenshot-2026-11-21-at-11-54-14-am.png)
